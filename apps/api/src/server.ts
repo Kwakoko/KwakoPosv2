@@ -110,11 +110,16 @@ export function buildServer(): FastifyInstance {
   return server;
 }
 
-if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production") {
+if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification" || process.env.PORT) {
   const config = loadConfig();
   const server = buildServer();
-  server.listen({ port: config.PORT, host: config.HOST }, (err, address) => {
-    if (err) { console.error(err); process.exit(1); }
+  const port = Number(process.env.PORT) || config.PORT || 8080;
+  const host = process.env.HOST || config.HOST || "0.0.0.0";
+  server.listen({ port, host }, (err, address) => {
+    if (err) {
+      console.error("FAILED_TO_START_SERVER:", err);
+      process.exit(1);
+    }
     console.log(`KwakoPos 2.0 API listening on ${address}`);
   });
 }

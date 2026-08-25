@@ -45,4 +45,4 @@ COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8080
 
-CMD ["npx", "tsx", "apps/api/src/server.ts"]
+CMD ["node", "apps/api/dist/server.js"]

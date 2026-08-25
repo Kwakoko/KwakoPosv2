@@ -13,9 +13,11 @@ import {
 
 export interface ProductionReleaseEvidenceArtifact {
   status: "PASS";
+  deploymentMode: "BOOTSTRAP" | "EXISTING_SERVICE";
   version: string;
   gitSha: string;
   containerDigest: string;
+  cloudRunService: string;
   cloudRunRevision: string;
   candidateUrl: string;
   health: "PASS";
@@ -30,10 +32,11 @@ export interface ProductionReleaseEvidenceArtifact {
 }
 
 export type ReleaseState =
+  | "SERVICE_DISCOVERY"
   | "CERTIFIED"
   | "IMAGE_BUILT"
   | "DIGEST_VERIFIED"
-  | "REVISION_DEPLOYED_NO_TRAFFIC"
+  | "CANDIDATE_DEPLOYED"
   | "DEPLOYED_IDENTITY_CERTIFIED"
   | "PRODUCTION_BROWSER_CERTIFIED"
   | "A_SERVER_B_CONVERGENCE_CERTIFIED"
@@ -46,7 +49,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   console.log(" KWAKOPOS 2.0 REAL PRODUCTION CERTIFICATION STATE MACHINE              ");
   console.log("========================================================================");
 
-  let state: ReleaseState = "CERTIFIED";
+  let state: ReleaseState = "SERVICE_DISCOVERY";
   console.log(`[STATE] Current State: ${state}`);
 
   // STAGE 1: Real Release Identity Verification
@@ -61,10 +64,10 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   state = "DIGEST_VERIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 2: Real Cloud Run Candidate Deployment (0% Traffic)
+  // STAGE 2: Real Cloud Run Candidate Deployment
   const candidate = deployCandidateRevision();
-  state = "REVISION_DEPLOYED_NO_TRAFFIC";
-  console.log(`[STATE] Current State: ${state}`);
+  state = "CANDIDATE_DEPLOYED";
+  console.log(`[STATE] Current State: ${state} (Mode: ${candidate.deploymentMode})`);
 
   // STAGE 3: Certify Deployed Candidate Revision Identity over HTTPS
   const deployedCert = await certifyDeployedRevision(candidate);
@@ -107,9 +110,11 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
 
   const evidenceArtifact: ProductionReleaseEvidenceArtifact = {
     status: "PASS",
+    deploymentMode: candidate.deploymentMode,
     version: identity.version,
     gitSha: identity.gitSha,
     containerDigest: identity.containerDigest,
+    cloudRunService: process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service",
     cloudRunRevision: identity.cloudRunRevision,
     candidateUrl: candidate.candidateUrl,
     health: "PASS",
