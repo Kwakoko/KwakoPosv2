@@ -1,0 +1,21 @@
+{
+  "name": "@kwakopos2/database",
+  "version": "2.0.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.9.1",
+    "@kwakopos2/contracts": "2.0.0",
+    "@kwakopos2/domain": "2.0.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.9.1",
+    "typescript": "^5.3.3"
+  }
+}

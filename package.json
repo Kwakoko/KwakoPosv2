@@ -1,0 +1,34 @@
+{
+  "name": "kwakopos2-monorepo",
+  "version": "2.0.0",
+  "private": true,
+  "description": "KwakoPos 2.0 Foundation - Clean, Modular, Offline-First, Multi-Tenant SaaS Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:sync": "vitest run tests/sync",
+    "test:invariants": "vitest run tests/unit/invariants.test.ts",
+    "certify": "tsx scripts/certification/runCertification.ts",
+    "db:generate": "npm run db:generate --workspace=@kwakopos2/database",
+    "db:push": "npm run db:push --workspace=@kwakopos2/database",
+    "dev:api": "npm run dev --workspace=@kwakopos2/api",
+    "dev:web": "npm run dev --workspace=@kwakopos2/web"
+  },
+  "dependencies": {
+    "zod": "^3.22.4",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.2",
+    "tsx": "^4.7.0"
+  }
+}
