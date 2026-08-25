@@ -50,12 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${GCP_PROJECT_ID}" ]]; then
-            echo "RELEASE_BLOCKED: GCP_PROJECT_ID is not configured as a repository secret or variable."
+            echo "RELEASE_BLOCKED: GCP project is not configured."
             exit 1
           fi
           if [[ -z "${GCP_WIF_PROVIDER}" || -z "${GCP_SERVICE_ACCOUNT}" ]]; then
             echo "RELEASE_BLOCKED: Google Workload Identity Federation is not configured."
-            echo "Required: GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT."
             exit 1
           fi
           echo "Google Cloud WIF configuration is present."
@@ -77,15 +76,9 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
         run: |
           set -euo pipefail
-          gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || {
-            echo "RELEASE_BLOCKED: No active Google Cloud credential after authentication."
-            exit 1
-          }
+          gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || { echo "RELEASE_BLOCKED: no active Google credential"; exit 1; }
           gcloud config set project "${GCP_PROJECT_ID}"
-          gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectId)' | grep -Fxq "${GCP_PROJECT_ID}" || {
-            echo "RELEASE_BLOCKED: Authenticated account cannot access project ${GCP_PROJECT_ID}."
-            exit 1
-          }
+          gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectId)' | grep -Fxq "${GCP_PROJECT_ID}" || { echo "RELEASE_BLOCKED: project access denied"; exit 1; }
           echo "Google Cloud authentication and project access verified."
 
       - name: Install Chromium for Real Production Browser Certification
@@ -112,17 +105,18 @@ jobs:
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
           if (!fs.existsSync(p)) throw new Error('RELEASE_BLOCKED: candidate deployment evidence was not generated');
           const candidate = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (!candidate.candidateUrl || !candidate.candidateRevision) {
-            throw new Error('RELEASE_BLOCKED: candidate identity missing');
-          }
-          if (!/^https:\/\//i.test(candidate.candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidate.candidateUrl)) {
-            throw new Error(`RELEASE_BLOCKED: invalid candidate URL ${candidate.candidateUrl}`);
-          }
-          if (!/^sha256:[0-9a-f]{64}$/i.test(candidate.containerDigest)) {
-            throw new Error(`RELEASE_BLOCKED: candidate container digest is not immutable: ${candidate.containerDigest}`);
-          }
-          fs.appendFileSync(process.env.GITHUB_ENV,
-            `CANDIDATE_URL=${candidate.candidateUrl}\nCLOUD_RUN_REVISION=${candidate.candidateRevision}\nCANDIDATE_DIGEST=${candidate.containerDigest}\n`);
+          if (!candidate.candidateUrl || !candidate.candidateRevision) throw new Error('RELEASE_BLOCKED: candidate identity missing');
+          if (!/^https:\/\//i.test(candidate.candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidate.candidateUrl)) throw new Error(`RELEASE_BLOCKED: invalid candidate URL ${candidate.candidateUrl}`);
+          if (!/^sha256:[0-9a-f]{64}$/i.test(candidate.containerDigest)) throw new Error(`RELEASE_BLOCKED: invalid immutable digest ${candidate.containerDigest}`);
+          if (!/^[0-9a-f]{40}$/i.test(candidate.gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA ${candidate.gitSha}`);
+          const githubEnv = process.env.GITHUB_ENV;
+          fs.appendFileSync(githubEnv, [
+            `CANDIDATE_URL=${candidate.candidateUrl}`,
+            `CLOUD_RUN_REVISION=${candidate.candidateRevision}`,
+            `CONTAINER_DIGEST=${candidate.containerDigest}`,
+            `CANDIDATE_DIGEST=${candidate.containerDigest}`,
+            `GIT_SHA=${candidate.gitSha}`,
+          ].join('\n') + '\n');
           NODE
 
       - name: Certify Exact Deployed Candidate over HTTPS
@@ -148,6 +142,7 @@ jobs:
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
+          CLOUD_RUN_REVISION: ${{ env.CLOUD_RUN_REVISION }}
         run: npm run release:promote
 
       - name: Archive Production Release Evidence Artifacts
