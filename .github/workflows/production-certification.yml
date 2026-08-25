@@ -41,12 +41,67 @@ jobs:
       - name: Execute Multi-Device Sync Convergence Tests
         run: npm run test:sync
 
-      - name: Authenticate to Google Cloud
+      - name: Validate Google Cloud Release Configuration
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+          GCP_CREDENTIALS_JSON: ${{ secrets.GCP_CREDENTIALS_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GCP_PROJECT_ID}" ]]; then
+            echo "RELEASE_BLOCKED: GCP_PROJECT_ID is not configured as a repository secret or variable."
+            exit 1
+          fi
+
+          has_wif=false
+          has_json=false
+          if [[ -n "${GCP_WIF_PROVIDER}" && -n "${GCP_SERVICE_ACCOUNT}" ]]; then has_wif=true; fi
+          if [[ -n "${GCP_CREDENTIALS_JSON}" ]]; then has_json=true; fi
+
+          if [[ "${has_wif}" == "true" && "${has_json}" == "true" ]]; then
+            echo "RELEASE_BLOCKED: Configure exactly one Google authentication method: WIF or credentials JSON."
+            exit 1
+          fi
+
+          if [[ "${has_wif}" != "true" && "${has_json}" != "true" ]]; then
+            echo "RELEASE_BLOCKED: No Google authentication configured."
+            echo "Set either GCP_WORKLOAD_IDENTITY_PROVIDER + GCP_SERVICE_ACCOUNT, or GCP_CREDENTIALS_JSON."
+            exit 1
+          fi
+
+          echo "Google Cloud release configuration is present."
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (secrets.GCP_CREDENTIALS_JSON == '') && (secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' || vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '')
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to Google Cloud via Service Account JSON
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && secrets.GCP_CREDENTIALS_JSON != '' && secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER == ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+
+      - name: Verify Google Cloud Authentication and Project Access
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || {
+            echo "RELEASE_BLOCKED: No active Google Cloud credential after authentication."
+            exit 1
+          }
+          gcloud config set project "${GCP_PROJECT_ID}"
+          gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectId)' | grep -Fxq "${GCP_PROJECT_ID}" || {
+            echo "RELEASE_BLOCKED: Authenticated account cannot access project ${GCP_PROJECT_ID}."
+            exit 1
+          }
+          echo "Google Cloud authentication and project access verified."
 
       - name: Setup Google Cloud SDK
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -60,7 +115,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
@@ -70,9 +125,11 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         run: |
+          set -euo pipefail
           node - <<'NODE'
           const fs = require('fs');
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
+          if (!fs.existsSync(p)) throw new Error('RELEASE_BLOCKED: candidate deployment evidence was not generated');
           const candidate = JSON.parse(fs.readFileSync(p, 'utf8'));
           if (!candidate.candidateUrl || !candidate.candidateRevision) {
             throw new Error('RELEASE_BLOCKED: candidate identity missing');
@@ -80,8 +137,11 @@ jobs:
           if (!/^https:\/\//i.test(candidate.candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidate.candidateUrl)) {
             throw new Error(`RELEASE_BLOCKED: invalid candidate URL ${candidate.candidateUrl}`);
           }
+          if (!/^sha256:[0-9a-f]{64}$/i.test(candidate.containerDigest)) {
+            throw new Error(`RELEASE_BLOCKED: candidate container digest is not immutable: ${candidate.containerDigest}`);
+          }
           fs.appendFileSync(process.env.GITHUB_ENV,
-            `CANDIDATE_URL=${candidate.candidateUrl}\nCLOUD_RUN_REVISION=${candidate.candidateRevision}\n`);
+            `CANDIDATE_URL=${candidate.candidateUrl}\nCLOUD_RUN_REVISION=${candidate.candidateRevision}\nCANDIDATE_DIGEST=${candidate.containerDigest}\n`);
           NODE
 
       - name: Certify Exact Deployed Candidate over HTTPS
@@ -103,7 +163,7 @@ jobs:
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
