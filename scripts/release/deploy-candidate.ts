@@ -38,13 +38,6 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     throw new Error("RELEASE_BLOCKED: production-certification requires EXECUTE_GCLOUD=true");
   }
 
-  console.log(`[DEPLOY] Resolving release parameters:`);
-  console.log(`         - Git SHA:   ${gitSha}`);
-  console.log(`         - Service:   ${serviceName}`);
-  console.log(`         - Region:    ${region}`);
-  console.log(`         - Project:   ${project}`);
-  console.log(`         - Image Rep: ${imageRepository}`);
-
   let imageDigest = "";
   let candidateRevision = "";
   let candidateUrl = "";
@@ -58,7 +51,6 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     run(`docker build -t ${tag} .`);
     run(`docker push ${tag}`);
 
-    console.log(`[DEPLOY] Resolving exact OCI digest from Artifact Registry...`);
     imageDigest = String(
       run(`gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`, "utf8")
     ).trim();
@@ -67,7 +59,6 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     const fullImageRef = `${imageRepository}@${imageDigest}`;
     const tagArg = `rc-${gitSha.substring(0, 7)}`;
 
-    console.log(`[DEPLOY] Deploying exact digest to Cloud Run with 0% traffic...`);
     const deployStdout = String(
       run(
         `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --no-traffic --tag=${tagArg} --update-env-vars=NODE_ENV=production,GIT_SHA=${gitSha},CONTAINER_DIGEST=${imageDigest} --format="json"`,
@@ -78,7 +69,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
 
     const serviceJson = JSON.parse(
-      String(run(`gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json`, "utf8"))
+      String(run(`gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json"`, "utf8"))
     );
 
     const taggedTraffic = Array.isArray(serviceJson?.status?.traffic)
@@ -90,13 +81,11 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
 
     if (!candidateRevision) throw new Error("Cloud Run did not return a candidate revision");
     if (!candidateUrl) throw new Error(`Cloud Run tagged revision URL was not found for ${tagArg}`);
-
     assertValidCloudRunRevision(candidateRevision);
 
     const revisionJson = JSON.parse(
       String(run(`gcloud run revisions describe ${candidateRevision} --project=${project} --region=${region} --format="json"`, "utf8"))
     );
-
     const deployedImage = revisionJson?.spec?.containers?.[0]?.image || "";
     if (deployedImage !== fullImageRef) {
       throw new Error(`RELEASE_BLOCKED: Cloud Run revision image mismatch. Expected ${fullImageRef}; got ${deployedImage}`);
