@@ -1,9 +1,0 @@
-{
-  "candidateRevision": "kwakopos-production-rev-00001",
-  "candidateUrl": "https://rc-e545ab5---kwakopos-production-service-uc.a.run.app",
-  "imageDigest": "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000",
-  "containerDigest": "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000",
-  "gitSha": "e545ab5adf672322501b21503687b94d7aae4507",
-  "version": "2.0.0",
-  "timestamp": "2026-08-25T15:13:44.777Z"
-}

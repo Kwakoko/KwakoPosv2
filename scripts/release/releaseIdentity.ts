@@ -14,32 +14,41 @@ export interface AuthoritativeReleaseIdentity {
   releaseTimestamp: string;
 }
 
-/**
- * Resolves the real, un-tampered Git SHA from the checked-out commit.
- */
 export function getRealGitSha(): string {
   try {
     const stdout = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
     assertValidGitSha(stdout);
     return stdout;
   } catch (err: any) {
+    if (process.env.NODE_ENV === "production-certification") {
+      console.error("RELEASE_BLOCKED: Unable to obtain real 40-char Git SHA from repository checkout.");
+      process.exit(1);
+    }
     throw new Error(`RELEASE_IDENTITY_FAILURE: Failed to resolve Git SHA: ${err.message}`);
   }
 }
 
-/**
- * Constructs authoritative release identity metadata from environment and git.
- */
 export function getAuthoritativeReleaseIdentity(override?: {
   containerDigest?: string;
   cloudRunRevision?: string;
 }): AuthoritativeReleaseIdentity {
-  const config = loadConfig();
+  const isProdCert = process.env.NODE_ENV === "production-certification";
   const gitSha = getRealGitSha();
+  const config = loadConfig();
 
-  // If environment specifies CONTAINER_DIGEST and CLOUD_RUN_REVISION, validate format strictly
-  const containerDigest = override?.containerDigest || process.env.CONTAINER_DIGEST || config.CONTAINER_DIGEST;
-  const cloudRunRevision = override?.cloudRunRevision || process.env.CLOUD_RUN_REVISION || config.CLOUD_RUN_REVISION;
+  const containerDigest = override?.containerDigest || process.env.CONTAINER_DIGEST || config.CONTAINER_DIGEST!;
+  const cloudRunRevision = override?.cloudRunRevision || process.env.CLOUD_RUN_REVISION || config.CLOUD_RUN_REVISION!;
+
+  if (isProdCert) {
+    if (containerDigest.includes("efd6bc4300000000000000000000000000000000000000000000000000000000")) {
+      console.error("RELEASE_BLOCKED: Default synthetic container digest detected in production-certification mode.");
+      process.exit(1);
+    }
+    if (cloudRunRevision === "kwakopos-production-rev-00001") {
+      console.error("RELEASE_BLOCKED: Default synthetic Cloud Run revision detected in production-certification mode.");
+      process.exit(1);
+    }
+  }
 
   assertValidGitSha(gitSha);
   assertValidContainerDigest(containerDigest);

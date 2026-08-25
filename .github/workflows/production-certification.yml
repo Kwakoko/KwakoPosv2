@@ -1,0 +1,69 @@
+name: KwakoPos 2.0 Real Production Certification Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  production-certification:
+    name: Production Release Certification State Machine
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Execute Core Unit & Invariant Tests
+        run: npm run test:unit
+
+      - name: Execute Integration API Tests
+        run: npm run test:integration
+
+      - name: Execute Multi-Device Sync Convergence Tests
+        run: npm run test:sync
+
+      - name: Authenticate to Google Cloud
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup Google Cloud SDK
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Execute Real Production Certification Pipeline
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          NODE_ENV: production-certification
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+          STRICT_HTTPS: 'true'
+        run: npm run release:prove
+
+      - name: Archive Production Release Evidence Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwakopos-release-evidence-${{ github.sha }}
+          path: artifacts/release-evidence/
+          retention-days: 90

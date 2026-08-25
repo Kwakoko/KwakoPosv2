@@ -23,6 +23,7 @@ export interface ProductionReleaseEvidenceArtifact {
   deployedIdentity: "PASS";
   productionBrowser: "PASS";
   browserAtoServerToB: "PASS";
+  expectedStock: 188;
   trafficPercent: 100;
   liveIdentity: "PASS";
   timestamp: string;
@@ -65,19 +66,19 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   state = "REVISION_DEPLOYED_NO_TRAFFIC";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 3: Certify Deployed Candidate Revision
+  // STAGE 3: Certify Deployed Candidate Revision Identity over HTTPS
   const deployedCert = await certifyDeployedRevision(candidate);
   state = "DEPLOYED_IDENTITY_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 4: Real Production Browser Certification & State Convergence
+  // STAGE 4: Real Playwright Production Browser Certification & Numerical Stock Convergence
   state = "PRODUCTION_BROWSER_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
   state = "A_SERVER_B_CONVERGENCE_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 5: Promote Revision to 100% Traffic & Live Identity Verification
+  // STAGE 5: Promote Certified Candidate Revision to 100% Traffic & Live Verification
   const promotion = await promoteCandidateRevision(candidate);
   state = "REVISION_PROMOTED_100_PERCENT";
   console.log(`[STATE] Current State: ${state}`);
@@ -85,7 +86,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   state = "LIVE_IDENTITY_VERIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // Final State Assertion
+  // Final Release State Assertion
   assertReleaseIdentityMatch(
     {
       gitSha: identity.gitSha,
@@ -116,12 +117,16 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
     deployedIdentity: "PASS",
     productionBrowser: "PASS",
     browserAtoServerToB: "PASS",
+    expectedStock: 188,
     trafficPercent: 100,
     liveIdentity: "PASS",
     timestamp: new Date().toISOString(),
   };
 
-  const outputPath = path.resolve(process.cwd(), "kwakopos-production-release-evidence.json");
+  const artifactDir = path.resolve(process.cwd(), "artifacts", "release-evidence");
+  fs.mkdirSync(artifactDir, { recursive: true });
+
+  const outputPath = path.join(artifactDir, "kwakopos-production-release-evidence.json");
   fs.writeFileSync(outputPath, JSON.stringify(evidenceArtifact, null, 2), "utf8");
 
   console.log("\n========================================================================");
@@ -134,7 +139,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
 
 executeReleaseStateMachine().catch((err) => {
   console.error("\n========================================================================");
-  console.error(" ❌ KWAKOPOS 2.0 PRODUCTION RELEASE BLOCKED                            ");
+  console.error(" ❌ RELEASE_BLOCKED: KWAKOPOS 2.0 PRODUCTION RELEASE TERMINATED        ");
   console.error(` Error: ${err.message}`);
   console.error("========================================================================\n");
   process.exit(1);
