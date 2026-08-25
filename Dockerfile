@@ -15,10 +15,8 @@ COPY tests ./tests
 COPY .env.example ./
 
 # Keep devDependencies in the builder so TypeScript, tsx and Prisma tooling are available.
-RUN npm ci --include=dev
-
-# Ensure TypeScript is available globally for workspace packages
-RUN npm install -g typescript@^5.3.3
+# Use npm install instead of npm ci to allow hoisting of dependencies across workspaces
+RUN npm install --include=dev
 
 RUN npm run db:generate
 RUN npm run build
