@@ -15,7 +15,7 @@ import {
   globalInMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
-import { TenantContext } from "@kwakopos2/contracts";
+import type { TenantContext } from "@kwakopos2/contracts";
 import { randomUUID } from "crypto";
 
 describe("KwakoPos 2.0 Core Invariants Automated Suite", () => {

@@ -1,4 +1,4 @@
-import {
+import type {
   TenantContext,
   SyncPushRequest,
   SyncPushResponse,
@@ -18,11 +18,19 @@ import {
 import { randomUUID } from "crypto";
 
 export class SyncEngine {
+  private productRepo: ScopedProductRepository;
+  private stockRepo: ScopedStockRepository;
+  private store: InMemoryStore;
+
   constructor(
-    private productRepo: ScopedProductRepository,
-    private stockRepo: ScopedStockRepository,
-    private store: InMemoryStore = globalInMemoryStore
-  ) {}
+    productRepo: ScopedProductRepository,
+    stockRepo: ScopedStockRepository,
+    store: InMemoryStore = globalInMemoryStore
+  ) {
+    this.productRepo = productRepo;
+    this.stockRepo = stockRepo;
+    this.store = store;
+  }
 
   /**
    * Processes client sync push operations idempotently.

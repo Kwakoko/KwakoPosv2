@@ -13,9 +13,8 @@ export const TenantContextSchema = z.object({
 });
 export type TenantContext = z.infer<typeof TenantContextSchema>;
 
-// ==========================================
-// Authentication Contracts
-// ==========================================
+export const UserRoleEnum = z.enum(["SUPER_ADMIN", "ADMIN", "MANAGER", "CASHIER", "AUDITOR"]);
+export type UserRole = z.infer<typeof UserRoleEnum>;
 
 export const LoginRequestSchema = z.object({
   email: z.string().email(),
@@ -284,10 +283,13 @@ export const SyncPushResponseSchema = z.object({
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
 
 export const SyncDeltaRequestSchema = z.object({
-  since: z.string().optional(), // ISO date timestamp
-  limit: z.number().default(100),
+  since: z.string().optional(),
+  limit: z.number().optional().default(100),
 });
-export type SyncDeltaRequest = z.infer<typeof SyncDeltaRequestSchema>;
+export type SyncDeltaRequest = {
+  since?: string;
+  limit?: number;
+};
 
 export const SyncDeltaResponseSchema = z.object({
   serverTimestamp: z.string(),

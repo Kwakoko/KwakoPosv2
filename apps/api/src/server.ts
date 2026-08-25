@@ -1,8 +1,8 @@
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
+import type { TenantContext } from "@kwakopos2/contracts";
 import {
-  TenantContext,
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
   CreateVariantRequestSchema,

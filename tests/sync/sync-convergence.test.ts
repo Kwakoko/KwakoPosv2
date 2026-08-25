@@ -7,7 +7,7 @@ import {
 import { SyncEngine } from "@kwakopos2/sync";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb";
 import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine";
-import { TenantContext } from "@kwakopos2/contracts";
+import type { TenantContext } from "@kwakopos2/contracts";
 import { calculateAvailableStock } from "@kwakopos2/domain";
 import { randomUUID } from "crypto";
 

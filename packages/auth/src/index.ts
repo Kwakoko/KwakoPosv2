@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import { createHash, randomBytes } from "crypto";
-import { TenantContext } from "@kwakopos2/contracts";
+import type { TenantContext, UserRole } from "@kwakopos2/contracts";
 
 const JWT_SECRET = process.env.JWT_SECRET || "kwakopos-super-secret-jwt-key-change-in-production-min32chars";
 

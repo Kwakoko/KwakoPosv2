@@ -1,11 +1,14 @@
 import { LocalIndexedDbStore } from "./indexedDb";
-import { SyncPushRequest, SyncPushResponse, SyncDeltaResponse } from "@kwakopos2/contracts";
+import type { SyncPushRequest, SyncPushResponse, SyncDeltaResponse } from "@kwakopos2/contracts";
 
 export class ClientSyncEngine {
-  constructor(
-    public deviceId: string,
-    public localDb: LocalIndexedDbStore
-  ) {}
+  public deviceId: string;
+  public localDb: LocalIndexedDbStore;
+
+  constructor(deviceId: string, localDb: LocalIndexedDbStore) {
+    this.deviceId = deviceId;
+    this.localDb = localDb;
+  }
 
   /**
    * Pushes all pending outbox operations from local IndexedDB to the Server API,

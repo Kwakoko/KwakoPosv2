@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import {
+import type {
   TenantContext,
   Product,
   ProductVariant,
@@ -61,7 +61,10 @@ export const globalInMemoryStore = new InMemoryStore();
 // ============================================================
 
 export class ScopedProductRepository {
-  constructor(private store: InMemoryStore = globalInMemoryStore) {}
+  private store: InMemoryStore;
+  constructor(store: InMemoryStore = globalInMemoryStore) {
+    this.store = store;
+  }
 
   createProduct(ctx: TenantContext, req: CreateProductRequest): Product {
     const productId = req.id || randomUUID();
@@ -208,7 +211,10 @@ export class ScopedProductRepository {
 }
 
 export class ScopedStockRepository {
-  constructor(private store: InMemoryStore = globalInMemoryStore) {}
+  private store: InMemoryStore;
+  constructor(store: InMemoryStore = globalInMemoryStore) {
+    this.store = store;
+  }
 
   recordStockAdjustment(ctx: TenantContext, req: CreateStockAdjustmentRequest): {
     adjustment: StockAdjustment;

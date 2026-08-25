@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { buildServer } from "../../apps/api/src/server";
 import { globalInMemoryStore } from "@kwakopos2/database";
+import type { TenantContext } from "@kwakopos2/contracts";
 import { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 
