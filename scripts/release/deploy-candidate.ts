@@ -45,6 +45,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   try {
     run("gcloud --version");
     run("docker --version");
+    run(`gcloud auth configure-docker ${region}-docker.pkg.dev --quiet`);
 
     const tag = `${imageRepository}:${gitSha}`;
     console.log(`[DEPLOY] Building immutable container image ${tag}...`);
