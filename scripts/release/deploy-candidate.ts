@@ -15,6 +15,10 @@ export interface CandidateDeploymentEvidence {
   timestamp: string;
 }
 
+function run(command: string, encoding?: "utf8") {
+  return execSync(command, encoding ? { encoding } : { stdio: "inherit" });
+}
+
 export function deployCandidateRevision(): CandidateDeploymentEvidence {
   console.log("----------------------------------------------------------------");
   console.log(" STEP 2 — Real Cloud Run Zero-Traffic Candidate Deployment     ");
@@ -30,76 +34,98 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
   const imageRepository = `${region}-docker.pkg.dev/${project}/kwakopos/kwakopos2`;
 
+  if (isProdCert && process.env.EXECUTE_GCLOUD !== "true") {
+    throw new Error("RELEASE_BLOCKED: production-certification requires EXECUTE_GCLOUD=true");
+  }
+
   console.log(`[DEPLOY] Resolving release parameters:`);
   console.log(`         - Git SHA:   ${gitSha}`);
   console.log(`         - Service:   ${serviceName}`);
   console.log(`         - Region:    ${region}`);
+  console.log(`         - Project:   ${project}`);
   console.log(`         - Image Rep: ${imageRepository}`);
 
-  let imageDigest: string = "";
-  let candidateRevision: string = "";
-  let candidateUrl: string = "";
+  let imageDigest = "";
+  let candidateRevision = "";
+  let candidateUrl = "";
 
-  const isGcloudAvailable = (): boolean => {
-    try {
-      execSync("gcloud --version", { stdio: "ignore" });
-      return true;
-    } catch {
-      return false;
+  try {
+    run("gcloud --version");
+    run("docker --version");
+
+    const tag = `${imageRepository}:${gitSha}`;
+    console.log(`[DEPLOY] Building immutable container image ${tag}...`);
+    run(`docker build -t ${tag} .`);
+    run(`docker push ${tag}`);
+
+    console.log(`[DEPLOY] Resolving exact OCI digest from Artifact Registry...`);
+    imageDigest = String(
+      run(
+        `gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`,
+        "utf8"
+      )
+    ).trim();
+    assertValidContainerDigest(imageDigest);
+
+    const fullImageRef = `${imageRepository}@${imageDigest}`;
+    const tagArg = `rc-${gitSha.substring(0, 7)}`;
+
+    console.log(`[DEPLOY] Deploying exact digest to Cloud Run with 0% traffic...`);
+    const deployStdout = String(
+      run(
+        `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --no-traffic --tag=${tagArg} --set-env-vars=NODE_ENV=production,GIT_SHA=${gitSha},CONTAINER_DIGEST=${imageDigest} --format="json"`,
+        "utf8"
+      )
+    );
+    const deployJson = JSON.parse(deployStdout);
+    candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
+
+    const serviceJson = JSON.parse(
+      String(
+        run(
+          `gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json"`,
+          "utf8"
+        )
+      )
+    );
+
+    const taggedTraffic = Array.isArray(serviceJson?.status?.traffic)
+      ? serviceJson.status.traffic.find((entry: any) => entry.tag === tagArg)
+      : undefined;
+
+    candidateRevision = taggedTraffic?.revisionName || candidateRevision;
+    candidateUrl = taggedTraffic?.url || "";
+
+    if (!candidateRevision) throw new Error("Cloud Run did not return a candidate revision");
+    if (!candidateUrl) throw new Error(`Cloud Run tagged revision URL was not found for ${tagArg}`);
+
+    assertValidCloudRunRevision(candidateRevision);
+
+    const revisionJson = JSON.parse(
+      String(
+        run(
+          `gcloud run revisions describe ${candidateRevision} --project=${project} --region=${region} --format="json"`,
+          "utf8"
+        )
+      )
+    );
+
+    const deployedImage = revisionJson?.spec?.containers?.[0]?.image || "";
+    if (deployedImage !== fullImageRef) {
+      throw new Error(`RELEASE_BLOCKED: Cloud Run revision image mismatch. Expected ${fullImageRef}; got ${deployedImage}`);
     }
-  };
 
-  if (isProdCert && !isGcloudAvailable()) {
-    console.error("RELEASE_BLOCKED: Google Cloud CLI (gcloud) is unavailable in production-certification mode.");
-    process.exit(1);
-  }
-
-  if (isGcloudAvailable() || process.env.EXECUTE_GCLOUD === "true") {
-    try {
-      console.log(`[DEPLOY] Building immutable container image...`);
-      const tag = `${imageRepository}:${gitSha}`;
-      execSync(`docker build -t ${tag} .`, { stdio: "inherit" });
-      execSync(`docker push ${tag}`, { stdio: "inherit" });
-
-      console.log(`[DEPLOY] Resolving exact OCI image digest from Artifact Registry...`);
-      const digestStdout = execSync(
-        `gcloud artifacts docker images describe ${tag} --format="value(image_summary.digest)"`,
-        { encoding: "utf8" }
-      ).trim();
-      imageDigest = digestStdout;
-
-      const fullImageRef = `${imageRepository}@${imageDigest}`;
-      const tagArg = `rc-${gitSha.substring(0, 7)}`;
-
-      console.log(`[DEPLOY] Deploying candidate revision to Cloud Run with zero traffic (--no-traffic)...`);
-      const deployStdout = execSync(
-        `gcloud run deploy ${serviceName} --image ${fullImageRef} --region ${region} --no-traffic --tag ${tagArg} --format="json"`,
-        { encoding: "utf8" }
-      );
-      const deployJson = JSON.parse(deployStdout);
-      candidateRevision = deployJson.status.latestCreatedRevisionName;
-      candidateUrl = deployJson.status.address.url;
-    } catch (err: any) {
-      if (isProdCert) {
-        console.error(`RELEASE_BLOCKED: Cloud Run deployment failed in production-certification mode: ${err.message}`);
-        process.exit(1);
-      }
+    const candidateTraffic = taggedTraffic?.percent ?? 0;
+    if (candidateTraffic !== 0) {
+      throw new Error(`RELEASE_BLOCKED: candidate revision received ${candidateTraffic}% traffic before certification`);
     }
-  }
 
-  // Verification / Dev Fallback if not strictly in production-certification mode with missing gcloud
-  if (!imageDigest) {
-    imageDigest = process.env.CONTAINER_DIGEST || config.CONTAINER_DIGEST || "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000";
+    console.log(`[PASS] Real Cloud Run candidate created with 0% traffic.`);
+  } catch (err: any) {
+    console.error(`RELEASE_BLOCKED: Real Cloud Run candidate deployment failed: ${err?.message || err}`);
+    if (isProdCert) process.exit(1);
+    throw err;
   }
-  if (!candidateRevision) {
-    candidateRevision = process.env.CLOUD_RUN_REVISION || config.CLOUD_RUN_REVISION || "kwakopos-production-rev-00001";
-  }
-  if (!candidateUrl) {
-    candidateUrl = process.env.CANDIDATE_URL || `https://rc-${gitSha.substring(0, 7)}---${serviceName}-uc.a.run.app`;
-  }
-
-  assertValidContainerDigest(imageDigest);
-  assertValidCloudRunRevision(candidateRevision);
 
   const evidence: CandidateDeploymentEvidence = {
     candidateRevision,
@@ -117,10 +143,11 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   const outputPath = path.join(artifactDir, "kwakopos-candidate-deployment.json");
   fs.writeFileSync(outputPath, JSON.stringify(evidence, null, 2), "utf8");
 
-  console.log(`[PASS] Candidate revision deployed successfully with 0% traffic:`);
-  console.log(`       - Revision Name: ${evidence.candidateRevision}`);
-  console.log(`       - Candidate URL: ${evidence.candidateUrl}`);
-  console.log(`       - Saved Evidence: ${outputPath}`);
+  console.log(`[PASS] Candidate deployment evidence written:`);
+  console.log(`       - Revision: ${evidence.candidateRevision}`);
+  console.log(`       - URL:      ${evidence.candidateUrl}`);
+  console.log(`       - Digest:   ${evidence.containerDigest}`);
+  console.log(`       - SHA:      ${evidence.gitSha}`);
 
   return evidence;
 }
