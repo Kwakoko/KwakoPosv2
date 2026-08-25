@@ -23,61 +23,45 @@ export function resolveRealGitSha(): string {
   }
   try {
     const sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-    if (/^[0-9a-f]{40}$/i.test(sha)) {
-      return sha;
-    }
+    if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
   } catch {
-    // If git unavailable and not in production-certification mode
+    // Git may be unavailable inside the runtime container.
   }
   if (process.env.NODE_ENV === "production-certification") {
-    console.error("RELEASE_BLOCKED: Unable to resolve authentic 40-character Git SHA from repository checkout.");
+    console.error("RELEASE_BLOCKED: Unable to resolve authentic 40-character Git SHA from repository checkout or GIT_SHA.");
     process.exit(1);
   }
   return "e545ab5adf672322501b21503687b94d7aae4507";
 }
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
-  const isProdCert = process.env.NODE_ENV === "production-certification";
   const gitSha = resolveRealGitSha();
-
-  let containerDigest = process.env.CONTAINER_DIGEST;
-  let cloudRunRevision = process.env.CLOUD_RUN_REVISION;
-
-  if (isProdCert) {
-    if (!containerDigest || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) {
-      console.error("RELEASE_BLOCKED: Invalid or missing CONTAINER_DIGEST in production-certification mode.");
-      process.exit(1);
-    }
-    if (!cloudRunRevision || cloudRunRevision.includes("MOCK") || cloudRunRevision.includes("SIMULATED")) {
-      console.error("RELEASE_BLOCKED: Invalid or synthetic CLOUD_RUN_REVISION in production-certification mode.");
-      process.exit(1);
-    }
-  } else {
-    if (!containerDigest) {
-      containerDigest = "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000";
-    }
-    if (!cloudRunRevision) {
-      cloudRunRevision = "kwakopos-production-rev-00001";
-    }
-  }
-
   const env = {
     GIT_SHA: gitSha,
-    CONTAINER_DIGEST: containerDigest,
-    CLOUD_RUN_REVISION: cloudRunRevision,
     ...process.env,
     ...overrideEnv,
   };
-
   return ConfigSchema.parse(env);
 }
 
 export function getReleaseIdentity(config: Config) {
+  const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST;
+  const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION;
+
+  if (process.env.NODE_ENV === "production-certification") {
+    if (!containerDigest || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) {
+      throw new Error("RELEASE_IDENTITY_FAILURE: Real immutable CONTAINER_DIGEST is required for production certification.");
+    }
+    if (!cloudRunRevision || /MOCK|SIMULATED/i.test(cloudRunRevision)) {
+      throw new Error("RELEASE_IDENTITY_FAILURE: Real Cloud Run revision is required for production certification.");
+    }
+  }
+
   return {
     version: config.APP_VERSION,
     appVersion: config.APP_VERSION,
     gitSha: config.GIT_SHA || resolveRealGitSha(),
-    containerDigest: config.CONTAINER_DIGEST || "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000",
-    cloudRunRevision: config.CLOUD_RUN_REVISION || "kwakopos-production-rev-00001",
+    containerDigest: containerDigest || null,
+    cloudRunRevision: cloudRunRevision || null,
   };
 }
