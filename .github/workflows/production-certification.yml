@@ -41,7 +41,10 @@ jobs:
       - name: Execute Multi-Device Sync Convergence Tests
         run: npm run test:sync
 
+      # Pull requests must never authenticate to GCP, deploy, promote, or mutate production.
+      # Real release certification is reserved for main pushes and manual dispatches.
       - name: Validate Google Cloud Release Configuration
+        if: github.event_name != 'pull_request'
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
           GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
@@ -53,15 +56,18 @@ jobs:
           echo "Google Cloud WIF configuration is present."
 
       - name: Authenticate to Google Cloud via Workload Identity Federation
+        if: github.event_name != 'pull_request'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
 
       - name: Setup Google Cloud SDK
+        if: github.event_name != 'pull_request'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Verify Google Cloud Authentication and Project Access
+        if: github.event_name != 'pull_request'
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
         run: |
@@ -83,12 +89,15 @@ jobs:
           exit 1
 
       - name: Configure Docker Authentication for Artifact Registry
+        if: github.event_name != 'pull_request'
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Install Chromium for Real Production Browser Certification
+        if: github.event_name != 'pull_request'
         run: npm run production:browser:install
 
       - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
+        if: github.event_name != 'pull_request'
         env:
           NODE_ENV: production-certification
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
@@ -98,6 +107,7 @@ jobs:
         run: npm run release:deploy-candidate
 
       - name: Export Exact Candidate Identity
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -120,18 +130,21 @@ jobs:
           NODE
 
       - name: Certify Exact Deployed Candidate over HTTPS
+        if: github.event_name != 'pull_request'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:certify:deployed
 
       - name: Run Real Chromium Browser A → Cloud Run → Browser B Certification
+        if: github.event_name != 'pull_request'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:browser
 
       - name: Promote Exact Certified Revision to 100% Traffic
+        if: github.event_name != 'pull_request'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
