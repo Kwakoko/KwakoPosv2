@@ -258,7 +258,7 @@ export function buildServer(): FastifyInstance {
   return server;
 }
 
-if (process.env.NODE_ENV !== "test") {
+if (process.env.START_SERVER === "true") {
   const config = loadConfig();
   const server = buildServer();
   server.listen({ port: config.PORT, host: config.HOST }, (err, address) => {

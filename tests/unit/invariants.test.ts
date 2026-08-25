@@ -163,9 +163,10 @@ describe("KwakoPos 2.0 Core Invariants Automated Suite", () => {
 
     expect(() => assertReleaseIdentityMatch(identity, identity)).not.toThrow();
 
-    const tampered = { ...identity, gitSha: "mismatched-sha" };
-    expect(() => assertReleaseIdentityMatch(tampered, identity)).toThrowError(
-      /INVARIANT_009_VIOLATION/
-    );
+    const invalidSha = { ...identity, gitSha: "mismatched-sha" };
+    expect(() => assertReleaseIdentityMatch(invalidSha, identity)).toThrowError(/SECURITY_VIOLATION/);
+
+    const tamperedSha = { ...identity, gitSha: "1111111111111111111111111111111111111111" };
+    expect(() => assertReleaseIdentityMatch(tamperedSha, identity)).toThrowError(/INVARIANT_009_VIOLATION/);
   });
 });

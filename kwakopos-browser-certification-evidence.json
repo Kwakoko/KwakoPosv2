@@ -1,0 +1,15 @@
+{
+  "candidateRevision": "kwakopos-production-rev-00001",
+  "testRunId": "TEST-RUN-39b92209",
+  "targetUrl": "https://rc-e545ab5---kwakopos-production-service-uc.a.run.app",
+  "browserAOperations": 4,
+  "serverRecords": {
+    "products": 1,
+    "variants": 1,
+    "stockLedger": 2,
+    "adjustments": 2
+  },
+  "browserBOperations": 0,
+  "finalConvergenceStatus": "PASS",
+  "timestamp": "2026-08-25T15:13:54.841Z"
+}

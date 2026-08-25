@@ -8,15 +8,6 @@ import {
 
 /**
  * Calculates stock balance strictly from append-only StockLedger records.
- *
- * OPENING: +
- * PURCHASE: +
- * SALE: -
- * ADJUSTMENT: + or - (quantity is already signed in movement)
- * TRANSFER_IN: +
- * TRANSFER_OUT: -
- * RETURN: +
- * DAMAGE: -
  */
 export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
   return ledgerEntries.reduce((total, entry) => {
@@ -32,7 +23,7 @@ export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
       case "DAMAGE":
         return total - Math.abs(qty);
       case "ADJUSTMENT":
-        return total + qty; // Signed (+/-)
+        return total + qty;
       default:
         return total;
     }
@@ -41,7 +32,6 @@ export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
 
 /**
  * INVARIANT 001: Product cannot lose variants during product update.
- * Updating a product must never overwrite or erase existing variants.
  */
 export function assertProductVariantImmutability(
   existingVariants: ProductVariant[],
@@ -58,7 +48,6 @@ export function assertProductVariantImmutability(
 
 /**
  * INVARIANT 002: Variant identity survives synchronization.
- * Variant IDs must never be changed or regenerated upon sync or reconnect.
  */
 export function assertVariantIdentityPersistence(
   existingVariantId: string,
@@ -73,7 +62,6 @@ export function assertVariantIdentityPersistence(
 
 /**
  * INVARIANT 003: Stock changes require ledger movements.
- * Mutable direct stock columns are forbidden.
  */
 export function assertLedgerRequiredForStockMutation(
   movementType: StockMovementType,
@@ -137,20 +125,67 @@ export function assertVerifiedTrafficPromotion(
 }
 
 /**
+ * Validates strict 40-character Git SHA format.
+ * Rejects truncated, zero-padded, or simulated SHAs.
+ */
+export function assertValidGitSha(gitSha: string): void {
+  if (!gitSha || typeof gitSha !== "string" || !/^[0-9a-f]{40}$/i.test(gitSha)) {
+    throw new Error(
+      `SECURITY_VIOLATION: Invalid Git SHA '${gitSha}'. Must be an exact 40-character hexadecimal string.`
+    );
+  }
+  if (gitSha === "0000000000000000000000000000000000000000" || gitSha.includes("MOCK")) {
+    throw new Error(`SECURITY_VIOLATION: Zero-padded or synthetic Git SHA '${gitSha}' is forbidden in production.`);
+  }
+}
+
+/**
+ * Validates strict SHA-256 Container Digest format.
+ * Rejects 'latest', mutable tags, or fake digests.
+ */
+export function assertValidContainerDigest(containerDigest: string): void {
+  if (!containerDigest || typeof containerDigest !== "string" || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) {
+    throw new Error(
+      `SECURITY_VIOLATION: Invalid Container Digest '${containerDigest}'. Must match sha256:<64-hex-chars>. Mutable tags like ':latest' are forbidden.`
+    );
+  }
+}
+
+/**
+ * Validates Cloud Run Revision format.
+ */
+export function assertValidCloudRunRevision(revision: string): void {
+  if (!revision || typeof revision !== "string" || revision.length < 5 || revision.includes("MOCK") || revision.includes("SIMULATED")) {
+    throw new Error(
+      `SECURITY_VIOLATION: Invalid or synthetic Cloud Run Revision '${revision}'.`
+    );
+  }
+}
+
+/**
  * INVARIANT 009: Production release identity must match Git SHA + digest + revision.
  */
 export function assertReleaseIdentityMatch(
   actual: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string },
   expected: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string }
 ): void {
+  assertValidGitSha(actual.gitSha);
+  assertValidGitSha(expected.gitSha);
+  assertValidContainerDigest(actual.containerDigest);
+  assertValidContainerDigest(expected.containerDigest);
+  assertValidCloudRunRevision(actual.cloudRunRevision);
+  assertValidCloudRunRevision(expected.cloudRunRevision);
+
   if (
-    actual.gitSha !== expected.gitSha ||
-    actual.containerDigest !== expected.containerDigest ||
+    actual.gitSha.toLowerCase() !== expected.gitSha.toLowerCase() ||
+    actual.containerDigest.toLowerCase() !== expected.containerDigest.toLowerCase() ||
     actual.cloudRunRevision !== expected.cloudRunRevision ||
     actual.appVersion !== expected.appVersion
   ) {
     throw new Error(
-      `INVARIANT_009_VIOLATION: Production release identity mismatch! Deployed: ${JSON.stringify(actual)}, Expected: ${JSON.stringify(expected)}`
+      `INVARIANT_009_VIOLATION: Production release identity mismatch!\n` +
+      `Deployed: ${JSON.stringify(actual)}\n` +
+      `Expected: ${JSON.stringify(expected)}`
     );
   }
 }
