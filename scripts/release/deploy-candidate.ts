@@ -26,7 +26,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   assertValidGitSha(gitSha);
 
   const region = process.env.GCP_REGION || "us-central1";
-  const project = process.env.GCP_PROJECT || "kwakopos-prod";
+  const project = process.env.GCP_PROJECT || "kwakoposv2";
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
   const imageRepository = `${region}-docker.pkg.dev/${project}/kwakopos/kwakopos2`;
 

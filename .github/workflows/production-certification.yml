@@ -44,9 +44,9 @@ jobs:
       - name: Validate Google Cloud Release Configuration
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
-          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
         run: |
           set -euo pipefail
           if [[ -z "${GCP_PROJECT_ID}" ]]; then
@@ -64,8 +64,8 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
 
       - name: Setup Google Cloud SDK
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -74,7 +74,7 @@ jobs:
       - name: Verify Google Cloud Authentication and Project Access
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
         run: |
           set -euo pipefail
           gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || {
@@ -96,7 +96,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
@@ -144,7 +144,7 @@ jobs:
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
