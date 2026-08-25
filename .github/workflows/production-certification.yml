@@ -42,45 +42,56 @@ jobs:
         run: npm run test:sync
 
       - name: Validate Google Cloud Release Configuration
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
           GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
         run: |
           set -euo pipefail
-          if [[ -z "${GCP_PROJECT_ID}" ]]; then
-            echo "RELEASE_BLOCKED: GCP project is not configured."
-            exit 1
-          fi
-          if [[ -z "${GCP_WIF_PROVIDER}" || -z "${GCP_SERVICE_ACCOUNT}" ]]; then
-            echo "RELEASE_BLOCKED: Google Workload Identity Federation is not configured."
-            exit 1
-          fi
+          [[ -n "${GCP_PROJECT_ID}" ]] || { echo "RELEASE_BLOCKED: GCP project is not configured."; exit 1; }
+          [[ -n "${GCP_WIF_PROVIDER}" && -n "${GCP_SERVICE_ACCOUNT}" ]] || { echo "RELEASE_BLOCKED: Google Workload Identity Federation is not configured."; exit 1; }
           echo "Google Cloud WIF configuration is present."
 
       - name: Authenticate to Google Cloud via Workload Identity Federation
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
 
       - name: Setup Google Cloud SDK
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Verify Google Cloud Authentication and Project Access
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
         run: |
           set -euo pipefail
           gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || { echo "RELEASE_BLOCKED: no active Google credential"; exit 1; }
-          gcloud config set project "${GCP_PROJECT_ID}"
-          gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectId)' | grep -Fxq "${GCP_PROJECT_ID}" || { echo "RELEASE_BLOCKED: project access denied"; exit 1; }
-          echo "Google Cloud authentication and project access verified."
+          for attempt in 1 2 3 4 5; do
+            if gcloud config set project "${GCP_PROJECT_ID}" >/tmp/gcloud-project.out 2>/tmp/gcloud-project.err && \
+               gcloud projects describe "${GCP_PROJECT_ID}" --format='value(projectId)' >/tmp/gcloud-describe.out 2>/tmp/gcloud-describe.err && \
+               grep -Fxq "${GCP_PROJECT_ID}" /tmp/gcloud-describe.out; then
+              echo "Google Cloud authentication and project access verified."
+              exit 0
+            fi
+            echo "[RETRY] Google Cloud credential/project verification attempt ${attempt}/5 failed."
+            cat /tmp/gcloud-project.err || true
+            cat /tmp/gcloud-describe.err || true
+            sleep $((attempt * 5))
+          done
+          echo "RELEASE_BLOCKED: Google Cloud authentication/project access could not be verified after retries."
+          exit 1
 
       - name: Install Chromium for Real Production Browser Certification
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: npm run production:browser:install
 
       - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
@@ -90,6 +101,7 @@ jobs:
         run: npm run release:deploy-candidate
 
       - name: Export Exact Candidate Identity
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -112,18 +124,21 @@ jobs:
           NODE
 
       - name: Certify Exact Deployed Candidate over HTTPS
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:certify:deployed
 
       - name: Run Real Chromium Browser A → Cloud Run → Browser B Certification
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:browser
 
       - name: Promote Exact Certified Revision to 100% Traffic
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
@@ -140,3 +155,4 @@ jobs:
           name: kwakopos-release-evidence-${{ github.sha }}
           path: artifacts/release-evidence/
           retention-days: 90
+          if-no-files-found: warn
