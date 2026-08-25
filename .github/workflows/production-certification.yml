@@ -52,7 +52,11 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Execute Real Production Certification Pipeline
+      - name: Install Chromium for Real Production Browser Certification
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: npm run production:browser:install
+
+      - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           NODE_ENV: production-certification
@@ -60,8 +64,50 @@ jobs:
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
+        run: npm run release:deploy-candidate
+
+      - name: Export Exact Candidate Identity
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
+          const candidate = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (!candidate.candidateUrl || !candidate.candidateRevision) {
+            throw new Error('RELEASE_BLOCKED: candidate identity missing');
+          }
+          if (!/^https:\/\//i.test(candidate.candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidate.candidateUrl)) {
+            throw new Error(`RELEASE_BLOCKED: invalid candidate URL ${candidate.candidateUrl}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            `CANDIDATE_URL=${candidate.candidateUrl}\nCLOUD_RUN_REVISION=${candidate.candidateRevision}\n`);
+          NODE
+
+      - name: Certify Exact Deployed Candidate over HTTPS
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
-        run: npm run release:prove
+        run: npm run production:certify:deployed
+
+      - name: Run Real Chromium Browser A → Cloud Run → Browser B Certification
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npm run production:browser
+
+      - name: Promote Exact Certified Revision to 100% Traffic
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+        run: npm run release:promote
 
       - name: Archive Production Release Evidence Artifacts
         if: always()
