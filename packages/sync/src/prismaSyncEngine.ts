@@ -1,5 +1,5 @@
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository } from "@kwakopos2/database/prismaRepositories";
+import { PrismaProductRepository, PrismaStockRepository } from "@kwakopos2/database";
 import { prisma } from "@kwakopos2/database";
 
 export class PrismaSyncEngine {
@@ -74,7 +74,7 @@ export class PrismaSyncEngine {
 
   async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
     const since = req.since ? new Date(req.since) : new Date(0);
-    const products = (await this.productRepo.getProducts(ctx)).filter((p) => new Date(p.updatedAt) >= since);
+    const products = (await this.productRepo.getProducts(ctx)).filter((p: any) => new Date(p.updatedAt) >= since);
     const variants = await prisma.productVariant.findMany({
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
       orderBy: { updatedAt: "asc" },
@@ -102,7 +102,7 @@ export class PrismaSyncEngine {
         createdAt: v.createdAt.toISOString(),
         updatedAt: v.updatedAt.toISOString(),
       })),
-      stockLedger: ledger.filter((entry) => new Date(entry.createdAt) >= since),
+      stockLedger: ledger.filter((entry: any) => new Date(entry.createdAt) >= since),
       adjustments: adjustments.map((a: any) => ({
         id: a.id,
         tenantId: a.tenantId,

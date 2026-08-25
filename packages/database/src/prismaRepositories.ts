@@ -11,7 +11,7 @@ import type {
   CreateStockAdjustmentRequest,
 } from "@kwakopos2/contracts";
 import { calculateAvailableStock, assertTenantIsolation } from "@kwakopos2/domain";
-import { prisma } from "./index";
+import { prisma } from "./index.js";
 
 const productShape = (row: any): Product => ({
   id: row.id,
@@ -202,7 +202,7 @@ export class PrismaStockRepository {
     if (!variant) throw new Error(`Variant ${req.variantId} not found`);
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: any) => {
       let changeQty = req.quantityChange;
       if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
       if (req.adjustmentType === "SET") {

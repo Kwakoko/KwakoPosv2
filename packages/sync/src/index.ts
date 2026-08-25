@@ -54,4 +54,4 @@ export class SyncEngine {
   }
 }
 
-export { PrismaSyncEngine } from "./prismaSyncEngine";
+export { PrismaSyncEngine } from "./prismaSyncEngine.js";

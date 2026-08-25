@@ -107,13 +107,13 @@ export class ScopedStockRepository {
     const now = new Date().toISOString(); const adjustmentId = req.id || randomUUID(); let changeQty = req.quantityChange;
     if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
     else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, req.variantId);
-    const adjustment = { id: adjustmentId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId, adjustmentType: req.adjustmentType, quantityChange: changeQty, reason: req.reason, referenceNote: req.referenceNote || null, status: "COMPLETED", createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, createdAt: now, updatedAt: now };
+    const adjustment = { id: adjustmentId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId, adjustmentType: req.adjustmentType, quantityChange: changeQty, reason: req.reason, referenceNote: req.referenceNote || null, status: "COMPLETED" as const, createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, createdAt: now, updatedAt: now };
     assertAdjustmentAuditable(adjustment); assertLedgerRequiredForStockMutation("ADJUSTMENT", changeQty);
-    const ledger = { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: "ADJUSTMENT", quantity: changeQty, referenceType: "StockAdjustment", referenceId: adjustmentId, occurredAt: now, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, createdAt: now };
+    const ledger = { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: "ADJUSTMENT" as const, quantity: changeQty, referenceType: "StockAdjustment", referenceId: adjustmentId, occurredAt: now, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, createdAt: now };
     this.store.stockAdjustments.set(adjustmentId, adjustment); this.store.stockLedgers.set(ledger.id, ledger); return { adjustment, ledger };
   }
   getAvailableStock(ctx: TenantContext, variantId: string): number { return calculateAvailableStock(Array.from(this.store.stockLedgers.values()).filter((l) => l.tenantId === ctx.tenantId && l.branchId === ctx.branchId && l.variantId === variantId)); }
   getLedger(ctx: TenantContext, variantId?: string): StockLedger[] { return Array.from(this.store.stockLedgers.values()).filter((l) => l.tenantId === ctx.tenantId && l.branchId === ctx.branchId && (!variantId || l.variantId === variantId)); }
 }
 
-export { PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories";
+export { PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
