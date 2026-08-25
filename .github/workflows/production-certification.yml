@@ -109,8 +109,7 @@ jobs:
           if (!/^https:\/\//i.test(candidate.candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidate.candidateUrl)) throw new Error(`RELEASE_BLOCKED: invalid candidate URL ${candidate.candidateUrl}`);
           if (!/^sha256:[0-9a-f]{64}$/i.test(candidate.containerDigest)) throw new Error(`RELEASE_BLOCKED: invalid immutable digest ${candidate.containerDigest}`);
           if (!/^[0-9a-f]{40}$/i.test(candidate.gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA ${candidate.gitSha}`);
-          const githubEnv = process.env.GITHUB_ENV;
-          fs.appendFileSync(githubEnv, [
+          fs.appendFileSync(process.env.GITHUB_ENV, [
             `CANDIDATE_URL=${candidate.candidateUrl}`,
             `CLOUD_RUN_REVISION=${candidate.candidateRevision}`,
             `CONTAINER_DIGEST=${candidate.containerDigest}`,
@@ -142,7 +141,6 @@ jobs:
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
-          CLOUD_RUN_REVISION: ${{ env.CLOUD_RUN_REVISION }}
         run: npm run release:promote
 
       - name: Archive Production Release Evidence Artifacts
