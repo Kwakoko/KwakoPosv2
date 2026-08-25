@@ -9,9 +9,7 @@
   },
   "dependencies": {
     "@kwakopos2/contracts": "2.0.0",
-    "@kwakopos2/domain": "2.0.0"
-  },
-  "devDependencies": {
+    "@kwakopos2/domain": "2.0.0",
     "typescript": "^5.3.3"
   }
 }
