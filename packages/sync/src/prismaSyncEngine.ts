@@ -16,7 +16,11 @@ export class PrismaSyncEngine {
       const existing = await prisma.syncOperation.findFirst({
         where: {
           tenantId: ctx.tenantId,
-          OR: [{ idempotencyKey: op.idempotencyKey }, { operationId: op.operationId, deviceId: req.deviceId }],
+          deviceId: req.deviceId,
+          OR: [
+            { idempotencyKey: op.idempotencyKey },
+            { operationId: op.operationId },
+          ],
         },
       });
       if (existing) {
@@ -44,6 +48,8 @@ export class PrismaSyncEngine {
             operationId: op.operationId,
             idempotencyKey: op.idempotencyKey,
           });
+        } else {
+          throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
 
         await prisma.syncOperation.create({
