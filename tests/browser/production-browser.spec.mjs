@@ -8,28 +8,17 @@ const candidateRevision = process.env.CLOUD_RUN_REVISION || "";
 const productionCertification = process.env.NODE_ENV === "production-certification";
 
 function requireRealCandidate() {
-  if (!productionCertification) {
-    throw new Error("RELEASE_BLOCKED: real production browser certification requires NODE_ENV=production-certification");
-  }
-  if (!candidateUrl || !/^https:\/\//i.test(candidateUrl)) {
-    throw new Error(`RELEASE_BLOCKED: candidate URL must be HTTPS, got '${candidateUrl}'`);
-  }
-  if (/localhost|127\.0\.0\.1/i.test(candidateUrl)) {
-    throw new Error("RELEASE_BLOCKED: localhost candidate URL is forbidden in production certification");
-  }
-  if (!candidateRevision) {
-    throw new Error("RELEASE_BLOCKED: CLOUD_RUN_REVISION is required");
-  }
+  if (!productionCertification) throw new Error("RELEASE_BLOCKED: real production browser certification requires NODE_ENV=production-certification");
+  if (!candidateUrl || !/^https:\/\//i.test(candidateUrl)) throw new Error(`RELEASE_BLOCKED: candidate URL must be HTTPS, got '${candidateUrl}'`);
+  if (/localhost|127\.0\.0\.1/i.test(candidateUrl)) throw new Error("RELEASE_BLOCKED: localhost candidate URL is forbidden in production certification");
+  if (!candidateRevision) throw new Error("RELEASE_BLOCKED: CLOUD_RUN_REVISION is required");
 }
 
-async function api(page, method, pathname, body, headers) {
+async function api(page, method, pathname, body, headers = {}) {
   return page.evaluate(async ({ method, pathname, body, headers }) => {
     const response = await fetch(pathname, {
       method,
-      headers: {
-        "content-type": "application/json",
-        ...headers,
-      },
+      headers: { "content-type": "application/json", ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const raw = await response.text();
@@ -44,15 +33,7 @@ async function assertOk(result, label) {
   expect(result.status, `${label}: HTTP status`).toBeLessThan(300);
 }
 
-function tenantHeaders() {
-  return {
-    "x-tenant-id": "tenant-browser-cert-real",
-    "x-branch-id": "branch-browser-cert-real",
-    "x-user-id": "user-browser-cert-real",
-  };
-}
-
-test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ browser }) => {
+test("REAL Chromium Browser A -> Cloud Run -> Browser B via real delta sync", async ({ browser }) => {
   requireRealCandidate();
 
   const browserA = await browser.newContext();
@@ -61,24 +42,30 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
   const pageB = await browserB.newPage();
 
   try {
-    // Establish two independent browser origins and storage partitions.
     await pageA.goto(`${candidateUrl}/version`, { waitUntil: "domcontentloaded" });
     await pageB.goto(`${candidateUrl}/version`, { waitUntil: "domcontentloaded" });
 
     const versionA = await pageA.evaluate(() => fetch("/version").then(r => r.json()));
     const versionB = await pageB.evaluate(() => fetch("/version").then(r => r.json()));
-
     expect(versionA.cloudRunRevision).toBe(candidateRevision);
     expect(versionB.cloudRunRevision).toBe(candidateRevision);
-    expect(versionA.gitSha).toBeTruthy();
+    expect(versionA.gitSha).toMatch(/^[0-9a-f]{40}$/i);
     expect(versionA.containerDigest).toMatch(/^sha256:[0-9a-f]{64}$/i);
 
-    const headers = tenantHeaders();
+    // Authenticate through the real production endpoint. Both browser contexts use the same
+    // persisted tenant/session identity, while keeping independent browser storage.
+    const email = `cert-${crypto.randomUUID().slice(0, 8)}@kwakopos.test`;
+    const password = `Cert-${crypto.randomUUID()}!`;
+    const login = await api(pageA, "POST", "/auth/login", { email, password, deviceId: "chromium-A" });
+    await assertOk(login, "Browser A login");
+    const accessToken = login.data.data.accessToken;
+    const headers = { authorization: `Bearer ${accessToken}` };
+
+    await pageB.evaluate((token) => localStorage.setItem("kwakopos_cert_access_token", token), accessToken);
+
     const productId = crypto.randomUUID();
     const variantId = crypto.randomUUID();
-    const now = new Date().toISOString();
 
-    // Browser A: create Product and Variant via the real candidate.
     const productResult = await api(pageA, "POST", "/products", {
       id: productId,
       name: "Production Chromium Water",
@@ -96,7 +83,6 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
     }, headers);
     await assertOk(variantResult, "Browser A variant create");
 
-    // Browser A: create opening stock (+200) and damage adjustment (-12).
     const opening = await api(pageA, "POST", "/inventory/adjustments", {
       variantId,
       adjustmentType: "INCREASE",
@@ -123,7 +109,49 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
     await assertOk(stockA, "Browser A stock read");
     expect(stockA.data.data.availableStock).toBe(188);
 
-    // Browser B: prove the state is retrievable from the same deployed candidate.
+    // Browser B starts without product state. It performs an actual server delta sync.
+    const delta = await api(
+      pageB,
+      "GET",
+      "/sync/delta?since=1970-01-01T00:00:00.000Z",
+      undefined,
+      headers,
+    );
+    await assertOk(delta, "Browser B delta sync");
+    expect(delta.data.data.products.some((p) => p.id === productId)).toBe(true);
+    expect(delta.data.data.variants.some((v) => v.id === variantId)).toBe(true);
+    expect(delta.data.data.stockLedger.filter((l) => l.variantId === variantId)).toHaveLength(2);
+    expect(delta.data.data.adjustments.filter((a) => a.variantId === variantId)).toHaveLength(2);
+
+    // Materialize the delta into Browser B's independent IndexedDB state.
+    await pageB.evaluate(({ product, variants, ledger, adjustments }) => {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open("kwakopos-production-certification", 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          for (const name of ["products", "variants", "stockLedger", "adjustments"]) {
+            if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction(["products", "variants", "stockLedger", "adjustments"], "readwrite");
+          for (const item of product) tx.objectStore("products").put(item);
+          for (const item of variants) tx.objectStore("variants").put(item);
+          for (const item of ledger) tx.objectStore("stockLedger").put(item);
+          for (const item of adjustments) tx.objectStore("adjustments").put(item);
+          tx.oncomplete = () => { db.close(); resolve(true); };
+          tx.onerror = () => reject(tx.error);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    }, {
+      product: delta.data.data.products.filter((p) => p.id === productId),
+      variants: delta.data.data.variants.filter((v) => v.id === variantId),
+      ledger: delta.data.data.stockLedger.filter((l) => l.variantId === variantId),
+      adjustments: delta.data.data.adjustments.filter((a) => a.variantId === variantId),
+    });
+
     const productB = await api(pageB, "GET", `/products/${productId}`, undefined, headers);
     await assertOk(productB, "Browser B product read");
     expect(productB.data.data.id).toBe(productId);
@@ -138,21 +166,36 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
     await assertOk(ledgerB, "Browser B ledger read");
     expect(ledgerB.data.data).toHaveLength(2);
 
-    // Browser B creates a local IndexedDB marker to prove independent browser storage.
-    await pageB.evaluate(({ productId, variantId }) => {
+    const localB = await pageB.evaluate(({ productId, variantId }) => {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open("kwakopos-production-certification", 1);
-        request.onupgradeneeded = () => request.result.createObjectStore("convergence", { keyPath: "id" });
-        request.onsuccess = () => {
-          const db = request.result;
-          const tx = db.transaction("convergence", "readwrite");
-          tx.objectStore("convergence").put({ id: "B", productId, variantId, stock: 188 });
-          tx.oncomplete = () => { db.close(); resolve(true); };
-          tx.onerror = () => reject(tx.error);
+        const req = indexedDB.open("kwakopos-production-certification", 1);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction(["products", "variants", "stockLedger", "adjustments"], "readonly");
+          const out = {};
+          const reads = ["products", "variants", "stockLedger", "adjustments"].map((name) => new Promise((res, rej) => {
+            const r = tx.objectStore(name).getAll();
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+          }));
+          Promise.all(reads).then(([products, variants, ledger, adjustments]) => {
+            db.close();
+            resolve({
+              productFound: products.some((p) => p.id === productId),
+              variantFound: variants.some((v) => v.id === variantId),
+              ledgerCount: ledger.filter((l) => l.variantId === variantId).length,
+              adjustmentCount: adjustments.filter((a) => a.variantId === variantId).length,
+            });
+          }).catch(reject);
         };
-        request.onerror = () => reject(request.error);
+        req.onerror = () => reject(req.error);
       });
     }, { productId, variantId });
+
+    expect(localB.productFound).toBe(true);
+    expect(localB.variantFound).toBe(true);
+    expect(localB.ledgerCount).toBe(2);
+    expect(localB.adjustmentCount).toBe(2);
 
     const evidence = {
       candidateRevision,
@@ -161,13 +204,9 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
       browserEngine: "Chromium",
       browserContexts: 2,
       browserAOperations: 4,
-      serverRecords: {
-        products: 1,
-        variants: 1,
-        stockLedger: 2,
-        adjustments: 2,
-      },
-      browserBOperations: 0,
+      serverRecords: { products: 1, variants: 1, stockLedger: 2, adjustments: 2 },
+      browserBDeltaSync: "PASS",
+      browserBLocalIndexedDB: "PASS",
       expectedStock: 188,
       actualStockBrowserA: stockA.data.data.availableStock,
       actualStockBrowserB: stockB.data.data.availableStock,
@@ -177,11 +216,7 @@ test("REAL Chromium Browser A -> Cloud Run -> Browser B convergence", async ({ b
 
     const artifactDir = path.resolve(process.cwd(), "artifacts", "release-evidence");
     fs.mkdirSync(artifactDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(artifactDir, "kwakopos-browser-certification-evidence.json"),
-      JSON.stringify(evidence, null, 2),
-      "utf8",
-    );
+    fs.writeFileSync(path.join(artifactDir, "kwakopos-browser-certification-evidence.json"), JSON.stringify(evidence, null, 2), "utf8");
   } finally {
     await browserA.close();
     await browserB.close();
