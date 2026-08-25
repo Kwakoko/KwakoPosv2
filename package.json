@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "start": "tsx apps/api/src/server.ts",
     "build": "npm run build --workspaces",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",

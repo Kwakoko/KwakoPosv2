@@ -1,0 +1,27 @@
+# Firebase App Hosting Configuration for KwakoPos 2.0
+runConfig:
+  minInstances: 0
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: DATABASE_URL
+    value: "postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NODE_ENV
+    value: "production"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: PORT
+    value: "8080"
+    availability:
+      - RUNTIME
+  - variable: JWT_SECRET
+    value: "kwakopos-super-secret-jwt-key-change-in-production-min32chars"
+    availability:
+      - RUNTIME
