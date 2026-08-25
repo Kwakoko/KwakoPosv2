@@ -60,10 +60,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
 
     console.log(`[DEPLOY] Resolving exact OCI digest from Artifact Registry...`);
     imageDigest = String(
-      run(
-        `gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`,
-        "utf8"
-      )
+      run(`gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`, "utf8")
     ).trim();
     assertValidContainerDigest(imageDigest);
 
@@ -73,7 +70,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     console.log(`[DEPLOY] Deploying exact digest to Cloud Run with 0% traffic...`);
     const deployStdout = String(
       run(
-        `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --no-traffic --tag=${tagArg} --set-env-vars=NODE_ENV=production,GIT_SHA=${gitSha},CONTAINER_DIGEST=${imageDigest} --format="json"`,
+        `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --no-traffic --tag=${tagArg} --update-env-vars=NODE_ENV=production,GIT_SHA=${gitSha},CONTAINER_DIGEST=${imageDigest} --format="json"`,
         "utf8"
       )
     );
@@ -81,12 +78,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
 
     const serviceJson = JSON.parse(
-      String(
-        run(
-          `gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json"`,
-          "utf8"
-        )
-      )
+      String(run(`gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json`, "utf8"))
     );
 
     const taggedTraffic = Array.isArray(serviceJson?.status?.traffic)
@@ -102,12 +94,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     assertValidCloudRunRevision(candidateRevision);
 
     const revisionJson = JSON.parse(
-      String(
-        run(
-          `gcloud run revisions describe ${candidateRevision} --project=${project} --region=${region} --format="json"`,
-          "utf8"
-        )
-      )
+      String(run(`gcloud run revisions describe ${candidateRevision} --project=${project} --region=${region} --format="json"`, "utf8"))
     );
 
     const deployedImage = revisionJson?.spec?.containers?.[0]?.image || "";
@@ -139,9 +126,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
 
   const artifactDir = path.resolve(process.cwd(), "artifacts", "release-evidence");
   fs.mkdirSync(artifactDir, { recursive: true });
-
-  const outputPath = path.join(artifactDir, "kwakopos-candidate-deployment.json");
-  fs.writeFileSync(outputPath, JSON.stringify(evidence, null, 2), "utf8");
+  fs.writeFileSync(path.join(artifactDir, "kwakopos-candidate-deployment.json"), JSON.stringify(evidence, null, 2), "utf8");
 
   console.log(`[PASS] Candidate deployment evidence written:`);
   console.log(`       - Revision: ${evidence.candidateRevision}`);
