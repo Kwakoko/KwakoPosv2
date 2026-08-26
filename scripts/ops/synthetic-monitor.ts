@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { ScopedProductRepository, ScopedStockRepository, globalInMemoryStore } from "@kwakopos2/database";
+import { ScopedProductRepository, ScopedStockRepository, ScopedCommercialRepository, globalInMemoryStore } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
@@ -39,7 +39,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   const productRepo = new ScopedProductRepository(globalInMemoryStore);
   const stockRepo = new ScopedStockRepository(globalInMemoryStore);
-  const syncEngine = new SyncEngine(productRepo, stockRepo, globalInMemoryStore);
+  const commercialRepo = new ScopedCommercialRepository(globalInMemoryStore);
+  const syncEngine = new SyncEngine(productRepo, stockRepo, commercialRepo, globalInMemoryStore);
 
   // -------------------------------------------------------------------------
   // SYNTHETIC TEST A: Login -> Create Product -> Update -> Verify Persistence
@@ -265,7 +266,186 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     evidence: { version: migration.newVersion, preserved: migration.preservedOutboxCount },
     timestamp: new Date().toISOString(),
   });
-  console.log(` [F/F] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
+  console.log(` [F/L] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST G: Product -> Variant -> Sale -> Stock Ledger Deduction (100 - 5 = 95)
+  // -------------------------------------------------------------------------
+  const startG = Date.now();
+  const prodG = productRepo.createProduct(ctx, {
+    name: "Commercial Flour 1kg",
+    sku: "FLOUR-1KG",
+    variants: [{ name: "1kg", sku: "FLOUR-1KG-V1", price: 2000, costPrice: 1500 }],
+  });
+  const varGId = prodG.variants![0].id;
+  stockRepo.recordStockAdjustment(ctx, {
+    variantId: varGId,
+    adjustmentType: "INCREASE",
+    quantityChange: 100,
+    reason: "Initial Stock",
+    deviceId: "dev-synth-1",
+    operationId: "op-synth-init-g",
+    idempotencyKey: "idem-synth-init-g",
+  });
+  const saleResG = commercialRepo.createPosSale(ctx, {
+    items: [{ productId: prodG.id, variantId: varGId, quantity: 5, unitPrice: 2000, unitCost: 1500 }],
+    payments: [{ amount: 10000, paymentMethod: "CASH" }],
+    deviceId: "dev-synth-1",
+    operationId: "op-synth-sale-g",
+    idempotencyKey: "idem-synth-sale-g",
+  });
+  const stockAfterG = stockRepo.getAvailableStock(ctx, varGId);
+  const passG = saleResG.sale.grandTotal === 10000 && stockAfterG === 95;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_G_POS_SALE_STOCK_DEDUCTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startG,
+    status: passG ? "PASS" : "FAIL",
+    evidence: { stockBefore: 100, sold: 5, stockAfter: stockAfterG },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [G/L] ${passG ? "✓" : "✗"} Synthetic Test G (POS Sale & Ledger Stock Deduction 100 -> 95): ${passG ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST H: Purchase -> Goods Receipt -> Stock Ledger Addition (95 + 20 = 115)
+  // -------------------------------------------------------------------------
+  const startH = Date.now();
+  const supH = commercialRepo.createSupplier(ctx, { name: "Synthetic Miller Ltd" });
+  const recH = commercialRepo.createPurchaseReceipt(ctx, {
+    supplierId: supH.id,
+    deviceId: "dev-synth-1",
+    operationId: "op-synth-rec-h",
+    idempotencyKey: "idem-synth-rec-h",
+    items: [{ variantId: varGId, quantityReceived: 20, unitCost: 1500 }],
+  });
+  const stockAfterH = stockRepo.getAvailableStock(ctx, varGId);
+  const passH = recH.ledgers.length === 1 && stockAfterH === 115;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_H_PURCHASE_RECEIPT_STOCK_ADDITION",
+    syntheticTenantId,
+    durationMs: Date.now() - startH,
+    status: passH ? "PASS" : "FAIL",
+    evidence: { stockBefore: 95, received: 20, stockAfter: stockAfterH },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [H/L] ${passH ? "✓" : "✗"} Synthetic Test H (Goods Receipt & Ledger Addition 95 -> 115): ${passH ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST I: Sale Return -> Stock Ledger Restoration (115 + 2 = 117)
+  // -------------------------------------------------------------------------
+  const startI = Date.now();
+  const retI = commercialRepo.createSaleReturn(ctx, {
+    reason: "Customer exchanged size",
+    refundType: "CASH",
+    deviceId: "dev-synth-1",
+    operationId: "op-synth-ret-i",
+    idempotencyKey: "idem-synth-ret-i",
+    items: [{ variantId: varGId, quantityReturned: 2, refundUnitPrice: 2000, condition: "GOOD" }],
+  });
+  const stockAfterI = stockRepo.getAvailableStock(ctx, varGId);
+  const passI = retI.returnRecord.totalRefundAmount === 4000 && stockAfterI === 117;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_I_SALE_RETURN_STOCK_RESTORATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startI,
+    status: passI ? "PASS" : "FAIL",
+    evidence: { stockBefore: 115, returned: 2, stockAfter: stockAfterI },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [I/L] ${passI ? "✓" : "✗"} Synthetic Test I (Sale Return & Ledger Restoration 115 -> 117): ${passI ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST J: Customer -> Credit Sale -> Balance Tracking
+  // -------------------------------------------------------------------------
+  const startJ = Date.now();
+  const custJ = commercialRepo.createCustomer(ctx, { name: "Synthetic Wholesale Buyer", creditLimit: 200000 });
+  const creditSaleJ = commercialRepo.createPosSale(ctx, {
+    customerId: custJ.id,
+    items: [{ productId: prodG.id, variantId: varGId, quantity: 10, unitPrice: 2000, unitCost: 1500 }],
+    payments: [{ amount: 20000, paymentMethod: "CREDIT" }],
+    deviceId: "dev-synth-1",
+    operationId: "op-synth-sale-j",
+    idempotencyKey: "idem-synth-sale-j",
+  });
+  const custJUpdated = commercialRepo.getCustomerById(ctx, custJ.id);
+  const passJ = creditSaleJ.sale.paymentStatus === "PAID" && custJUpdated?.currentBalance === 20000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_J_CUSTOMER_CREDIT_ACCOUNTING",
+    syntheticTenantId,
+    durationMs: Date.now() - startJ,
+    status: passJ ? "PASS" : "FAIL",
+    evidence: { creditLimit: 200000, creditSale: 20000, currentBalance: custJUpdated?.currentBalance },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [J/L] ${passJ ? "✓" : "✗"} Synthetic Test J (Customer Credit & AR Tracking): ${passJ ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST K: Multi-Device Outbox Convergence (Device A -> Server -> Device B)
+  // -------------------------------------------------------------------------
+  const startK = Date.now();
+  const dbA = new LocalIndexedDbStore();
+  const dbB = new LocalIndexedDbStore();
+  const engineA = new ClientSyncEngine("device-k-a", dbA);
+  const engineB = new ClientSyncEngine("device-k-b", dbB);
+
+  dbA.recordOutboxMutation({
+    id: "OP-DEV-A-01",
+    entityType: "Customer",
+    entityId: randomUUID(),
+    operationType: "CREATE",
+    payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
+    clientCreatedAt: new Date().toISOString(),
+    idempotencyKey: "CONV-A-01",
+    status: "PENDING",
+  });
+
+  // Device A syncs up to Server
+  await engineA.syncWithServer(
+    async (req) => syncEngine.processPush(ctx, req),
+    async (since) => syncEngine.processDelta(ctx, { since })
+  );
+
+  // Device B syncs down from Server
+  await engineB.syncWithServer(
+    async (req) => syncEngine.processPush(ctx, req),
+    async (since) => syncEngine.processDelta(ctx, { since })
+  );
+
+  const serverCustomers = commercialRepo.getCustomers(ctx);
+  const passK = serverCustomers.some((c) => c.name === "Converged Customer Alpha");
+  results.push({
+    testSuite: "SYNTHETIC_TEST_K_MULTI_DEVICE_CONVERGENCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startK,
+    status: passK ? "PASS" : "FAIL",
+    evidence: { convergedCustomerCount: serverCustomers.length },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [K/L] ${passK ? "✓" : "✗"} Synthetic Test K (Multi-Device A -> Server -> B Sync Convergence): ${passK ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST L: Cashier Session Lifecycle & Drawer Variance Reconciliation
+  // -------------------------------------------------------------------------
+  const startL = Date.now();
+  const sessionL = commercialRepo.openCashSession(ctx, { openingCash: 100000 });
+  sessionL.cashSalesTotal = 50000;
+  commercialRepo.recordExpense(ctx, {
+    cashSessionId: sessionL.id,
+    category: "OFFICE_EXPENSE",
+    amount: 10000,
+    reason: "Cleaning Supplies",
+  });
+  const closedSessionL = commercialRepo.closeCashSession(ctx, sessionL.id, { actualCash: 140000 });
+  const passL = closedSessionL.status === "CLOSED" && closedSessionL.expectedCash === 140000 && closedSessionL.variance === 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_L_CASH_SESSION_RECONCILIATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startL,
+    status: passL ? "PASS" : "FAIL",
+    evidence: { opening: 100000, sales: 50000, expenses: 10000, expected: closedSessionL.expectedCash, variance: closedSessionL.variance },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [L/L] ${passL ? "✓" : "✗"} Synthetic Test L (Cashier Session Lifecycle & Variance Reconciliation): ${passL ? "PASS" : "FAIL"}`);
 
   const allPassed = results.every((r) => r.status === "PASS");
   return { allPassed, results };

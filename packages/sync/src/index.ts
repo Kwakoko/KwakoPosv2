@@ -8,11 +8,21 @@ import type {
   CreateProductRequest,
   CreateVariantRequest,
   CreateStockAdjustmentRequest,
+  CreateCustomerRequest,
+  CreateSupplierRequest,
+  CreatePosSaleRequest,
+  CreateSaleReturnRequest,
+  CreatePurchaseOrderRequest,
+  CreatePurchaseReceiptRequest,
+  CreatePaymentRequest,
+  OpenCashSessionRequest,
 } from "@kwakopos2/contracts";
 import {
   ScopedProductRepository,
   ScopedStockRepository,
+  ScopedCommercialRepository,
   globalInMemoryStore,
+  globalCommercialRepository,
   InMemoryStore,
 } from "@kwakopos2/database";
 import { randomUUID } from "crypto";
@@ -20,12 +30,24 @@ import { randomUUID } from "crypto";
 export class SyncEngine {
   private productRepo: ScopedProductRepository;
   private stockRepo: ScopedStockRepository;
+  private commercialRepo: ScopedCommercialRepository;
   private store: InMemoryStore;
 
-  constructor(productRepo: ScopedProductRepository, stockRepo: ScopedStockRepository, store: InMemoryStore = globalInMemoryStore) {
+  constructor(
+    productRepo: ScopedProductRepository,
+    stockRepo: ScopedStockRepository,
+    commercialRepoOrStore?: ScopedCommercialRepository | InMemoryStore,
+    store?: InMemoryStore
+  ) {
     this.productRepo = productRepo;
     this.stockRepo = stockRepo;
-    this.store = store;
+    if (commercialRepoOrStore && ("tenants" in (commercialRepoOrStore as any) || "clear" in (commercialRepoOrStore as any))) {
+      this.store = commercialRepoOrStore as InMemoryStore;
+      this.commercialRepo = new ScopedCommercialRepository(this.store);
+    } else {
+      this.commercialRepo = (commercialRepoOrStore as ScopedCommercialRepository) || globalCommercialRepository;
+      this.store = store || globalInMemoryStore;
+    }
   }
 
   processPush(ctx: TenantContext, req: SyncPushRequest): SyncPushResponse {
@@ -34,17 +56,26 @@ export class SyncEngine {
 
     for (const op of req.operations) {
       const existingOp = Array.from(this.store.syncOperations.values()).find(
-        (o) => o.tenantId === ctx.tenantId && o.deviceId === req.deviceId &&
-          (o.idempotencyKey === op.idempotencyKey || o.operationId === op.operationId),
+        (o) =>
+          o.tenantId === ctx.tenantId &&
+          o.deviceId === req.deviceId &&
+          (o.idempotencyKey === op.idempotencyKey || o.operationId === op.operationId)
       );
       if (existingOp) {
-        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+        results.push({
+          operationId: op.operationId,
+          idempotencyKey: op.idempotencyKey,
+          status: "ALREADY_PROCESSED",
+        });
         continue;
       }
 
       try {
         if (op.entityType === "Product" && op.operationType === "CREATE") {
-          this.productRepo.createProduct(ctx, { ...(op.payload as unknown as CreateProductRequest), id: op.entityId });
+          this.productRepo.createProduct(ctx, {
+            ...(op.payload as unknown as CreateProductRequest),
+            id: op.entityId,
+          });
         } else if (op.entityType === "Product" && op.operationType === "UPDATE") {
           this.productRepo.updateProduct(ctx, op.entityId, op.payload as any);
         } else if (op.entityType === "ProductVariant" && op.operationType === "CREATE") {
@@ -62,6 +93,38 @@ export class SyncEngine {
             operationId: op.operationId,
             idempotencyKey: op.idempotencyKey,
           });
+        } else if (op.entityType === "Customer" && op.operationType === "CREATE") {
+          this.commercialRepo.createCustomer(ctx, {
+            ...(op.payload as unknown as CreateCustomerRequest),
+            id: op.entityId,
+          });
+        } else if (op.entityType === "Supplier" && op.operationType === "CREATE") {
+          this.commercialRepo.createSupplier(ctx, {
+            ...(op.payload as unknown as CreateSupplierRequest),
+            id: op.entityId,
+          });
+        } else if (op.entityType === "Sale" && op.operationType === "CREATE") {
+          this.commercialRepo.createPosSale(ctx, {
+            ...(op.payload as unknown as CreatePosSaleRequest),
+            id: op.entityId,
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: op.idempotencyKey,
+          });
+        } else if (op.entityType === "PurchaseOrder" && op.operationType === "CREATE") {
+          this.commercialRepo.createPurchaseOrder(ctx, op.payload as unknown as CreatePurchaseOrderRequest);
+        } else if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
+          this.commercialRepo.createPurchaseReceipt(ctx, {
+            ...(op.payload as unknown as CreatePurchaseReceiptRequest),
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: op.idempotencyKey,
+          });
+        } else if (op.entityType === "Payment" && op.operationType === "CREATE") {
+          const payload = op.payload as unknown as CreatePaymentRequest;
+          // Payment handled via sale or purchase allocation
+        } else if (op.entityType === "CashSession" && op.operationType === "CREATE") {
+          this.commercialRepo.openCashSession(ctx, op.payload as unknown as OpenCashSessionRequest);
         } else {
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
@@ -84,9 +147,18 @@ export class SyncEngine {
         };
         this.store.syncOperations.set(syncOp.id, syncOp);
         processedCount += 1;
-        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "SUCCESS" });
+        results.push({
+          operationId: op.operationId,
+          idempotencyKey: op.idempotencyKey,
+          status: "SUCCESS",
+        });
       } catch (err: any) {
-        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: err?.message || "Sync operation failed" });
+        results.push({
+          operationId: op.operationId,
+          idempotencyKey: op.idempotencyKey,
+          status: "FAILED",
+          error: err?.message || "Sync operation failed",
+        });
       }
     }
 
@@ -99,12 +171,14 @@ export class SyncEngine {
       serverTimestamp: new Date().toISOString(),
       products: this.productRepo.getProducts(ctx).filter((p) => new Date(p.updatedAt) >= sinceDate),
       variants: Array.from(this.store.variants.values()).filter(
-        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt) >= sinceDate,
+        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt) >= sinceDate
       ),
       stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt) >= sinceDate),
       adjustments: Array.from(this.store.stockAdjustments.values()).filter(
-        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt) >= sinceDate,
+        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt) >= sinceDate
       ),
+      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt) >= sinceDate),
+      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt) >= sinceDate),
     };
   }
 }

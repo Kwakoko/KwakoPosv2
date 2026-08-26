@@ -8,6 +8,17 @@ import {
   CreateVariantRequestSchema,
   UpdateVariantRequestSchema,
   CreateStockAdjustmentRequestSchema,
+  CreateCustomerRequestSchema,
+  UpdateCustomerRequestSchema,
+  CreateSupplierRequestSchema,
+  UpdateSupplierRequestSchema,
+  CreatePurchaseOrderRequestSchema,
+  CreatePurchaseReceiptRequestSchema,
+  CreatePosSaleRequestSchema,
+  CreateSaleReturnRequestSchema,
+  OpenCashSessionRequestSchema,
+  CloseCashSessionRequestSchema,
+  CreateExpenseRequestSchema,
   SyncPushRequestSchema,
   SyncDeltaRequestSchema,
 } from "@kwakopos2/contracts";
@@ -15,6 +26,8 @@ import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSes
 import {
   ScopedProductRepository,
   ScopedStockRepository,
+  ScopedCommercialRepository,
+  globalCommercialRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   globalInMemoryStore,
@@ -66,7 +79,7 @@ export function buildServer(): FastifyInstance {
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
   const syncEngine = productionPersistence
     ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
-    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalInMemoryStore);
+    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalCommercialRepository, globalInMemoryStore);
 
   // Centralized error handler: prefer structured statusCode/code when present.
   server.setErrorHandler((error: any, _req, reply) => {
@@ -600,6 +613,177 @@ export function buildServer(): FastifyInstance {
     const query = SyncDeltaRequestSchema.parse(req.query || {});
     const result = await syncEngine.processDelta(req.tenantContext!, query as any);
     return { success: true, data: result };
+  });
+
+  // ==========================================
+  // Commercial Core Routes (/api/v1/*)
+  // ==========================================
+
+  // Product Search
+  server.get("/api/v1/products/search", async (req) => {
+    const q = ((req.query as any)?.q || "").toLowerCase().trim();
+    const allProducts = await productRepo.getProducts(req.tenantContext!);
+    if (!q) return { success: true, data: allProducts };
+
+    const filtered = allProducts.filter((p) => {
+      if (p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)) return true;
+      if (p.variants && p.variants.some((v) => v.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) || (v.barcode && v.barcode.toLowerCase().includes(q)))) return true;
+      return false;
+    });
+    return { success: true, data: filtered };
+  });
+
+  // Customer Management
+  server.get("/api/v1/customers", async (req) => {
+    const customers = globalCommercialRepository.getCustomers(req.tenantContext!);
+    return { success: true, data: customers };
+  });
+
+  server.post("/api/v1/customers", async (req, reply) => {
+    const validated = CreateCustomerRequestSchema.parse(req.body);
+    const customer = globalCommercialRepository.createCustomer(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: customer });
+  });
+
+  server.get("/api/v1/customers/:id", async (req, reply) => {
+    const customer = globalCommercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
+    if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
+    return { success: true, data: customer };
+  });
+
+  server.put("/api/v1/customers/:id", async (req) => {
+    const validated = UpdateCustomerRequestSchema.parse(req.body);
+    const updated = globalCommercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: updated };
+  });
+
+  // Supplier Management
+  server.get("/api/v1/suppliers", async (req) => {
+    const suppliers = globalCommercialRepository.getSuppliers(req.tenantContext!);
+    return { success: true, data: suppliers };
+  });
+
+  server.post("/api/v1/suppliers", async (req, reply) => {
+    const validated = CreateSupplierRequestSchema.parse(req.body);
+    const supplier = globalCommercialRepository.createSupplier(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: supplier });
+  });
+
+  server.get("/api/v1/suppliers/:id", async (req, reply) => {
+    const supplier = globalCommercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
+    if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
+    return { success: true, data: supplier };
+  });
+
+  server.put("/api/v1/suppliers/:id", async (req) => {
+    const validated = UpdateSupplierRequestSchema.parse(req.body);
+    const updated = globalCommercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: updated };
+  });
+
+  // Purchasing & Goods Receipt
+  server.get("/api/v1/purchases", async (req) => {
+    const pos = Array.from(globalCommercialRepository.purchaseOrders.values()).filter(
+      (po) => po.tenantId === req.tenantContext!.tenantId && po.branchId === req.tenantContext!.branchId
+    );
+    return { success: true, data: pos };
+  });
+
+  server.post("/api/v1/purchases", async (req, reply) => {
+    const validated = CreatePurchaseOrderRequestSchema.parse(req.body);
+    const po = globalCommercialRepository.createPurchaseOrder(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: po });
+  });
+
+  server.post("/api/v1/purchases/receipts", async (req, reply) => {
+    const validated = CreatePurchaseReceiptRequestSchema.parse(req.body);
+    const result = globalCommercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  // POS Sales Engine
+  server.get("/api/v1/pos/sales", async (req) => {
+    const sales = Array.from(globalCommercialRepository.sales.values()).filter(
+      (s) => s.tenantId === req.tenantContext!.tenantId && s.branchId === req.tenantContext!.branchId
+    );
+    return { success: true, data: sales };
+  });
+
+  server.post("/api/v1/pos/sales", async (req, reply) => {
+    const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const result = globalCommercialRepository.createPosSale(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/pos/sales/:id", async (req, reply) => {
+    const sale = globalCommercialRepository.sales.get((req.params as any).id);
+    if (!sale || sale.tenantId !== req.tenantContext!.tenantId) {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
+    }
+    const lines = globalCommercialRepository.saleLines.get(sale.id) || [];
+    return { success: true, data: { ...sale, lines } };
+  });
+
+  // Returns & Refunds
+  server.post("/api/v1/returns", async (req, reply) => {
+    const validated = CreateSaleReturnRequestSchema.parse(req.body);
+    const result = globalCommercialRepository.createSaleReturn(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  // Cash Sessions & Drawer Reconciliation
+  server.post("/api/v1/cash-sessions", async (req, reply) => {
+    const validated = OpenCashSessionRequestSchema.parse(req.body);
+    const session = globalCommercialRepository.openCashSession(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: session });
+  });
+
+  server.get("/api/v1/cash-sessions/active", async (req) => {
+    const session = Array.from(globalCommercialRepository.cashSessions.values()).find(
+      (s) => s.tenantId === req.tenantContext!.tenantId && s.branchId === req.tenantContext!.branchId && s.status === "OPEN"
+    );
+    return { success: true, data: session || null };
+  });
+
+  server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
+    const validated = CreateExpenseRequestSchema.parse(req.body);
+    const expense = globalCommercialRepository.recordExpense(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: expense });
+  });
+
+  server.post("/api/v1/cash-sessions/:id/close", async (req) => {
+    const validated = CloseCashSessionRequestSchema.parse(req.body);
+    const session = globalCommercialRepository.closeCashSession(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: session };
+  });
+
+  // Commercial Reports & Executive Dashboard
+  server.get("/api/v1/reports/summary", async (req) => {
+    const summary = globalCommercialRepository.getDashboardSummary(req.tenantContext!);
+    return { success: true, data: summary };
+  });
+
+  server.get("/api/v1/dashboard/executive", async (req) => {
+    const summary = globalCommercialRepository.getDashboardSummary(req.tenantContext!);
+    return { success: true, data: summary };
+  });
+
+  // Super Admin Commercial Operations
+  server.get("/admin/commercial/overview", async () => {
+    const totalTenants = 1;
+    const totalSales = globalCommercialRepository.sales.size;
+    const totalPurchases = globalCommercialRepository.purchaseOrders.size;
+    const totalReceipts = globalCommercialRepository.purchaseReceipts.size;
+    return {
+      success: true,
+      data: {
+        totalTenants,
+        totalSales,
+        totalPurchases,
+        totalReceipts,
+        status: "HEALTHY",
+      },
+    };
   });
 
   // ==========================================
