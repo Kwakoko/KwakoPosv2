@@ -38,6 +38,7 @@
     "@types/node": "^20.11.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.41.2",
     "vitest": "^1.2.2"
   }
 }

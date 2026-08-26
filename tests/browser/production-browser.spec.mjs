@@ -29,8 +29,11 @@ async function api(page, method, pathname, body, headers = {}) {
 }
 
 async function assertOk(result, label) {
-  expect(result.status, `${label}: HTTP status`).toBeGreaterThanOrEqual(200);
-  expect(result.status, `${label}: HTTP status`).toBeLessThan(300);
+  if (result.status < 200 || result.status >= 300) {
+    console.error(`[PLAYWRIGHT_STEP_FAIL] ${label} returned HTTP ${result.status}:`, JSON.stringify(result.data));
+  }
+  expect(result.status, `${label}: HTTP status (Body: ${JSON.stringify(result.data)})`).toBeGreaterThanOrEqual(200);
+  expect(result.status, `${label}: HTTP status (Body: ${JSON.stringify(result.data)})`).toBeLessThan(300);
 }
 
 test("REAL Chromium Browser A -> Cloud Run -> Browser B via real delta sync", async ({ browser }) => {
