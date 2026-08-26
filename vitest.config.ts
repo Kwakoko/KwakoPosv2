@@ -10,6 +10,7 @@ export default defineConfig({
       "@kwakopos2/database": path.resolve(__dirname, "./packages/database/src/index.ts"),
       "@kwakopos2/auth": path.resolve(__dirname, "./packages/auth/src/index.ts"),
       "@kwakopos2/sync": path.resolve(__dirname, "./packages/sync/src/index.ts"),
+      "@kwakopos2/observability": path.resolve(__dirname, "./packages/observability/src/index.ts"),
     },
   },
   test: {

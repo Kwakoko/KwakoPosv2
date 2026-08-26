@@ -32,6 +32,9 @@ jobs:
       - name: Generate Prisma Client
         run: npm run db:generate
 
+      - name: Build All Monorepo Workspaces
+        run: npm run build
+
       - name: Execute Core Unit & Invariant Tests
         run: npm run test:unit
 
@@ -40,6 +43,9 @@ jobs:
 
       - name: Execute Multi-Device Sync Convergence Tests
         run: npm run test:sync
+
+      - name: Execute Continuous Synthetic Monitoring Suite
+        run: npx tsx scripts/ops/synthetic-monitor.ts
 
       # Pull requests must never authenticate to GCP, deploy, promote, or mutate production.
       # Real release certification is reserved for main pushes and manual dispatches.
