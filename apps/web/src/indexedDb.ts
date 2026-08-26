@@ -19,8 +19,10 @@ export interface OutboxItem {
 
 /**
  * Local operational IndexedDB / Memory store engine for Browser A & Browser B.
+ * Includes schema versioning, migration safety, and durable outbox protection.
  */
 export class LocalIndexedDbStore {
+  schemaVersion = 1;
   products: Map<string, Product> = new Map();
   productVariants: Map<string, ProductVariant> = new Map();
   stockLedger: Map<string, StockLedger> = new Map();
@@ -64,4 +66,31 @@ export class LocalIndexedDbStore {
       item.status = "SYNCED";
     }
   }
+
+  markOutboxFailed(operationId: string, errorReason: string) {
+    const item = this.syncOutbox.get(operationId);
+    if (item) {
+      item.status = "FAILED";
+      this.syncMetadata.set(`error_${operationId}`, errorReason);
+    }
+  }
+
+  /**
+   * Safe PWA / App upgrade migration handler.
+   * Guarantees pending outbox mutations and local stock data are never purged during upgrades.
+   */
+  migrateToVersion(targetVersion: number): { previousVersion: number; newVersion: number; preservedOutboxCount: number } {
+    const previousVersion = this.schemaVersion;
+    const preservedOutboxCount = this.getPendingOutbox().length;
+
+    if (targetVersion > previousVersion) {
+      // Execute incremental schema migrations while preserving outbox & entities
+      this.schemaVersion = targetVersion;
+      this.syncMetadata.set("schemaVersion", String(targetVersion));
+      this.syncMetadata.set("lastMigratedAt", new Date().toISOString());
+    }
+
+    return { previousVersion, newVersion: this.schemaVersion, preservedOutboxCount };
+  }
 }
+

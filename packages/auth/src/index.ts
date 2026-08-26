@@ -47,3 +47,100 @@ export function extractTenantContext(payload: JwtPayload): TenantContext {
     permissions: payload.permissions,
   };
 }
+
+export interface SessionRecord {
+  id: string;
+  tenantId: string;
+  userId: string;
+  deviceId: string;
+  refreshTokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+export class SessionManager {
+  private inMemorySessions = new Map<string, SessionRecord>();
+
+  hashToken(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  async createSession(
+    tenantId: string,
+    userId: string,
+    deviceId: string,
+    expiresInDays = 30
+  ): Promise<{ sessionId: string; refreshToken: string; expiresAt: Date }> {
+    const sessionId = randomBytes(16).toString("hex");
+    const refreshToken = generateRefreshToken();
+    const refreshTokenHash = this.hashToken(refreshToken);
+    const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+
+    const record: SessionRecord = {
+      id: sessionId,
+      tenantId,
+      userId,
+      deviceId,
+      refreshTokenHash,
+      expiresAt,
+      revokedAt: null,
+      createdAt: new Date(),
+    };
+
+    this.inMemorySessions.set(sessionId, record);
+    return { sessionId, refreshToken, expiresAt };
+  }
+
+  async rotateRefreshToken(
+    sessionId: string,
+    providedRefreshToken: string,
+    userPayload: Omit<JwtPayload, "deviceId">
+  ): Promise<{ accessToken: string; refreshToken: string } | null> {
+    const session = this.inMemorySessions.get(sessionId);
+    if (!session || session.revokedAt || session.expiresAt < new Date()) {
+      return null;
+    }
+
+    const providedHash = this.hashToken(providedRefreshToken);
+    if (session.refreshTokenHash !== providedHash) {
+      session.revokedAt = new Date();
+      return null;
+    }
+
+    const newRefreshToken = generateRefreshToken();
+    session.refreshTokenHash = this.hashToken(newRefreshToken);
+
+    const payload: JwtPayload = {
+      ...userPayload,
+      deviceId: session.deviceId,
+    };
+
+    const accessToken = generateAccessToken(payload);
+    return { accessToken, refreshToken: newRefreshToken };
+  }
+
+  async revokeSession(sessionId: string): Promise<boolean> {
+    const session = this.inMemorySessions.get(sessionId);
+    if (session) {
+      session.revokedAt = new Date();
+      return true;
+    }
+    return false;
+  }
+
+  async revokeAllUserSessions(tenantId: string, userId: string): Promise<number> {
+    let count = 0;
+    for (const session of this.inMemorySessions.values()) {
+      if (session.tenantId === tenantId && session.userId === userId && !session.revokedAt) {
+        session.revokedAt = new Date();
+        count++;
+      }
+    }
+    return count;
+  }
+}
+
+export const globalSessionManager = new SessionManager();
+
+

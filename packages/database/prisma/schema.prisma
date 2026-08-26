@@ -234,3 +234,34 @@ model AuditEvent {
   @@index([tenantId, branchId, createdAt])
   @@map("audit_events")
 }
+
+model SyncDeadLetter {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String
+  deviceId    String
+  operationId String
+  entityType  String
+  payload     Json
+  errorReason String
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, branchId, createdAt])
+  @@map("sync_dead_letters")
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  tenantId    String?
+  branchId    String?
+  key         String
+  enabled     Boolean  @default(false)
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, tenantId, branchId])
+  @@map("feature_flags")
+}
+

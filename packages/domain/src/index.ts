@@ -189,3 +189,70 @@ export function assertReleaseIdentityMatch(
     );
   }
 }
+
+/**
+ * INVARIANT 010: Total available stock must match exactly the algebraic sum of stock ledger records.
+ */
+export function assertInventoryLedgerIntegrity(
+  variantId: string,
+  reportedStock: number,
+  ledgerEntries: StockLedger[]
+): void {
+  const calculated = calculateAvailableStock(ledgerEntries);
+  if (reportedStock !== calculated) {
+    throw new Error(
+      `INVARIANT_010_VIOLATION: Inventory integrity mismatch for variant ${variantId}. Reported: ${reportedStock}, Calculated from ledger: ${calculated}`
+    );
+  }
+}
+
+/**
+ * INVARIANT 011: No orphaned stock adjustment without its ledger record.
+ */
+export function assertNoOrphanAdjustments(
+  adjustments: StockAdjustment[],
+  ledgers: StockLedger[]
+): void {
+  const ledgerMap = new Set(ledgers.map((l) => l.idempotencyKey));
+  for (const adj of adjustments) {
+    if (!ledgerMap.has(adj.idempotencyKey)) {
+      throw new Error(
+        `INVARIANT_011_VIOLATION: Orphaned adjustment ${adj.id} (key: ${adj.idempotencyKey}) has no matching ledger entry.`
+      );
+    }
+  }
+}
+
+export interface FeatureFlagRule {
+  key: string;
+  enabled: boolean;
+  tenantId?: string | null;
+  branchId?: string | null;
+}
+
+export function evaluateFeatureFlag(
+  flags: FeatureFlagRule[],
+  key: string,
+  context?: { tenantId?: string; branchId?: string }
+): boolean {
+  // 1. Branch specific match
+  if (context?.tenantId && context?.branchId) {
+    const branchMatch = flags.find(
+      (f) => f.key === key && f.tenantId === context.tenantId && f.branchId === context.branchId
+    );
+    if (branchMatch !== undefined) return branchMatch.enabled;
+  }
+
+  // 2. Tenant specific match
+  if (context?.tenantId) {
+    const tenantMatch = flags.find(
+      (f) => f.key === key && f.tenantId === context.tenantId && !f.branchId
+    );
+    if (tenantMatch !== undefined) return tenantMatch.enabled;
+  }
+
+  // 3. Global fallback
+  const globalMatch = flags.find((f) => f.key === key && !f.tenantId && !f.branchId);
+  return globalMatch ? globalMatch.enabled : false;
+}
+

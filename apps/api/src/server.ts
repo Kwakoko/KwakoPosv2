@@ -11,7 +11,7 @@ import {
   SyncPushRequestSchema,
   SyncDeltaRequestSchema,
 } from "@kwakopos2/contracts";
-import { verifyAccessToken, extractTenantContext, generateAccessToken } from "@kwakopos2/auth";
+import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager } from "@kwakopos2/auth";
 import {
   ScopedProductRepository,
   ScopedStockRepository,
@@ -78,7 +78,11 @@ export function buildServer(): FastifyInstance {
 
   // Extract tenant context via auth middleware
   server.addHook("onRequest", async (req, reply) => {
-    if (req.routerPath === "/health" || req.routerPath === "/readiness" || req.routerPath === "/version" || req.routerPath === "/auth/login") {
+    const correlationId = (req.headers["x-correlation-id"] as string) || randomUUID();
+    reply.header("x-correlation-id", correlationId);
+
+    const url = req.routeOptions?.url || req.url.split("?")[0];
+    if (url === "/health" || url === "/readiness" || url === "/version" || url === "/auth/login" || url === "/auth/refresh") {
       return;
     }
 
@@ -160,14 +164,55 @@ export function buildServer(): FastifyInstance {
 
     const tokenPayload = { sub: userId, tenantId, branchId, email, roles: ["ADMIN"], permissions: ["*"], deviceId: deviceId || "device-server-01" };
     const accessToken = generateAccessToken(tokenPayload);
+    const session = await globalSessionManager.createSession(tenantId, userId, tokenPayload.deviceId);
+
     return reply.send({
       success: true,
       data: {
         accessToken,
-        refreshToken: "refresh-token-session-01",
+        refreshToken: session.refreshToken,
+        sessionId: session.sessionId,
         user: { id: userId, tenantId, branchId, email, name: "Admin User", role: "ADMIN" },
       },
     });
+  });
+
+  // Refresh token rotation
+  server.post("/auth/refresh", async (req, reply) => {
+    const { sessionId, refreshToken, email, tenantId, branchId, userId } = (req.body as any) || {};
+    if (!sessionId || !refreshToken || !tenantId || !branchId || !userId) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing refresh parameters" } });
+    }
+
+    const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
+      sub: userId,
+      tenantId,
+      branchId,
+      email: email || "user@kwakopos.com",
+      roles: ["ADMIN"],
+      permissions: ["*"],
+    });
+
+    if (!rotated) {
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked refresh token" } });
+    }
+
+    return reply.send({
+      success: true,
+      data: {
+        accessToken: rotated.accessToken,
+        refreshToken: rotated.refreshToken,
+      },
+    });
+  });
+
+  // Logout / revoke session
+  server.post("/auth/logout", async (req, reply) => {
+    const { sessionId } = (req.body as any) || {};
+    if (sessionId) {
+      await globalSessionManager.revokeSession(sessionId);
+    }
+    return reply.send({ success: true, data: { loggedOut: true } });
   });
 
   // Product routes (examples using schema parsing & tenant context)
