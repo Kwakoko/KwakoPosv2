@@ -1,5 +1,5 @@
 import { runSyntheticProductionSuite } from "../ops/synthetic-monitor.js";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
 
 const targetUrl =
@@ -44,13 +44,15 @@ async function runObservabilityReleaseGate() {
   }
 
   // 3. Live Version & Release Identity
+  const rootPkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+  const expectedVersion = rootPkg.version || "2.1.0";
   let liveVersion: any = {};
   try {
     const res = await fetch(`${targetUrl}/version`);
     liveVersion = await res.json();
-    if (liveVersion.appVersion === "2.0.0" || liveVersion.version === "2.0.0") {
+    if (liveVersion.appVersion === expectedVersion || liveVersion.version === expectedVersion) {
       checks["versionIdentity"] = "PASS";
-      console.log(` [3/10] ✓ Live Release Version 2.0.0 & SHA (${liveVersion.gitSha?.slice(0, 8) || "a1fd05a6"}): PASS`);
+      console.log(` [3/10] ✓ Live Release Version ${expectedVersion} & SHA (${liveVersion.gitSha?.slice(0, 8) || "a1fd05a6"}): PASS`);
     } else {
       checks["versionIdentity"] = "FAIL";
     }
@@ -167,7 +169,7 @@ async function runObservabilityReleaseGate() {
   const evidence = {
     status: allPassed ? "RELEASE_GATE_PASSED_GREEN" : "RELEASE_GATE_FAILED_RED",
     releaseGateStatus: allPassed ? "GREEN" : "RED",
-    appVersion: "2.0.0",
+    appVersion: liveVersion.appVersion || expectedVersion,
     gitSha: liveVersion.gitSha || "a1fd05a62376c7d006cd1455fb37581e6cbc8bab",
     containerDigest:
       liveVersion.containerDigest ||
