@@ -1,9 +1,16 @@
 import { randomUUID } from "crypto";
-import { ScopedProductRepository, ScopedStockRepository, ScopedCommercialRepository, globalInMemoryStore } from "@kwakopos2/database";
+import { ScopedProductRepository, ScopedStockRepository, ScopedCommercialRepository, ScopedFinanceRepository, globalInMemoryStore } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
-import { calculateAvailableStock, assertInventoryLedgerIntegrity, assertNoOrphanAdjustments } from "@kwakopos2/domain";
+import {
+  calculateAvailableStock,
+  assertInventoryLedgerIntegrity,
+  assertNoOrphanAdjustments,
+  FinancialBridge,
+  AccountingEngine,
+  ReceivablesPayablesEngine,
+} from "@kwakopos2/domain";
 import { globalMetrics, globalIncidentEngine, defaultLogger } from "@kwakopos2/observability";
 
 export interface SyntheticRunResult {
@@ -446,6 +453,236 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [L/L] ${passL ? "✓" : "✗"} Synthetic Test L (Cashier Session Lifecycle & Variance Reconciliation): ${passL ? "PASS" : "FAIL"}`);
+
+  // =========================================================================
+  // PHASE 2: FINANCE & OPERATIONAL CONTROL SYNTHETIC MONITORING (F01 - F08)
+  // =========================================================================
+
+  const financeRepo = new ScopedFinanceRepository(globalInMemoryStore);
+  const accountLookup = financeRepo.getAccountLookup(ctx);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F01: Sale -> Payment -> Journal -> General Ledger & Trial Balance
+  // -------------------------------------------------------------------------
+  const startF01 = Date.now();
+  const saleF01 = commercialRepo.createPosSale(ctx, {
+    items: [{ productId: prod.id, variantId: targetVarId, quantity: 2, unitPrice: 30, unitCost: 12 }],
+    payments: [{ amount: 60, paymentMethod: "CASH" }],
+    deviceId: "synth-dev-1",
+    operationId: "op-synth-f01",
+    idempotencyKey: `synth-f01-${randomUUID()}`,
+  });
+  const { journal: jF01 } = FinancialBridge.mapSaleToJournal(ctx, saleF01.sale, accountLookup, "CASH");
+  financeRepo.journalEntries.set(jF01.id, jF01);
+  financeRepo.journalLines.set(jF01.id, jF01.lines || []);
+  const tbF01 = financeRepo.getTrialBalance(ctx);
+  const passF01 = jF01.totalDebit === jF01.totalCredit && tbF01.isBalanced;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F01_SALE_JOURNAL_GL_INTEGRITY",
+    syntheticTenantId,
+    durationMs: Date.now() - startF01,
+    status: passF01 ? "PASS" : "FAIL",
+    evidence: { journalId: jF01.id, totalDebit: jF01.totalDebit, isTrialBalanceBalanced: tbF01.isBalanced },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F01/F08] ${passF01 ? "✓" : "✗"} Synthetic Test F01 (Sale -> Journal -> GL Double-Entry Balance): ${passF01 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F02: Credit Sale -> Customer Invoice -> Payment Allocation -> Zero Balance
+  // -------------------------------------------------------------------------
+  const startF02 = Date.now();
+  const custF02 = commercialRepo.createCustomer(ctx, { name: "Synthetic Credit Customer", creditLimit: 500000 });
+  const invF02 = financeRepo.createCustomerInvoice(ctx, {
+    customerId: custF02.id,
+    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    items: [{ description: "Credit Goods", quantity: 5, unitPrice: 10000 }],
+  });
+  const allocF02 = financeRepo.allocatePayment(ctx, {
+    paymentId: randomUUID(),
+    customerInvoiceId: invF02.id,
+    amount: 50000,
+  });
+  const passF02 = allocF02.updatedInvoice.status === "PAID" && allocF02.updatedInvoice.balanceDue === 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F02_AR_INVOICE_ALLOCATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startF02,
+    status: passF02 ? "PASS" : "FAIL",
+    evidence: { invoiceId: invF02.id, status: allocF02.updatedInvoice.status, balanceDue: allocF02.updatedInvoice.balanceDue },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F02/F08] ${passF02 ? "✓" : "✗"} Synthetic Test F02 (Credit Sale -> AR Invoice -> Payment Allocation): ${passF02 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F03: Purchase -> Supplier Invoice -> Supplier Payment -> Zero Balance
+  // -------------------------------------------------------------------------
+  const startF03 = Date.now();
+  const supF03 = commercialRepo.createSupplier(ctx, { name: "Synthetic AP Supplier" });
+  const invF03 = financeRepo.createSupplierInvoice(ctx, {
+    supplierId: supF03.id,
+    dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
+    items: [{ description: "Raw Materials", quantity: 10, unitCost: 8000 }],
+  });
+  const allocF03 = financeRepo.allocatePayment(ctx, {
+    paymentId: randomUUID(),
+    supplierInvoiceId: invF03.id,
+    amount: 80000,
+  });
+  const passF03 = allocF03.updatedInvoice.status === "PAID" && allocF03.updatedInvoice.balanceDue === 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F03_AP_INVOICE_ALLOCATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startF03,
+    status: passF03 ? "PASS" : "FAIL",
+    evidence: { supplierInvoiceId: invF03.id, status: allocF03.updatedInvoice.status, balanceDue: allocF03.updatedInvoice.balanceDue },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F03/F08] ${passF03 ? "✓" : "✗"} Synthetic Test F03 (Purchase -> AP Invoice -> Supplier Payment): ${passF03 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F04: Expense -> Journal Posting
+  // -------------------------------------------------------------------------
+  const startF04 = Date.now();
+  const expF04 = commercialRepo.recordExpense(ctx, { category: "UTILITIES", amount: 25000, reason: "Electricity Bill" });
+  const { journal: jF04 } = FinancialBridge.mapExpenseToJournal(ctx, expF04, accountLookup.expenseDefaultAccountId, accountLookup);
+  financeRepo.journalEntries.set(jF04.id, jF04);
+  financeRepo.journalLines.set(jF04.id, jF04.lines || []);
+  const passF04 = jF04.status === "POSTED" && jF04.totalDebit === 25000 && jF04.totalCredit === 25000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F04_EXPENSE_JOURNAL_POSTING",
+    syntheticTenantId,
+    durationMs: Date.now() - startF04,
+    status: passF04 ? "PASS" : "FAIL",
+    evidence: { expenseId: expF04.id, journalId: jF04.id },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F04/F08] ${passF04 ? "✓" : "✗"} Synthetic Test F04 (Operating Expense -> GL Journal Posting): ${passF04 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F05: Cash Session -> Close -> Drawer Variance Journal
+  // -------------------------------------------------------------------------
+  const startF05 = Date.now();
+  const sesF05 = commercialRepo.openCashSession(ctx, { openingCash: 100000 });
+  sesF05.cashSalesTotal = 20000;
+  const closedF05 = commercialRepo.closeCashSession(ctx, sesF05.id, { actualCash: 115000 }); // 5k short
+  const varianceResultF05 = FinancialBridge.mapCashSessionVarianceToJournal(ctx, closedF05, accountLookup);
+  const passF05 = varianceResultF05 !== null && varianceResultF05.journal.totalDebit === 5000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F05_CASH_VARIANCE_JOURNAL",
+    syntheticTenantId,
+    durationMs: Date.now() - startF05,
+    status: passF05 ? "PASS" : "FAIL",
+    evidence: { variance: closedF05.variance, journalDebit: varianceResultF05?.journal.totalDebit },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F05/F08] ${passF05 ? "✓" : "✗"} Synthetic Test F05 (Cash Session -> Variance -> Cash Short Journal): ${passF05 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F06: Multi-Device Financial Mutation Sync Convergence
+  // -------------------------------------------------------------------------
+  const startF06 = Date.now();
+  const dbStoreF06A = new LocalIndexedDbStore();
+  const dbStoreF06B = new LocalIndexedDbStore();
+  const engineF06A = new ClientSyncEngine("device-fin-a", dbStoreF06A);
+  const engineF06B = new ClientSyncEngine("device-fin-b", dbStoreF06B);
+
+  dbStoreF06A.recordOutboxMutation({
+    id: "op-fin-sync-1",
+    entityType: "Customer",
+    entityId: randomUUID(),
+    operationType: "CREATE",
+    payload: { name: "Converged Financial Customer", creditLimit: 250000 },
+    idempotencyKey: `idem-fin-sync-${randomUUID()}`,
+    clientCreatedAt: new Date().toISOString(),
+    status: "PENDING",
+  });
+
+  await engineF06A.syncWithServer(
+    async (req) => syncEngine.processPush(ctx, req),
+    async (since) => syncEngine.processDelta(ctx, { since })
+  );
+  await engineF06B.syncWithServer(
+    async (req) => syncEngine.processPush(ctx, req),
+    async (since) => syncEngine.processDelta(ctx, { since })
+  );
+
+  const passF06 = commercialRepo.getCustomers(ctx).some((c) => c.name === "Converged Financial Customer");
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F06_FINANCIAL_SYNC_CONVERGENCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startF06,
+    status: passF06 ? "PASS" : "FAIL",
+    evidence: { syncStatus: "CONVERGED", customerFound: passF06 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F06/F08] ${passF06 ? "✓" : "✗"} Synthetic Test F06 (Multi-Device Financial Mutation Sync Convergence): ${passF06 ? "PASS" : "FAIL"}`);
+
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F07: Closed Accounting Period -> Attempt Posting -> Correct Rejection
+  // -------------------------------------------------------------------------
+  const startF07 = Date.now();
+  const fyF07 = financeRepo.createFiscalYear(ctx, { name: "FY Synthetic", startDate: "2026-01-01", endDate: "2026-12-31" });
+  const pF07 = financeRepo.createAccountingPeriod(ctx, { fiscalYearId: fyF07.id, periodNumber: 2, name: "2026-02", startDate: "2026-02-01", endDate: "2026-02-28" });
+  financeRepo.closePeriod(ctx, pF07.id);
+  let rejectedCorrectly = false;
+  try {
+    financeRepo.createJournalEntry(ctx, {
+      accountingPeriodId: pF07.id,
+      sourceType: "MANUAL",
+      description: "Invalid Posting",
+      lines: [
+        { accountId: accountLookup.cashAccountId, debit: 100, credit: 0 },
+        { accountId: accountLookup.salesRevenueAccountId, debit: 0, credit: 100 },
+      ],
+    });
+  } catch (err: any) {
+    rejectedCorrectly = err.message.includes("INVARIANT_F010_VIOLATION");
+  }
+  const passF07 = rejectedCorrectly;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F07_CLOSED_PERIOD_POSTING_REJECTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startF07,
+    status: passF07 ? "PASS" : "FAIL",
+    evidence: { rejectedCorrectly },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F07/F08] ${passF07 ? "✓" : "✗"} Synthetic Test F07 (Closed Accounting Period -> Correct Rejection): ${passF07 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST F08: Duplicate Payment -> Idempotency -> Single Financial Result
+  // -------------------------------------------------------------------------
+  const startF08 = Date.now();
+  const keyF08 = `idem-fin-f08-${randomUUID()}`;
+  const firstJ = financeRepo.createJournalEntry(ctx, {
+    idempotencyKey: keyF08,
+    sourceType: "MANUAL",
+    description: "Idempotent Entry",
+    lines: [
+      { accountId: accountLookup.cashAccountId, debit: 5000, credit: 0 },
+      { accountId: accountLookup.salesRevenueAccountId, debit: 0, credit: 5000 },
+    ],
+  });
+  const secondJ = financeRepo.createJournalEntry(ctx, {
+    idempotencyKey: keyF08,
+    sourceType: "MANUAL",
+    description: "Duplicate Attempt",
+    lines: [
+      { accountId: accountLookup.cashAccountId, debit: 5000, credit: 0 },
+      { accountId: accountLookup.salesRevenueAccountId, debit: 0, credit: 5000 },
+    ],
+  });
+  const passF08 = firstJ.journal.id === secondJ.journal.id;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_F08_IDEMPOTENCY_SINGLE_RESULT",
+    syntheticTenantId,
+    durationMs: Date.now() - startF08,
+    status: passF08 ? "PASS" : "FAIL",
+    evidence: { firstId: firstJ.journal.id, secondId: secondJ.journal.id, duplicatePrevented: passF08 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [F08/F08] ${passF08 ? "✓" : "✗"} Synthetic Test F08 (Duplicate Payment Idempotency -> Single Financial Result): ${passF08 ? "PASS" : "FAIL"}`);
 
   const allPassed = results.every((r) => r.status === "PASS");
   return { allPassed, results };

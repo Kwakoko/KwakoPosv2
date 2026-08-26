@@ -33,6 +33,24 @@ export const CommercialPermissionEnum = z.enum([
   "REPORT_VIEW",
   "REPORT_EXPORT",
   "SUPER_ADMIN_OPERATIONS",
+  "FINANCE_VIEW",
+  "FINANCE_CREATE",
+  "JOURNAL_CREATE",
+  "JOURNAL_POST",
+  "JOURNAL_REVERSE",
+  "AR_VIEW",
+  "AR_MANAGE",
+  "AP_VIEW",
+  "AP_MANAGE",
+  "PAYMENT_RECONCILE",
+  "BANK_RECONCILE",
+  "CASH_RECONCILE",
+  "BUDGET_VIEW",
+  "BUDGET_MANAGE",
+  "PERIOD_CLOSE",
+  "PERIOD_REOPEN",
+  "FINANCIAL_REPORT_VIEW",
+  "FINANCIAL_REPORT_EXPORT",
 ]);
 export type CommercialPermission = z.infer<typeof CommercialPermissionEnum>;
 
@@ -880,3 +898,615 @@ export const ApiResponseSchema = <T extends z.ZodTypeAny>(dataSchema: T) =>
       })
       .optional(),
   });
+
+// ==========================================
+// PHASE 2: FINANCE & OPERATIONAL CONTROL CONTRACTS
+// ==========================================
+
+export const AccountClassEnum = z.enum([
+  "ASSET",
+  "LIABILITY",
+  "EQUITY",
+  "REVENUE",
+  "COGS",
+  "EXPENSE",
+  "OTHER_INCOME",
+  "OTHER_EXPENSE",
+]);
+export type AccountClass = z.infer<typeof AccountClassEnum>;
+
+export const AccountSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
+  accountCode: z.string().min(1),
+  name: z.string().min(1),
+  accountClass: AccountClassEnum,
+  accountGroup: z.string().min(1),
+  currency: z.string().default("TZS"),
+  isSystem: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+  currentBalance: z.number().default(0),
+  description: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Account = z.infer<typeof AccountSchema>;
+
+export const CreateAccountRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  accountCode: z.string().min(1),
+  name: z.string().min(1),
+  accountClass: AccountClassEnum,
+  accountGroup: z.string().min(1),
+  currency: z.string().default("TZS").optional(),
+  description: z.string().optional(),
+  branchId: z.string().uuid().optional(),
+});
+export type CreateAccountRequest = z.infer<typeof CreateAccountRequestSchema>;
+
+export const UpdateAccountRequestSchema = z.object({
+  name: z.string().min(1).optional(),
+  accountGroup: z.string().min(1).optional(),
+  description: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequestSchema>;
+
+// Fiscal Year & Accounting Period
+export const FiscalYearSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  name: z.string().min(1),
+  startDate: z.string().or(z.date()),
+  endDate: z.string().or(z.date()),
+  status: z.enum(["OPEN", "CLOSING", "CLOSED", "LOCKED"]).default("OPEN"),
+  isClosed: z.boolean().default(false),
+  closedAt: z.string().or(z.date()).nullable().optional(),
+  closedById: z.string().uuid().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type FiscalYear = z.infer<typeof FiscalYearSchema>;
+
+export const CreateFiscalYearRequestSchema = z.object({
+  name: z.string().min(1),
+  startDate: z.string().min(1),
+  endDate: z.string().min(1),
+});
+export type CreateFiscalYearRequest = z.infer<typeof CreateFiscalYearRequestSchema>;
+
+export const AccountingPeriodSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  fiscalYearId: z.string().uuid(),
+  periodNumber: z.number().int().min(1).max(12),
+  name: z.string().min(1),
+  startDate: z.string().or(z.date()),
+  endDate: z.string().or(z.date()),
+  status: z.enum(["OPEN", "CLOSING", "CLOSED", "LOCKED"]).default("OPEN"),
+  closedAt: z.string().or(z.date()).nullable().optional(),
+  closedById: z.string().uuid().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type AccountingPeriod = z.infer<typeof AccountingPeriodSchema>;
+
+export const CreateAccountingPeriodRequestSchema = z.object({
+  fiscalYearId: z.string().uuid(),
+  periodNumber: z.number().int().min(1).max(12),
+  name: z.string().min(1),
+  startDate: z.string().min(1),
+  endDate: z.string().min(1),
+});
+export type CreateAccountingPeriodRequest = z.infer<typeof CreateAccountingPeriodRequestSchema>;
+
+// Journal Entry & Lines
+export const JournalLineSchema = z.object({
+  id: z.string().uuid(),
+  journalEntryId: z.string().uuid(),
+  accountId: z.string().uuid(),
+  accountCode: z.string().optional(),
+  accountName: z.string().optional(),
+  costCenterId: z.string().uuid().nullable().optional(),
+  description: z.string().nullable().optional(),
+  debit: z.number().nonnegative().default(0),
+  credit: z.number().nonnegative().default(0),
+  currency: z.string().default("TZS"),
+  exchangeRate: z.number().positive().default(1.0),
+});
+export type JournalLine = z.infer<typeof JournalLineSchema>;
+
+export const JournalEntrySchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  accountingPeriodId: z.string().uuid().nullable().optional(),
+  journalNumber: z.string(),
+  entryDate: z.string().or(z.date()),
+  postingDate: z.string().or(z.date()),
+  sourceType: z.enum([
+    "SALE",
+    "PURCHASE",
+    "PAYMENT",
+    "EXPENSE",
+    "RETURN",
+    "TRANSFER",
+    "CASH_SESSION",
+    "MANUAL",
+    "REVERSAL",
+  ]),
+  sourceId: z.string().nullable().optional(),
+  description: z.string(),
+  currency: z.string().default("TZS"),
+  exchangeRate: z.number().positive().default(1.0),
+  totalDebit: z.number().nonnegative(),
+  totalCredit: z.number().nonnegative(),
+  status: z.enum(["DRAFT", "PENDING_APPROVAL", "POSTED", "REVERSED"]).default("POSTED"),
+  isReversal: z.boolean().default(false),
+  reversalOfJournalId: z.string().uuid().nullable().optional(),
+  reversalReason: z.string().nullable().optional(),
+  createdById: z.string().uuid().nullable().optional(),
+  postedById: z.string().uuid().nullable().optional(),
+  postedAt: z.string().or(z.date()).nullable().optional(),
+  idempotencyKey: z.string().nullable().optional(),
+  lines: z.array(JournalLineSchema).optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+export const CreateJournalEntryRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  accountingPeriodId: z.string().uuid().optional(),
+  entryDate: z.string().optional(),
+  sourceType: z.enum([
+    "SALE",
+    "PURCHASE",
+    "PAYMENT",
+    "EXPENSE",
+    "RETURN",
+    "TRANSFER",
+    "CASH_SESSION",
+    "MANUAL",
+    "REVERSAL",
+  ]).default("MANUAL"),
+  sourceId: z.string().optional(),
+  description: z.string().min(1),
+  currency: z.string().default("TZS").optional(),
+  exchangeRate: z.number().positive().default(1.0).optional(),
+  idempotencyKey: z.string().optional(),
+  lines: z.array(
+    z.object({
+      accountId: z.string().uuid(),
+      costCenterId: z.string().uuid().optional(),
+      description: z.string().optional(),
+      debit: z.number().nonnegative().default(0),
+      credit: z.number().nonnegative().default(0),
+    })
+  ).min(2),
+});
+export type CreateJournalEntryRequest = z.infer<typeof CreateJournalEntryRequestSchema>;
+
+export const ReverseJournalEntryRequestSchema = z.object({
+  reason: z.string().min(1),
+  reversalDate: z.string().optional(),
+});
+export type ReverseJournalEntryRequest = z.infer<typeof ReverseJournalEntryRequestSchema>;
+
+// Customer Invoice & Receivables
+export const CustomerInvoiceLineSchema = z.object({
+  id: z.string().uuid(),
+  customerInvoiceId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
+  description: z.string(),
+  quantity: z.number().positive(),
+  unitPrice: z.number().nonnegative(),
+  taxRate: z.number().nonnegative().default(0),
+  taxAmount: z.number().nonnegative().default(0),
+  discountAmount: z.number().nonnegative().default(0),
+  lineTotal: z.number().nonnegative(),
+});
+export type CustomerInvoiceLine = z.infer<typeof CustomerInvoiceLineSchema>;
+
+export const CustomerInvoiceSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  customerId: z.string().uuid(),
+  saleId: z.string().uuid().nullable().optional(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string().or(z.date()),
+  dueDate: z.string().or(z.date()),
+  subtotal: z.number().nonnegative(),
+  taxTotal: z.number().nonnegative().default(0),
+  discountTotal: z.number().nonnegative().default(0),
+  grandTotal: z.number().nonnegative(),
+  amountPaid: z.number().nonnegative().default(0),
+  balanceDue: z.number().nonnegative(),
+  status: z.enum(["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]).default("ISSUED"),
+  notes: z.string().nullable().optional(),
+  lines: z.array(CustomerInvoiceLineSchema).optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type CustomerInvoice = z.infer<typeof CustomerInvoiceSchema>;
+
+export const CreateCustomerInvoiceRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  customerId: z.string().uuid(),
+  saleId: z.string().uuid().optional(),
+  invoiceDate: z.string().optional(),
+  dueDate: z.string(),
+  notes: z.string().optional(),
+  items: z.array(
+    z.object({
+      variantId: z.string().uuid().optional(),
+      description: z.string().min(1),
+      quantity: z.number().positive(),
+      unitPrice: z.number().nonnegative(),
+      taxRate: z.number().nonnegative().optional(),
+      discountAmount: z.number().nonnegative().optional(),
+    })
+  ).min(1),
+});
+export type CreateCustomerInvoiceRequest = z.infer<typeof CreateCustomerInvoiceRequestSchema>;
+
+// Supplier Invoice & Payables
+export const SupplierInvoiceLineSchema = z.object({
+  id: z.string().uuid(),
+  supplierInvoiceId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
+  description: z.string(),
+  quantity: z.number().positive(),
+  unitCost: z.number().nonnegative(),
+  taxRate: z.number().nonnegative().default(0),
+  taxAmount: z.number().nonnegative().default(0),
+  lineTotal: z.number().nonnegative(),
+});
+export type SupplierInvoiceLine = z.infer<typeof SupplierInvoiceLineSchema>;
+
+export const SupplierInvoiceSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  supplierId: z.string().uuid(),
+  purchaseReceiptId: z.string().uuid().nullable().optional(),
+  invoiceNumber: z.string(),
+  invoiceDate: z.string().or(z.date()),
+  dueDate: z.string().or(z.date()),
+  subtotal: z.number().nonnegative(),
+  taxTotal: z.number().nonnegative().default(0),
+  grandTotal: z.number().nonnegative(),
+  amountPaid: z.number().nonnegative().default(0),
+  balanceDue: z.number().nonnegative(),
+  status: z.enum(["RECEIVED", "APPROVED", "PARTIALLY_PAID", "PAID", "OVERDUE", "REJECTED"]).default("RECEIVED"),
+  notes: z.string().nullable().optional(),
+  lines: z.array(SupplierInvoiceLineSchema).optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type SupplierInvoice = z.infer<typeof SupplierInvoiceSchema>;
+
+export const CreateSupplierInvoiceRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  supplierId: z.string().uuid(),
+  purchaseReceiptId: z.string().uuid().optional(),
+  invoiceNumber: z.string().optional(),
+  invoiceDate: z.string().optional(),
+  dueDate: z.string(),
+  notes: z.string().optional(),
+  items: z.array(
+    z.object({
+      variantId: z.string().uuid().optional(),
+      description: z.string().min(1),
+      quantity: z.number().positive(),
+      unitCost: z.number().nonnegative(),
+      taxRate: z.number().nonnegative().optional(),
+    })
+  ).min(1),
+});
+export type CreateSupplierInvoiceRequest = z.infer<typeof CreateSupplierInvoiceRequestSchema>;
+
+// Payment Allocation
+export const PaymentAllocationSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  paymentId: z.string().uuid(),
+  customerInvoiceId: z.string().uuid().nullable().optional(),
+  supplierInvoiceId: z.string().uuid().nullable().optional(),
+  allocatedAmount: z.number().positive(),
+  allocatedAt: z.string().or(z.date()),
+  createdById: z.string().uuid().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+});
+export type PaymentAllocation = z.infer<typeof PaymentAllocationSchema>;
+
+export const AllocatePaymentRequestSchema = z.object({
+  paymentId: z.string().uuid(),
+  customerInvoiceId: z.string().uuid().optional(),
+  supplierInvoiceId: z.string().uuid().optional(),
+  amount: z.number().positive(),
+});
+export type AllocatePaymentRequest = z.infer<typeof AllocatePaymentRequestSchema>;
+
+// Bank Accounts & Transactions
+export const BankAccountSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  accountName: z.string().min(1),
+  bankName: z.string().min(1),
+  accountNumber: z.string().min(1),
+  currency: z.string().default("TZS"),
+  openingBalance: z.number().default(0),
+  currentBalance: z.number().default(0),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type BankAccount = z.infer<typeof BankAccountSchema>;
+
+export const CreateBankAccountRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  accountName: z.string().min(1),
+  bankName: z.string().min(1),
+  accountNumber: z.string().min(1),
+  currency: z.string().default("TZS").optional(),
+  openingBalance: z.number().default(0).optional(),
+});
+export type CreateBankAccountRequest = z.infer<typeof CreateBankAccountRequestSchema>;
+
+export const BankTransactionSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  bankAccountId: z.string().uuid(),
+  transactionDate: z.string().or(z.date()),
+  transactionType: z.enum([
+    "DEPOSIT",
+    "WITHDRAWAL",
+    "TRANSFER_IN",
+    "TRANSFER_OUT",
+    "FEE",
+    "INTEREST",
+    "ADJUSTMENT",
+  ]),
+  amount: z.number(),
+  reference: z.string().min(1),
+  description: z.string().nullable().optional(),
+  reconciled: z.boolean().default(false),
+  reconciledAt: z.string().or(z.date()).nullable().optional(),
+  matchedJournalLineId: z.string().uuid().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+});
+export type BankTransaction = z.infer<typeof BankTransactionSchema>;
+
+export const CreateBankTransactionRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  transactionDate: z.string().optional(),
+  transactionType: z.enum([
+    "DEPOSIT",
+    "WITHDRAWAL",
+    "TRANSFER_IN",
+    "TRANSFER_OUT",
+    "FEE",
+    "INTEREST",
+    "ADJUSTMENT",
+  ]),
+  amount: z.number(),
+  reference: z.string().min(1),
+  description: z.string().optional(),
+});
+export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
+
+// Budget
+export const BudgetLineSchema = z.object({
+  id: z.string().uuid(),
+  budgetId: z.string().uuid(),
+  accountId: z.string().uuid(),
+  accountCode: z.string().optional(),
+  accountName: z.string().optional(),
+  costCenterId: z.string().uuid().nullable().optional(),
+  budgetedAmount: z.number().nonnegative(),
+  actualAmount: z.number().default(0),
+  varianceAmount: z.number().default(0),
+});
+export type BudgetLine = z.infer<typeof BudgetLineSchema>;
+
+export const BudgetSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  name: z.string().min(1),
+  fiscalYear: z.string().min(1),
+  period: z.string().nullable().optional(),
+  totalBudget: z.number().nonnegative(),
+  status: z.enum(["DRAFT", "APPROVED", "ARCHIVED"]).default("APPROVED"),
+  lines: z.array(BudgetLineSchema).optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Budget = z.infer<typeof BudgetSchema>;
+
+export const CreateBudgetRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  fiscalYear: z.string().min(1),
+  period: z.string().optional(),
+  lines: z.array(
+    z.object({
+      accountId: z.string().uuid(),
+      costCenterId: z.string().uuid().optional(),
+      budgetedAmount: z.number().nonnegative(),
+    })
+  ).min(1),
+});
+export type CreateBudgetRequest = z.infer<typeof CreateBudgetRequestSchema>;
+
+// Financial Reports & Aging
+export const AgingBucketSchema = z.object({
+  current: z.number().default(0),
+  days1To30: z.number().default(0),
+  days31To60: z.number().default(0),
+  days61To90: z.number().default(0),
+  days90Plus: z.number().default(0),
+  total: z.number().default(0),
+});
+export type AgingBucket = z.infer<typeof AgingBucketSchema>;
+
+export const AgingReportItemSchema = z.object({
+  entityId: z.string().uuid(),
+  entityName: z.string(),
+  entityCode: z.string(),
+  buckets: AgingBucketSchema,
+});
+export type AgingReportItem = z.infer<typeof AgingReportItemSchema>;
+
+export const AgingReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  reportType: z.enum(["ACCOUNTS_RECEIVABLE", "ACCOUNTS_PAYABLE"]),
+  asOfDate: z.string(),
+  totalOutstanding: z.number(),
+  summary: AgingBucketSchema,
+  items: z.array(AgingReportItemSchema),
+});
+export type AgingReport = z.infer<typeof AgingReportSchema>;
+
+export const ProfitAndLossReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  periodName: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  revenue: z.object({
+    retailSales: z.number(),
+    wholesaleSales: z.number(),
+    serviceRevenue: z.number(),
+    discounts: z.number(),
+    totalRevenue: z.number(),
+  }),
+  costOfGoodsSold: z.object({
+    directCogs: z.number(),
+    shrinkageLoss: z.number(),
+    totalCogs: z.number(),
+  }),
+  grossProfit: z.number(),
+  grossMarginPct: z.number(),
+  operatingExpenses: z.object({
+    rent: z.number(),
+    utilities: z.number(),
+    salaries: z.number(),
+    officeSupplies: z.number(),
+    miscExpenses: z.number(),
+    totalOperatingExpenses: z.number(),
+  }),
+  operatingProfit: z.number(),
+  operatingMarginPct: z.number(),
+  otherIncome: z.number(),
+  otherExpenses: z.number(),
+  netProfit: z.number(),
+  netMarginPct: z.number(),
+});
+export type ProfitAndLossReport = z.infer<typeof ProfitAndLossReportSchema>;
+
+export const BalanceSheetReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  asOfDate: z.string(),
+  assets: z.object({
+    cashOnHand: z.number(),
+    bankBalances: z.number(),
+    accountsReceivable: z.number(),
+    inventoryValuation: z.number(),
+    totalCurrentAssets: z.number(),
+    totalAssets: z.number(),
+  }),
+  liabilities: z.object({
+    accountsPayable: z.number(),
+    vatPayable: z.number(),
+    customerAdvances: z.number(),
+    totalCurrentLiabilities: z.number(),
+    totalLiabilities: z.number(),
+  }),
+  equity: z.object({
+    ownerCapital: z.number(),
+    retainedEarnings: z.number(),
+    currentPeriodNetProfit: z.number(),
+    totalEquity: z.number(),
+  }),
+  isBalanced: z.boolean(),
+  balanceCheckDifference: z.number(),
+});
+export type BalanceSheetReport = z.infer<typeof BalanceSheetReportSchema>;
+
+export const TrialBalanceReportItemSchema = z.object({
+  accountId: z.string().uuid(),
+  accountCode: z.string(),
+  accountName: z.string(),
+  accountClass: AccountClassEnum,
+  debit: z.number(),
+  credit: z.number(),
+  balance: z.number(),
+});
+export type TrialBalanceReportItem = z.infer<typeof TrialBalanceReportItemSchema>;
+
+export const TrialBalanceReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  asOfDate: z.string(),
+  totalDebits: z.number(),
+  totalCredits: z.number(),
+  isBalanced: z.boolean(),
+  items: z.array(TrialBalanceReportItemSchema),
+});
+export type TrialBalanceReport = z.infer<typeof TrialBalanceReportSchema>;
+
+export const ExecutiveFinancialDashboardSchema = z.object({
+  revenue: z.number(),
+  cogs: z.number(),
+  grossProfit: z.number(),
+  grossMarginPct: z.number(),
+  operatingExpenses: z.number(),
+  netProfit: z.number(),
+  netMarginPct: z.number(),
+  cashPosition: z.number(),
+  bankPosition: z.number(),
+  accountsReceivable: z.number(),
+  accountsPayable: z.number(),
+  inventoryValue: z.number(),
+  overdueReceivablesCount: z.number(),
+  overduePayablesCount: z.number(),
+  budgetVariancePct: z.number(),
+  branchProfitability: z.array(
+    z.object({
+      branchId: z.string().uuid(),
+      branchName: z.string(),
+      revenue: z.number(),
+      grossProfit: z.number(),
+      netProfit: z.number(),
+      marginPct: z.number(),
+    })
+  ),
+});
+export type ExecutiveFinancialDashboard = z.infer<typeof ExecutiveFinancialDashboardSchema>;
+
+export const FinancialAnomalySchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  anomalyType: z.string(),
+  severity: z.enum(["INFO", "WARNING", "CRITICAL"]).default("WARNING"),
+  description: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  detectedAt: z.string().or(z.date()),
+  resolved: z.boolean().default(false),
+  resolvedAt: z.string().or(z.date()).nullable().optional(),
+  resolvedById: z.string().uuid().nullable().optional(),
+  metadata: z.any().optional(),
+  createdAt: z.string().or(z.date()),
+});
+export type FinancialAnomaly = z.infer<typeof FinancialAnomalySchema>;

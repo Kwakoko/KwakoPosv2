@@ -1,4 +1,5 @@
-export type DocumentPrefix = "SAL" | "PUR" | "REC" | "RET" | "PAY" | "SES" | "ADJ" | "TRA";
+export type DocumentPrefix = "SAL" | "PUR" | "REC" | "RET" | "PAY" | "SES" | "ADJ" | "TRA" | "JRN" | "REV" | "INV" | "BIL";
+
 
 export class TransactionNumbering {
   /**
