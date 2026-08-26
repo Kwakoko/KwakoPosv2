@@ -67,10 +67,18 @@ function isProductionEnv(cfg: ReturnType<typeof loadConfig>) {
   return cfg.NODE_ENV === "production" || cfg.NODE_ENV === "production-certification";
 }
 
-export function buildServer(): FastifyInstance {
-  const config = loadConfig();
+/** Options accepted by buildServer for test injection and programmatic use. */
+export interface BuildServerOptions {
+  /** Pre-loaded config — skips env re-read when provided. */
+  config?: ReturnType<typeof loadConfig>;
+  /** Override persistence mode explicitly (true = Prisma, false = in-memory). */
+  productionPersistence?: boolean;
+}
+
+export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
+  const config = opts.config ?? loadConfig();
   const server = Fastify({ logger: true });
-  const productionPersistence = isProductionEnv(config);
+  const productionPersistence = opts.productionPersistence ?? isProductionEnv(config);
 
   // Fastify CORS setup
   server.register(cors, { origin: "*" });
@@ -976,7 +984,7 @@ export function buildServer(): FastifyInstance {
   return server;
 }
 
-if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification" || process.env.PORT) {
+if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") {
   (async () => {
     const config = loadConfig();
     const server = buildServer();

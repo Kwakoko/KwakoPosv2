@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildServer } from "../../apps/api/src/server.js";
 import type { FastifyInstance } from "fastify";
 
@@ -11,8 +11,12 @@ describe("Commercial Core REST API Routes (/api/v1/*)", () => {
   };
 
   beforeAll(async () => {
-    server = buildServer();
+    server = buildServer({ productionPersistence: false });
     await server.ready();
+  });
+
+  afterAll(async () => {
+    await server.close();
   });
 
   it("creates customer and retrieves customer list", async () => {

@@ -11,7 +11,8 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
       NODE_ENV: "test",
       PORT: "3003",
     });
-    server = await buildServer({ config, productionPersistence: false });
+    server = buildServer({ config, productionPersistence: false });
+    await server.ready();
   });
 
   afterAll(async () => {
