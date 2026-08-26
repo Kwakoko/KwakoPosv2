@@ -141,7 +141,11 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       throw new Error(`RELEASE_BLOCKED: Cloud Run revision image mismatch. Expected ${fullImageRef}; got ${deployedImage}`);
     }
 
-    if (deploymentMode === "EXISTING_SERVICE") {
+    const otherRevisionServingTraffic = Array.isArray(serviceJson?.status?.traffic)
+      ? serviceJson.status.traffic.some((t: any) => t.revisionName && t.revisionName !== candidateRevision && (t.percent || 0) > 0)
+      : false;
+
+    if (deploymentMode === "EXISTING_SERVICE" && otherRevisionServingTraffic) {
       const candidateTraffic = taggedTraffic?.percent ?? 0;
       if (candidateTraffic !== 0) {
         throw new Error(`RELEASE_BLOCKED: candidate revision received ${candidateTraffic}% traffic before certification`);
