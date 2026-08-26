@@ -175,6 +175,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx tsx scripts/release/publish-github-release.ts
 
+      - name: Execute Continuous Production Operations & Governance Gate
+        if: github.event_name != 'pull_request'
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npx tsx scripts/ops/production-operations-gate.ts
+
       - name: Archive Production Release Evidence Artifacts
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,18 +1,12 @@
 {
   "version": "2.1.0",
   "tag": "v2.1.0",
-  "gitSha": "77a9906b76ce998d1fd214e3cb5f00620c8f940e",
-  "containerDigest": null,
-  "cloudRunRevision": null,
-  "environment": "development",
-  "releaseChannel": "development",
-  "releasedAt": "2026-08-26T04:54:40.690Z",
+  "gitSha": "442fe44454192d8fc03a35629acbf9fb809a954e",
+  "containerDigest": "sha256:dcaa86bbc8c37ebb4606c3fd49ffa5436e96a9405ca00851768031a7cd4a1761",
+  "cloudRunRevision": "kwakopos-production-service-00036-qux",
+  "environment": "production",
+  "releaseChannel": "production",
+  "releasedAt": "2026-08-26T05:04:11.907Z",
   "certification": "PASS",
-  "compatibility": {
-    "databaseSchemaVersion": 2,
-    "syncProtocolVersion": 2,
-    "pwaSchemaVersion": 3,
-    "minSupportedClientVersion": "2.0.0",
-    "recommendedClientVersion": "2.0.0"
-  }
+  "evidenceFile": "kwakopos-release-evidence-v2.1.0-442fe444.json"
 }
