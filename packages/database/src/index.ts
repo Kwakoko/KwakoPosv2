@@ -119,7 +119,9 @@ export class ScopedStockRepository {
 export { PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
 import { ScopedCommercialRepository } from "./commercialRepositories.js";
 import { ScopedFinanceRepository } from "./financeRepositories.js";
+import { hardenFinanceRepository, wireCommercialFinanceBridges } from "./financeHardening.js";
 export { ScopedCommercialRepository, ScopedFinanceRepository };
+export { hardenFinanceRepository, wireCommercialFinanceBridges };
 export const globalCommercialRepository = new ScopedCommercialRepository(globalInMemoryStore);
-export const globalFinanceRepository = new ScopedFinanceRepository(globalInMemoryStore);
-
+export const globalFinanceRepository = hardenFinanceRepository(new ScopedFinanceRepository(globalInMemoryStore));
+wireCommercialFinanceBridges(globalCommercialRepository, globalFinanceRepository);
