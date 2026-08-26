@@ -7,6 +7,7 @@ export interface ParsedCommit {
   subject: string;
   body?: string;
   rawMessage: string;
+  category: "Breaking Changes" | "Features" | "Bug Fixes" | "Performance" | "Observability & Ops" | "Security" | "Refactoring" | "Documentation" | "Other";
 }
 
 export interface SemVerComponents {
@@ -57,7 +58,6 @@ export function compareSemVer(v1: string, v2: string): number {
   if (s1.minor !== s2.minor) return s1.minor - s2.minor;
   if (s1.patch !== s2.patch) return s1.patch - s2.patch;
 
-  // Prerelease comparison: non-prerelease has higher precedence than prerelease
   if (!s1.prerelease && s2.prerelease) return 1;
   if (s1.prerelease && !s2.prerelease) return -1;
   if (s1.prerelease && s2.prerelease) {
@@ -65,6 +65,30 @@ export function compareSemVer(v1: string, v2: string): number {
   }
 
   return 0;
+}
+
+export function categorizeCommit(type: string, isBreaking: boolean): ParsedCommit["category"] {
+  if (isBreaking) return "Breaking Changes";
+  switch (type.toLowerCase()) {
+    case "feat":
+      return "Features";
+    case "fix":
+      return "Bug Fixes";
+    case "perf":
+      return "Performance";
+    case "security":
+      return "Security";
+    case "refactor":
+      return "Refactoring";
+    case "docs":
+      return "Documentation";
+    case "ci":
+    case "build":
+    case "ops":
+      return "Observability & Ops";
+    default:
+      return "Other";
+  }
 }
 
 export function parseConventionalCommit(message: string): ParsedCommit {
@@ -76,27 +100,31 @@ export function parseConventionalCommit(message: string): ParsedCommit {
   const headerMatch = firstLine.match(/^([a-zA-Z]+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
 
   if (!headerMatch) {
+    const isBreaking = isBreakingFooter;
     return {
       type: "other",
-      isBreaking: isBreakingFooter,
+      isBreaking,
       subject: firstLine,
       body: rest || undefined,
       rawMessage: trimmed,
+      category: categorizeCommit("other", isBreaking),
     };
   }
 
   const type = headerMatch[1].toLowerCase();
   const scope = headerMatch[2] ? headerMatch[2].toLowerCase() : undefined;
   const isBreakingHeader = Boolean(headerMatch[3]);
+  const isBreaking = isBreakingHeader || isBreakingFooter;
   const subject = headerMatch[4].trim();
 
   return {
     type,
     scope,
-    isBreaking: isBreakingHeader || isBreakingFooter,
+    isBreaking,
     subject,
     body: rest || undefined,
     rawMessage: trimmed,
+    category: categorizeCommit(type, isBreaking),
   };
 }
 
@@ -153,4 +181,39 @@ export function calculateNextVersion(
     patch: nextPatch,
     prerelease: options?.prereleaseTag,
   });
+}
+
+export function generateFormattedReleaseNotes(
+  version: string,
+  baselineTag: string,
+  commits: ParsedCommit[]
+): string {
+  const dateStr = new Date().toISOString().split("T")[0];
+  let notes = `## [${version}] - ${dateStr}\n\n`;
+
+  const categories: Array<ParsedCommit["category"]> = [
+    "Breaking Changes",
+    "Features",
+    "Bug Fixes",
+    "Performance",
+    "Observability & Ops",
+    "Security",
+    "Refactoring",
+    "Documentation",
+  ];
+
+  for (const cat of categories) {
+    const items = commits.filter((c) => c.category === cat);
+    if (items.length > 0) {
+      notes += `### ${cat}\n`;
+      for (const item of items) {
+        const scopeStr = item.scope ? `**${item.scope}**: ` : "";
+        notes += `- ${scopeStr}${item.subject}\n`;
+      }
+      notes += "\n";
+    }
+  }
+
+  notes += `*Baseline Tag*: \`${baselineTag}\`\n`;
+  return notes.trim();
 }

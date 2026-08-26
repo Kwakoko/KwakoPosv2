@@ -1,6 +1,6 @@
 {
   "name": "kwakopos2-monorepo",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "KwakoPos 2.0 Foundation - Clean, Modular, Offline-First, Multi-Tenant SaaS Platform",
   "workspaces": [

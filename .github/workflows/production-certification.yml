@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
@@ -34,6 +34,9 @@ jobs:
 
       - name: Generate SemVer Release Manifest
         run: npx tsx scripts/release/generate-release-manifest.ts
+
+      - name: Validate Version Consistency Gate
+        run: npx tsx scripts/release/version-consistency-gate.ts
 
       - name: Generate Prisma Client
         run: npm run db:generate
@@ -165,6 +168,12 @@ jobs:
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
         run: npm run release:promote
+
+      - name: Publish Official GitHub Release and Immutable Git Tag
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx scripts/release/publish-github-release.ts
 
       - name: Archive Production Release Evidence Artifacts
         if: always()

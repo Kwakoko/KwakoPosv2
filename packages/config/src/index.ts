@@ -12,7 +12,7 @@ export const ConfigSchema = z.object({
   GIT_SHA: z.string().optional(),
   CONTAINER_DIGEST: z.string().optional(),
   CLOUD_RUN_REVISION: z.string().optional(),
-  APP_VERSION: z.string().default("2.0.0"),
+  APP_VERSION: z.string().default("2.1.0"),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

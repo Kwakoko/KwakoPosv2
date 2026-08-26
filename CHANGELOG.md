@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-08-26
+
+### Added
+- **Semantic Versioning & Automated Release Management**:
+  - Conventional commit parser and automated SemVer calculation (`calculateNextVersion`).
+  - Canonical `ReleaseIdentity` and machine-readable `release-manifest.json`.
+  - Version Consistency Enforcement Gate (`scripts/release/version-consistency-gate.ts`).
+  - Automated Git tagging (`v2.1.0`) and official GitHub Release publishing (`scripts/release/publish-github-release.ts`).
+  - Safe runtime version endpoints: `GET /api/system/version` and `GET /admin/releases/history`.
+  - PWA version tracker displaying `KwakoPos © 2026 • Version 2.1.0` with durable offline outbox upgrade protection.
+- **Production Observability & Real-User Monitoring (RUM)**:
+  - `@kwakopos2/observability` package with distributed tracing (`x-trace-id`, `x-span-id`, `x-correlation-id`).
+  - Frontend RUM Collector capturing Web Vitals (FCP, LCP, INP, CLS, TTI), API request durations, and unhandled errors.
+  - Continuous inventory reconciler enforcing ${\text{Available Stock}} \equiv \sum \text{StockLedger movements}$.
+  - Tenant Reliability scoring ($0-100$) and incident lifecycle engine.
+  - Automated continuous synthetic production suite (Tests A through F).
+  - Super Admin Observability Center (`/admin/observability/*`).
+
+### Changed
+- Promoted platform release version to `2.1.0`.
+
+---
+
 ## [2.0.0] - 2026-08-26
 
 ### Added

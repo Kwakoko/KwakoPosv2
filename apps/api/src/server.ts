@@ -107,7 +107,7 @@ export function buildServer(): FastifyInstance {
       requestId: correlationId,
       traceId,
       spanId,
-      appVersion: "2.0.0",
+      appVersion: config.APP_VERSION || "2.1.0",
       cloudRunRevision: config.CLOUD_RUN_REVISION || "kwakopos-production-service",
       environment: config.NODE_ENV,
     });
