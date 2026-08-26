@@ -36,29 +36,29 @@ export function getAuthoritativeReleaseIdentity(override?: {
   const gitSha = getRealGitSha();
   const config = loadConfig();
 
-  const containerDigest = override?.containerDigest || process.env.CONTAINER_DIGEST || config.CONTAINER_DIGEST!;
-  const cloudRunRevision = override?.cloudRunRevision || process.env.CLOUD_RUN_REVISION || config.CLOUD_RUN_REVISION!;
+  const containerDigest = override?.containerDigest || process.env.CONTAINER_DIGEST || config.CONTAINER_DIGEST;
+  const cloudRunRevision = override?.cloudRunRevision || process.env.CLOUD_RUN_REVISION || config.CLOUD_RUN_REVISION;
 
   if (isProdCert) {
-    if (containerDigest.includes("efd6bc4300000000000000000000000000000000000000000000000000000000")) {
+    if (containerDigest && containerDigest.includes("efd6bc4300000000000000000000000000000000000000000000000000000000")) {
       console.error("RELEASE_BLOCKED: Default synthetic container digest detected in production-certification mode.");
       process.exit(1);
     }
-    if (cloudRunRevision === "kwakopos-production-rev-00001") {
+    if (cloudRunRevision && cloudRunRevision === "kwakopos-production-rev-00001") {
       console.error("RELEASE_BLOCKED: Default synthetic Cloud Run revision detected in production-certification mode.");
       process.exit(1);
     }
   }
 
   assertValidGitSha(gitSha);
-  assertValidContainerDigest(containerDigest);
-  assertValidCloudRunRevision(cloudRunRevision);
+  if (containerDigest) assertValidContainerDigest(containerDigest);
+  if (cloudRunRevision) assertValidCloudRunRevision(cloudRunRevision);
 
   return {
     version: config.APP_VERSION,
     gitSha,
-    containerDigest,
-    cloudRunRevision,
+    containerDigest: containerDigest || "",
+    cloudRunRevision: cloudRunRevision || "",
     releaseTimestamp: new Date().toISOString(),
   };
 }

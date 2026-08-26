@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { getAuthoritativeReleaseIdentity } from "./releaseIdentity";
+import { getAuthoritativeReleaseIdentity, getRealGitSha } from "./releaseIdentity";
 import { deployCandidateRevision } from "./deploy-candidate";
 import { certifyDeployedRevision } from "./certify-deployed";
 import { promoteCandidateRevision } from "./promote-revision";
@@ -53,19 +53,20 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   console.log(`[STATE] Current State: ${state}`);
 
   // STAGE 1: Real Release Identity Verification
-  const identity = getAuthoritativeReleaseIdentity();
-  assertValidGitSha(identity.gitSha);
-  assertValidContainerDigest(identity.containerDigest);
-  assertValidCloudRunRevision(identity.cloudRunRevision);
+  const gitSha = getRealGitSha();
+  assertValidGitSha(gitSha);
 
   state = "IMAGE_BUILT";
   console.log(`[STATE] Current State: ${state}`);
 
+  // STAGE 2: Real Cloud Run Candidate Deployment
+  const candidate = deployCandidateRevision();
+  assertValidContainerDigest(candidate.containerDigest);
+  assertValidCloudRunRevision(candidate.candidateRevision);
+
   state = "DIGEST_VERIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 2: Real Cloud Run Candidate Deployment
-  const candidate = deployCandidateRevision();
   state = "CANDIDATE_DEPLOYED";
   console.log(`[STATE] Current State: ${state} (Mode: ${candidate.deploymentMode})`);
 
@@ -92,10 +93,10 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   // Final Release State Assertion
   assertReleaseIdentityMatch(
     {
-      gitSha: identity.gitSha,
-      containerDigest: identity.containerDigest,
-      cloudRunRevision: identity.cloudRunRevision,
-      appVersion: identity.version,
+      gitSha: candidate.gitSha,
+      containerDigest: candidate.containerDigest,
+      cloudRunRevision: candidate.candidateRevision,
+      appVersion: candidate.version,
     },
     {
       gitSha: promotion.liveGitSha,
@@ -111,11 +112,11 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   const evidenceArtifact: ProductionReleaseEvidenceArtifact = {
     status: "PASS",
     deploymentMode: candidate.deploymentMode,
-    version: identity.version,
-    gitSha: identity.gitSha,
-    containerDigest: identity.containerDigest,
+    version: candidate.version,
+    gitSha: candidate.gitSha,
+    containerDigest: candidate.containerDigest,
     cloudRunService: process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service",
-    cloudRunRevision: identity.cloudRunRevision,
+    cloudRunRevision: candidate.candidateRevision,
     candidateUrl: candidate.candidateUrl,
     health: "PASS",
     readiness: "PASS",
