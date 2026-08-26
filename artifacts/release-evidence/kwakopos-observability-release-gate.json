@@ -2,9 +2,9 @@
   "status": "RELEASE_GATE_PASSED_GREEN",
   "releaseGateStatus": "GREEN",
   "appVersion": "2.0.0",
-  "gitSha": "13ad5796dee81a56750561544417c4d38ec81d1c",
-  "containerDigest": "sha256:dad8579455fe5e0c3e012eaa79fba323bf6cf9ff6490c27eaab7f37d38530fc9",
-  "cloudRunRevision": "kwakopos-production-service-00024-fir",
+  "gitSha": "3ab42e57e63d219ad04f658eb25fc075cc9c7af8",
+  "containerDigest": "sha256:c1ba0a02098b1dbe46121c2822e2897ab69816b501009380e0cce38532cd3924",
+  "cloudRunRevision": "kwakopos-production-service-00028-kuf",
   "targetServiceUrl": "https://kwakopos-production-service-75x6obw55q-uc.a.run.app",
   "verificationChecks": {
     "healthCheck": "PASS",
@@ -42,7 +42,7 @@
     {
       "test": "SYNTHETIC_TEST_E_OFFLINE_DURABILITY",
       "status": "PASS",
-      "durationMs": 1
+      "durationMs": 0
     },
     {
       "test": "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
@@ -50,5 +50,5 @@
       "durationMs": 0
     }
   ],
-  "timestamp": "2026-08-26T04:16:31.589Z"
+  "timestamp": "2026-08-26T04:25:48.482Z"
 }
