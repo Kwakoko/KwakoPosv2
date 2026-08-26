@@ -1,0 +1,13 @@
+{
+  "evaluatedAt": "2026-08-26T05:19:27.027Z",
+  "appVersion": "2.1.0",
+  "status": "PASS",
+  "divergencesCount": 0,
+  "orphanAdjustmentsCount": 0,
+  "verifiedRules": [
+    "INVARIANT_001_PRODUCT",
+    "INVARIANT_002_VARIANT",
+    "INVARIANT_003_LEDGER_ARITHMETIC",
+    "INVARIANT_004_SYNC_CONVERGENCE"
+  ]
+}
