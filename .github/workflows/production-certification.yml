@@ -111,6 +111,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: npm run production:browser:install
 
+      - name: Synchronize Database Schema
+        if: github.event_name != 'pull_request'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require' }}
+        run: npm run db:push
+
       - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
         if: github.event_name != 'pull_request'
         env:
