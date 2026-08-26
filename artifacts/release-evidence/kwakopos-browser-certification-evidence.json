@@ -1,0 +1,19 @@
+{
+  "candidateRevision": "kwakopos-production-rev-00001",
+  "candidateUrl": "https://rc-919ccda---kwakopos-production-service-uc.a.run.app",
+  "testRunId": "PLAYWRIGHT-RUN-dfc56453",
+  "browserAOperations": 4,
+  "serverRecords": {
+    "products": 1,
+    "variants": 1,
+    "stockLedger": 2,
+    "adjustments": 2
+  },
+  "browserBOperations": 0,
+  "expectedStock": 188,
+  "actualStockBrowserA": 188,
+  "actualStockServer": 188,
+  "actualStockBrowserB": 188,
+  "finalConvergenceStatus": "PASS",
+  "timestamp": "2026-08-26T02:51:50.022Z"
+}

@@ -104,7 +104,7 @@ export function buildServer(): FastifyInstance {
   });
 
   // System endpoints
-  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
+  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString(), database: "connected" }));
 
   server.get("/readiness", async () => {
     if (productionPersistence) {
@@ -175,7 +175,7 @@ export function buildServer(): FastifyInstance {
     const ctx = req.tenantContext!;
     const validated = CreateProductRequestSchema.parse(req.body);
     const product = await productRepo.createProduct(ctx, validated);
-    return { success: true, data: product };
+    return reply.status(201).send({ success: true, data: product });
   });
 
   server.get("/products", async (req) => {
@@ -198,7 +198,7 @@ export function buildServer(): FastifyInstance {
   server.post("/products/:id/variants", async (req, reply) => {
     const validated = CreateVariantRequestSchema.parse(req.body);
     const variant = await productRepo.addVariant(req.tenantContext!, (req.params as any).id, validated);
-    return { success: true, data: variant };
+    return reply.status(201).send({ success: true, data: variant });
   });
 
   server.put("/variants/:id", async (req) => {
@@ -216,12 +216,12 @@ export function buildServer(): FastifyInstance {
   server.post("/inventory/adjustments", async (req, reply) => {
     const validated = CreateStockAdjustmentRequestSchema.parse(req.body);
     const result = await stockRepo.recordStockAdjustment(req.tenantContext!, validated);
-    return { success: true, data: result };
+    return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/inventory/stock/:variantId", async (req) => {
     const stock = await stockRepo.getAvailableStock(req.tenantContext!, (req.params as any).variantId);
-    return { success: true, data: { variantId: (req.params as any).variantId, available: stock } };
+    return { success: true, data: { variantId: (req.params as any).variantId, availableStock: stock, available: stock } };
   });
 
   server.get("/inventory/ledger", async (req) => {

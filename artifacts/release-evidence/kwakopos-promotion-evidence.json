@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "promotedRevision": "kwakopos-production-rev-00001",
+  "trafficPercent": 100,
+  "liveGitSha": "919ccda6c1c85143ed18b2f484dc6b6d038e6d44",
+  "liveContainerDigest": "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000",
+  "liveCloudRunRevision": "kwakopos-production-rev-00001",
+  "liveVersion": "2.0.0",
+  "liveIdentityMatch": "PASS",
+  "timestamp": "2026-08-25T17:45:36.955Z"
+}

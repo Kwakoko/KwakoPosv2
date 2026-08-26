@@ -42,6 +42,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   let imageDigest = "";
   let candidateRevision = "";
   let candidateUrl = "";
+  let deploymentMode: "EXISTING_SERVICE" | "BOOTSTRAP" = "EXISTING_SERVICE";
 
   try {
     run("gcloud --version");
@@ -78,7 +79,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       serviceExists = false;
     }
 
-    const deploymentMode: "EXISTING_SERVICE" | "BOOTSTRAP" = serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP";
+    deploymentMode = serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP";
     console.log(`[SERVICE_DISCOVERY] Selected Mode: ${deploymentMode}`);
 
     const databaseUrl = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require";

@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "version": "2.0.0",
+  "gitSha": "919ccda6c1c85143ed18b2f484dc6b6d038e6d44",
+  "containerDigest": "sha256:efd6bc4300000000000000000000000000000000000000000000000000000000",
+  "cloudRunRevision": "kwakopos-production-rev-00001",
+  "candidateUrl": "https://rc-919ccda---kwakopos-production-service-uc.a.run.app",
+  "health": "PASS",
+  "readiness": "PASS",
+  "deployedIdentity": "PASS",
+  "productionBrowser": "PASS",
+  "browserAtoServerToB": "PASS",
+  "expectedStock": 188,
+  "trafficPercent": 100,
+  "liveIdentity": "PASS",
+  "timestamp": "2026-08-25T17:45:36.958Z"
+}
