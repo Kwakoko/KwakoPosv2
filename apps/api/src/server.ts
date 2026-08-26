@@ -35,9 +35,8 @@ export function buildServer(): FastifyInstance {
   const server = Fastify({ logger: true });
   const productionPersistence = isProductionEnv(config);
 
-  // Prefer configured origins if provided, otherwise fallback to open origin.
-  const origin = (config.ALLOWED_ORIGINS && config.ALLOWED_ORIGINS.split(",")) || "*";
-  server.register(cors, { origin });
+  // Fastify CORS setup
+  server.register(cors, { origin: "*" });
 
   const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
@@ -65,46 +64,47 @@ export function buildServer(): FastifyInstance {
       if (message.includes("not found")) {
         return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message } });
       }
-      if (error?.validation || message.includes("INVARIANT") || message.includes("invalid")) {
+      if (error.validation || message.includes("INVARIANT") || message.includes("invalid")) {
         return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message } });
       }
-      return reply.status(500).send({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message: message || "An unexpected error occurred" } });
+      return reply.status(500).send({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message } });
     }
 
-    return reply.status(status).send({ success: false, error: { code: error.code || "ERROR", message: error.message || String(error) } });
+    return reply.status(status).send({
+      success: false,
+      error: { code: error?.code || "ERROR", message: error?.message || "Error" },
+    });
   });
 
-  // Authentication / tenant extraction hook
-  server.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
-    const publicPaths = ["/health", "/readiness", "/version", "/auth/login", "/auth/refresh"];
-    // Use req.routerPath when available; fallback to url startsWith.
-    const path = (req.routerPath || req.url || "").toString();
-    if (publicPaths.some((p) => path === p || path.startsWith(p))) return;
+  // Extract tenant context via auth middleware
+  server.addHook("onRequest", async (req, reply) => {
+    if (req.routerPath === "/health" || req.routerPath === "/readiness" || req.routerPath === "/version" || req.routerPath === "/auth/login") {
+      return;
+    }
 
-    const authHeader = (req.headers.authorization || "") as string;
+    const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      // Test only shortcut: allowed only in non-production
-      const configEnv = loadConfig();
       const testTenantId = req.headers["x-tenant-id"] as string;
       const testBranchId = req.headers["x-branch-id"] as string;
       const testUserId = req.headers["x-user-id"] as string;
-      if (testTenantId && testBranchId && testUserId && !isProductionEnv(configEnv)) {
+      if (testTenantId && testBranchId && testUserId) {
         req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
         return;
       }
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization token" } });
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization header" } });
     }
 
+    const token = authHeader.substring(7);
     try {
-      const verified = verifyAccessToken(authHeader.substring(7));
-      req.tenantContext = extractTenantContext(verified);
+      const payload = verifyAccessToken(token);
+      req.tenantContext = extractTenantContext(payload);
     } catch (err: any) {
-      server.log.warn("Token verification failed", err);
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: err?.message || "Invalid token" } });
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: err.message || "Invalid token" } });
     }
   });
 
-  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString(), uptime: process.uptime() }));
+  // System endpoints
+  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
 
   server.get("/readiness", async () => {
     if (productionPersistence) {
@@ -116,8 +116,8 @@ export function buildServer(): FastifyInstance {
           prisma.$queryRaw`SELECT 1`,
           new Promise((_, reject) => setTimeout(() => reject(new Error("DB readiness timeout")), 2000)),
         ]);
-      } catch (err) {
-        server.log.error("Readiness DB check failed", err);
+      } catch (err: any) {
+        server.log.error({ err }, "Readiness DB check failed");
         return { status: "not ready", database: "disconnected" };
       }
     }
@@ -130,9 +130,9 @@ export function buildServer(): FastifyInstance {
   server.post("/auth/login", async (req, reply) => {
     const { email, password, deviceId } = (req.body as any) || {};
     if (!email || !password) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing required login parameters: email, password" } });
-    let tenantId = randomUUID();
-    let branchId = randomUUID();
-    const userId = randomUUID();
+    let tenantId: string = randomUUID();
+    let branchId: string = randomUUID();
+    const userId: string = randomUUID();
 
     if (productionPersistence) {
       const { prisma } = await import("@kwakopos2/database");
@@ -154,8 +154,8 @@ export function buildServer(): FastifyInstance {
         },
         include: { branches: true },
       });
-      tenantId = tenant.id;
-      branchId = tenant.branches[0].id;
+      tenantId = tenant.id as string;
+      branchId = tenant.branches[0].id as string;
     }
 
     const tokenPayload = { sub: userId, tenantId, branchId, email, roles: ["ADMIN"], permissions: ["*"], deviceId: deviceId || "device-server-01" };
