@@ -126,6 +126,26 @@ export class PrismaSyncEngine {
         createdAt: a.createdAt.toISOString(),
         updatedAt: a.updatedAt.toISOString(),
       })),
+      customers: (await prisma.customer.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
+        orderBy: { updatedAt: "asc" },
+      })).map((c: any) => ({
+        ...c,
+        creditLimit: Number(c.creditLimit),
+        currentBalance: Number(c.currentBalance),
+        openingBalance: Number(c.openingBalance),
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+      })),
+      suppliers: (await prisma.supplier.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
+        orderBy: { updatedAt: "asc" },
+      })).map((s: any) => ({
+        ...s,
+        outstandingBalance: Number(s.outstandingBalance),
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      })),
     };
   }
 }
