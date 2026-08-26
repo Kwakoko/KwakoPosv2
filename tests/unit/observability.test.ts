@@ -32,7 +32,7 @@ describe("KwakoPos Production Observability Platform Suite", () => {
       expect(ctx.spanId).toBeDefined();
       expect(ctx.requestId).toBeDefined();
       expect(ctx.tenantId).toBe("tenant-trace-01");
-      expect(ctx.appVersion).toBe("2.0.0");
+      expect(ctx.appVersion).toBe("2.1.0");
     });
 
     it("strictly sanitizes sensitive fields (passwords, tokens, keys, card numbers) from telemetry payloads", () => {

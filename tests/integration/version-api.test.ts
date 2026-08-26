@@ -7,7 +7,7 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
 
   beforeAll(async () => {
     const config = loadConfig({
-      APP_VERSION: "2.0.0",
+      APP_VERSION: "2.1.0",
       NODE_ENV: "test",
       PORT: "3003",
     });
@@ -27,8 +27,8 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.payload);
     expect(json.success).toBe(true);
-    expect(json.version).toBe("2.0.0");
-    expect(json.gitTag).toBe("v2.0.0");
+    expect(json.version).toBe("2.1.0");
+    expect(json.gitTag).toBe("v2.1.0");
     expect(json.gitSha).toBeDefined();
     expect(json.compatibility).toBeDefined();
     expect(json.compatibility.databaseSchemaVersion).toBeGreaterThan(0);
@@ -48,8 +48,8 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
 
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.payload);
-    expect(json.version).toBe("2.0.0");
-    expect(json.gitTag).toBe("v2.0.0");
+    expect(json.version).toBe("2.1.0");
+    expect(json.gitTag).toBe("v2.1.0");
   });
 
   it("GET /admin/releases/compatibility returns client & protocol compatibility requirements", async () => {
@@ -75,7 +75,7 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.payload);
     expect(json.success).toBe(true);
-    expect(json.data.currentVersion).toBe("2.0.0");
+    expect(json.data.currentVersion).toBe("2.1.0");
     expect(json.data.history.length).toBeGreaterThan(0);
     expect(json.data.history[0].certification).toBe("PASS");
   });

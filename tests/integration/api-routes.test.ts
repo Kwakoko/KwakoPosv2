@@ -35,7 +35,7 @@ describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
     const res = await server.inject({ method: "GET", url: "/version" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.appVersion).toBe("2.0.0");
+    expect(body.appVersion).toBe("2.1.0");
     expect(body.gitSha).toBeDefined();
     expect(body.containerDigest).toBeDefined();
     expect(body.cloudRunRevision).toBeDefined();
