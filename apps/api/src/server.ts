@@ -66,8 +66,11 @@ import {
   globalWorkforceRepository,
   PrismaProductRepository,
   PrismaStockRepository,
+  PrismaFinanceRepository,
+  PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
 } from "@kwakopos2/database";
+
 
 import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
 import {
@@ -125,6 +128,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const syncEngine = productionPersistence
     ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
     : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalCommercialRepository, globalInMemoryStore);
+
+  const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;
+  const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
+
 
   // Centralized error handler: prefer structured statusCode/code when present.
   server.setErrorHandler((error: any, _req, reply) => {
@@ -742,7 +749,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/purchases/receipts", async (req, reply) => {
     const validated = CreatePurchaseReceiptRequestSchema.parse(req.body);
-    const result = globalCommercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
+    const result = atomicCommercialFinance
+      ? await atomicCommercialFinance.createPurchaseReceipt(req.tenantContext!, validated)
+      : globalCommercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
@@ -756,7 +765,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
     const validated = CreatePosSaleRequestSchema.parse(req.body);
-    const result = globalCommercialRepository.createPosSale(req.tenantContext!, validated);
+    const result = atomicCommercialFinance
+      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
+      : globalCommercialRepository.createPosSale(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
@@ -792,9 +803,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
     const validated = CreateExpenseRequestSchema.parse(req.body);
-    const expense = globalCommercialRepository.recordExpense(req.tenantContext!, validated);
+    const expense = atomicCommercialFinance
+      ? await atomicCommercialFinance.recordExpense(req.tenantContext!, validated)
+      : globalCommercialRepository.recordExpense(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: expense });
   });
+
 
   server.post("/api/v1/cash-sessions/:id/close", async (req) => {
     const validated = CloseCashSessionRequestSchema.parse(req.body);
@@ -837,58 +851,58 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Chart of Accounts
   server.get("/api/v1/finance/accounts", async (req) => {
-    const accounts = globalFinanceRepository.ensureDefaultAccounts(req.tenantContext!);
+    const accounts = await financeRepository.ensureDefaultAccounts(req.tenantContext!);
     return { success: true, data: accounts };
   });
 
   server.post("/api/v1/finance/accounts", async (req, reply) => {
     const validated = CreateAccountRequestSchema.parse(req.body);
-    const account = globalFinanceRepository.createAccount(req.tenantContext!, validated);
+    const account = await financeRepository.createAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: account });
   });
 
   server.put("/api/v1/finance/accounts/:id", async (req) => {
     const validated = UpdateAccountRequestSchema.parse(req.body);
-    const updated = globalFinanceRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
+    const updated = await financeRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
   // Fiscal Years & Accounting Periods
   server.get("/api/v1/finance/periods", async (req) => {
-    const periods = globalFinanceRepository.getAccountingPeriods(req.tenantContext!);
+    const periods = await financeRepository.getAccountingPeriods(req.tenantContext!);
     return { success: true, data: periods };
   });
 
   server.post("/api/v1/finance/periods", async (req, reply) => {
     const validated = CreateAccountingPeriodRequestSchema.parse(req.body);
-    const period = globalFinanceRepository.createAccountingPeriod(req.tenantContext!, validated);
+    const period = await financeRepository.createAccountingPeriod(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: period });
   });
 
   server.post("/api/v1/finance/periods/:id/close", async (req) => {
-    const closed = globalFinanceRepository.closePeriod(req.tenantContext!, (req.params as any).id);
+    const closed = await financeRepository.closePeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: closed };
   });
 
   server.post("/api/v1/finance/periods/:id/reopen", async (req) => {
-    const reopened = globalFinanceRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
+    const reopened = await financeRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: reopened };
   });
 
   // Double-Entry Journals
   server.get("/api/v1/finance/journals", async (req) => {
-    const journals = globalFinanceRepository.getJournals(req.tenantContext!);
+    const journals = await financeRepository.getJournals(req.tenantContext!);
     return { success: true, data: journals };
   });
 
   server.post("/api/v1/finance/journals", async (req, reply) => {
     const validated = CreateJournalEntryRequestSchema.parse(req.body);
-    const result = globalFinanceRepository.createJournalEntry(req.tenantContext!, validated);
+    const result = await financeRepository.createJournalEntry(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/finance/journals/:id", async (req, reply) => {
-    const result = globalFinanceRepository.getJournalById(req.tenantContext!, (req.params as any).id);
+    const result = await financeRepository.getJournalById(req.tenantContext!, (req.params as any).id);
     if (!result) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Journal entry not found" } });
     }
@@ -897,114 +911,115 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/finance/journals/:id/reverse", async (req, reply) => {
     const validated = ReverseJournalEntryRequestSchema.parse(req.body);
-    const result = globalFinanceRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
+    const result = await financeRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   // Accounts Receivable (Customer Invoices & Aging)
   server.get("/api/v1/finance/receivables/invoices", async (req) => {
-    const invoices = globalFinanceRepository.getCustomerInvoices(req.tenantContext!);
+    const invoices = await financeRepository.getCustomerInvoices(req.tenantContext!);
     return { success: true, data: invoices };
   });
 
   server.post("/api/v1/finance/receivables/invoices", async (req, reply) => {
     const validated = CreateCustomerInvoiceRequestSchema.parse(req.body);
-    const invoice = globalFinanceRepository.createCustomerInvoice(req.tenantContext!, validated);
+    const invoice = await financeRepository.createCustomerInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
   });
 
   server.get("/api/v1/finance/receivables/aging", async (req) => {
-    const report = globalFinanceRepository.getReceivablesAging(req.tenantContext!);
+    const report = await financeRepository.getReceivablesAging(req.tenantContext!);
     return { success: true, data: report };
   });
 
   // Accounts Payable (Supplier Invoices & Aging)
   server.get("/api/v1/finance/payables/invoices", async (req) => {
-    const invoices = globalFinanceRepository.getSupplierInvoices(req.tenantContext!);
+    const invoices = await financeRepository.getSupplierInvoices(req.tenantContext!);
     return { success: true, data: invoices };
   });
 
   server.post("/api/v1/finance/payables/invoices", async (req, reply) => {
     const validated = CreateSupplierInvoiceRequestSchema.parse(req.body);
-    const invoice = globalFinanceRepository.createSupplierInvoice(req.tenantContext!, validated);
+    const invoice = await financeRepository.createSupplierInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
   });
 
   server.get("/api/v1/finance/payables/aging", async (req) => {
-    const report = globalFinanceRepository.getPayablesAging(req.tenantContext!);
+    const report = await financeRepository.getPayablesAging(req.tenantContext!);
     return { success: true, data: report };
   });
 
   // Payment Allocation
   server.post("/api/v1/finance/payments/allocate", async (req) => {
     const validated = AllocatePaymentRequestSchema.parse(req.body);
-    const result = globalFinanceRepository.allocatePayment(req.tenantContext!, validated);
+    const result = await financeRepository.allocatePayment(req.tenantContext!, validated);
     return { success: true, data: result };
   });
 
   // Bank Accounts & Transactions
   server.get("/api/v1/finance/banks", async (req) => {
-    const banks = globalFinanceRepository.getBankAccounts(req.tenantContext!);
+    const banks = await financeRepository.getBankAccounts(req.tenantContext!);
     return { success: true, data: banks };
   });
 
   server.post("/api/v1/finance/banks", async (req, reply) => {
     const validated = CreateBankAccountRequestSchema.parse(req.body);
-    const bank = globalFinanceRepository.createBankAccount(req.tenantContext!, validated);
+    const bank = await financeRepository.createBankAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: bank });
   });
 
   server.post("/api/v1/finance/banks/:id/transactions", async (req, reply) => {
     const validated = CreateBankTransactionRequestSchema.parse(req.body);
-    const tx = globalFinanceRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
+    const tx = await financeRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: tx });
   });
 
   // Budgets
   server.get("/api/v1/finance/budgets", async (req) => {
-    const budgets = globalFinanceRepository.getBudgets(req.tenantContext!);
+    const budgets = await financeRepository.getBudgets(req.tenantContext!);
     return { success: true, data: budgets };
   });
 
   server.post("/api/v1/finance/budgets", async (req, reply) => {
     const validated = CreateBudgetRequestSchema.parse(req.body);
-    const budget = globalFinanceRepository.createBudget(req.tenantContext!, validated);
+    const budget = await financeRepository.createBudget(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: budget });
   });
 
   server.get("/api/v1/finance/budgets/:id/vs-actual", async (req) => {
-    const variance = globalFinanceRepository.getBudgetVsActual(req.tenantContext!, (req.params as any).id);
+    const variance = await financeRepository.getBudgetVsActual(req.tenantContext!, (req.params as any).id);
     return { success: true, data: variance };
   });
 
   // Financial Reports
   server.get("/api/v1/finance/reports/trial-balance", async (req) => {
     const asOfDate = (req.query as any)?.asOfDate;
-    const report = globalFinanceRepository.getTrialBalance(req.tenantContext!, asOfDate);
+    const report = await financeRepository.getTrialBalance(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/profit-loss", async (req) => {
     const { startDate, endDate } = (req.query as any) || {};
-    const report = globalFinanceRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
+    const report = await financeRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/balance-sheet", async (req) => {
     const asOfDate = (req.query as any)?.asOfDate;
-    const report = globalFinanceRepository.getBalanceSheet(req.tenantContext!, asOfDate);
+    const report = await financeRepository.getBalanceSheet(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/dashboard/executive", async (req) => {
-    const dashboard = globalFinanceRepository.getExecutiveDashboard(req.tenantContext!);
+    const dashboard = await financeRepository.getExecutiveDashboard(req.tenantContext!);
     return { success: true, data: dashboard };
   });
 
   server.get("/api/v1/finance/anomalies", async (req) => {
-    const anomalies = globalFinanceRepository.getAnomalies(req.tenantContext!);
+    const anomalies = await financeRepository.getAnomalies(req.tenantContext!);
     return { success: true, data: anomalies };
   });
+
 
   // ==========================================
   // PHASE 3: Workforce & Operational Workforce Control REST Routes

@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const file = path.resolve("apps/api/src/server.ts");
+const cwd = process.cwd();
+const file = fs.existsSync(path.resolve(cwd, "apps/api/src/server.ts"))
+  ? path.resolve(cwd, "apps/api/src/server.ts")
+  : path.resolve(cwd, "src/server.ts");
 let source = fs.readFileSync(file, "utf8");
+
 
 if (source.includes("const financeRepository: any = productionPersistence ? new PrismaFinanceRepository()") && source.includes("await atomicCommercialFinance.createSale")) {
   console.log("Production finance hardening already present; no changes needed.");
@@ -11,9 +15,13 @@ if (source.includes("const financeRepository: any = productionPersistence ? new 
 
 source = source.replace("  PrismaStockRepository,\n  globalInMemoryStore,", "  PrismaStockRepository,\n  PrismaFinanceRepository,\n  PrismaAtomicCommercialFinanceService,\n  globalInMemoryStore,");
 source = source.replace("  const syncEngine = productionPersistence\n    ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)\n    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalCommercialRepository, globalInMemoryStore);", "  const syncEngine = productionPersistence\n    ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)\n    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalCommercialRepository, globalInMemoryStore);\n\n  const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;\n  const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;");
-const financeStart = source.indexOf("  // ==========================================\n  // PHASE 2: Finance & Operational Control REST Routes");
-const financeEnd = source.indexOf("  // ==========================================\n  // Observability & Real-User Monitoring Routes", financeStart);
+const financeStart = source.indexOf("// PHASE 2: Finance & Operational Control REST Routes");
+let financeEnd = source.indexOf("// PHASE 3: Workforce", financeStart);
+if (financeEnd < 0) {
+  financeEnd = source.indexOf("// Observability & Real-User Monitoring Routes", financeStart);
+}
 if (financeStart < 0 || financeEnd < 0) throw new Error("FINANCE_PATCH_TARGET_NOT_FOUND");
+
 let financeBlock = source.slice(financeStart, financeEnd).replaceAll("globalFinanceRepository.", "financeRepository.");
 financeBlock = financeBlock.replace(/(?<!await )financeRepository\.(\w+\([^;\n]+\))/g, "await financeRepository.$1");
 source = source.slice(0, financeStart) + financeBlock + source.slice(financeEnd);

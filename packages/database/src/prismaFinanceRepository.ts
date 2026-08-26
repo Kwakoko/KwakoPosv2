@@ -1,6 +1,7 @@
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./index.js";
-import { AccountingEngine, FinancialReportingEngine, TransactionNumbering } from "@kwakopos2/domain";
+import { AccountingEngine, FinancialReportingEngine, TransactionNumbering, FinancialBridge } from "@kwakopos2/domain";
+
 
 const num = (v: unknown) => Number(v ?? 0);
 
@@ -85,10 +86,11 @@ export class PrismaFinanceRepository {
   async getTrialBalance(ctx: TenantContext, asOfDate?: string) {
     const reportDate = asOfDate ? new Date(asOfDate) : new Date();
     const journals = await this.db.journalEntry.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, entryDate: { lte: reportDate }, status: "POSTED" }, include: { lines: true } });
-    const accounts = await this.getAccounts(ctx);
     const lines = journals.flatMap((j: any) => j.lines);
-    return FinancialReportingEngine.generateTrialBalance(ctx, accounts as any, journals as any, lines as any, reportDate);
+    return FinancialReportingEngine.generateTrialBalance(ctx as any, accounts as any, journals as any, lines as any, reportDate as any) ?? { accounts: [], totals: { totalDebit: 0, totalCredit: 0 }, asOfDate: reportDate.toISOString() };
   }
+
+
 
   async getExecutiveDashboard(ctx: TenantContext) {
     const journals = await this.db.journalEntry.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "POSTED" }, include: { lines: true } });
