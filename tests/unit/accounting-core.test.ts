@@ -94,4 +94,16 @@ describe("KwakoPos Double-Entry Accounting Core Engine", () => {
     const liabilityBalance = AccountingEngine.computeAccountBalance("LIABILITY", 0, liabilityLines);
     expect(liabilityBalance).toBe(150000);
   });
+
+  it("converts foreign currency amount to base functional currency (TZS)", () => {
+    // 100 USD @ 2,600 TZS/USD = 260,000 TZS
+    const conversion = AccountingEngine.convertCurrency(100, 2600, "USD", "TZS");
+    expect(conversion.baseAmount).toBe(260000);
+    expect(conversion.rateUsed).toBe(2600);
+
+    // Same currency conversion is identity
+    const identity = AccountingEngine.convertCurrency(50000, 1.0, "TZS", "TZS");
+    expect(identity.baseAmount).toBe(50000);
+  });
 });
+

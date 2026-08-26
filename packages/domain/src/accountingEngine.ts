@@ -252,4 +252,22 @@ export class AccountingEngine {
       return Math.round((openingBalance + totalCredit - totalDebit) * 100) / 100;
     }
   }
+
+  /**
+   * Multi-Currency Conversion Utility
+   * Converts foreign currency amount to base functional currency (TZS) using exchange rate.
+   */
+  static convertCurrency(
+    amount: number,
+    exchangeRate: number,
+    fromCurrency = "USD",
+    toCurrency = "TZS"
+  ): { baseAmount: number; rateUsed: number } {
+    if (fromCurrency === toCurrency || exchangeRate <= 0) {
+      return { baseAmount: Math.round(amount * 100) / 100, rateUsed: 1.0 };
+    }
+    const baseAmount = Math.round(amount * exchangeRate * 100) / 100;
+    return { baseAmount, rateUsed: exchangeRate };
+  }
 }
+

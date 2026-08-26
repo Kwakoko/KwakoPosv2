@@ -137,4 +137,81 @@ describe("KwakoPos Finance REST API Integration Tests (/api/v1/finance/*)", () =
     expect(dashRes.statusCode).toBe(200);
     expect(dashRes.json().data.branchProfitability).toBeDefined();
   });
+
+  it("manages Bank Accounts, Budgets, and Financial Anomalies", async () => {
+    // 1. Create Bank Account
+    const bankRes = await server.inject({
+      method: "POST",
+      url: "/api/v1/finance/banks",
+      headers: tenantHeaders,
+      payload: {
+        accountName: "CRDB Main Operating",
+        bankName: "CRDB Bank",
+        accountNumber: "0150123456700",
+        currency: "TZS",
+        openingBalance: 10000000,
+      },
+    });
+    expect(bankRes.statusCode).toBe(201);
+    const bankId = bankRes.json().data.id;
+
+    // 2. Record Bank Transaction
+    const txRes = await server.inject({
+      method: "POST",
+      url: `/api/v1/finance/banks/${bankId}/transactions`,
+      headers: tenantHeaders,
+      payload: {
+        transactionType: "DEPOSIT",
+        amount: 2500000,
+        reference: "DEP-2026-001",
+        description: "Customer Direct Deposit",
+      },
+    });
+    expect(txRes.statusCode).toBe(201);
+    expect(txRes.json().data.amount).toBe(2500000);
+
+    // 3. Create Budget & Query Variance
+    const accList = (
+      await server.inject({
+        method: "GET",
+        url: "/api/v1/finance/accounts",
+        headers: tenantHeaders,
+      })
+    ).json().data;
+    const targetAcc = accList[0];
+
+    const budgetRes = await server.inject({
+      method: "POST",
+      url: "/api/v1/finance/budgets",
+      headers: tenantHeaders,
+      payload: {
+        name: "FY 2026 Operating Budget",
+        fiscalYear: "2026",
+        period: "ANNUAL",
+        lines: [
+          { accountId: targetAcc.id, budgetedAmount: 15000000 },
+        ],
+      },
+    });
+    expect(budgetRes.statusCode).toBe(201);
+
+
+    const budgetId = budgetRes.json().data.id;
+
+    const varRes = await server.inject({
+      method: "GET",
+      url: `/api/v1/finance/budgets/${budgetId}/vs-actual`,
+      headers: tenantHeaders,
+    });
+    expect(varRes.statusCode).toBe(200);
+
+    // 4. Query Anomalies
+    const anomRes = await server.inject({
+      method: "GET",
+      url: "/api/v1/finance/anomalies",
+      headers: tenantHeaders,
+    });
+    expect(anomRes.statusCode).toBe(200);
+  });
 });
+

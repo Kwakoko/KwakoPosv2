@@ -667,6 +667,14 @@ export class ScopedFinanceRepository {
     const pnl = this.getProfitAndLoss(ctx);
     const bs = this.getBalanceSheet(ctx);
 
+    const now = Date.now();
+    const overdueReceivables = this.getCustomerInvoices(ctx).filter(
+      (i) => Number(i.balanceDue) > 0 && new Date(i.dueDate).getTime() < now
+    );
+    const overduePayables = this.getSupplierInvoices(ctx).filter(
+      (i) => Number(i.balanceDue) > 0 && new Date(i.dueDate).getTime() < now
+    );
+
     const branch = { id: ctx.branchId, name: "Main Branch" };
     const branchScorecard = ProfitabilityEngine.generateBranchScorecard(branch, [], []);
 
@@ -683,20 +691,60 @@ export class ScopedFinanceRepository {
       accountsReceivable: bs.assets.accountsReceivable,
       accountsPayable: bs.liabilities.accountsPayable,
       inventoryValue: bs.assets.inventoryValuation,
-      overdueReceivablesCount: 0,
-      overduePayablesCount: 0,
+      overdueReceivablesCount: overdueReceivables.length,
+      overduePayablesCount: overduePayables.length,
       budgetVariancePct: 0,
       branchProfitability: [
         {
           branchId: branch.id,
           branchName: branch.name,
-          revenue: branchScorecard.revenue,
-          grossProfit: branchScorecard.grossProfit,
-          netProfit: branchScorecard.netProfit,
-          marginPct: branchScorecard.netMarginPct,
+          revenue: branchScorecard.revenue || pnl.revenue.totalRevenue,
+          grossProfit: branchScorecard.grossProfit || pnl.grossProfit,
+          netProfit: branchScorecard.netProfit || pnl.netProfit,
+          marginPct: branchScorecard.netMarginPct || pnl.netMarginPct,
         },
       ],
     };
+  }
+
+  // =========================================================================
+  // Commercial-to-Finance Automated Bridge Helpers
+  // =========================================================================
+
+  bridgeCommercialSale(
+    ctx: TenantContext,
+    sale: any,
+    tenderMethod: "CASH" | "BANK" | "CREDIT" | "MOBILE_MONEY" = "CASH"
+  ): { journal: JournalEntry; lines: JournalLine[] } {
+    const lookup = this.getAccountLookup(ctx);
+    const { journal, lines } = FinancialBridge.mapSaleToJournal(ctx, sale, lookup, tenderMethod);
+    this.journalEntries.set(journal.id, journal);
+    this.journalLines.set(journal.id, lines);
+    return { journal, lines };
+  }
+
+  bridgePurchaseReceipt(
+    ctx: TenantContext,
+    receipt: any
+  ): { journal: JournalEntry; lines: JournalLine[] } {
+    const lookup = this.getAccountLookup(ctx);
+    const { journal, lines } = FinancialBridge.mapGoodsReceiptToJournal(ctx, receipt, lookup);
+    this.journalEntries.set(journal.id, journal);
+    this.journalLines.set(journal.id, lines);
+    return { journal, lines };
+  }
+
+  bridgeExpense(
+    ctx: TenantContext,
+    expense: any,
+    expenseAccountId?: string
+  ): { journal: JournalEntry; lines: JournalLine[] } {
+    const lookup = this.getAccountLookup(ctx);
+    const targetAccountId = expenseAccountId || lookup.expenseDefaultAccountId;
+    const { journal, lines } = FinancialBridge.mapExpenseToJournal(ctx, expense, targetAccountId, lookup);
+    this.journalEntries.set(journal.id, journal);
+    this.journalLines.set(journal.id, lines);
+    return { journal, lines };
   }
 
   // =========================================================================
@@ -714,3 +762,4 @@ export class ScopedFinanceRepository {
     );
   }
 }
+
