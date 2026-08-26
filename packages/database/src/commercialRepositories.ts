@@ -677,14 +677,41 @@ export class ScopedCommercialRepository {
       (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && calculateAvailableStock(Array.from(this.store.stockLedgers.values()).filter((l) => l.variantId === v.id)) <= 5
     ).length;
 
-    const topSellingProducts = Array.from(this.store.variants.values())
+    // Derive top-selling products from real sale lines
+    const variantSalesMap = new Map<string, { quantitySold: number; revenue: number }>();
+    for (const [saleId, lines] of this.saleLines.entries()) {
+      const sale = this.sales.get(saleId);
+      if (!sale || sale.tenantId !== ctx.tenantId || sale.branchId !== ctx.branchId) continue;
+      for (const line of lines) {
+        const existing = variantSalesMap.get(line.variantId) || { quantitySold: 0, revenue: 0 };
+        variantSalesMap.set(line.variantId, {
+          quantitySold: existing.quantitySold + line.quantity,
+          revenue: existing.revenue + line.lineTotal,
+        });
+      }
+    }
+    const topSellingProducts = Array.from(variantSalesMap.entries())
+      .sort((a, b) => b[1].quantitySold - a[1].quantitySold)
       .slice(0, 5)
-      .map((v) => ({
-        variantId: v.id,
-        productName: v.name,
-        quantitySold: 10,
-        revenue: v.price * 10,
-      }));
+      .map(([variantId, stats]) => {
+        const variant = this.store.variants.get(variantId);
+        return {
+          variantId,
+          productName: variant ? variant.name : variantId,
+          quantitySold: stats.quantitySold,
+          revenue: Math.round(stats.revenue * 100) / 100,
+        };
+      });
+
+    // Derive cash drawer position from the open session for this branch
+    const openSession = Array.from(this.cashSessions.values()).find(
+      (s) => s.tenantId === ctx.tenantId && s.branchId === ctx.branchId && s.status === "OPEN"
+    );
+    const cashDrawerPosition = openSession
+      ? Math.round(
+          (openSession.openingCash + (openSession.cashSalesTotal || 0) - (openSession.cashRefundsTotal || 0) - (openSession.cashExpensesTotal || 0)) * 100
+        ) / 100
+      : 0;
 
     return {
       todayRevenue: Math.round(todayRevenue * 100) / 100,
@@ -694,7 +721,7 @@ export class ScopedCommercialRepository {
       totalOutstandingPayables: Math.round(totalOutstandingPayables * 100) / 100,
       lowStockItemsCount,
       topSellingProducts,
-      cashDrawerPosition: 250000,
+      cashDrawerPosition,
     };
   }
 }
