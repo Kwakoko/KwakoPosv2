@@ -84,9 +84,34 @@ export function buildServer(): FastifyInstance {
   server.post("/auth/login", async (req, reply) => {
     const { email, password, deviceId } = (req.body as any) || {};
     if (!email || !password) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing required login parameters: email, password" } });
-    const tenantId = randomUUID();
-    const branchId = randomUUID();
+    let tenantId = randomUUID();
+    let branchId = randomUUID();
     const userId = randomUUID();
+
+    if (productionPersistence) {
+      const { prisma } = await import("@kwakopos2/database");
+      const slug = (email.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + randomUUID().slice(0, 8);
+      const tenant = await prisma.tenant.create({
+        data: {
+          id: tenantId,
+          name: `${email.split("@")[0]} Organization`,
+          slug,
+          status: "ACTIVE",
+          branches: {
+            create: {
+              id: branchId,
+              name: "Main Branch",
+              code: "MAIN-" + randomUUID().slice(0, 6),
+              isMain: true,
+            },
+          },
+        },
+        include: { branches: true },
+      });
+      tenantId = tenant.id;
+      branchId = tenant.branches[0].id;
+    }
+
     const tokenPayload = { sub: userId, tenantId, branchId, email, roles: ["ADMIN"], permissions: ["*"], deviceId: deviceId || "device-server-01" };
     const accessToken = generateAccessToken(tokenPayload);
     return { success: true, data: { accessToken, refreshToken: "refresh-token-session-01", user: { id: userId, tenantId, branchId, email, name: "Admin User", role: "ADMIN" } } };

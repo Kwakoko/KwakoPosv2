@@ -160,7 +160,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   }
 
   const evidence: CandidateDeploymentEvidence = {
-    deploymentMode: serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP",
+    deploymentMode,
     candidateRevision,
     candidateUrl,
     imageDigest,
