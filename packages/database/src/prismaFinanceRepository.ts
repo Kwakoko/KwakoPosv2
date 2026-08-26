@@ -141,9 +141,11 @@ export class PrismaFinanceRepository {
   async getTrialBalance(ctx: TenantContext, asOfDate?: string) {
     const reportDate = asOfDate ? new Date(asOfDate) : new Date();
     const journals = await this.db.journalEntry.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, entryDate: { lte: reportDate }, status: "POSTED" }, include: { lines: true } });
+    const accounts = await this.getAccounts(ctx);
     const lines = journals.flatMap((j: any) => j.lines);
     return FinancialReportingEngine.generateTrialBalance(ctx as any, accounts as any, journals as any, lines as any, reportDate as any) ?? { accounts: [], totals: { totalDebit: 0, totalCredit: 0 }, asOfDate: reportDate.toISOString() };
   }
+
 
 
 
