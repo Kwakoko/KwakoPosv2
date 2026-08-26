@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryStore, ScopedCommercialRepository, ScopedFinanceRepository, hardenFinanceRepository, wireCommercialFinanceBridges } from "../../packages/database/src/index.js";
+import { InMemoryStore, ScopedProductRepository, ScopedCommercialRepository, ScopedFinanceRepository, hardenFinanceRepository, wireCommercialFinanceBridges } from "../../packages/database/src/index.js";
+
 import type { TenantContext } from "@kwakopos2/contracts";
 
 const ctx: TenantContext = {
@@ -101,11 +102,13 @@ describe("Phase 2 finance hardening", () => {
     finance.createAccount(ctx, { accountCode: "6900", name: "Expense", accountClass: "EXPENSE", accountGroup: "OPERATING" });
     finance.createAccount(ctx, { accountCode: "8100", name: "Cash Variance", accountClass: "OTHER_EXPENSE", accountGroup: "VARIANCE" });
 
-    const product = commercial.createProduct(ctx, {
+    const productRepo = new ScopedProductRepository(store);
+    const product = productRepo.createProduct(ctx, {
       name: "Bridge Product",
       sku: "BR-1",
       variants: [{ name: "Default", sku: "BR-1-V", price: 1000, costPrice: 500 }],
     });
+
     const request = {
       idempotencyKey: "sale-bridge-test-1",
       deviceId: "device-a",

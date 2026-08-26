@@ -71,7 +71,62 @@ export class PrismaFinanceRepository {
     });
   }
 
-  async reverseJournalEntry(ctx: TenantContext, id: string, req: any) { const original = await this.getJournalById(ctx, id); if (!original) throw new Error(`Journal ${id} not found`); if (original.journal.status === "REVERSED") throw new Error("JOURNAL_ALREADY_REVERSED"); const number = `REV-MAIN-${(await this.db.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1}`; const built = AccountingEngine.createReversalJournal(ctx, original.journal as any, original.lines as any, req.reason, number); return this.db.$transaction(async (tx: any) => { await tx.journalEntry.update({ where: { id }, data: { status: "REVERSED" } }); const j = await tx.journalEntry.create({ data: { id: built.reversalJournal.id, tenantId: ctx.tenantId, branchId: ctx.branchId, accountingPeriodId: built.reversalJournal.accountingPeriodId ?? null, journalNumber: built.reversalJournal.journalNumber, entryDate: new Date(built.reversalJournal.entryDate), postingDate: new Date(built.reversalJournal.postingDate), sourceType: "REVERSAL", sourceId: id, description: built.reversalJournal.description, currency: built.reversalJournal.currency, exchangeRate: built.reversalJournal.exchangeRate, totalDebit: built.reversalJournal.totalDebit, totalCredit: built.reversalJournal.totalCredit, status: "POSTED", isReversal: true, reversalOfJournalId: id, reversalReason: req.reason, createdById: ctx.userId, postedById: ctx.userId, postedAt: new Date(), idempotencyKey: `jrn-rev-${id}` } }); const lines = await Promise.all((built.reversalLines as any[]).map((l) => tx.journalLine.create({ data: { id: l.id, journalEntryId: j.id, accountId: l.accountId, costCenterId: l.costCenterId ?? null, description: l.description ?? null, debit: l.debit, credit: l.credit, currency: l.currency ?? j.currency, exchangeRate: l.exchangeRate ?? j.exchangeRate } })); return { reversalJournal: j, reversalLines: lines }; }); }
+  async reverseJournalEntry(ctx: TenantContext, id: string, req: any) {
+    const original = await this.getJournalById(ctx, id);
+    if (!original) throw new Error(`Journal ${id} not found`);
+    if (original.journal.status === "REVERSED") throw new Error("JOURNAL_ALREADY_REVERSED");
+    const count = await this.db.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    const number = `REV-MAIN-${count + 1}`;
+    const built = AccountingEngine.createReversalJournal(ctx, original.journal as any, original.lines as any, req.reason, number);
+    return this.db.$transaction(async (tx: any) => {
+      await tx.journalEntry.update({ where: { id }, data: { status: "REVERSED" } });
+      const j = await tx.journalEntry.create({
+        data: {
+          id: built.reversalJournal.id,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          accountingPeriodId: built.reversalJournal.accountingPeriodId ?? null,
+          journalNumber: built.reversalJournal.journalNumber,
+          entryDate: new Date(built.reversalJournal.entryDate),
+          postingDate: new Date(built.reversalJournal.postingDate),
+          sourceType: "REVERSAL",
+          sourceId: id,
+          description: built.reversalJournal.description,
+          currency: built.reversalJournal.currency,
+          exchangeRate: built.reversalJournal.exchangeRate,
+          totalDebit: built.reversalJournal.totalDebit,
+          totalCredit: built.reversalJournal.totalCredit,
+          status: "POSTED",
+          isReversal: true,
+          reversalOfJournalId: id,
+          reversalReason: req.reason,
+          createdById: ctx.userId,
+          postedById: ctx.userId,
+          postedAt: new Date(),
+          idempotencyKey: `jrn-rev-${id}`,
+        },
+      });
+      const lines = await Promise.all(
+        (built.reversalLines as any[]).map((l) =>
+          tx.journalLine.create({
+            data: {
+              id: l.id,
+              journalEntryId: j.id,
+              accountId: l.accountId,
+              costCenterId: l.costCenterId ?? null,
+              description: l.description ?? null,
+              debit: l.debit,
+              credit: l.credit,
+              currency: l.currency ?? j.currency,
+              exchangeRate: l.exchangeRate ?? j.exchangeRate,
+            },
+          })
+        )
+      );
+      return { reversalJournal: j, reversalLines: lines };
+    });
+  }
+
 
   async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
   async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
