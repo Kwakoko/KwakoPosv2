@@ -12,6 +12,12 @@ function assertContextBranch(ctx: TenantContext, resourceTenantId: string, resou
   }
 }
 
+function findExistingSourceJournal(finance: ScopedFinanceRepository, tenantId: string, sourceType: string, sourceId: string) {
+  return Array.from(finance.journalEntries.values()).find(
+    (journal) => journal.tenantId === tenantId && journal.sourceType === sourceType && journal.sourceId === sourceId && !journal.isReversal
+  );
+}
+
 export function hardenFinanceRepository(finance: ScopedFinanceRepository) {
   const candidate = finance as ScopedFinanceRepository & { [MUTATION_GUARDS]?: boolean };
   if (candidate[MUTATION_GUARDS]) return finance;
@@ -116,28 +122,35 @@ export function wireCommercialFinanceBridges(
   const originalSale = commercial.createPosSale.bind(commercial);
   commercial.createPosSale = ((ctx: TenantContext, req: any) => {
     const result = originalSale(ctx, req);
-    const tender = req.payments?.[0]?.paymentMethod === "BANK"
-      ? "BANK"
-      : req.payments?.[0]?.paymentMethod === "CREDIT"
-        ? "CREDIT"
-        : req.payments?.[0]?.paymentMethod === "MOBILE_MONEY"
-          ? "MOBILE_MONEY"
-          : "CASH";
-    finance.bridgeCommercialSale(ctx, result.sale, tender as any);
+    const sale = result.sale;
+    const existing = findExistingSourceJournal(finance, ctx.tenantId, "SALE", sale.id);
+    if (!existing) {
+      const tender = req.payments?.[0]?.paymentMethod === "BANK"
+        ? "BANK"
+        : req.payments?.[0]?.paymentMethod === "CREDIT"
+          ? "CREDIT"
+          : req.payments?.[0]?.paymentMethod === "MOBILE_MONEY"
+            ? "MOBILE_MONEY"
+            : "CASH";
+      finance.bridgeCommercialSale(ctx, sale, tender as any);
+    }
     return result;
   }) as any;
 
   const originalReceipt = commercial.createPurchaseReceipt.bind(commercial);
   commercial.createPurchaseReceipt = ((ctx: TenantContext, req: any) => {
     const result = originalReceipt(ctx, req);
-    finance.bridgePurchaseReceipt(ctx, result.receipt);
+    const receipt = result.receipt;
+    const existing = findExistingSourceJournal(finance, ctx.tenantId, "PURCHASE", receipt.id);
+    if (!existing) finance.bridgePurchaseReceipt(ctx, receipt);
     return result;
   }) as any;
 
   const originalExpense = commercial.recordExpense.bind(commercial);
   commercial.recordExpense = ((ctx: TenantContext, req: any) => {
     const result = originalExpense(ctx, req);
-    finance.bridgeExpense(ctx, result);
+    const existing = findExistingSourceJournal(finance, ctx.tenantId, "EXPENSE", result.id);
+    if (!existing) finance.bridgeExpense(ctx, result);
     return result;
   }) as any;
 
