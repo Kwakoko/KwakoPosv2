@@ -106,10 +106,17 @@ describe("Phase 2 finance hardening", () => {
       sku: "BR-1",
       variants: [{ name: "Default", sku: "BR-1-V", price: 1000, costPrice: 500 }],
     });
-    const sale = commercial.createPosSale(ctx, {
+    const request = {
+      idempotencyKey: "sale-bridge-test-1",
+      deviceId: "device-a",
+      operationId: "operation-sale-1",
       items: [{ productId: product.id, variantId: product.variants[0].id, quantity: 1, unitPrice: 1000, unitCost: 500 }],
       payments: [{ amount: 1000, paymentMethod: "CASH" }],
-    } as any);
+    } as any;
+
+    const sale = commercial.createPosSale(ctx, request);
+    const duplicateSale = commercial.createPosSale(ctx, request);
+    expect(duplicateSale.sale.id).toBe(sale.sale.id);
 
     const saleJournals = Array.from(finance.journalEntries.values()).filter((j) => j.sourceType === "SALE" && j.sourceId === sale.sale.id);
     expect(saleJournals).toHaveLength(1);
