@@ -1,5 +1,5 @@
 {
-  "evaluatedAt": "2026-08-26T05:39:32.291Z",
+  "evaluatedAt": "2026-08-26T06:09:58.183Z",
   "targetUrl": "https://kwakopos-production-service-75x6obw55q-uc.a.run.app",
   "appVersion": "2.1.0",
   "overallStatus": "GREEN",
@@ -18,70 +18,70 @@
   "syntheticResults": [
     {
       "testSuite": "SYNTHETIC_TEST_A_PRODUCT_LIFECYCLE",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
-      "durationMs": 2,
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
+      "durationMs": 3,
       "status": "PASS",
       "evidence": {
-        "productId": "f6482211-330f-44f8-ad14-817d2beb25eb",
+        "productId": "0bd79f77-94b0-4f92-9adf-1757457c4396",
         "name": "Synthetic Product Alpha Updated"
       },
-      "timestamp": "2026-08-26T05:39:32.280Z"
+      "timestamp": "2026-08-26T06:09:58.167Z"
     },
     {
       "testSuite": "SYNTHETIC_TEST_B_VARIANT_INTEGRITY",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
-      "durationMs": 0,
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
+      "durationMs": 1,
       "status": "PASS",
       "evidence": {
-        "variantId": "56e3b277-260e-43ad-b51e-09e46ae7e5b0",
+        "variantId": "1e078b6c-b35a-411c-b7af-7879750d3ca9",
         "totalVariants": 2
       },
-      "timestamp": "2026-08-26T05:39:32.280Z"
+      "timestamp": "2026-08-26T06:09:58.168Z"
     },
     {
       "testSuite": "SYNTHETIC_TEST_C_STOCK_LEDGER_ARITHMETIC",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
-      "durationMs": 4,
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
+      "durationMs": 2,
       "status": "PASS",
       "evidence": {
-        "variantId": "56e3b277-260e-43ad-b51e-09e46ae7e5b0",
+        "variantId": "1e078b6c-b35a-411c-b7af-7879750d3ca9",
         "expectedStock": 135,
         "actualStock": 135
       },
-      "timestamp": "2026-08-26T05:39:32.284Z"
+      "timestamp": "2026-08-26T06:09:58.170Z"
     },
     {
       "testSuite": "SYNTHETIC_TEST_D_MULTI_DEVICE_CONVERGENCE",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
-      "durationMs": 5,
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
+      "durationMs": 10,
       "status": "PASS",
       "evidence": {
         "browserBStock": 75,
         "expected": 75
       },
-      "timestamp": "2026-08-26T05:39:32.289Z"
+      "timestamp": "2026-08-26T06:09:58.180Z"
     },
     {
       "testSuite": "SYNTHETIC_TEST_E_OFFLINE_DURABILITY",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
       "durationMs": 1,
       "status": "PASS",
       "evidence": {
         "pendingBefore": 1,
         "pendingAfter": 0
       },
-      "timestamp": "2026-08-26T05:39:32.290Z"
+      "timestamp": "2026-08-26T06:09:58.181Z"
     },
     {
       "testSuite": "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
-      "syntheticTenantId": "tenant-synthetic-191b3887",
-      "durationMs": 0,
+      "syntheticTenantId": "tenant-synthetic-1978ce6e",
+      "durationMs": 1,
       "status": "PASS",
       "evidence": {
         "version": 3,
         "preserved": 1
       },
-      "timestamp": "2026-08-26T05:39:32.290Z"
+      "timestamp": "2026-08-26T06:09:58.182Z"
     }
   ]
 }
