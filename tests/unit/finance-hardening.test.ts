@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryStore, ScopedCommercialRepository, ScopedFinanceRepository, hardenFinanceRepository, wireCommercialFinanceBridges } from "../../packages/database/src/index.js";
+import type { TenantContext } from "@kwakopos2/contracts";
 
-const ctx = {
+const ctx: TenantContext = {
   tenantId: "11111111-1111-1111-1111-111111111111",
-  branchId: "22222222-2222-2222-222222222222",
-  userId: "33333333-3333-3333-333333333333",
+  branchId: "22222222-2222-2222-2222-222222222222",
+  userId: "33333333-3333-3333-3333-333333333333",
   roles: ["ADMIN"],
   permissions: ["*"],
-} as const;
+};
 
 describe("Phase 2 finance hardening", () => {
   it("rejects account creation outside the current branch and duplicate codes", () => {
@@ -38,7 +39,7 @@ describe("Phase 2 finance hardening", () => {
 
   it("enforces fiscal period ownership and uniqueness before journal posting", () => {
     const finance = hardenFinanceRepository(new ScopedFinanceRepository(new InMemoryStore()));
-    const foreignCtx = { ...ctx, tenantId: "55555555-5555-5555-5555-555555555555" };
+    const foreignCtx: TenantContext = { ...ctx, tenantId: "55555555-5555-5555-5555-555555555555" };
 
     expect(() => finance.createJournalEntry(ctx, {
       description: "should fail",
@@ -50,13 +51,13 @@ describe("Phase 2 finance hardening", () => {
       ],
     })).toThrow(/FINANCE_PERIOD_NOT_FOUND/);
 
-    const period = finance.createFiscalYear(ctx, {
+    const fiscalYear = finance.createFiscalYear(ctx, {
       name: "FY 2026",
       startDate: "2026-01-01T00:00:00.000Z",
       endDate: "2026-12-31T23:59:59.999Z",
     });
     const created = finance.createAccountingPeriod(ctx, {
-      fiscalYearId: period.id,
+      fiscalYearId: fiscalYear.id,
       periodNumber: 1,
       name: "2026-01",
       startDate: "2026-01-01T00:00:00.000Z",
@@ -64,11 +65,11 @@ describe("Phase 2 finance hardening", () => {
     });
 
     expect(() => finance.createAccountingPeriod(ctx, {
-      fiscalYearId: period.id,
+      fiscalYearId: fiscalYear.id,
       periodNumber: 1,
       name: "Duplicate",
-      startDate: created.startDate as string,
-      endDate: created.endDate as string,
+      startDate: String(created.startDate),
+      endDate: String(created.endDate),
     })).toThrow(/FINANCE_PERIOD_EXISTS/);
 
     expect(() => finance.createJournalEntry(foreignCtx, {
