@@ -18,8 +18,8 @@
     "test:invariants": "vitest run tests/unit/invariants.test.ts",
     "certify": "tsx scripts/certification/runCertification.ts",
     "production:certify:deployed": "tsx scripts/release/certify-deployed.ts",
-    "production:browser": "npx --yes playwright@1.62.1 test tests/browser/production-browser.spec.mjs --config=playwright.production.config.mjs",
-    "production:browser:install": "npx --yes playwright@1.62.1 install --with-deps chromium",
+    "production:browser": "npx playwright test tests/browser/production-browser.spec.mjs --config=playwright.production.config.mjs",
+    "production:browser:install": "npx playwright install --with-deps chromium",
     "release:deploy-candidate": "tsx scripts/release/deploy-candidate.ts",
     "release:promote": "tsx scripts/release/promote-revision.ts",
     "release:prove": "tsx scripts/release/prove-production-release.ts",
@@ -29,16 +29,16 @@
     "dev:web": "npm run dev --workspace=@kwakopos2/web"
   },
   "dependencies": {
-    "zod": "^3.22.4",
-    "jsonwebtoken": "^9.0.2",
-    "typescript": "^5.3.3",
-    "tsx": "^4.7.0",
-    "prisma": "^5.9.1",
     "@types/jsonwebtoken": "^9.0.5",
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.9.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@playwright/test": "^1.41.2",
+    "@playwright/test": "^1.62.1",
     "vitest": "^1.2.2"
   }
 }
