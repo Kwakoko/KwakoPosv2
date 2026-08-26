@@ -112,6 +112,10 @@ export class IncidentEngine {
     return inc;
   }
 
+  resolveIncident(incidentId: string, resolutionNote: string, actor = "system-operator"): IncidentRecord | null {
+    return this.updateIncidentStatus(incidentId, "RESOLVED", resolutionNote, actor);
+  }
+
   getIncident(id: string): IncidentRecord | null {
     return this.incidents.get(id) || null;
   }
@@ -120,6 +124,23 @@ export class IncidentEngine {
     return Array.from(this.incidents.values()).filter(
       (inc) => inc.status !== "RESOLVED" && (!tenantId || inc.tenantId === tenantId)
     );
+  }
+
+  searchIncidents(filters: {
+    tenantId?: string;
+    status?: IncidentStatus;
+    severity?: IncidentSeverity;
+    limit?: number;
+  }): IncidentRecord[] {
+    return Array.from(this.incidents.values())
+      .filter((inc) => {
+        if (filters.tenantId && inc.tenantId !== filters.tenantId) return false;
+        if (filters.status && inc.status !== filters.status) return false;
+        if (filters.severity && inc.severity !== filters.severity) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      .slice(0, filters.limit || 100);
   }
 
   getAllIncidents(limit = 100): IncidentRecord[] {

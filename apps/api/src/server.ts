@@ -420,12 +420,71 @@ export function buildServer(): FastifyInstance {
     return { success: true, data: { tenants } };
   });
 
+  server.get("/admin/observability/tenants/:id", async (req, reply) => {
+    const tenantId = (req.params as any).id;
+    const httpSummary = globalMetrics.getTenantHttpMetricsSummary(tenantId);
+    const rumSummary = globalMetrics.getTenantRumMetricsSummary(tenantId);
+    const activeIncidents = globalIncidentEngine.getActiveIncidents(tenantId);
+
+    const score = globalTenantHealthScorer.computeTenantScore({
+      tenantId,
+      apiSuccessRate: httpSummary.successRate,
+      syncSuccessRate: 100,
+      inventoryIntegrity: 100,
+      medianLatencyMs: httpSummary.p50LatencyMs || 25,
+      activeIncidentCount: activeIncidents.length,
+    });
+
+    return {
+      success: true,
+      data: {
+        tenantId,
+        score,
+        http: httpSummary,
+        rum: rumSummary,
+        activeIncidents,
+      },
+    };
+  });
+
   server.get("/admin/observability/incidents", async (req) => {
     const tenantId = (req.query as any)?.tenantId;
-    const incidents = tenantId
-      ? globalIncidentEngine.getActiveIncidents(tenantId)
-      : globalIncidentEngine.getAllIncidents();
+    const status = (req.query as any)?.status;
+    const severity = (req.query as any)?.severity;
+
+    const incidents = globalIncidentEngine.searchIncidents({
+      tenantId,
+      status,
+      severity,
+    });
     return { success: true, data: { incidents } };
+  });
+
+  server.post("/admin/observability/incidents", async (req, reply) => {
+    const { title, description, severity, tenantId, branchId, service, affectedOperationIds } = (req.body as any) || {};
+    if (!title || !description || !severity) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "title, description, and severity required" } });
+    }
+    const incident = await globalIncidentEngine.createIncident({
+      title,
+      description,
+      severity,
+      tenantId,
+      branchId,
+      service,
+      affectedOperationIds,
+    });
+    return reply.status(201).send({ success: true, data: incident });
+  });
+
+  server.post("/admin/observability/incidents/:id/resolve", async (req, reply) => {
+    const incidentId = (req.params as any).id;
+    const { note, actor } = (req.body as any) || {};
+    const updated = globalIncidentEngine.resolveIncident(incidentId, note || "Resolved by operator", actor || "admin");
+    if (!updated) {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Incident not found" } });
+    }
+    return { success: true, data: updated };
   });
 
   server.get("/admin/observability/slos", async () => {

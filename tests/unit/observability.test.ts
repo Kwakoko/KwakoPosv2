@@ -242,4 +242,65 @@ describe("KwakoPos Production Observability Platform Suite", () => {
       expect(report.reasons.length).toBeGreaterThan(0);
     });
   });
+
+  describe("7. Tenant-Level Metrics & Incident Resolution Lifecycle", () => {
+    it("filters HTTP and RUM telemetry by tenant correctly", () => {
+      globalMetrics.recordHttpRequest({
+        route: "/products",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 40,
+        tenantId: "tenant-alpha",
+        timestamp: Date.now(),
+      });
+      globalMetrics.recordHttpRequest({
+        route: "/products",
+        method: "GET",
+        statusCode: 500,
+        durationMs: 90,
+        tenantId: "tenant-beta",
+        timestamp: Date.now(),
+      });
+
+      const alphaHttp = globalMetrics.getTenantHttpMetricsSummary("tenant-alpha");
+      expect(alphaHttp.totalRequests).toBe(1);
+      expect(alphaHttp.errorCount5xx).toBe(0);
+      expect(alphaHttp.successRate).toBe(100);
+
+      const betaHttp = globalMetrics.getTenantHttpMetricsSummary("tenant-beta");
+      expect(betaHttp.totalRequests).toBe(1);
+      expect(betaHttp.errorCount5xx).toBe(1);
+      expect(betaHttp.successRate).toBe(0);
+    });
+
+    it("creates, searches, and resolves incidents with full audit trail", async () => {
+      const inc = await globalIncidentEngine.createIncident({
+        title: "High Latency Warning",
+        description: "P95 latency exceeded 600ms",
+        severity: "WARNING",
+        tenantId: "tenant-alpha",
+        service: "api-gateway",
+      });
+
+      expect(inc.id).toBeDefined();
+      expect(inc.status).toBe("DETECTED");
+
+      const found = globalIncidentEngine.searchIncidents({
+        tenantId: "tenant-alpha",
+        severity: "WARNING",
+      });
+      expect(found).toHaveLength(1);
+
+      const resolved = globalIncidentEngine.resolveIncident(
+        inc.id,
+        "Scaled up Cloud Run instances to resolve contention",
+        "ops-admin"
+      );
+      expect(resolved).not.toBeNull();
+      expect(resolved?.status).toBe("RESOLVED");
+      expect(resolved?.resolvedAt).toBeDefined();
+      expect(resolved?.timeline.length).toBe(2);
+      expect(resolved?.timeline[1].actor).toBe("ops-admin");
+    });
+  });
 });

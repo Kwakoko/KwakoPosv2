@@ -149,6 +149,39 @@ export class FrontendRumCollector {
     }
   }
 
+  private flushTimer?: any;
+
+  startAutoFlush(intervalMs = 10000) {
+    if (this.flushTimer) clearInterval(this.flushTimer);
+    if (typeof setInterval !== "undefined") {
+      this.flushTimer = setInterval(() => {
+        if (this.queue.length > 0) {
+          this.flush().catch(() => {});
+        }
+      }, intervalMs);
+    }
+  }
+
+  stopAutoFlush() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+  }
+
+  installBrowserHooks() {
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", () => this.recordConnectionState(true));
+      window.addEventListener("offline", () => this.recordConnectionState(false));
+      window.addEventListener("error", (ev) => {
+        this.recordError(ev.error || ev.message);
+      });
+      window.addEventListener("unhandledrejection", (ev) => {
+        this.recordError(ev.reason instanceof Error ? ev.reason : String(ev.reason));
+      });
+    }
+  }
+
   getQueuedEvents(): RumPayload[] {
     return [...this.queue];
   }
