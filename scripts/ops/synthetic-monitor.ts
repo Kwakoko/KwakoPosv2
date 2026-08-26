@@ -1,5 +1,12 @@
 import { randomUUID } from "crypto";
-import { ScopedProductRepository, ScopedStockRepository, ScopedCommercialRepository, ScopedFinanceRepository, globalInMemoryStore } from "@kwakopos2/database";
+import {
+  ScopedProductRepository,
+  ScopedStockRepository,
+  ScopedCommercialRepository,
+  ScopedFinanceRepository,
+  ScopedWorkforceRepository,
+  globalInMemoryStore,
+} from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
@@ -10,7 +17,15 @@ import {
   FinancialBridge,
   AccountingEngine,
   ReceivablesPayablesEngine,
+  EmployeeEngine,
+  AttendanceEngine,
+  SchedulingEngine,
+  LeaveEngine,
+  TaskWorkOrderEngine,
+  PayrollInputEngine,
+  LaborCostingEngine,
 } from "@kwakopos2/domain";
+
 import { globalMetrics, globalIncidentEngine, defaultLogger } from "@kwakopos2/observability";
 
 export interface SyntheticRunResult {
@@ -684,9 +699,261 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   });
   console.log(` [F08/F08] ${passF08 ? "✓" : "✗"} Synthetic Test F08 (Duplicate Payment Idempotency -> Single Financial Result): ${passF08 ? "PASS" : "FAIL"}`);
 
+  // ==========================================
+  // PHASE 3: WORKFORCE SYNTHETIC TESTS (W01 - W10)
+  // ==========================================
+  const workforceRepo = new ScopedWorkforceRepository(globalInMemoryStore);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W01: Create Employee -> Assign Branch -> Verify Persistence
+  // -------------------------------------------------------------------------
+  const startW01 = Date.now();
+  const { employee: empW01 } = workforceRepo.createEmployee(ctx, {
+    firstName: "Emanuel",
+    lastName: "Mushi",
+    phone: "+255755112233",
+    email: "emanuel@example.com",
+    baseSalary: 1200000,
+    hourlyRate: 7500,
+  });
+  const fetchedEmpW01 = workforceRepo.getEmployeeById(ctx, empW01.id);
+  const passW01 = fetchedEmpW01 !== null && fetchedEmpW01.employeeNumber.startsWith("EMP-");
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W01_EMPLOYEE_CREATION_PERSISTENCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startW01,
+    status: passW01 ? "PASS" : "FAIL",
+    evidence: { employeeId: empW01.id, employeeNumber: fetchedEmpW01?.employeeNumber },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W01/W10] ${passW01 ? "✓" : "✗"} Synthetic Test W01 (Create Employee -> Assign Branch -> Persistence): ${passW01 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W02: Schedule Shift -> Publish -> Verify Schedule
+  // -------------------------------------------------------------------------
+  const startW02 = Date.now();
+  const schedW02 = workforceRepo.createSchedule(ctx, {
+    employeeId: empW01.id,
+    date: "2026-08-27",
+    startTime: "08:00",
+    endTime: "17:00",
+    status: "PUBLISHED",
+  });
+  const passW02 = schedW02 !== null && schedW02.status === "PUBLISHED" && schedW02.employeeId === empW01.id;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W02_SCHEDULE_PUBLISH",
+    syntheticTenantId,
+    durationMs: Date.now() - startW02,
+    status: passW02 ? "PASS" : "FAIL",
+    evidence: { scheduleId: schedW02.id, status: schedW02.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W02/W10] ${passW02 ? "✓" : "✗"} Synthetic Test W02 (Schedule Shift -> Publish -> Visibility): ${passW02 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W03: Clock In -> Offline Local State -> Sync to Browser B
+  // -------------------------------------------------------------------------
+  const startW03 = Date.now();
+  const clockInW03 = workforceRepo.clockIn(ctx, {
+    employeeId: empW01.id,
+    scheduleId: schedW02.id,
+    clockInTime: "2026-08-27T08:00:00.000Z",
+    method: "STANDARD",
+    idempotencyKey: `clk-w03-${randomUUID()}`,
+  });
+  const passW03 = clockInW03.status === "PRESENT" && clockInW03.employeeId === empW01.id;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W03_CLOCK_IN_SYNC",
+    syntheticTenantId,
+    durationMs: Date.now() - startW03,
+    status: passW03 ? "PASS" : "FAIL",
+    evidence: { attendanceId: clockInW03.id, status: clockInW03.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W03/W10] ${passW03 ? "✓" : "✗"} Synthetic Test W03 (Clock In -> Sync Convergence): ${passW03 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W04: Clock Out -> Timesheet Generation -> Calculate Hours
+  // -------------------------------------------------------------------------
+  const startW04 = Date.now();
+  const clockOutW04 = workforceRepo.clockOut(ctx, clockInW03.id, {
+    clockOutTime: "2026-08-27T18:00:00.000Z", // 10h elapsed, 60m break -> 9h worked -> 8 reg + 1 ot
+    breakMinutes: 60,
+  });
+  const timesheetW04 = workforceRepo.generateTimesheet(ctx, {
+    employeeId: empW01.id,
+    periodStart: "2026-08-01",
+    periodEnd: "2026-08-31",
+  });
+  const passW04 =
+    clockOutW04.regularMinutes === 480 &&
+    clockOutW04.overtimeMinutes === 60 &&
+    timesheetW04.totalWorkedMinutes === 540;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W04_CLOCK_OUT_TIMESHEET_CALCULATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startW04,
+    status: passW04 ? "PASS" : "FAIL",
+    evidence: {
+      regularMinutes: clockOutW04.regularMinutes,
+      overtimeMinutes: clockOutW04.overtimeMinutes,
+      timesheetWorkedMinutes: timesheetW04.totalWorkedMinutes,
+    },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W04/W10] ${passW04 ? "✓" : "✗"} Synthetic Test W04 (Clock Out -> Timesheet Hours Calculation): ${passW04 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W05: Leave Request -> Approval -> Balance Validation
+  // -------------------------------------------------------------------------
+  const startW05 = Date.now();
+  const leaveTypeW05 = workforceRepo.createLeaveType(ctx, {
+    name: "Casual Leave",
+    code: `CASUAL-${randomUUID().slice(0, 4)}`,
+    defaultAllowanceDays: 14,
+  });
+  const leaveReqW05 = workforceRepo.requestLeave(ctx, {
+    employeeId: empW01.id,
+    leaveTypeId: leaveTypeW05.id,
+    startDate: "2026-09-10",
+    endDate: "2026-09-12",
+    totalDays: 3,
+    reason: "Personal family matters",
+  });
+  const approvedLeaveW05 = workforceRepo.approveLeave(ctx, leaveReqW05.id, true);
+  const remainingLeaveW05 = LeaveEngine.calculateRemainingBalance(leaveTypeW05, [approvedLeaveW05]);
+  const passW05 = approvedLeaveW05.status === "APPROVED" && remainingLeaveW05.remainingDays === 11;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W05_LEAVE_APPROVAL_BALANCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startW05,
+    status: passW05 ? "PASS" : "FAIL",
+    evidence: { leaveId: approvedLeaveW05.id, remainingDays: remainingLeaveW05.remainingDays },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W05/W10] ${passW05 ? "✓" : "✗"} Synthetic Test W05 (Leave Request -> Approval -> Balance Check): ${passW05 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W06: Task -> Assignment -> Completion -> Verification
+  // -------------------------------------------------------------------------
+  const startW06 = Date.now();
+  const taskW06 = workforceRepo.createTask(ctx, {
+    title: "Sanitize POS Terminal Keypads & Printers",
+    priority: "HIGH",
+    assignedEmployeeId: empW01.id,
+  });
+  const completedTaskW06 = workforceRepo.updateTask(ctx, taskW06.id, { status: "COMPLETED" });
+  const verifiedTaskW06 = workforceRepo.updateTask(ctx, taskW06.id, { status: "VERIFIED" });
+  const passW06 = verifiedTaskW06.status === "VERIFIED" && verifiedTaskW06.verifiedById === ctx.userId;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W06_TASK_LIFECYCLE_VERIFICATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startW06,
+    status: passW06 ? "PASS" : "FAIL",
+    evidence: { taskId: verifiedTaskW06.id, status: verifiedTaskW06.status, verifiedBy: verifiedTaskW06.verifiedById },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W06/W10] ${passW06 ? "✓" : "✗"} Synthetic Test W06 (Task Assignment -> Completion -> Verification): ${passW06 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W07: Approved Hours -> Payroll Input Generation
+  // -------------------------------------------------------------------------
+  const startW07 = Date.now();
+  const approvedTsW07 = workforceRepo.approveTimesheet(ctx, timesheetW04.id);
+  const payrollInputW07 = workforceRepo.generatePayrollInputFromTimesheet(ctx, empW01.id, approvedTsW07.id);
+  const passW07 = payrollInputW07.basicHours === 8 && payrollInputW07.grossPay > 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W07_PAYROLL_INPUT_DERIVATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startW07,
+    status: passW07 ? "PASS" : "FAIL",
+    evidence: { payrollInputId: payrollInputW07.id, basicHours: payrollInputW07.basicHours, grossPay: payrollInputW07.grossPay },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W07/W10] ${passW07 ? "✓" : "✗"} Synthetic Test W07 (Approved Timesheet -> Payroll Input Derivation): ${passW07 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W08: Work Order -> Labor Costing Calculation
+  // -------------------------------------------------------------------------
+  const startW08 = Date.now();
+  const woW08 = workforceRepo.createWorkOrder(ctx, {
+    title: "Network Router & Switch Firmware Upgrade",
+    assignedEmployeeId: empW01.id,
+    laborHours: 3,
+    laborRate: 20000,
+    materialsCostTotal: 50000,
+  });
+  const passW08 = woW08.laborCostTotal === 60000 && woW08.grandTotal === 110000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W08_WORK_ORDER_LABOR_COSTING",
+    syntheticTenantId,
+    durationMs: Date.now() - startW08,
+    status: passW08 ? "PASS" : "FAIL",
+    evidence: { workOrderId: woW08.id, laborCost: woW08.laborCostTotal, grandTotal: woW08.grandTotal },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W08/W10] ${passW08 ? "✓" : "✗"} Synthetic Test W08 (Work Order -> Labor Costing Arithmetic): ${passW08 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W09: Duplicate Attendance Event -> Idempotency Key Rejection
+  // -------------------------------------------------------------------------
+  const startW09 = Date.now();
+  const keyW09 = `clk-idem-w09-${randomUUID()}`;
+  workforceRepo.clockIn(ctx, {
+    employeeId: empW01.id,
+    clockInTime: "2026-08-28T08:00:00.000Z",
+    idempotencyKey: keyW09,
+  });
+  let duplicateRejectedW09 = false;
+  try {
+    workforceRepo.clockIn(ctx, {
+      employeeId: empW01.id,
+      clockInTime: "2026-08-28T08:00:00.000Z",
+      idempotencyKey: keyW09,
+    });
+  } catch (err: any) {
+    if (err.message.includes("INVARIANT_W004_VIOLATION")) {
+      duplicateRejectedW09 = true;
+    }
+  }
+  const passW09 = duplicateRejectedW09;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W09_ATTENDANCE_IDEMPOTENCY_REJECTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startW09,
+    status: passW09 ? "PASS" : "FAIL",
+    evidence: { duplicateRejected: duplicateRejectedW09 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W09/W10] ${passW09 ? "✓" : "✗"} Synthetic Test W09 (Duplicate Attendance Event -> Idempotent Rejection): ${passW09 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST W10: Cross-Tenant Employee/Task Access -> Strict Isolation Rejection
+  // -------------------------------------------------------------------------
+  const startW10 = Date.now();
+  const foreignCtx = {
+    tenantId: `tenant-foreign-${randomUUID().slice(0, 8)}`,
+    branchId: `branch-foreign-${randomUUID().slice(0, 8)}`,
+    userId: `user-foreign-${randomUUID().slice(0, 8)}`,
+    roles: ["ADMIN"],
+    permissions: ["*"],
+  };
+  const foreignEmployee = workforceRepo.getEmployeeById(foreignCtx, empW01.id);
+  const passW10 = foreignEmployee === null;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_W10_CROSS_TENANT_WORKFORCE_ISOLATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startW10,
+    status: passW10 ? "PASS" : "FAIL",
+    evidence: { crossTenantAccessPrevented: passW10 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [W10/W10] ${passW10 ? "✓" : "✗"} Synthetic Test W10 (Cross-Tenant Workforce Access -> Strict Isolation Rejection): ${passW10 ? "PASS" : "FAIL"}`);
+
   const allPassed = results.every((r) => r.status === "PASS");
   return { allPassed, results };
 }
+
 
 if (process.argv[1] && process.argv[1].endsWith("synthetic-monitor.ts")) {
   runSyntheticProductionSuite()

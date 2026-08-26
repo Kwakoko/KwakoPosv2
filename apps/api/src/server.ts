@@ -31,6 +31,26 @@ import {
   CreateBankAccountRequestSchema,
   CreateBankTransactionRequestSchema,
   CreateBudgetRequestSchema,
+  CreateDepartmentRequestSchema,
+  CreateJobPositionRequestSchema,
+  CreateEmployeeRequestSchema,
+  UpdateEmployeeRequestSchema,
+  CreateEmploymentRecordRequestSchema,
+  CreateShiftTemplateRequestSchema,
+  CreateWorkforceScheduleRequestSchema,
+  ClockInRequestSchema,
+  ClockOutRequestSchema,
+  CreateTimesheetRequestSchema,
+  CreateLeaveRequestSchema,
+  CreateWorkforceTaskRequestSchema,
+  UpdateWorkforceTaskRequestSchema,
+  CreateWorkOrderRequestSchema,
+  UpdateWorkOrderRequestSchema,
+  CreateEmployeeSkillRequestSchema,
+  CreateEmployeeCertificationRequestSchema,
+  CreatePerformanceReviewRequestSchema,
+  CreateCommissionRecordRequestSchema,
+  CreatePayrollInputRequestSchema,
   SyncPushRequestSchema,
   SyncDeltaRequestSchema,
 } from "@kwakopos2/contracts";
@@ -40,12 +60,15 @@ import {
   ScopedStockRepository,
   ScopedCommercialRepository,
   ScopedFinanceRepository,
+  ScopedWorkforceRepository,
   globalCommercialRepository,
   globalFinanceRepository,
+  globalWorkforceRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   globalInMemoryStore,
 } from "@kwakopos2/database";
+
 import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
 import {
   createTraceContext,
@@ -982,6 +1005,270 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const anomalies = globalFinanceRepository.getAnomalies(req.tenantContext!);
     return { success: true, data: anomalies };
   });
+
+  // ==========================================
+  // PHASE 3: Workforce & Operational Workforce Control REST Routes
+  // ==========================================
+
+  // Departments
+  server.get("/api/v1/workforce/departments", async (req) => {
+    const departments = globalWorkforceRepository.getDepartments(req.tenantContext!);
+    return { success: true, data: departments };
+  });
+
+  server.post("/api/v1/workforce/departments", async (req, reply) => {
+    const validated = CreateDepartmentRequestSchema.parse(req.body);
+    const department = globalWorkforceRepository.createDepartment(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: department });
+  });
+
+  // Job Positions
+  server.get("/api/v1/workforce/positions", async (req) => {
+    const positions = globalWorkforceRepository.getJobPositions(req.tenantContext!);
+    return { success: true, data: positions };
+  });
+
+  server.post("/api/v1/workforce/positions", async (req, reply) => {
+    const validated = CreateJobPositionRequestSchema.parse(req.body);
+    const position = globalWorkforceRepository.createJobPosition(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: position });
+  });
+
+  // Employees & Employment Records
+  server.get("/api/v1/workforce/employees", async (req) => {
+    const employees = globalWorkforceRepository.getEmployees(req.tenantContext!);
+    return { success: true, data: employees };
+  });
+
+  server.post("/api/v1/workforce/employees", async (req, reply) => {
+    const validated = CreateEmployeeRequestSchema.parse(req.body);
+    const result = globalWorkforceRepository.createEmployee(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/workforce/employees/:id", async (req, reply) => {
+    const employee = globalWorkforceRepository.getEmployeeById(req.tenantContext!, (req.params as any).id);
+    if (!employee) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Employee not found" } });
+    return { success: true, data: employee };
+  });
+
+  server.put("/api/v1/workforce/employees/:id", async (req) => {
+    const validated = UpdateEmployeeRequestSchema.parse(req.body);
+    const reason = (req.body as any)?.reason;
+    const updated = globalWorkforceRepository.updateEmployee(req.tenantContext!, (req.params as any).id, validated, reason);
+    return { success: true, data: updated };
+  });
+
+  server.get("/api/v1/workforce/employees/:id/employment-history", async (req) => {
+    const history = globalWorkforceRepository.getEmploymentHistory(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: history };
+  });
+
+  // Shift Templates & Schedules
+  server.get("/api/v1/workforce/shifts/templates", async (req) => {
+    const templates = globalWorkforceRepository.getShiftTemplates(req.tenantContext!);
+    return { success: true, data: templates };
+  });
+
+  server.post("/api/v1/workforce/shifts/templates", async (req, reply) => {
+    const validated = CreateShiftTemplateRequestSchema.parse(req.body);
+    const template = globalWorkforceRepository.createShiftTemplate(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: template });
+  });
+
+  server.get("/api/v1/workforce/schedules", async (req) => {
+    const schedules = globalWorkforceRepository.getSchedules(req.tenantContext!);
+    return { success: true, data: schedules };
+  });
+
+  server.post("/api/v1/workforce/schedules", async (req, reply) => {
+    const validated = CreateWorkforceScheduleRequestSchema.parse(req.body);
+    const schedule = globalWorkforceRepository.createSchedule(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: schedule });
+  });
+
+  // Attendance & Time Tracking
+  server.get("/api/v1/workforce/attendance", async (req) => {
+    const records = globalWorkforceRepository.getAttendanceRecords(req.tenantContext!);
+    return { success: true, data: records };
+  });
+
+  server.post("/api/v1/workforce/attendance/clock-in", async (req, reply) => {
+    const validated = ClockInRequestSchema.parse(req.body);
+    const record = globalWorkforceRepository.clockIn(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: record });
+  });
+
+  server.post("/api/v1/workforce/attendance/:id/clock-out", async (req) => {
+    const validated = ClockOutRequestSchema.parse(req.body);
+    const record = globalWorkforceRepository.clockOut(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: record };
+  });
+
+  // Timesheets
+  server.get("/api/v1/workforce/timesheets", async (req) => {
+    const timesheets = globalWorkforceRepository.getTimesheets(req.tenantContext!);
+    return { success: true, data: timesheets };
+  });
+
+  server.post("/api/v1/workforce/timesheets", async (req, reply) => {
+    const validated = CreateTimesheetRequestSchema.parse(req.body);
+    const timesheet = globalWorkforceRepository.generateTimesheet(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: timesheet });
+  });
+
+  server.post("/api/v1/workforce/timesheets/:id/approve", async (req) => {
+    const approved = globalWorkforceRepository.approveTimesheet(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: approved };
+  });
+
+  // Leave Management
+  server.get("/api/v1/workforce/leave/types", async (req) => {
+    const types = globalWorkforceRepository.getLeaveTypes(req.tenantContext!);
+    return { success: true, data: types };
+  });
+
+  server.post("/api/v1/workforce/leave/types", async (req, reply) => {
+    const body = (req.body as any) || {};
+    const type = globalWorkforceRepository.createLeaveType(req.tenantContext!, body);
+    return reply.status(201).send({ success: true, data: type });
+  });
+
+  server.get("/api/v1/workforce/leave/requests", async (req) => {
+    const requests = globalWorkforceRepository.getLeaveRequests(req.tenantContext!);
+    return { success: true, data: requests };
+  });
+
+  server.post("/api/v1/workforce/leave/requests", async (req, reply) => {
+    const validated = CreateLeaveRequestSchema.parse(req.body);
+    const request = globalWorkforceRepository.requestLeave(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: request });
+  });
+
+  server.post("/api/v1/workforce/leave/requests/:id/approve", async (req) => {
+    const { approved, reason } = (req.body as any) || {};
+    const updated = globalWorkforceRepository.approveLeave(req.tenantContext!, (req.params as any).id, approved !== false, reason);
+    return { success: true, data: updated };
+  });
+
+  // Tasks & Work Orders
+  server.get("/api/v1/workforce/tasks", async (req) => {
+    const tasks = globalWorkforceRepository.getTasks(req.tenantContext!);
+    return { success: true, data: tasks };
+  });
+
+  server.post("/api/v1/workforce/tasks", async (req, reply) => {
+    const validated = CreateWorkforceTaskRequestSchema.parse(req.body);
+    const task = globalWorkforceRepository.createTask(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: task });
+  });
+
+  server.put("/api/v1/workforce/tasks/:id", async (req) => {
+    const validated = UpdateWorkforceTaskRequestSchema.parse(req.body);
+    const updated = globalWorkforceRepository.updateTask(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: updated };
+  });
+
+  server.get("/api/v1/workforce/work-orders", async (req) => {
+    const workOrders = globalWorkforceRepository.getWorkOrders(req.tenantContext!);
+    return { success: true, data: workOrders };
+  });
+
+  server.post("/api/v1/workforce/work-orders", async (req, reply) => {
+    const validated = CreateWorkOrderRequestSchema.parse(req.body);
+    const wo = globalWorkforceRepository.createWorkOrder(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: wo });
+  });
+
+  server.put("/api/v1/workforce/work-orders/:id", async (req) => {
+    const validated = UpdateWorkOrderRequestSchema.parse(req.body);
+    const updated = globalWorkforceRepository.updateWorkOrder(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: updated };
+  });
+
+  // Skills & Certifications
+  server.post("/api/v1/workforce/employees/:id/skills", async (req, reply) => {
+    const validated = CreateEmployeeSkillRequestSchema.parse(req.body);
+    const skill = globalWorkforceRepository.addSkill(req.tenantContext!, (req.params as any).id, validated);
+    return reply.status(201).send({ success: true, data: skill });
+  });
+
+  server.get("/api/v1/workforce/employees/:id/skills", async (req) => {
+    const skills = globalWorkforceRepository.getSkills(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: skills };
+  });
+
+  server.post("/api/v1/workforce/employees/:id/certifications", async (req, reply) => {
+    const validated = CreateEmployeeCertificationRequestSchema.parse(req.body);
+    const cert = globalWorkforceRepository.addCertification(req.tenantContext!, (req.params as any).id, validated);
+    return reply.status(201).send({ success: true, data: cert });
+  });
+
+  server.get("/api/v1/workforce/certifications", async (req) => {
+    const employeeId = (req.query as any)?.employeeId;
+    const certs = globalWorkforceRepository.getCertifications(req.tenantContext!, employeeId);
+    return { success: true, data: certs };
+  });
+
+  // Performance Reviews
+  server.get("/api/v1/workforce/performance", async (req) => {
+    const employeeId = (req.query as any)?.employeeId;
+    const reviews = globalWorkforceRepository.getPerformanceReviews(req.tenantContext!, employeeId);
+    return { success: true, data: reviews };
+  });
+
+  server.post("/api/v1/workforce/performance", async (req, reply) => {
+    const validated = CreatePerformanceReviewRequestSchema.parse(req.body);
+    const review = globalWorkforceRepository.createPerformanceReview(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: review });
+  });
+
+  // Commissions
+  server.get("/api/v1/workforce/commissions", async (req) => {
+    const commissions = globalWorkforceRepository.getCommissions(req.tenantContext!);
+    return { success: true, data: commissions };
+  });
+
+  server.post("/api/v1/workforce/commissions", async (req, reply) => {
+    const validated = CreateCommissionRecordRequestSchema.parse(req.body);
+    const record = globalWorkforceRepository.recordCommission(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: record });
+  });
+
+  server.post("/api/v1/workforce/commissions/:id/approve", async (req) => {
+    const approved = globalWorkforceRepository.approveCommission(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: approved };
+  });
+
+  // Payroll Inputs
+  server.get("/api/v1/workforce/payroll-inputs", async (req) => {
+    const inputs = globalWorkforceRepository.getPayrollInputs(req.tenantContext!);
+    return { success: true, data: inputs };
+  });
+
+  server.post("/api/v1/workforce/payroll-inputs/from-timesheet", async (req, reply) => {
+    const { employeeId, timesheetId } = (req.body as any) || {};
+    const input = globalWorkforceRepository.generatePayrollInputFromTimesheet(req.tenantContext!, employeeId, timesheetId);
+    return reply.status(201).send({ success: true, data: input });
+  });
+
+  server.post("/api/v1/workforce/payroll-inputs/:id/approve", async (req) => {
+    const approved = globalWorkforceRepository.approvePayrollInput(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: approved };
+  });
+
+  // Workforce Dashboard & Analytics
+  server.get("/api/v1/workforce/dashboard", async (req) => {
+    const dashboard = globalWorkforceRepository.getDashboardSummary(req.tenantContext!);
+    return { success: true, data: dashboard };
+  });
+
+  server.get("/api/v1/workforce/analytics", async (req) => {
+    const period = (req.query as any)?.period || "2026-08";
+    const report = globalWorkforceRepository.getAnalyticsReport(req.tenantContext!, period);
+    return { success: true, data: report };
+  });
+
 
 
   // ==========================================

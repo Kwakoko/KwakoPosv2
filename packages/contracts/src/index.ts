@@ -48,11 +48,41 @@ export const CommercialPermissionEnum = z.enum([
   "BUDGET_VIEW",
   "BUDGET_MANAGE",
   "PERIOD_CLOSE",
-  "PERIOD_REOPEN",
   "FINANCIAL_REPORT_VIEW",
   "FINANCIAL_REPORT_EXPORT",
+  "WORKFORCE_VIEW",
+  "EMPLOYEE_VIEW",
+  "EMPLOYEE_CREATE",
+  "EMPLOYEE_EDIT",
+  "EMPLOYEE_ARCHIVE",
+  "ATTENDANCE_VIEW",
+  "ATTENDANCE_RECORD",
+  "ATTENDANCE_CORRECT",
+  "ATTENDANCE_APPROVE",
+  "SCHEDULE_VIEW",
+  "SCHEDULE_CREATE",
+  "SCHEDULE_PUBLISH",
+  "SCHEDULE_EDIT",
+  "LEAVE_VIEW",
+  "LEAVE_REQUEST",
+  "LEAVE_APPROVE",
+  "LEAVE_REJECT",
+  "TASK_VIEW",
+  "TASK_CREATE",
+  "TASK_ASSIGN",
+  "TASK_VERIFY",
+  "WORK_ORDER_VIEW",
+  "WORK_ORDER_CREATE",
+  "WORK_ORDER_MANAGE",
+  "PAYROLL_INPUT_VIEW",
+  "PAYROLL_INPUT_APPROVE",
+  "PERFORMANCE_VIEW",
+  "PERFORMANCE_MANAGE",
+  "CERTIFICATION_VIEW",
+  "CERTIFICATION_MANAGE",
 ]);
 export type CommercialPermission = z.infer<typeof CommercialPermissionEnum>;
+
 
 export const TenantContextSchema = z.object({
   tenantId: z.string().uuid(),
@@ -1510,3 +1540,650 @@ export const FinancialAnomalySchema = z.object({
   createdAt: z.string().or(z.date()),
 });
 export type FinancialAnomaly = z.infer<typeof FinancialAnomalySchema>;
+
+// ==========================================
+// PHASE 3: WORKFORCE MANAGEMENT CONTRACTS
+// ==========================================
+
+export const DepartmentSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  description: z.string().nullable().optional(),
+  managerId: z.string().uuid().nullable().optional(),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Department = z.infer<typeof DepartmentSchema>;
+
+export const CreateDepartmentRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  description: z.string().optional(),
+  managerId: z.string().uuid().optional(),
+});
+export type CreateDepartmentRequest = z.infer<typeof CreateDepartmentRequestSchema>;
+
+export const JobPositionSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  departmentId: z.string().uuid().nullable().optional(),
+  title: z.string().min(1),
+  positionCode: z.string().min(1),
+  jobDescription: z.string().nullable().optional(),
+  payClassification: z.enum(["HOURLY", "SALARY", "COMMISSION", "PIECE_RATE"]).default("SALARY"),
+  defaultSalary: z.number().optional(),
+  defaultHourlyRate: z.number().optional(),
+  defaultCommissionRate: z.number().optional(),
+  schedulePolicy: z.string().nullable().optional(),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type JobPosition = z.infer<typeof JobPositionSchema>;
+
+export const CreateJobPositionRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  departmentId: z.string().uuid().optional(),
+  title: z.string().min(1),
+  positionCode: z.string().min(1),
+  jobDescription: z.string().optional(),
+  payClassification: z.enum(["HOURLY", "SALARY", "COMMISSION", "PIECE_RATE"]).optional(),
+  defaultSalary: z.number().optional(),
+  defaultHourlyRate: z.number().optional(),
+  defaultCommissionRate: z.number().optional(),
+  schedulePolicy: z.string().optional(),
+});
+export type CreateJobPositionRequest = z.infer<typeof CreateJobPositionRequestSchema>;
+
+export const EmployeeSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
+  userId: z.string().uuid().nullable().optional(),
+  employeeNumber: z.string().min(1),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  preferredName: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  address: z.string().nullable().optional(),
+  emergencyContact: z.string().nullable().optional(),
+  dateOfBirth: z.string().or(z.date()).nullable().optional(),
+  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED"]).default("ACTIVE"),
+  hireDate: z.string().or(z.date()),
+  terminationDate: z.string().or(z.date()).nullable().optional(),
+  departmentId: z.string().uuid().nullable().optional(),
+  positionId: z.string().uuid().nullable().optional(),
+  managerId: z.string().uuid().nullable().optional(),
+  workType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN", "CASUAL"]).default("FULL_TIME"),
+  contractType: z.enum(["PERMANENT", "FIXED_TERM", "PROBATION"]).default("PERMANENT"),
+  baseSalary: z.number().default(0),
+  hourlyRate: z.number().default(0),
+  commissionRate: z.number().default(0),
+  pinCodeHash: z.string().nullable().optional(),
+  profilePhotoUrl: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Employee = z.infer<typeof EmployeeSchema>;
+
+export const CreateEmployeeRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  employeeNumber: z.string().optional(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  preferredName: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  address: z.string().optional(),
+  emergencyContact: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  hireDate: z.string().optional(),
+  departmentId: z.string().uuid().optional(),
+  positionId: z.string().uuid().optional(),
+  managerId: z.string().uuid().optional(),
+  workType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN", "CASUAL"]).optional(),
+  contractType: z.enum(["PERMANENT", "FIXED_TERM", "PROBATION"]).optional(),
+  baseSalary: z.number().nonnegative().optional(),
+  hourlyRate: z.number().nonnegative().optional(),
+  commissionRate: z.number().nonnegative().optional(),
+  pinCode: z.string().optional(),
+});
+export type CreateEmployeeRequest = z.infer<typeof CreateEmployeeRequestSchema>;
+
+export const UpdateEmployeeRequestSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  preferredName: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  address: z.string().optional(),
+  emergencyContact: z.string().optional(),
+  departmentId: z.string().uuid().nullable().optional(),
+  positionId: z.string().uuid().nullable().optional(),
+  branchId: z.string().uuid().nullable().optional(),
+  managerId: z.string().uuid().nullable().optional(),
+  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED"]).optional(),
+  workType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN", "CASUAL"]).optional(),
+  contractType: z.enum(["PERMANENT", "FIXED_TERM", "PROBATION"]).optional(),
+  baseSalary: z.number().nonnegative().optional(),
+  hourlyRate: z.number().nonnegative().optional(),
+  commissionRate: z.number().nonnegative().optional(),
+});
+export type UpdateEmployeeRequest = z.infer<typeof UpdateEmployeeRequestSchema>;
+
+export const EmploymentRecordSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  effectiveDate: z.string().or(z.date()),
+  endDate: z.string().or(z.date()).nullable().optional(),
+  changeType: z.enum(["HIRE", "PROMOTION", "TRANSFER", "PAY_ADJUSTMENT", "STATUS_CHANGE", "TERMINATION"]),
+  departmentId: z.string().uuid().nullable().optional(),
+  positionId: z.string().uuid().nullable().optional(),
+  branchId: z.string().uuid().nullable().optional(),
+  managerId: z.string().uuid().nullable().optional(),
+  contractType: z.string().nullable().optional(),
+  payRate: z.number().nullable().optional(),
+  reason: z.string().nullable().optional(),
+  createdById: z.string().uuid(),
+  createdAt: z.string().or(z.date()),
+});
+export type EmploymentRecord = z.infer<typeof EmploymentRecordSchema>;
+
+export const CreateEmploymentRecordRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  effectiveDate: z.string().optional(),
+  changeType: z.enum(["HIRE", "PROMOTION", "TRANSFER", "PAY_ADJUSTMENT", "STATUS_CHANGE", "TERMINATION"]),
+  departmentId: z.string().uuid().optional(),
+  positionId: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
+  managerId: z.string().uuid().optional(),
+  contractType: z.string().optional(),
+  payRate: z.number().optional(),
+  reason: z.string().optional(),
+});
+export type CreateEmploymentRecordRequest = z.infer<typeof CreateEmploymentRecordRequestSchema>;
+
+export const ShiftTemplateSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid().nullable().optional(),
+  departmentId: z.string().uuid().nullable().optional(),
+  name: z.string().min(1),
+  startTime: z.string(), // "08:00"
+  endTime: z.string(),   // "17:00"
+  breakDurationMinutes: z.number().default(60),
+  workdays: z.array(z.number()), // [1,2,3,4,5]
+  requiredHeadcount: z.number().default(1),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type ShiftTemplate = z.infer<typeof ShiftTemplateSchema>;
+
+export const CreateShiftTemplateRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
+  departmentId: z.string().uuid().optional(),
+  name: z.string().min(1),
+  startTime: z.string(),
+  endTime: z.string(),
+  breakDurationMinutes: z.number().default(60),
+  workdays: z.array(z.number()).default([1, 2, 3, 4, 5]),
+  requiredHeadcount: z.number().default(1),
+});
+export type CreateShiftTemplateRequest = z.infer<typeof CreateShiftTemplateRequestSchema>;
+
+export const WorkforceScheduleSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  shiftTemplateId: z.string().uuid().nullable().optional(),
+  date: z.string().or(z.date()),
+  startTime: z.string(),
+  endTime: z.string(),
+  status: z.enum(["DRAFT", "PUBLISHED", "ACKNOWLEDGED", "ACTIVE", "COMPLETED", "CANCELLED"]).default("PUBLISHED"),
+  notes: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type WorkforceSchedule = z.infer<typeof WorkforceScheduleSchema>;
+
+export const CreateWorkforceScheduleRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  shiftTemplateId: z.string().uuid().optional(),
+  date: z.string(),
+  startTime: z.string(),
+  endTime: z.string(),
+  status: z.enum(["DRAFT", "PUBLISHED", "ACKNOWLEDGED", "ACTIVE", "COMPLETED", "CANCELLED"]).optional(),
+  notes: z.string().optional(),
+});
+export type CreateWorkforceScheduleRequest = z.infer<typeof CreateWorkforceScheduleRequestSchema>;
+
+export const AttendanceRecordSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  scheduleId: z.string().uuid().nullable().optional(),
+  workDate: z.string().or(z.date()),
+  clockIn: z.string().or(z.date()),
+  clockOut: z.string().or(z.date()).nullable().optional(),
+  breakMinutes: z.number().default(0),
+  regularMinutes: z.number().default(0),
+  overtimeMinutes: z.number().default(0),
+  status: z.enum(["PRESENT", "LATE", "EARLY_LEAVE", "OVERTIME", "ABSENT", "EXCUSED"]).default("PRESENT"),
+  method: z.enum(["STANDARD", "PIN", "QR", "DEVICE", "GEOLOCATION", "BIOMETRIC"]).default("STANDARD"),
+  pinVerified: z.boolean().default(false),
+  qrCode: z.string().nullable().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  deviceId: z.string().nullable().optional(),
+  idempotencyKey: z.string().min(1),
+  supervisorApproved: z.boolean().default(false),
+  approvedById: z.string().uuid().nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  correctionReason: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type AttendanceRecord = z.infer<typeof AttendanceRecordSchema>;
+
+export const ClockInRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  scheduleId: z.string().uuid().optional(),
+  clockInTime: z.string().optional(),
+  method: z.enum(["STANDARD", "PIN", "QR", "DEVICE", "GEOLOCATION", "BIOMETRIC"]).optional(),
+  pinCode: z.string().optional(),
+  qrCode: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  deviceId: z.string().optional(),
+  idempotencyKey: z.string().min(1),
+});
+export type ClockInRequest = z.infer<typeof ClockInRequestSchema>;
+
+export const ClockOutRequestSchema = z.object({
+  clockOutTime: z.string().optional(),
+  breakMinutes: z.number().nonnegative().optional(),
+  notes: z.string().optional(),
+});
+export type ClockOutRequest = z.infer<typeof ClockOutRequestSchema>;
+
+export const TimesheetSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  periodStart: z.string().or(z.date()),
+  periodEnd: z.string().or(z.date()),
+  totalScheduledMinutes: z.number().default(0),
+  totalWorkedMinutes: z.number().default(0),
+  totalRegularMinutes: z.number().default(0),
+  totalOvertimeMinutes: z.number().default(0),
+  totalBreakMinutes: z.number().default(0),
+  totalAbsentMinutes: z.number().default(0),
+  totalApprovedMinutes: z.number().default(0),
+  status: z.enum(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "LOCKED"]).default("DRAFT"),
+  submittedAt: z.string().or(z.date()).nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  approvedById: z.string().uuid().nullable().optional(),
+  rejectionReason: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Timesheet = z.infer<typeof TimesheetSchema>;
+
+export const CreateTimesheetRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  periodStart: z.string(),
+  periodEnd: z.string(),
+});
+export type CreateTimesheetRequest = z.infer<typeof CreateTimesheetRequestSchema>;
+
+export const LeaveTypeSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  isPaid: z.boolean().default(true),
+  defaultAllowanceDays: z.number().default(21),
+  requiresProof: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type LeaveType = z.infer<typeof LeaveTypeSchema>;
+
+export const LeaveRequestSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  leaveTypeId: z.string().uuid(),
+  startDate: z.string().or(z.date()),
+  endDate: z.string().or(z.date()),
+  totalDays: z.number(),
+  partialDay: z.enum(["FULL", "FIRST_HALF", "SECOND_HALF"]).default("FULL"),
+  reason: z.string().nullable().optional(),
+  status: z.enum(["DRAFT", "PENDING", "APPROVED", "REJECTED", "CANCELLED"]).default("PENDING"),
+  documentUrl: z.string().nullable().optional(),
+  approvedById: z.string().uuid().nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  rejectionReason: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type LeaveRequest = z.infer<typeof LeaveRequestSchema>;
+
+export const CreateLeaveRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  leaveTypeId: z.string().uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  totalDays: z.number().positive(),
+  partialDay: z.enum(["FULL", "FIRST_HALF", "SECOND_HALF"]).optional(),
+  reason: z.string().optional(),
+  documentUrl: z.string().optional(),
+});
+export type CreateLeaveRequest = z.infer<typeof CreateLeaveRequestSchema>;
+
+export const WorkforceTaskSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  taskType: z.enum(["GENERAL", "STOCK_COUNT", "MAINTENANCE", "CLEANING", "SERVICE", "INSPECTION"]).default("GENERAL"),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
+  status: z.enum(["BACKLOG", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "VERIFIED", "CANCELLED"]).default("BACKLOG"),
+  assignedEmployeeId: z.string().uuid().nullable().optional(),
+  assignedTeam: z.string().nullable().optional(),
+  dueDate: z.string().or(z.date()).nullable().optional(),
+  checklist: z.array(z.object({ item: z.string(), done: z.boolean() })).optional(),
+  attachments: z.array(z.string()).default([]),
+  relatedEntityType: z.string().nullable().optional(),
+  relatedEntityId: z.string().nullable().optional(),
+  completedAt: z.string().or(z.date()).nullable().optional(),
+  verifiedById: z.string().uuid().nullable().optional(),
+  verifiedAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type WorkforceTask = z.infer<typeof WorkforceTaskSchema>;
+
+export const CreateWorkforceTaskRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  taskType: z.enum(["GENERAL", "STOCK_COUNT", "MAINTENANCE", "CLEANING", "SERVICE", "INSPECTION"]).optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
+  assignedEmployeeId: z.string().uuid().optional(),
+  assignedTeam: z.string().optional(),
+  dueDate: z.string().optional(),
+  checklist: z.array(z.object({ item: z.string(), done: z.boolean() })).optional(),
+  relatedEntityType: z.string().optional(),
+  relatedEntityId: z.string().optional(),
+});
+export type CreateWorkforceTaskRequest = z.infer<typeof CreateWorkforceTaskRequestSchema>;
+
+export const UpdateWorkforceTaskRequestSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
+  status: z.enum(["BACKLOG", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "VERIFIED", "CANCELLED"]).optional(),
+  assignedEmployeeId: z.string().uuid().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  checklist: z.array(z.object({ item: z.string(), done: z.boolean() })).optional(),
+});
+export type UpdateWorkforceTaskRequest = z.infer<typeof UpdateWorkforceTaskRequestSchema>;
+
+export const WorkOrderSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  workOrderNumber: z.string().min(1),
+  customerId: z.string().uuid().nullable().optional(),
+  projectId: z.string().uuid().nullable().optional(),
+  title: z.string().min(1),
+  description: z.string().nullable().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
+  status: z.enum(["DRAFT", "SCHEDULED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "INVOICED", "CANCELLED"]).default("DRAFT"),
+  scheduledStart: z.string().or(z.date()).nullable().optional(),
+  scheduledEnd: z.string().or(z.date()).nullable().optional(),
+  assignedEmployeeId: z.string().uuid().nullable().optional(),
+  laborHours: z.number().default(0),
+  laborRate: z.number().default(0),
+  laborCostTotal: z.number().default(0),
+  materialsCostTotal: z.number().default(0),
+  grandTotal: z.number().default(0),
+  notes: z.string().nullable().optional(),
+  approvedById: z.string().uuid().nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type WorkOrder = z.infer<typeof WorkOrderSchema>;
+
+export const CreateWorkOrderRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  workOrderNumber: z.string().optional(),
+  customerId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
+  scheduledStart: z.string().optional(),
+  scheduledEnd: z.string().optional(),
+  assignedEmployeeId: z.string().uuid().optional(),
+  laborHours: z.number().default(0),
+  laborRate: z.number().default(0),
+  materialsCostTotal: z.number().default(0),
+  notes: z.string().optional(),
+});
+export type CreateWorkOrderRequest = z.infer<typeof CreateWorkOrderRequestSchema>;
+
+export const UpdateWorkOrderRequestSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  status: z.enum(["DRAFT", "SCHEDULED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "INVOICED", "CANCELLED"]).optional(),
+  assignedEmployeeId: z.string().uuid().nullable().optional(),
+  laborHours: z.number().nonnegative().optional(),
+  laborRate: z.number().nonnegative().optional(),
+  materialsCostTotal: z.number().nonnegative().optional(),
+  notes: z.string().optional(),
+});
+export type UpdateWorkOrderRequest = z.infer<typeof UpdateWorkOrderRequestSchema>;
+
+export const EmployeeSkillSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  skillName: z.string().min(1),
+  proficiencyLevel: z.enum(["BEGINNER", "INTERMEDIATE", "ADVANCED", "EXPERT"]).default("INTERMEDIATE"),
+  yearsExperience: z.number().default(1),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type EmployeeSkill = z.infer<typeof EmployeeSkillSchema>;
+
+export const CreateEmployeeSkillRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  skillName: z.string().min(1),
+  proficiencyLevel: z.enum(["BEGINNER", "INTERMEDIATE", "ADVANCED", "EXPERT"]).optional(),
+  yearsExperience: z.number().optional(),
+});
+export type CreateEmployeeSkillRequest = z.infer<typeof CreateEmployeeSkillRequestSchema>;
+
+export const EmployeeCertificationSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  certificationName: z.string().min(1),
+  issuingBody: z.string().min(1),
+  certificateNumber: z.string().nullable().optional(),
+  issueDate: z.string().or(z.date()),
+  expiryDate: z.string().or(z.date()).nullable().optional(),
+  isVerified: z.boolean().default(false),
+  verifiedById: z.string().uuid().nullable().optional(),
+  verifiedAt: z.string().or(z.date()).nullable().optional(),
+  documentUrl: z.string().nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type EmployeeCertification = z.infer<typeof EmployeeCertificationSchema>;
+
+export const CreateEmployeeCertificationRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  certificationName: z.string().min(1),
+  issuingBody: z.string().min(1),
+  certificateNumber: z.string().optional(),
+  issueDate: z.string(),
+  expiryDate: z.string().optional(),
+  documentUrl: z.string().optional(),
+});
+export type CreateEmployeeCertificationRequest = z.infer<typeof CreateEmployeeCertificationRequestSchema>;
+
+export const PerformanceReviewSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  reviewerId: z.string().uuid(),
+  reviewPeriod: z.string().min(1),
+  rating: z.number().min(1).max(5),
+  strengths: z.string().nullable().optional(),
+  improvements: z.string().nullable().optional(),
+  goals: z.any().optional(),
+  status: z.enum(["DRAFT", "SUBMITTED", "ACKNOWLEDGED", "COMPLETED"]).default("COMPLETED"),
+  submittedAt: z.string().or(z.date()).nullable().optional(),
+  acknowledgedAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type PerformanceReview = z.infer<typeof PerformanceReviewSchema>;
+
+export const CreatePerformanceReviewRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  reviewPeriod: z.string().min(1),
+  rating: z.number().min(1).max(5),
+  strengths: z.string().optional(),
+  improvements: z.string().optional(),
+  goals: z.any().optional(),
+});
+export type CreatePerformanceReviewRequest = z.infer<typeof CreatePerformanceReviewRequestSchema>;
+
+export const CommissionRecordSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  saleId: z.string().uuid().nullable().optional(),
+  workOrderId: z.string().uuid().nullable().optional(),
+  period: z.string().min(1),
+  salesAmount: z.number(),
+  commissionRate: z.number(),
+  commissionAmount: z.number(),
+  status: z.enum(["PENDING", "APPROVED", "PAID", "CANCELLED"]).default("PENDING"),
+  approvedById: z.string().uuid().nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type CommissionRecord = z.infer<typeof CommissionRecordSchema>;
+
+export const CreateCommissionRecordRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  saleId: z.string().uuid().optional(),
+  workOrderId: z.string().uuid().optional(),
+  period: z.string().min(1),
+  salesAmount: z.number().nonnegative(),
+  commissionRate: z.number().nonnegative(),
+});
+export type CreateCommissionRecordRequest = z.infer<typeof CreateCommissionRecordRequestSchema>;
+
+export const PayrollInputSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  employeeId: z.string().uuid(),
+  periodStart: z.string().or(z.date()),
+  periodEnd: z.string().or(z.date()),
+  basicHours: z.number().default(0),
+  overtimeHours: z.number().default(0),
+  regularPay: z.number().default(0),
+  overtimePay: z.number().default(0),
+  commissionsTotal: z.number().default(0),
+  bonusesTotal: z.number().default(0),
+  allowancesTotal: z.number().default(0),
+  deductionsTotal: z.number().default(0),
+  grossPay: z.number().default(0),
+  status: z.enum(["CALCULATED", "APPROVED", "EXPORTED", "LOCKED"]).default("CALCULATED"),
+  approvedById: z.string().uuid().nullable().optional(),
+  approvedAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type PayrollInput = z.infer<typeof PayrollInputSchema>;
+
+export const CreatePayrollInputRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  employeeId: z.string().uuid(),
+  periodStart: z.string(),
+  periodEnd: z.string(),
+  basicHours: z.number().nonnegative(),
+  overtimeHours: z.number().nonnegative().default(0),
+  regularPay: z.number().nonnegative(),
+  overtimePay: z.number().nonnegative().default(0),
+  commissionsTotal: z.number().nonnegative().default(0),
+  bonusesTotal: z.number().nonnegative().default(0),
+  allowancesTotal: z.number().nonnegative().default(0),
+  deductionsTotal: z.number().nonnegative().default(0),
+});
+export type CreatePayrollInputRequest = z.infer<typeof CreatePayrollInputRequestSchema>;
+
+export const WorkforceDashboardSummarySchema = z.object({
+  totalEmployees: z.number(),
+  activeEmployees: z.number(),
+  presentToday: z.number(),
+  absentToday: z.number(),
+  lateToday: z.number(),
+  overtimeToday: z.number(),
+  pendingLeaveRequests: z.number(),
+  openTasks: z.number(),
+  activeWorkOrders: z.number(),
+  expiringCertificationsCount: z.number(),
+  workforceHealth: z.enum(["GREEN", "YELLOW", "RED"]),
+});
+export type WorkforceDashboardSummary = z.infer<typeof WorkforceDashboardSummarySchema>;
+
+export const WorkforceAnalyticsReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  period: z.string(),
+  headcount: z.number(),
+  turnoverRatePct: z.number(),
+  averagePunctualityPct: z.number(),
+  totalHoursWorked: z.number(),
+  totalOvertimeHours: z.number(),
+  totalLaborCost: z.number(),
+  revenuePerEmployee: z.number(),
+  taskCompletionRatePct: z.number(),
+});
+export type WorkforceAnalyticsReport = z.infer<typeof WorkforceAnalyticsReportSchema>;
