@@ -188,9 +188,33 @@ async function runObservabilityReleaseGate() {
   const evidencePath = join(evidenceDir, "kwakopos-observability-release-gate.json");
   writeFileSync(evidencePath, JSON.stringify(evidence, null, 2), "utf8");
 
+  // Also archive exact SemVer linked evidence file
+  const semverEvidencePath = join(
+    evidenceDir,
+    `kwakopos-release-evidence-v${evidence.appVersion}-${evidence.gitSha.slice(0, 8)}.json`
+  );
+  writeFileSync(semverEvidencePath, JSON.stringify(evidence, null, 2), "utf8");
+
+  // Update release-manifest.json
+  const manifest = {
+    version: evidence.appVersion,
+    tag: `v${evidence.appVersion}`,
+    gitSha: evidence.gitSha,
+    containerDigest: evidence.containerDigest,
+    cloudRunRevision: evidence.cloudRunRevision,
+    environment: "production",
+    releaseChannel: "production",
+    releasedAt: evidence.timestamp,
+    certification: allPassed ? "PASS" : "FAIL",
+    evidenceFile: `kwakopos-release-evidence-v${evidence.appVersion}-${evidence.gitSha.slice(0, 8)}.json`,
+  };
+  writeFileSync(join(evidenceDir, "release-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+  writeFileSync(join(process.cwd(), "release-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+
   console.log("========================================================================");
   console.log(` 🎉 OBSERVABILITY RELEASE GATE: ${allPassed ? "100% SUCCESS (GREEN)" : "FAILED (RED)"}`);
   console.log(` Evidence Saved to: ${evidencePath}`);
+  console.log(` SemVer Evidence Saved to: ${semverEvidencePath}`);
   console.log("========================================================================");
 
   if (!allPassed) process.exit(1);

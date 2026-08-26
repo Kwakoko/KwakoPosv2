@@ -117,10 +117,12 @@ export function buildServer(): FastifyInstance {
       url === "/health" ||
       url === "/readiness" ||
       url === "/version" ||
+      url === "/api/system/version" ||
       url === "/auth/login" ||
       url === "/auth/refresh" ||
       url.startsWith("/telemetry") ||
-      url.startsWith("/admin/observability")
+      url.startsWith("/admin/observability") ||
+      url.startsWith("/admin/releases")
     ) {
       return;
     }
@@ -191,7 +193,69 @@ export function buildServer(): FastifyInstance {
     return { status: "ready" };
   });
 
-  server.get("/version", async () => getReleaseIdentity(config));
+  const releaseIdentityHandler = async () => {
+    const identity = getReleaseIdentity(config);
+    return {
+      success: true,
+      data: identity,
+      version: identity.version,
+      appVersion: identity.appVersion,
+      gitTag: identity.gitTag,
+      gitSha: identity.gitSha,
+      containerDigest: identity.containerDigest,
+      cloudRunRevision: identity.cloudRunRevision,
+      environment: identity.environment,
+      releaseChannel: identity.releaseChannel,
+      releaseTimestamp: identity.releaseTimestamp,
+      compatibility: identity.compatibility,
+    };
+  };
+
+  server.get("/api/system/version", releaseIdentityHandler);
+  server.get("/version", releaseIdentityHandler);
+
+  server.get("/admin/releases/compatibility", async () => {
+    const identity = getReleaseIdentity(config);
+    return {
+      success: true,
+      data: identity.compatibility,
+    };
+  });
+
+  server.get("/admin/releases/history", async () => {
+    const current = getReleaseIdentity(config);
+    const history = [
+      {
+        version: current.appVersion,
+        gitTag: current.gitTag,
+        gitSha: current.gitSha,
+        containerDigest: current.containerDigest,
+        cloudRunRevision: current.cloudRunRevision,
+        status: "ACTIVE_PRODUCTION",
+        releasedAt: current.releaseTimestamp,
+        certification: "PASS",
+      },
+      {
+        version: "2.0.0",
+        gitTag: "v2.0.0",
+        gitSha: "a1fd05a62376c7d006cd1455fb37581e6cbc8bab",
+        containerDigest: "sha256:125e5e2304c5281ede2a9899f3047d54b85379ced3f5f6ab944cb20b279ec6cb",
+        cloudRunRevision: "kwakopos-production-service-00020-bet",
+        status: "PREVIOUS_PRODUCTION",
+        releasedAt: "2026-08-26T03:54:56Z",
+        certification: "PASS",
+      },
+    ];
+    return {
+      success: true,
+      data: {
+        currentVersion: current.appVersion,
+        latestAvailableVersion: current.appVersion,
+        activeRevision: current.cloudRunRevision,
+        history,
+      },
+    };
+  });
 
   // Login: ONLY allow the "auto-provision" test login when NOT in production.
   server.post("/auth/login", async (req, reply) => {

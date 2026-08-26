@@ -44,9 +44,41 @@ export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Confi
   return ConfigSchema.parse(env);
 }
 
-export function getReleaseIdentity(config: Config) {
+export interface ReleaseIdentity {
+  version: string;
+  appVersion: string;
+  gitTag: string;
+  gitSha: string;
+  containerDigest: string | null;
+  cloudRunRevision: string | null;
+  environment: string;
+  releaseChannel: string;
+  releaseTimestamp: string;
+  compatibility: CompatibilityMetadata;
+}
+
+export interface CompatibilityMetadata {
+  databaseSchemaVersion: number;
+  syncProtocolVersion: number;
+  pwaSchemaVersion: number;
+  minSupportedClientVersion: string;
+  recommendedClientVersion: string;
+}
+
+export const CURRENT_COMPATIBILITY: CompatibilityMetadata = {
+  databaseSchemaVersion: 2,
+  syncProtocolVersion: 2,
+  pwaSchemaVersion: 3,
+  minSupportedClientVersion: "2.0.0",
+  recommendedClientVersion: "2.0.0",
+};
+
+export function getReleaseIdentity(config: Config): ReleaseIdentity {
   const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST;
   const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION;
+  const appVersion = config.APP_VERSION || "2.0.0";
+  const gitSha = config.GIT_SHA || resolveRealGitSha();
+  const gitTag = `v${appVersion}`;
 
   if (process.env.NODE_ENV === "production-certification") {
     if (!containerDigest || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) {
@@ -58,10 +90,18 @@ export function getReleaseIdentity(config: Config) {
   }
 
   return {
-    version: config.APP_VERSION,
-    appVersion: config.APP_VERSION,
-    gitSha: config.GIT_SHA || resolveRealGitSha(),
+    version: appVersion,
+    appVersion,
+    gitTag,
+    gitSha,
     containerDigest: containerDigest || null,
     cloudRunRevision: cloudRunRevision || null,
+    environment: config.NODE_ENV,
+    releaseChannel: config.NODE_ENV === "production" ? "production" : "development",
+    releaseTimestamp: new Date().toISOString(),
+    compatibility: CURRENT_COMPATIBILITY,
   };
 }
+
+export * from "./semverEngine.js";
+

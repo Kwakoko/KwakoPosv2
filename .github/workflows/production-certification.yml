@@ -29,6 +29,12 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Validate Conventional Commit Format
+        run: npx tsx scripts/ci/validate-commit-message.ts
+
+      - name: Generate SemVer Release Manifest
+        run: npx tsx scripts/release/generate-release-manifest.ts
+
       - name: Generate Prisma Client
         run: npm run db:generate
 

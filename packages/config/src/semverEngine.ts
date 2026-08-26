@@ -1,0 +1,156 @@
+export type ReleaseBumpType = "MAJOR" | "MINOR" | "PATCH" | "NONE";
+
+export interface ParsedCommit {
+  type: string;
+  scope?: string;
+  isBreaking: boolean;
+  subject: string;
+  body?: string;
+  rawMessage: string;
+}
+
+export interface SemVerComponents {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease?: string;
+  build?: string;
+}
+
+const SEMVER_REGEX =
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+export function parseSemVer(versionStr: string): SemVerComponents {
+  const match = versionStr.trim().match(SEMVER_REGEX);
+  if (!match) {
+    throw new Error(`INVALID_SEMVER: "${versionStr}" is not a valid Semantic Version (MAJOR.MINOR.PATCH).`);
+  }
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: parseInt(match[3], 10),
+    prerelease: match[4] || undefined,
+    build: match[5] || undefined,
+  };
+}
+
+export function isValidSemVer(versionStr: string): boolean {
+  return SEMVER_REGEX.test(versionStr.trim());
+}
+
+export function formatSemVer(components: SemVerComponents): string {
+  let str = `${components.major}.${components.minor}.${components.patch}`;
+  if (components.prerelease) {
+    str += `-${components.prerelease}`;
+  }
+  if (components.build) {
+    str += `+${components.build}`;
+  }
+  return str;
+}
+
+export function compareSemVer(v1: string, v2: string): number {
+  const s1 = parseSemVer(v1);
+  const s2 = parseSemVer(v2);
+
+  if (s1.major !== s2.major) return s1.major - s2.major;
+  if (s1.minor !== s2.minor) return s1.minor - s2.minor;
+  if (s1.patch !== s2.patch) return s1.patch - s2.patch;
+
+  // Prerelease comparison: non-prerelease has higher precedence than prerelease
+  if (!s1.prerelease && s2.prerelease) return 1;
+  if (s1.prerelease && !s2.prerelease) return -1;
+  if (s1.prerelease && s2.prerelease) {
+    return s1.prerelease.localeCompare(s2.prerelease);
+  }
+
+  return 0;
+}
+
+export function parseConventionalCommit(message: string): ParsedCommit {
+  const trimmed = message.trim();
+  const firstLine = trimmed.split("\n")[0].trim();
+  const rest = trimmed.split("\n").slice(1).join("\n").trim();
+
+  const isBreakingFooter = /BREAKING[ -]CHANGE:\s*(.+)/i.test(trimmed);
+  const headerMatch = firstLine.match(/^([a-zA-Z]+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
+
+  if (!headerMatch) {
+    return {
+      type: "other",
+      isBreaking: isBreakingFooter,
+      subject: firstLine,
+      body: rest || undefined,
+      rawMessage: trimmed,
+    };
+  }
+
+  const type = headerMatch[1].toLowerCase();
+  const scope = headerMatch[2] ? headerMatch[2].toLowerCase() : undefined;
+  const isBreakingHeader = Boolean(headerMatch[3]);
+  const subject = headerMatch[4].trim();
+
+  return {
+    type,
+    scope,
+    isBreaking: isBreakingHeader || isBreakingFooter,
+    subject,
+    body: rest || undefined,
+    rawMessage: trimmed,
+  };
+}
+
+export function determineBumpFromCommits(commitMessages: string[]): ReleaseBumpType {
+  let bump: ReleaseBumpType = "NONE";
+
+  for (const msg of commitMessages) {
+    const parsed = parseConventionalCommit(msg);
+    if (parsed.isBreaking) {
+      return "MAJOR";
+    }
+    if (parsed.type === "feat") {
+      bump = "MINOR";
+    } else if (
+      bump !== "MINOR" &&
+      ["fix", "perf", "refactor", "security", "docs", "revert"].includes(parsed.type)
+    ) {
+      bump = "PATCH";
+    }
+  }
+
+  return bump;
+}
+
+export function calculateNextVersion(
+  currentVersion: string,
+  commitMessages: string[],
+  options?: {
+    forceBump?: ReleaseBumpType;
+    prereleaseTag?: string;
+  }
+): string {
+  const current = parseSemVer(currentVersion);
+  const bump = options?.forceBump || determineBumpFromCommits(commitMessages);
+
+  let nextMajor = current.major;
+  let nextMinor = current.minor;
+  let nextPatch = current.patch;
+
+  if (bump === "MAJOR") {
+    nextMajor += 1;
+    nextMinor = 0;
+    nextPatch = 0;
+  } else if (bump === "MINOR") {
+    nextMinor += 1;
+    nextPatch = 0;
+  } else if (bump === "PATCH") {
+    nextPatch += 1;
+  }
+
+  return formatSemVer({
+    major: nextMajor,
+    minor: nextMinor,
+    patch: nextPatch,
+    prerelease: options?.prereleaseTag,
+  });
+}

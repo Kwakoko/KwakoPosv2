@@ -1,7 +1,7 @@
 {
   "candidateRevision": "kwakopos-production-service-00014-xod",
   "candidateUrl": "https://rc-b5a5fc8---kwakopos-production-service-75x6obw55q-uc.a.run.app",
-  "testRunId": "PLAYWRIGHT-RUN-980f78ab",
+  "testRunId": "PLAYWRIGHT-RUN-425118ba",
   "browserAOperations": 4,
   "serverRecords": {
     "products": 1,
@@ -15,5 +15,5 @@
   "actualStockServer": 188,
   "actualStockBrowserB": 188,
   "finalConvergenceStatus": "PASS",
-  "timestamp": "2026-08-26T04:21:23.769Z"
+  "timestamp": "2026-08-26T04:40:41.179Z"
 }
