@@ -8,8 +8,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@kwakopos2/contracts": "2.2.0",
-    "@kwakopos2/domain": "2.2.0",
+    "@kwakopos2/contracts": "*",
+    "@kwakopos2/domain": "*",
     "typescript": "^5.3.3"
   }
 }

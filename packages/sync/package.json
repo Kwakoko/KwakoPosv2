@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/sync",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -17,9 +17,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@kwakopos2/contracts": "2.0.0",
-    "@kwakopos2/domain": "2.0.0",
-    "@kwakopos2/database": "2.0.0",
+    "@kwakopos2/contracts": "*",
+    "@kwakopos2/domain": "*",
+    "@kwakopos2/database": "*",
     "typescript": "^5.3.3"
   }
 }
