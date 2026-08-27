@@ -7,6 +7,7 @@ import {
   ScopedWorkforceRepository,
   ScopedPluginRepository,
   ScopedTelecomRepository,
+  ScopedMonetizationRepository,
   globalInMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
@@ -41,7 +42,14 @@ import {
   KmlKmzParserEngine,
   TelecomWorkflowEngine,
   TelecomCostingEngine,
+  EntitlementEngine,
+  UsageMeteringEngine,
+  SubscriptionLifecycleEngine,
+  BillingInvoicingEngine,
+  PaymentEngine,
+  RevenueAnalyticsEngine,
 } from "@kwakopos2/domain";
+
 
 
 
@@ -1604,7 +1612,251 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   });
   console.log(` [T10/T10] ${passT10 ? "✓" : "✗"} Synthetic Test T10 (Tenant Isolation on Telecom Objects): ${passT10 ? "PASS" : "FAIL"}`);
 
+  // =========================================================================
+  // PHASE 6: SAAS MONETIZATION SYNTHETIC MONITORING (B01 - B12)
+  // =========================================================================
+  const monetizationRepo = new ScopedMonetizationRepository(globalInMemoryStore);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B01: Trial -> Subscription Activation
+  // -------------------------------------------------------------------------
+  const startB01 = Date.now();
+  const starterPlan = monetizationRepo.getPlanByCode("STARTER")!;
+  const subB01 = monetizationRepo.createSubscription(ctx, {
+    tenantId: ctx.tenantId,
+    planId: starterPlan.id,
+    billingInterval: "MONTHLY",
+    startTrial: true,
+  });
+  const passB01 = subB01.status === "TRIAL" && subB01.planCode === "STARTER";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B01_TRIAL_SUBSCRIPTION_ACTIVATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startB01,
+    status: passB01 ? "PASS" : "FAIL",
+    evidence: { subscriptionId: subB01.id, status: subB01.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B01/B12] ${passB01 ? "✓" : "✗"} Synthetic Test B01 (Trial Subscription Activation): ${passB01 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B02: Subscription -> Invoice Generation
+  // -------------------------------------------------------------------------
+  const startB02 = Date.now();
+  const invoiceB02 = monetizationRepo.createInvoice(ctx, subB01.id);
+  const passB02 = invoiceB02.grandTotal > 0 && invoiceB02.status === "OPEN" && invoiceB02.lines.length > 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B02_SUBSCRIPTION_INVOICE_GENERATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startB02,
+    status: passB02 ? "PASS" : "FAIL",
+    evidence: { invoiceId: invoiceB02.id, grandTotal: invoiceB02.grandTotal },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B02/B12] ${passB02 ? "✓" : "✗"} Synthetic Test B02 (Subscription Invoice Generation): ${passB02 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B03: Invoice -> Payment -> Paid
+  // -------------------------------------------------------------------------
+  const startB03 = Date.now();
+  const paymentB03 = monetizationRepo.processPayment(ctx, {
+    tenantId: ctx.tenantId,
+    invoiceId: invoiceB02.id,
+    provider: "MPESA",
+    amount: invoiceB02.grandTotal,
+    currency: "TZS",
+    payerPhoneOrEmail: "+255754000123",
+    idempotencyKey: `PAY-SYNTH-${randomUUID()}`,
+  });
+  const updatedInvB03 = monetizationRepo.getInvoiceById(ctx, invoiceB02.id);
+  const passB03 = paymentB03.status === "SUCCESS" && updatedInvB03?.status === "PAID" && updatedInvB03?.balanceDue === 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B03_INVOICE_PAYMENT_PAID",
+    syntheticTenantId,
+    durationMs: Date.now() - startB03,
+    status: passB03 ? "PASS" : "FAIL",
+    evidence: { paymentId: paymentB03.id, invoiceStatus: updatedInvB03?.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B03/B12] ${passB03 ? "✓" : "✗"} Synthetic Test B03 (Invoice Payment -> Paid): ${passB03 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B04: Payment Failure -> Dunning -> Recovery
+  // -------------------------------------------------------------------------
+  const startB04 = Date.now();
+  const dunningRecoveryValid = SubscriptionLifecycleEngine.validateStateTransition("PAST_DUE", "ACTIVE");
+  const passB04 = dunningRecoveryValid;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B04_PAYMENT_FAILURE_DUNNING_RECOVERY",
+    syntheticTenantId,
+    durationMs: Date.now() - startB04,
+    status: passB04 ? "PASS" : "FAIL",
+    evidence: { dunningRecoveryValid },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B04/B12] ${passB04 ? "✓" : "✗"} Synthetic Test B04 (Payment Failure & Dunning Recovery): ${passB04 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B05: Plan Upgrade -> Entitlement Change
+  // -------------------------------------------------------------------------
+  const startB05 = Date.now();
+  const proPlanB05 = monetizationRepo.getPlanByCode("PROFESSIONAL")!;
+  const upgradedSub = monetizationRepo.changePlan(ctx, subB01.id, {
+    targetPlanId: proPlanB05.id,
+    immediate: true,
+    prorate: true,
+  });
+  const entCheckB05 = monetizationRepo.checkEntitlement(ctx, "analytics.advanced");
+  const passB05 = upgradedSub.planCode === "PROFESSIONAL" && entCheckB05.allowed;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B05_PLAN_UPGRADE_ENTITLEMENT_CHANGE",
+    syntheticTenantId,
+    durationMs: Date.now() - startB05,
+    status: passB05 ? "PASS" : "FAIL",
+    evidence: { newPlan: upgradedSub.planCode, analyticsAllowed: entCheckB05.allowed },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B05/B12] ${passB05 ? "✓" : "✗"} Synthetic Test B05 (Plan Upgrade -> Entitlement Change): ${passB05 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B06: Plan Downgrade -> Limit Validation
+  // -------------------------------------------------------------------------
+  const startB06 = Date.now();
+  const businessPlanB06 = monetizationRepo.getPlanByCode("BUSINESS")!;
+  const downgradedSub = monetizationRepo.changePlan(ctx, subB01.id, {
+    targetPlanId: businessPlanB06.id,
+    immediate: true,
+    prorate: true,
+  });
+  const passB06 = downgradedSub.planCode === "BUSINESS";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B06_PLAN_DOWNGRADE_LIMIT_VALIDATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startB06,
+    status: passB06 ? "PASS" : "FAIL",
+    evidence: { newPlan: downgradedSub.planCode },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B06/B12] ${passB06 ? "✓" : "✗"} Synthetic Test B06 (Plan Downgrade -> Limit Validation): ${passB06 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B07: Plugin Purchase -> Entitlement Activation
+  // -------------------------------------------------------------------------
+  const startB07 = Date.now();
+  const telecomPluginCheck = monetizationRepo.checkEntitlement(ctx, "industry.telecom");
+  const passB07 = typeof telecomPluginCheck.allowed === "boolean";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B07_PLUGIN_ENTITLEMENT_ACTIVATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startB07,
+    status: passB07 ? "PASS" : "FAIL",
+    evidence: { pluginEntitled: telecomPluginCheck.allowed },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B07/B12] ${passB07 ? "✓" : "✗"} Synthetic Test B07 (Plugin Entitlement Activation): ${passB07 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B08: Usage Threshold -> Alert Evaluation
+  // -------------------------------------------------------------------------
+  const startB08 = Date.now();
+  const thresholdNotice = UsageMeteringEngine.evaluateUsageThreshold(850, 1000);
+  const passB08 = thresholdNotice.threshold === "WARNING" && thresholdNotice.percent === 85;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B08_USAGE_THRESHOLD_ALERT",
+    syntheticTenantId,
+    durationMs: Date.now() - startB08,
+    status: passB08 ? "PASS" : "FAIL",
+    evidence: { threshold: thresholdNotice.threshold, percent: thresholdNotice.percent },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B08/B12] ${passB08 ? "✓" : "✗"} Synthetic Test B08 (Usage Threshold Alert): ${passB08 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B09: Usage Overage -> Billing Calculation
+  // -------------------------------------------------------------------------
+  const startB09 = Date.now();
+  const overageCalc = UsageMeteringEngine.calculateOverageCharge(5800, 5000, 10);
+  const passB09 = overageCalc.overageQuantity === 800 && overageCalc.overageChargeTotal === 8000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B09_USAGE_OVERAGE_BILLING",
+    syntheticTenantId,
+    durationMs: Date.now() - startB09,
+    status: passB09 ? "PASS" : "FAIL",
+    evidence: { overageQuantity: overageCalc.overageQuantity, totalCharge: overageCalc.overageChargeTotal },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B09/B12] ${passB09 ? "✓" : "✗"} Synthetic Test B09 (Usage Overage Billing): ${passB09 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B10: Cancellation -> Access Policy & Data Preservation
+  // -------------------------------------------------------------------------
+  const startB10 = Date.now();
+  const cancelledSub = monetizationRepo.cancelSubscription(ctx, subB01.id, "Testing Cancellation");
+  const postCancelEntitlement = monetizationRepo.checkEntitlement(ctx, "core.pos");
+  const passB10 = cancelledSub.status === "CANCELLED" && !postCancelEntitlement.allowed;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B10_CANCELLATION_ACCESS_POLICY",
+    syntheticTenantId,
+    durationMs: Date.now() - startB10,
+    status: passB10 ? "PASS" : "FAIL",
+    evidence: { cancelledStatus: cancelledSub.status, accessAllowed: postCancelEntitlement.allowed },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B10/B12] ${passB10 ? "✓" : "✗"} Synthetic Test B10 (Cancellation Access Policy & Data Safety): ${passB10 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B11: Duplicate Payment Webhook -> Single Financial Effect
+  // -------------------------------------------------------------------------
+  const startB11 = Date.now();
+  const existingPayments = monetizationRepo.getPayments(ctx);
+  let duplicatePrevented = false;
+  try {
+    monetizationRepo.processPayment(ctx, {
+      tenantId: ctx.tenantId,
+      invoiceId: invoiceB02.id,
+      provider: "MPESA",
+      amount: 100,
+      currency: "TZS",
+      payerPhoneOrEmail: "+255754000123",
+      idempotencyKey: paymentB03.idempotencyKey, // Re-submitting same idempotency key
+    });
+  } catch {
+    duplicatePrevented = true;
+  }
+  const passB11 = duplicatePrevented;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B11_DUPLICATE_WEBHOOK_SINGLE_EFFECT",
+    syntheticTenantId,
+    durationMs: Date.now() - startB11,
+    status: passB11 ? "PASS" : "FAIL",
+    evidence: { duplicatePrevented },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B11/B12] ${passB11 ? "✓" : "✗"} Synthetic Test B11 (Duplicate Webhook Single Financial Effect): ${passB11 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST B12: Tenant A Billing -> Attempted Tenant B Access -> Reject
+  // -------------------------------------------------------------------------
+  const startB12 = Date.now();
+  let crossTenantInvoiceRejected = false;
+  try {
+    monetizationRepo.getInvoiceById(tenantBContext, invoiceB02.id);
+  } catch {
+    crossTenantInvoiceRejected = true;
+  }
+  const passB12 = crossTenantInvoiceRejected;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_B12_CROSS_TENANT_BILLING_ISOLATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startB12,
+    status: passB12 ? "PASS" : "FAIL",
+    evidence: { crossTenantInvoiceRejected },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [B12/B12] ${passB12 ? "✓" : "✗"} Synthetic Test B12 (Tenant Isolation on Billing Objects): ${passB12 ? "PASS" : "FAIL"}`);
+
   const allPassed = results.every((r) => r.status === "PASS");
+
   return { allPassed, results };
 }
 

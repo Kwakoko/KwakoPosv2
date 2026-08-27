@@ -80,8 +80,23 @@ export const CommercialPermissionEnum = z.enum([
   "PERFORMANCE_MANAGE",
   "CERTIFICATION_VIEW",
   "CERTIFICATION_MANAGE",
+  "BILLING_VIEW",
+  "BILLING_MANAGE",
+  "SUBSCRIPTION_VIEW",
+  "SUBSCRIPTION_CHANGE",
+  "PLAN_MANAGE",
+  "INVOICE_VIEW",
+  "INVOICE_MANAGE",
+  "PAYMENT_VIEW",
+  "PAYMENT_RECONCILE",
+  "DISCOUNT_MANAGE",
+  "COUPON_MANAGE",
+  "REFUND_APPROVE",
+  "CREDIT_NOTE_CREATE",
+  "BILLING_REPORT_VIEW",
 ]);
 export type CommercialPermission = z.infer<typeof CommercialPermissionEnum>;
+
 
 
 export const TenantContextSchema = z.object({
@@ -2197,4 +2212,6 @@ export type WorkforceAnalyticsReport = z.infer<typeof WorkforceAnalyticsReportSc
 
 export * from "./pluginContracts.js";
 export * from "./telecomContracts.js";
+export * from "./monetizationContracts.js";
+
 

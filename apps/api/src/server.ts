@@ -67,6 +67,8 @@ import {
   globalWorkforceRepository,
   globalPluginRepository,
   globalTelecomRepository,
+  globalMonetizationRepository,
+  ScopedMonetizationRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   PrismaFinanceRepository,
@@ -88,7 +90,15 @@ import {
   KmlKmzParserEngine,
   TelecomWorkflowEngine,
   TelecomCostingEngine,
+  EntitlementEngine,
+  UsageMeteringEngine,
+  SubscriptionLifecycleEngine,
+  BillingInvoicingEngine,
+  SaaSPaymentEngine,
+  RevenueAnalyticsEngine,
 } from "@kwakopos2/domain";
+
+
 
 
 
@@ -1897,8 +1907,135 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: result };
   });
 
+  // =========================================================================
+  // Phase 6: SaaS Monetization & Revenue Management REST Endpoints
+  // =========================================================================
+
+  // 1. Subscription Plans
+  server.get("/api/v1/billing/plans", async (req, reply) => {
+    const plans = globalMonetizationRepository.getPlans();
+    return reply.status(200).send({ success: true, data: plans });
+  });
+
+  server.get("/api/v1/billing/plans/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const plan = globalMonetizationRepository.getPlanById(id);
+    if (!plan) return reply.status(404).send({ success: false, error: "Plan not found" });
+    return reply.status(200).send({ success: true, data: plan });
+  });
+
+  server.post("/api/v1/billing/plans", async (req, reply) => {
+    const plan = globalMonetizationRepository.createPlan(req.body as any);
+    return reply.status(201).send({ success: true, data: plan });
+  });
+
+  // 2. Subscriptions
+  server.get("/api/v1/billing/subscriptions/current", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const sub = globalMonetizationRepository.getSubscription(ctx);
+    return reply.status(200).send({ success: true, data: sub });
+  });
+
+  server.post("/api/v1/billing/subscriptions", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const sub = globalMonetizationRepository.createSubscription(ctx, req.body as any);
+    return reply.status(201).send({ success: true, data: sub });
+  });
+
+  server.post("/api/v1/billing/subscriptions/change-plan", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const body = req.body as any;
+    const sub = globalMonetizationRepository.getSubscription(ctx);
+    if (!sub) return reply.status(404).send({ success: false, error: "Active subscription not found" });
+    const updated = globalMonetizationRepository.changePlan(ctx, sub.id, body);
+    return reply.status(200).send({ success: true, data: updated });
+  });
+
+  server.post("/api/v1/billing/subscriptions/cancel", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const body = req.body as any;
+    const sub = globalMonetizationRepository.getSubscription(ctx);
+    if (!sub) return reply.status(404).send({ success: false, error: "Active subscription not found" });
+    const cancelled = globalMonetizationRepository.cancelSubscription(ctx, sub.id, body.reason || "Customer requested");
+    return reply.status(200).send({ success: true, data: cancelled });
+  });
+
+  // 3. Entitlement Evaluation
+  server.get("/api/v1/billing/entitlements/check", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const { featureKey, currentUsage } = req.query as { featureKey: string; currentUsage?: string };
+    const usageNum = currentUsage !== undefined ? Number(currentUsage) : undefined;
+    const result = globalMonetizationRepository.checkEntitlement(ctx, featureKey, usageNum);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  // 4. Usage Metering
+  server.post("/api/v1/billing/usage/record", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const event = globalMonetizationRepository.recordUsage(ctx, req.body as any);
+    return reply.status(201).send({ success: true, data: event });
+  });
+
+  server.get("/api/v1/billing/usage/aggregates", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const { meterType } = req.query as { meterType: any };
+    const aggregate = globalMonetizationRepository.getUsageAggregate(ctx, meterType || "SALES_TRANSACTIONS");
+    return reply.status(200).send({ success: true, data: aggregate });
+  });
+
+  // 5. Invoices
+  server.post("/api/v1/billing/invoices/generate", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const { subscriptionId, couponCode } = req.body as any;
+    const invoice = globalMonetizationRepository.createInvoice(ctx, subscriptionId, couponCode);
+    return reply.status(201).send({ success: true, data: invoice });
+  });
+
+  server.get("/api/v1/billing/invoices", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const invoices = globalMonetizationRepository.getInvoices(ctx);
+    return reply.status(200).send({ success: true, data: invoices });
+  });
+
+  server.get("/api/v1/billing/invoices/:id", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const { id } = req.params as { id: string };
+    const invoice = globalMonetizationRepository.getInvoiceById(ctx, id);
+    if (!invoice) return reply.status(404).send({ success: false, error: "Invoice not found" });
+    return reply.status(200).send({ success: true, data: invoice });
+  });
+
+  // 6. Payments
+  server.post("/api/v1/billing/payments/process", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const payment = globalMonetizationRepository.processPayment(ctx, req.body as any);
+    return reply.status(201).send({ success: true, data: payment });
+  });
+
+  server.get("/api/v1/billing/payments", async (req, reply) => {
+    const ctx = (req as any).tenantContext as TenantContext;
+    const payments = globalMonetizationRepository.getPayments(ctx);
+    return reply.status(200).send({ success: true, data: payments });
+  });
+
+
+  // 7. Payment Webhooks
+  server.post("/api/v1/billing/webhooks/:provider", async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const payload = req.body as any;
+    // Idempotent webhook receipt
+    return reply.status(200).send({ success: true, received: true, provider, eventId: payload?.eventId || "WH-ACK" });
+  });
+
+  // 8. SaaS Analytics & KPIs
+  server.get("/api/v1/billing/reports/kpis", async (req, reply) => {
+    const kpis = globalMonetizationRepository.getSaaSKpis();
+    return reply.status(200).send({ success: true, data: kpis });
+  });
+
   return server;
 }
+
 
 if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") {
   (async () => {

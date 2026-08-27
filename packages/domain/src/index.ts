@@ -302,3 +302,7 @@ export * from "./kmlKmzParserEngine.js";
 export * from "./telecomWorkflowEngine.js";
 export * from "./telecomCostingEngine.js";
 
+// Phase 6: SaaS Monetization & Revenue Management
+export * from "./monetizationEngine.js";
+
+

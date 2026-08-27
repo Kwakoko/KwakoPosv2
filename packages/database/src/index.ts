@@ -11,6 +11,12 @@ import type {
   UpdateProductRequest,
   UpdateVariantRequest,
   CreateStockAdjustmentRequest,
+  Plan,
+  Subscription,
+  MeterEvent,
+  BillingInvoice,
+  BillingPayment,
+  Coupon,
 } from "@kwakopos2/contracts";
 import {
   calculateAvailableStock,
@@ -35,6 +41,12 @@ export class InMemoryStore {
   stockAdjustments: Map<string, StockAdjustment> = new Map();
   syncOperations: Map<string, SyncOperation> = new Map();
   auditEvents: Map<string, any> = new Map();
+  plans: Map<string, Plan> = new Map();
+  subscriptions: Map<string, Subscription> = new Map();
+  meterEvents: Map<string, MeterEvent> = new Map();
+  billingInvoices: Map<string, BillingInvoice> = new Map();
+  billingPayments: Map<string, BillingPayment> = new Map();
+  coupons: Map<string, Coupon> = new Map();
 
   clear() {
     this.tenants.clear();
@@ -47,8 +59,15 @@ export class InMemoryStore {
     this.stockAdjustments.clear();
     this.syncOperations.clear();
     this.auditEvents.clear();
+    this.plans.clear();
+    this.subscriptions.clear();
+    this.meterEvents.clear();
+    this.billingInvoices.clear();
+    this.billingPayments.clear();
+    this.coupons.clear();
   }
 }
+
 
 export const globalInMemoryStore = new InMemoryStore();
 
@@ -128,7 +147,8 @@ import { ScopedWorkforceRepository } from "./workforceRepositories.js";
 import { ScopedPluginRepository } from "./scopedPluginRepository.js";
 import { hardenFinanceRepository, wireCommercialFinanceBridges } from "./financeHardening.js";
 import { ScopedTelecomRepository, globalTelecomRepository } from "./scopedTelecomRepository.js";
-export { ScopedCommercialRepository, ScopedFinanceRepository, ScopedWorkforceRepository, ScopedPluginRepository, ScopedTelecomRepository };
+import { ScopedMonetizationRepository } from "./monetizationRepositories.js";
+export { ScopedCommercialRepository, ScopedFinanceRepository, ScopedWorkforceRepository, ScopedPluginRepository, ScopedTelecomRepository, ScopedMonetizationRepository };
 export { hardenFinanceRepository, wireCommercialFinanceBridges };
 export { PrismaFinanceRepository } from "./prismaFinanceRepository.js";
 export { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
@@ -136,8 +156,13 @@ export const globalCommercialRepository = new ScopedCommercialRepository(globalI
 export const globalFinanceRepository = hardenFinanceRepository(new ScopedFinanceRepository(globalInMemoryStore));
 export const globalWorkforceRepository = new ScopedWorkforceRepository(globalInMemoryStore);
 export const globalPluginRepository = new ScopedPluginRepository(globalInMemoryStore);
+export const globalMonetizationRepository = new ScopedMonetizationRepository(globalInMemoryStore);
 export { globalTelecomRepository };
 wireCommercialFinanceBridges(globalCommercialRepository, globalFinanceRepository);
+
+
+
+
 
 
 
