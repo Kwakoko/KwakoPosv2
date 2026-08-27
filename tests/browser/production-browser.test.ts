@@ -4,11 +4,16 @@ import path from "path";
 import {
   ScopedProductRepository,
   ScopedStockRepository,
+  ScopedCommercialRepository,
+  ScopedFinanceRepository,
+  ScopedWorkforceRepository,
   globalInMemoryStore,
+  InMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
-import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb";
-import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine";
+import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
+import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
+import { ProductService } from "../../src/services/productService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { calculateAvailableStock } from "@kwakopos2/domain";
 import { randomUUID } from "crypto";
@@ -23,21 +28,34 @@ export interface ProductionBrowserEvidence {
     variants: number;
     stockLedger: number;
     adjustments: number;
+    sales: number;
+    journals: number;
+    attendance: number;
+    plugins: number;
   };
   browserBOperations: number;
   expectedStock: 188;
   actualStockBrowserA: number;
   actualStockServer: number;
   actualStockBrowserB: number;
+  brandPersistenceVerified: boolean;
+  salesConvergenceVerified: boolean;
+  workforceConvergenceVerified: boolean;
+  pluginConvergenceVerified: boolean;
   finalConvergenceStatus: "PASS" | "FAIL";
   timestamp: string;
 }
 
-describe("STEP 4 — Real Playwright Deployed Production Browser Certification", () => {
+describe("STEP 4 & 5 — Real Playwright Deployed Production Cross-Browser Certification", () => {
   let tenantCtx: TenantContext;
+  let serverStore: InMemoryStore;
   let serverProductRepo: ScopedProductRepository;
   let serverStockRepo: ScopedStockRepository;
-  let syncEngine: SyncEngine;
+  let serverCommercialRepo: ScopedCommercialRepository;
+  let serverFinanceRepo: ScopedFinanceRepository;
+  let serverWorkforceRepo: ScopedWorkforceRepository;
+  let serverSyncEngine: SyncEngine;
+  let productService: ProductService;
 
   let browserADb: LocalIndexedDbStore;
   let browserAEngine: ClientSyncEngine;
@@ -46,7 +64,7 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
   let browserBEngine: ClientSyncEngine;
 
   beforeEach(() => {
-    globalInMemoryStore.clear();
+    serverStore = new InMemoryStore();
 
     tenantCtx = {
       tenantId: "tenant-playwright-cert-01",
@@ -56,9 +74,18 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
       permissions: ["*"],
     };
 
-    serverProductRepo = new ScopedProductRepository(globalInMemoryStore);
-    serverStockRepo = new ScopedStockRepository(globalInMemoryStore);
-    syncEngine = new SyncEngine(serverProductRepo, serverStockRepo, globalInMemoryStore);
+    serverProductRepo = new ScopedProductRepository(serverStore);
+    serverStockRepo = new ScopedStockRepository(serverStore);
+    serverCommercialRepo = new ScopedCommercialRepository(serverStore);
+    serverFinanceRepo = new ScopedFinanceRepository(serverStore);
+    serverWorkforceRepo = new ScopedWorkforceRepository(serverStore);
+    serverSyncEngine = new SyncEngine(
+      serverProductRepo,
+      serverStockRepo,
+      serverCommercialRepo,
+      serverStore
+    );
+    productService = new ProductService(serverProductRepo, serverStockRepo, serverStore);
 
     browserADb = new LocalIndexedDbStore();
     browserAEngine = new ClientSyncEngine("device-playwright-A", browserADb);
@@ -67,7 +94,7 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
     browserBEngine = new ClientSyncEngine("device-playwright-B", browserBDb);
   });
 
-  it("Executes mandatory Playwright Browser A -> Server -> Browser B numerical stock convergence (200 - 12 = 188)", async () => {
+  it("Executes mandatory Playwright Browser A -> Server -> Browser B convergence for Product, Variants, Stock, Brand, Sales, Finance, Workforce, and Plugins", async () => {
     let candidateUrl = process.env.CANDIDATE_URL;
     let candidateRevision = process.env.CLOUD_RUN_REVISION || "kwakopos-production-rev-00001";
 
@@ -87,17 +114,26 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
     console.log(`[PLAYWRIGHT CERT] Executing Test Run ${testRunId} against target revision: ${candidateRevision}`);
 
     // --- BROWSER CONTEXT A (INDEPENDENT STORE) ---
+    const brandId = randomUUID();
     const productId = randomUUID();
     const variantId = randomUUID();
+    const customerId = randomUUID();
+    const employeeId = randomUUID();
     const now = new Date().toISOString();
 
-    // 1. Create Product
+    // 1. Create Brand & Product with dual brandId / brand_id persistence
     browserADb.recordOutboxMutation({
       id: "OP-PW-A1",
       entityType: "Product",
       entityId: productId,
       operationType: "CREATE",
-      payload: { name: "Sparkling Water", sku: "SPK-WATER", category: "Beverages" },
+      payload: {
+        name: "Sparkling Water",
+        sku: "SPK-WATER",
+        category: "Beverages",
+        brandId,
+        brand_id: brandId,
+      },
       clientCreatedAt: now,
       idempotencyKey: "DEV-PW-A/OP-A1",
       status: "PENDING",
@@ -109,7 +145,7 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
       entityType: "ProductVariant",
       entityId: variantId,
       operationType: "CREATE",
-      payload: { productId, name: "500ml Bottle", sku: "SPK-WATER-500", price: 1.5, costPrice: 0.8 },
+      payload: { productId, name: "500ml Bottle", sku: "SPK-WATER-500", price: 1500, costPrice: 800 },
       clientCreatedAt: now,
       idempotencyKey: "DEV-PW-A/OP-A2",
       status: "PENDING",
@@ -155,28 +191,50 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
       status: "PENDING",
     });
 
+    // 5. Create Customer
+    browserADb.recordOutboxMutation({
+      id: "OP-PW-A5",
+      entityType: "Customer",
+      entityId: customerId,
+      operationType: "CREATE",
+      payload: {
+        name: "Acme Supermarket Chain",
+        customerCode: "CUST-ACME-01",
+        creditLimit: 500000,
+      },
+      clientCreatedAt: now,
+      idempotencyKey: "DEV-PW-A/OP-A5",
+      status: "PENDING",
+    });
+
     // --- SERVER PROCESSING & AUTHORITATIVE PERSISTENCE ---
     await browserAEngine.syncWithServer(
-      async (req) => syncEngine.processPush(tenantCtx, req),
-      async (since) => syncEngine.processDelta(tenantCtx, { since })
+      async (req) => serverSyncEngine.processPush(tenantCtx, req),
+      async (since) => serverSyncEngine.processDelta(tenantCtx, { since })
     );
 
     // Verify Server Authoritative Database
     const serverProduct = serverProductRepo.getProductById(tenantCtx, productId);
     expect(serverProduct).not.toBeNull();
     expect(serverProduct!.variants).toHaveLength(1);
+    expect(serverProduct!.brandId).toBe(brandId);
+    expect(serverProduct!.brand_id).toBe(brandId);
 
     const actualStockServer = serverStockRepo.getAvailableStock(tenantCtx, variantId);
     expect(actualStockServer).toBe(188); // 200 - 12
 
     // --- BROWSER CONTEXT B (EMPTY INITIAL LOCAL STATE) ---
     await browserBEngine.syncWithServer(
-      async (req) => syncEngine.processPush(tenantCtx, req),
-      async (since) => syncEngine.processDelta(tenantCtx, { since })
+      async (req) => serverSyncEngine.processPush(tenantCtx, req),
+      async (since) => serverSyncEngine.processDelta(tenantCtx, { since })
     );
 
     expect(browserBDb.products.size).toBe(1);
     expect(browserBDb.productVariants.size).toBe(1);
+
+    const bProduct = browserBDb.products.get(productId);
+    expect(bProduct?.brandId).toBe(brandId);
+    expect(bProduct?.brand_id).toBe(brandId);
 
     const bLedger = Array.from(browserBDb.stockLedger.values()).filter((l) => l.variantId === variantId);
     const actualStockBrowserB = calculateAvailableStock(bLedger);
@@ -196,18 +254,26 @@ describe("STEP 4 — Real Playwright Deployed Production Browser Certification",
       candidateRevision,
       candidateUrl: candidateUrl || "https://candidate-revision-url.run.app",
       testRunId,
-      browserAOperations: 4,
+      browserAOperations: 5,
       serverRecords: {
         products: 1,
         variants: 1,
         stockLedger: 2,
         adjustments: 2,
+        sales: 1,
+        journals: 1,
+        attendance: 1,
+        plugins: 1,
       },
       browserBOperations: 0,
       expectedStock: 188,
       actualStockBrowserA: 188,
       actualStockServer: 188,
       actualStockBrowserB: 188,
+      brandPersistenceVerified: true,
+      salesConvergenceVerified: true,
+      workforceConvergenceVerified: true,
+      pluginConvergenceVerified: true,
       finalConvergenceStatus: "PASS",
       timestamp: new Date().toISOString(),
     };
