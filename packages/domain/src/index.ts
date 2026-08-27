@@ -281,5 +281,17 @@ export * from "./payrollInputEngine.js";
 export * from "./laborCostingEngine.js";
 export * from "./workforceAnalyticsEngine.js";
 
-
-
+// Phase 4: Industry Plugin Framework & Domain Engines
+export * from "./pluginInvariants.js";
+export * from "./pluginRegistryEngine.js";
+export * from "./pluginConfigEngine.js";
+export * from "./pluginWorkflowEngine.js";
+export * from "./pluginNavigationEngine.js";
+export * from "./pluginDashboardEngine.js";
+export * from "./pluginCatalog.js";
+export * from "./restaurantEngine.js";
+export * from "./pharmacyEngine.js";
+export * from "./garageEngine.js";
+export * from "./constructionEngine.js";
+export * from "./telecomEngine.js";
+export * from "./wholesaleEngine.js";

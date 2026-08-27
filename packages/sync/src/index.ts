@@ -125,9 +125,22 @@ export class SyncEngine {
           // Payment handled via sale or purchase allocation
         } else if (op.entityType === "CashSession" && op.operationType === "CREATE") {
           this.commercialRepo.openCashSession(ctx, op.payload as unknown as OpenCashSessionRequest);
+        } else if (op.entityType?.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(op.entityType)) {
+          // Dynamic Plugin Entity Sync
+          const pluginEntityMap = (this.store as any).pluginCustomEntities || new Map();
+          pluginEntityMap.set(`${ctx.tenantId}:${op.entityType}:${op.entityId}`, {
+            id: op.entityId,
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            entityType: op.entityType,
+            payload: op.payload,
+            updatedAt: new Date().toISOString(),
+          });
+          (this.store as any).pluginCustomEntities = pluginEntityMap;
         } else {
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
+
 
         const syncOp: SyncOperation = {
           id: randomUUID(),

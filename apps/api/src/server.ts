@@ -61,15 +61,31 @@ import {
   ScopedCommercialRepository,
   ScopedFinanceRepository,
   ScopedWorkforceRepository,
+  ScopedPluginRepository,
   globalCommercialRepository,
   globalFinanceRepository,
   globalWorkforceRepository,
+  globalPluginRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   PrismaFinanceRepository,
   PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
 } from "@kwakopos2/database";
+import {
+  PluginRegistryEngine,
+  PluginConfigEngine,
+  PluginNavigationEngine,
+  PluginDashboardEngine,
+  StandardPluginCatalog,
+  RestaurantEngine,
+  PharmacyEngine,
+  GarageEngine,
+  ConstructionEngine,
+  TelecomEngine,
+  WholesaleEngine,
+} from "@kwakopos2/domain";
+
 
 
 import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
@@ -1283,6 +1299,244 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const report = globalWorkforceRepository.getAnalyticsReport(req.tenantContext!, period);
     return { success: true, data: report };
   });
+
+  // ==========================================
+  // PHASE 4: INDUSTRY PLUGIN EXPANSION ROUTES
+  // ==========================================
+
+  const pluginRegistryEngine = new PluginRegistryEngine();
+  StandardPluginCatalog.forEach((p) => pluginRegistryEngine.registerManifest(p));
+  const pluginConfigEngine = new PluginConfigEngine();
+  const pluginNavigationEngine = new PluginNavigationEngine();
+  const pluginDashboardEngine = new PluginDashboardEngine();
+  const restaurantEngine = new RestaurantEngine();
+  const pharmacyEngine = new PharmacyEngine();
+  const garageEngine = new GarageEngine();
+  const constructionEngine = new ConstructionEngine();
+  const telecomEngine = new TelecomEngine();
+  const wholesaleEngine = new WholesaleEngine();
+
+  // 1. Plugin Catalog & Tenant Activations
+  server.get("/api/v1/plugins", async (req) => {
+    const catalog = pluginRegistryEngine.getAllManifests();
+    const activeActivations = req.tenantContext
+      ? globalPluginRepository.getTenantActivations(req.tenantContext)
+      : [];
+    return {
+      success: true,
+      data: {
+        catalog,
+        tenantActivations: activeActivations,
+      },
+    };
+  });
+
+  server.get("/api/v1/plugins/:pluginId", async (req, reply) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const manifest = pluginRegistryEngine.getManifest(pluginId);
+    if (!manifest) {
+      reply.status(404);
+      return { success: false, error: { code: "NOT_FOUND", message: `Plugin ${pluginId} not found in catalog` } };
+    }
+    const isActive = req.tenantContext ? globalPluginRepository.isPluginActive(req.tenantContext, pluginId) : false;
+    return { success: true, data: { manifest, isActive } };
+  });
+
+  server.post("/api/v1/plugins/:pluginId/activate", async (req, reply) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const manifest = pluginRegistryEngine.getManifest(pluginId);
+    if (!manifest) {
+      reply.status(404);
+      return { success: false, error: { code: "NOT_FOUND", message: `Plugin ${pluginId} not found in catalog` } };
+    }
+    const { initialConfig } = (req.body as any) || {};
+    const activation = globalPluginRepository.activatePlugin(
+      req.tenantContext!,
+      pluginId,
+      manifest.version,
+      initialConfig || {}
+    );
+    return { success: true, data: activation };
+  });
+
+  server.post("/api/v1/plugins/:pluginId/deactivate", async (req) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const deactivation = globalPluginRepository.deactivatePlugin(req.tenantContext!, pluginId);
+    return { success: true, data: deactivation };
+  });
+
+  server.get("/api/v1/plugins/:pluginId/health", async (req, reply) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const manifest = pluginRegistryEngine.getManifest(pluginId);
+    if (!manifest) {
+      reply.status(404);
+      return { success: false, error: { code: "NOT_FOUND", message: `Plugin ${pluginId} not found` } };
+    }
+    const health = pluginRegistryEngine.generateHealthReport(pluginId, manifest.version);
+    return { success: true, data: health };
+  });
+
+  // 2. Dynamic Navigation
+  server.get("/api/v1/plugins/navigation", async (req) => {
+    const activations = globalPluginRepository.getTenantActivations(req.tenantContext!);
+    const activeManifests = activations
+      .map((a) => pluginRegistryEngine.getManifest(a.pluginId))
+      .filter((m): m is NonNullable<typeof m> => m !== undefined);
+    const navItems = pluginNavigationEngine.composeNavigation(activeManifests, req.tenantContext!);
+    return { success: true, data: navItems };
+  });
+
+  // 3. Hierarchical Config
+  server.get("/api/v1/plugins/:pluginId/config", async (req) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const key = (req.query as any)?.key || "";
+    const entries = globalPluginRepository.getConfigEntries(pluginId);
+    const value = pluginConfigEngine.resolveConfiguration(key, entries, {
+      tenantId: req.tenantContext?.tenantId,
+      branchId: req.tenantContext?.branchId,
+      userId: req.tenantContext?.userId,
+    });
+    return { success: true, data: { key, value } };
+  });
+
+  server.post("/api/v1/plugins/:pluginId/config", async (req, reply) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const { scope, key, value } = (req.body as any) || {};
+    const entry = globalPluginRepository.setConfigEntry(req.tenantContext!, {
+      pluginId,
+      scope: scope || "TENANT",
+      key,
+      value,
+      tenantId: req.tenantContext?.tenantId || null,
+      branchId: req.tenantContext?.branchId || null,
+      userId: req.tenantContext?.userId || null,
+    });
+    reply.status(201);
+    return { success: true, data: entry };
+  });
+
+  // 4. Plugin Dashboard
+  server.get("/api/v1/plugins/:pluginId/dashboard", async (req, reply) => {
+    const { pluginId } = req.params as { pluginId: string };
+    const manifest = pluginRegistryEngine.getManifest(pluginId);
+    if (!manifest || manifest.dashboards.length === 0) {
+      return { success: true, data: [] };
+    }
+    const dashboardDef = manifest.dashboards[0];
+    const metrics = pluginDashboardEngine.aggregateDashboardMetrics(dashboardDef, {
+      activePromotions: 3,
+      palletsShipped: 48,
+      todayCovers: 120,
+      occupancyRate: 85,
+      expiringBatchesCount: 2,
+      vehiclesInService: 6,
+      activeProjects: 4,
+      sitesOnAir: 18,
+    });
+    return { success: true, data: metrics };
+  });
+
+  // 5. Specialized Industry Endpoints
+
+  // RESTAURANT
+  server.post("/api/v1/plugins/restaurant/tables", async (req, reply) => {
+    const table = globalPluginRepository.createRestaurantTable(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: table };
+  });
+
+  server.get("/api/v1/plugins/restaurant/tables", async (req) => {
+    const tables = globalPluginRepository.getRestaurantTables(req.tenantContext!);
+    return { success: true, data: tables };
+  });
+
+  server.post("/api/v1/plugins/restaurant/kitchen-tickets", async (req, reply) => {
+    const ticket = globalPluginRepository.createKitchenTicket(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: ticket };
+  });
+
+  server.post("/api/v1/plugins/restaurant/bill-split", async (req) => {
+    const { grandTotal, numGuests } = (req.body as any) || {};
+    const shares = restaurantEngine.splitBillEvenly(Number(grandTotal) || 0, Number(numGuests) || 1);
+    return { success: true, data: { grandTotal, numGuests, shares } };
+  });
+
+  // PHARMACY
+  server.post("/api/v1/plugins/pharmacy/prescriptions", async (req, reply) => {
+    const pres = globalPluginRepository.createPrescription(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: pres };
+  });
+
+  server.get("/api/v1/plugins/pharmacy/prescriptions", async (req) => {
+    const list = globalPluginRepository.getPrescriptions(req.tenantContext!);
+    return { success: true, data: list };
+  });
+
+  // GARAGE
+  server.post("/api/v1/plugins/garage/vehicles", async (req, reply) => {
+    const veh = globalPluginRepository.createGarageVehicle(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: veh };
+  });
+
+  server.post("/api/v1/plugins/garage/work-orders", async (req, reply) => {
+    const wo = globalPluginRepository.createGarageWorkOrder(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: wo };
+  });
+
+  // CONSTRUCTION
+  server.post("/api/v1/plugins/construction/projects", async (req, reply) => {
+    const proj = globalPluginRepository.createConstructionProject(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: proj };
+  });
+
+  // TELECOM
+  server.post("/api/v1/plugins/telecom/sites", async (req, reply) => {
+    const site = globalPluginRepository.createTelecomSite(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: site };
+  });
+
+  server.post("/api/v1/plugins/telecom/links/calculate", async (req) => {
+    const { distanceKm, frequencyGhz, txPowerDbm, antennaGainDbi } = (req.body as any) || {};
+    const fspl = telecomEngine.calculateFreeSpacePathLoss(Number(distanceKm) || 10, Number(frequencyGhz) || 18);
+    const rsl = telecomEngine.calculateReceivedSignalLevel(
+      Number(txPowerDbm) || 20,
+      Number(antennaGainDbi) || 38,
+      Number(antennaGainDbi) || 38,
+      fspl
+    );
+    const fresnel = telecomEngine.calculateFresnelZoneRadius(Number(distanceKm) || 10, Number(frequencyGhz) || 18);
+    return {
+      success: true,
+      data: {
+        distanceKm,
+        frequencyGhz,
+        freeSpacePathLossDb: fspl,
+        receivedSignalLevelDbm: rsl,
+        fresnelZoneRadiusMeters: fresnel,
+      },
+    };
+  });
+
+  // WHOLESALE
+  server.post("/api/v1/plugins/wholesale/tier-rules", async (req, reply) => {
+    const rule = globalPluginRepository.setWholesaleTierRule(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: rule };
+  });
+
+  server.post("/api/v1/plugins/wholesale/calculate-price", async (req) => {
+    const { quantity, basePrice, variantId } = (req.body as any) || {};
+    const tierRule = variantId ? globalPluginRepository.wholesaleTierRules.get(variantId) : null;
+    const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, tierRule);
+    return { success: true, data: result };
+  });
+
 
 
 

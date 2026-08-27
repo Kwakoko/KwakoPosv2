@@ -2187,3 +2187,5 @@ export const WorkforceAnalyticsReportSchema = z.object({
   taskCompletionRatePct: z.number(),
 });
 export type WorkforceAnalyticsReport = z.infer<typeof WorkforceAnalyticsReportSchema>;
+
+export * from "./pluginContracts.js";

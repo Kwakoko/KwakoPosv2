@@ -5,6 +5,7 @@ import {
   ScopedCommercialRepository,
   ScopedFinanceRepository,
   ScopedWorkforceRepository,
+  ScopedPluginRepository,
   globalInMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
@@ -24,7 +25,20 @@ import {
   TaskWorkOrderEngine,
   PayrollInputEngine,
   LaborCostingEngine,
+  PluginRegistryEngine,
+  PluginConfigEngine,
+  PluginWorkflowEngine,
+  PluginNavigationEngine,
+  PluginDashboardEngine,
+  StandardPluginCatalog,
+  RestaurantEngine,
+  PharmacyEngine,
+  GarageEngine,
+  ConstructionEngine,
+  TelecomEngine,
+  WholesaleEngine,
 } from "@kwakopos2/domain";
+
 
 import { globalMetrics, globalIncidentEngine, defaultLogger } from "@kwakopos2/observability";
 
@@ -950,9 +964,332 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   });
   console.log(` [W10/W10] ${passW10 ? "✓" : "✗"} Synthetic Test W10 (Cross-Tenant Workforce Access -> Strict Isolation Rejection): ${passW10 ? "PASS" : "FAIL"}`);
 
+  // ==========================================
+  // PHASE 4: INDUSTRY PLUGIN EXPANSION SYNTHETIC TESTS (P01 - P10)
+  // ==========================================
+  const pluginRepo = new ScopedPluginRepository(globalInMemoryStore);
+  const pluginRegistry = new PluginRegistryEngine();
+
+  StandardPluginCatalog.forEach((p) => pluginRegistry.registerManifest(p));
+  const pluginConfigEngine = new PluginConfigEngine();
+  const pluginWorkflowEngine = new PluginWorkflowEngine();
+  const restaurantEngine = new RestaurantEngine();
+  const pharmacyEngine = new PharmacyEngine();
+  const garageEngine = new GarageEngine();
+  const telecomEngine = new TelecomEngine();
+  const wholesaleEngine = new WholesaleEngine();
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P01: Plugin Manifest Registration & Dependency Graph Validation
+  // -------------------------------------------------------------------------
+  const startP01 = Date.now();
+  const activeDeps = new Set(["commercial-core", "inventory", "finance", "workforce"]);
+  let p01Valid = false;
+  try {
+    pluginRegistry.validateDependencies("restaurant", activeDeps);
+    p01Valid = true;
+  } catch {}
+  const passP01 = p01Valid && pluginRegistry.getAllManifests().length >= 6;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P01_PLUGIN_REGISTRY_AND_DEPENDENCIES",
+    syntheticTenantId,
+    durationMs: Date.now() - startP01,
+    status: passP01 ? "PASS" : "FAIL",
+    evidence: { manifestCount: pluginRegistry.getAllManifests().length, restaurantDepsSatisfied: p01Valid },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P01/P10] ${passP01 ? "✓" : "✗"} Synthetic Test P01 (Plugin Manifest Registration & Dependency Validation): ${passP01 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P02: Tenant Plugin Activation & Isolation (P003)
+  // -------------------------------------------------------------------------
+  const startP02 = Date.now();
+  const actP02 = pluginRepo.activatePlugin(ctx, "restaurant", "1.0.0", { serviceChargePct: 10 });
+  const isActiveP02 = pluginRepo.isPluginActive(ctx, "restaurant");
+  const foreignP02Active = pluginRepo.isPluginActive(foreignCtx, "restaurant");
+  const passP02 = isActiveP02 && !foreignP02Active && actP02.state === "ACTIVE";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P02_TENANT_PLUGIN_ACTIVATION_ISOLATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startP02,
+    status: passP02 ? "PASS" : "FAIL",
+    evidence: { tenantActive: isActiveP02, foreignActive: foreignP02Active },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P02/P10] ${passP02 ? "✓" : "✗"} Synthetic Test P02 (Tenant Plugin Activation & Multi-Tenant Isolation): ${passP02 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P03: Plugin Mutation Sync Idempotency (P004)
+  // -------------------------------------------------------------------------
+  const startP03 = Date.now();
+  const p03IdemKey = `plg-evt-idem-${randomUUID()}`;
+  pluginRepo.logPluginEvent(ctx, {
+    pluginId: "restaurant",
+    eventType: "TABLE_OPENED",
+    operationId: "op-p03-1",
+    idempotencyKey: p03IdemKey,
+    actorId: ctx.userId,
+    payload: { tableNumber: "T-01" },
+  });
+  let duplicateRejectedP03 = false;
+  try {
+    pluginRepo.logPluginEvent(ctx, {
+      pluginId: "restaurant",
+      eventType: "TABLE_OPENED",
+      operationId: "op-p03-2",
+      idempotencyKey: p03IdemKey,
+      actorId: ctx.userId,
+      payload: { tableNumber: "T-01" },
+    });
+  } catch (err: any) {
+    if (err.message.includes("INVARIANT_P004_VIOLATION")) {
+      duplicateRejectedP03 = true;
+    }
+  }
+  const passP03 = duplicateRejectedP03;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P03_PLUGIN_IDEMPOTENCY_REJECTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startP03,
+    status: passP03 ? "PASS" : "FAIL",
+    evidence: { duplicateRejected: duplicateRejectedP03 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P03/P10] ${passP03 ? "✓" : "✗"} Synthetic Test P03 (Duplicate Plugin Event -> Idempotent Rejection): ${passP03 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P04: Hierarchical Configuration Resolution
+  // -------------------------------------------------------------------------
+  const startP04 = Date.now();
+  pluginRepo.setConfigEntry(ctx, {
+    pluginId: "restaurant",
+    scope: "GLOBAL",
+    key: "autoGratuity",
+    value: false,
+    tenantId: null,
+    branchId: null,
+    userId: null,
+  });
+  pluginRepo.setConfigEntry(ctx, {
+    pluginId: "restaurant",
+    scope: "TENANT",
+    key: "autoGratuity",
+    value: true,
+    tenantId: ctx.tenantId,
+    branchId: null,
+    userId: null,
+  });
+  const resolvedP04 = pluginConfigEngine.resolveConfiguration(
+    "autoGratuity",
+    pluginRepo.getConfigEntries("restaurant"),
+    { tenantId: ctx.tenantId }
+  );
+  const passP04 = resolvedP04 === true;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P04_HIERARCHICAL_CONFIG_RESOLUTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startP04,
+    status: passP04 ? "PASS" : "FAIL",
+    evidence: { resolvedValue: resolvedP04 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P04/P10] ${passP04 ? "✓" : "✗"} Synthetic Test P04 (Hierarchical Plugin Configuration Resolution): ${passP04 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P05: Dynamic Plugin Workflow Lifecycle Execution
+  // -------------------------------------------------------------------------
+  const startP05 = Date.now();
+  const wfDefP05 = StandardPluginCatalog.find((p) => p.id === "restaurant")!.workflows[0];
+  const instanceP05 = pluginWorkflowEngine.startWorkflow(wfDefP05, "order-syn-01", ctx);
+  pluginWorkflowEngine.advanceStep(instanceP05, wfDefP05, ctx, "Cooking");
+  pluginWorkflowEngine.advanceStep(instanceP05, wfDefP05, ctx, "Ready");
+  pluginWorkflowEngine.advanceStep(instanceP05, wfDefP05, ctx, "Served");
+  pluginWorkflowEngine.advanceStep(instanceP05, wfDefP05, ctx, "Done");
+  const passP05 = instanceP05.status === "COMPLETED" && instanceP05.history.length === 5;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P05_PLUGIN_WORKFLOW_EXECUTION",
+    syntheticTenantId,
+    durationMs: Date.now() - startP05,
+    status: passP05 ? "PASS" : "FAIL",
+    evidence: { finalStatus: instanceP05.status, stepsCompleted: instanceP05.history.length },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P05/P10] ${passP05 ? "✓" : "✗"} Synthetic Test P05 (Dynamic Plugin Workflow Step Lifecycle): ${passP05 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P06: Restaurant Table & Kitchen Display Ticket
+  // -------------------------------------------------------------------------
+  const startP06 = Date.now();
+  const tableP06 = pluginRepo.createRestaurantTable(ctx, {
+    branchId: ctx.branchId,
+    tableNumber: "T-99",
+    capacity: 6,
+    status: "OCCUPIED",
+    floorArea: "BALCONY",
+    currentOrderId: "order-syn-01",
+    assignedStaffId: ctx.userId,
+  });
+  const ticketP06 = pluginRepo.createKitchenTicket(ctx, {
+    branchId: ctx.branchId,
+    orderId: "order-syn-01",
+    tableNumber: "T-99",
+    status: "PENDING",
+    prepTimeMinutes: 20,
+    items: [{ id: randomUUID(), name: "Grilled Tilapia", quantity: 2, course: "MAIN", modifiers: ["Extra Chilli"], notes: null }],
+  });
+  const passP06 = tableP06.status === "OCCUPIED" && ticketP06.items.length === 1;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P06_RESTAURANT_TABLE_KITCHEN_TICKET",
+    syntheticTenantId,
+    durationMs: Date.now() - startP06,
+    status: passP06 ? "PASS" : "FAIL",
+    evidence: { tableId: tableP06.id, ticketId: ticketP06.id },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P06/P10] ${passP06 ? "✓" : "✗"} Synthetic Test P06 (Restaurant Table & Kitchen Ticket Management): ${passP06 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P07: Pharmacy Prescription Validation & Batch Expiry Controls
+  // -------------------------------------------------------------------------
+  const startP07 = Date.now();
+  const presP07 = pluginRepo.createPrescription(ctx, {
+    branchId: ctx.branchId,
+    prescriptionNumber: "RX-SYN-001",
+    patientName: "David Chemba",
+    patientAge: 42,
+    doctorName: "Dr. Lwakatare",
+    doctorLicenseNumber: "TZ-MD-8812",
+    status: "VALIDATED",
+    dispensedByUserId: null,
+    dispensedAt: null,
+    items: [
+      {
+        id: randomUUID(),
+        medicineName: "Amoxicillin Trihydrate 500mg",
+        activeIngredient: "Amoxicillin",
+        dosage: "500mg",
+        frequency: "8-hourly",
+        durationDays: 5,
+        quantity: 15,
+        batchNumber: "B-2026-NOV",
+        expiryDate: "2026-11-30T00:00:00Z",
+      },
+    ],
+  });
+  let p07Valid = false;
+  try {
+    pharmacyEngine.assertPrescriptionValidForDispense(presP07, new Date("2026-08-27T00:00:00Z"));
+    p07Valid = true;
+  } catch {}
+  const passP07 = p07Valid && presP07.items[0].batchNumber === "B-2026-NOV";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P07_PHARMACY_PRESCRIPTION_EXPIRY_CONTROL",
+    syntheticTenantId,
+    durationMs: Date.now() - startP07,
+    status: passP07 ? "PASS" : "FAIL",
+    evidence: { prescriptionId: presP07.id, dispenseCheckPassed: p07Valid },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P07/P10] ${passP07 ? "✓" : "✗"} Synthetic Test P07 (Pharmacy Prescription Validation & Batch Expiry): ${passP07 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P08: Garage Work Order Costing & QA Review Signoff
+  // -------------------------------------------------------------------------
+  const startP08 = Date.now();
+  const vehP08 = pluginRepo.createGarageVehicle(ctx, {
+    branchId: ctx.branchId,
+    registrationNumber: "T 123 ABC",
+    make: "Toyota",
+    model: "Hilux D4D",
+    year: 2022,
+    vin: "MHF239847293",
+    mileage: 45000,
+    customerId: randomUUID(),
+  });
+  const { laborCostTotal: laborP08, grandTotal: grandP08 } = garageEngine.calculateWorkOrderCost(200000, 4, 35000);
+  const woP08 = pluginRepo.createGarageWorkOrder(ctx, {
+    branchId: ctx.branchId,
+    workOrderNumber: "WO-SYN-881",
+    vehicleId: vehP08.id,
+    customerId: vehP08.customerId,
+    assignedTechnicianId: ctx.userId,
+    status: "QA_REVIEW",
+    issueDescription: "Brake overhaul and fluid replacement",
+    diagnosis: "Replaced front pads and bled master cylinder",
+    partsCostTotal: 200000,
+    laborHours: 4,
+    laborRate: 35000,
+    laborCostTotal: laborP08,
+    grandTotal: grandP08,
+    qaPassed: false,
+    qaInspectorId: null,
+  });
+  let qaAllowedP08 = false;
+  try {
+    garageEngine.assertQaSignoffAllowed(woP08);
+    qaAllowedP08 = true;
+  } catch {}
+  const passP08 = qaAllowedP08 && woP08.grandTotal === 340000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P08_GARAGE_WORK_ORDER_QA_COSTING",
+    syntheticTenantId,
+    durationMs: Date.now() - startP08,
+    status: passP08 ? "PASS" : "FAIL",
+    evidence: { workOrderId: woP08.id, grandTotal: woP08.grandTotal, qaAllowed: qaAllowedP08 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P08/P10] ${passP08 ? "✓" : "✗"} Synthetic Test P08 (Garage Work Order Costing & QA Signoff): ${passP08 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P09: Telecom Microwave Link Physics & Fresnel Zone Clearance
+  // -------------------------------------------------------------------------
+  const startP09 = Date.now();
+  const fsplP09 = telecomEngine.calculateFreeSpacePathLoss(12.5, 18);
+  const rslP09 = telecomEngine.calculateReceivedSignalLevel(20, 38, 38, fsplP09, 2);
+  const fresnelP09 = telecomEngine.calculateFresnelZoneRadius(12.5, 18);
+  const azimuthP09 = telecomEngine.calculateAzimuth(-6.8235, 39.2695, -6.444, 38.9056);
+  const passP09 = fsplP09 > 135 && rslP09 < 0 && fresnelP09 > 5 && azimuthP09 > 300;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P09_TELECOM_MICROWAVE_ENGINEERING",
+    syntheticTenantId,
+    durationMs: Date.now() - startP09,
+    status: passP09 ? "PASS" : "FAIL",
+    evidence: { fsplDb: fsplP09, rslDbm: rslP09, fresnelRadiusM: fresnelP09, azimuthDeg: azimuthP09 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P09/P10] ${passP09 ? "✓" : "✗"} Synthetic Test P09 (Telecom Microwave Link Physics & Path Loss): ${passP09 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST P10: Wholesale Quantity Tier Pricing & Pallet Calculation
+  // -------------------------------------------------------------------------
+  const startP10 = Date.now();
+  const wholesaleRuleP10 = pluginRepo.setWholesaleTierRule(ctx, {
+    variantId: randomUUID(),
+    minimumOrderQuantity: 10,
+    unitsPerCase: 12,
+    casesPerPallet: 50,
+    tiers: [
+      { minQuantity: 100, unitPrice: 8000, discountPercent: 20 },
+      { minQuantity: 50, unitPrice: 9000, discountPercent: 10 },
+    ],
+  });
+  const priceP10 = wholesaleEngine.calculateUnitPrice(150, 10000, wholesaleRuleP10);
+  const palletP10 = wholesaleEngine.calculatePalletBreakdown(1250, 12, 50);
+  const passP10 = priceP10.unitPrice === 8000 && palletP10.fullPallets === 2 && palletP10.looseUnits === 2;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_P10_WHOLESALE_TIER_PRICING_PALLET_MATH",
+    syntheticTenantId,
+    durationMs: Date.now() - startP10,
+    status: passP10 ? "PASS" : "FAIL",
+    evidence: { tierUnitPrice: priceP10.unitPrice, fullPallets: palletP10.fullPallets, looseUnits: palletP10.looseUnits },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [P10/P10] ${passP10 ? "✓" : "✗"} Synthetic Test P10 (Wholesale Quantity Tier Pricing & Pallet Breakdown): ${passP10 ? "PASS" : "FAIL"}`);
+
   const allPassed = results.every((r) => r.status === "PASS");
   return { allPassed, results };
 }
+
 
 
 if (process.argv[1] && process.argv[1].endsWith("synthetic-monitor.ts")) {

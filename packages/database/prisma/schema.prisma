@@ -1590,3 +1590,200 @@ model PayrollInput {
   @@index([tenantId, branchId, periodStart])
   @@map("payroll_inputs")
 }
+
+// ==========================================
+// PHASE 4: INDUSTRY PLUGIN EXPANSION
+// ==========================================
+
+model PluginActivation {
+  id            String    @id @default(uuid())
+  tenantId      String
+  pluginId      String
+  pluginVersion String
+  state         String    @default("ACTIVE") // DISCOVERED, INSTALLED, CONFIGURED, ENABLED, ACTIVE, SUSPENDED, UPGRADED, DISABLED, UNINSTALLED
+  enabledAt     DateTime?
+  installedAt   DateTime  @default(now())
+  disabledAt    DateTime?
+  configuration Json      @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([tenantId, pluginId])
+  @@index([tenantId, state])
+  @@map("plugin_activations")
+}
+
+model BranchPluginConfig {
+  id            String   @id @default(uuid())
+  tenantId      String
+  branchId      String
+  pluginId      String
+  isEnabled     Boolean  @default(true)
+  configuration Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, branchId, pluginId])
+  @@index([tenantId, branchId])
+  @@map("branch_plugin_configs")
+}
+
+model PluginConfigEntry {
+  id        String   @id @default(uuid())
+  tenantId  String?
+  branchId  String?
+  userId    String?
+  pluginId  String
+  scope     String   @default("GLOBAL") // GLOBAL, TENANT, BRANCH, USER
+  key       String
+  value     Json
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pluginId, scope, key])
+  @@map("plugin_config_entries")
+}
+
+model PluginEventLog {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String?
+  pluginId       String
+  eventType      String
+  entityType     String?
+  entityId       String?
+  operationId    String
+  idempotencyKey String
+  payload        Json     @default("{}")
+  actorId        String
+  timestamp      DateTime @default(now())
+
+  @@index([tenantId, pluginId, eventType])
+  @@map("plugin_event_logs")
+}
+
+model RestaurantTableRecord {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  tableNumber    String
+  capacity       Int      @default(4)
+  status         String   @default("AVAILABLE") // AVAILABLE, OCCUPIED, RESERVED, CLEANING, OUT_OF_SERVICE
+  floorArea      String   @default("MAIN")
+  currentOrderId String?
+  assignedStaffId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, branchId, tableNumber])
+  @@index([tenantId, branchId, status])
+  @@map("restaurant_tables")
+}
+
+model KitchenTicketRecord {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  orderId         String
+  tableNumber     String?
+  status          String   @default("PENDING") // PENDING, PREPARING, READY, SERVED, CANCELLED
+  items           Json     @default("[]")
+  prepTimeMinutes Int      @default(15)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, branchId, status])
+  @@map("kitchen_tickets")
+}
+
+model GarageVehicleRecord {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  branchId           String
+  registrationNumber String
+  make               String
+  model              String
+  year               Int?
+  vin                String?
+  mileage            Int      @default(0)
+  customerId         String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([tenantId, branchId, registrationNumber])
+  @@index([tenantId, customerId])
+  @@map("garage_vehicles")
+}
+
+model GarageWorkOrderRecord {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  branchId             String
+  workOrderNumber      String
+  vehicleId            String
+  customerId           String
+  assignedTechnicianId String?
+  status               String   @default("INTAKE") // INTAKE, DIAGNOSIS, IN_PROGRESS, QA_REVIEW, COMPLETED, DELIVERED
+  issueDescription     String
+  diagnosis            String?
+  partsCostTotal       Decimal  @default(0) @db.Decimal(12, 2)
+  laborHours           Decimal  @default(0) @db.Decimal(8, 2)
+  laborRate            Decimal  @default(0) @db.Decimal(12, 2)
+  laborCostTotal       Decimal  @default(0) @db.Decimal(12, 2)
+  grandTotal           Decimal  @default(0) @db.Decimal(12, 2)
+  qaPassed             Boolean  @default(false)
+  qaInspectorId        String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([tenantId, branchId, workOrderNumber])
+  @@index([tenantId, branchId, status])
+  @@map("garage_work_orders")
+}
+
+model ConstructionProjectRecord {
+  id                      String   @id @default(uuid())
+  tenantId                String
+  branchId                String
+  projectCode             String
+  name                    String
+  siteLocation            String
+  status                  String   @default("PLANNING") // PLANNING, ACTIVE, ON_HOLD, COMPLETED, CLOSED
+  budgetTotal             Decimal  @default(0) @db.Decimal(14, 2)
+  actualCostTotal         Decimal  @default(0) @db.Decimal(14, 2)
+  progressPercent         Int      @default(0)
+  workPackages            Json     @default("[]")
+  startDate               DateTime @default(now())
+  estimatedCompletionDate DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([tenantId, branchId, projectCode])
+  @@index([tenantId, branchId, status])
+  @@map("construction_projects")
+}
+
+model TelecomSiteRecord {
+  id                          String    @id @default(uuid())
+  tenantId                    String
+  branchId                    String
+  siteCode                    String
+  name                        String
+  siteType                    String    @default("MACRO_TOWER")
+  latitude                    Float
+  longitude                   Float
+  towerHeightMeters           Float     @default(45)
+  status                      String    @default("SURVEY") // SURVEY, CIVIL_WORKS, INSTALLATION, ON_AIR, ACCEPTED
+  equipmentBOM                Json      @default("[]")
+  links                       Json      @default("[]")
+  acceptanceCertificateNumber String?
+  isAccepted                  Boolean   @default(false)
+  acceptedAt                  DateTime?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+
+  @@unique([tenantId, branchId, siteCode])
+  @@index([tenantId, branchId, status])
+  @@map("telecom_sites")
+}
