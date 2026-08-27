@@ -286,6 +286,7 @@ model Product {
   tenantId     String
   branchId     String
   categoryId   String?
+  brandId      String?          @map("brand_id")
   name         String
   description  String?
   sku          String
