@@ -66,6 +66,7 @@ import {
   globalFinanceRepository,
   globalWorkforceRepository,
   globalPluginRepository,
+  globalTelecomRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   PrismaFinanceRepository,
@@ -84,7 +85,11 @@ import {
   ConstructionEngine,
   TelecomEngine,
   WholesaleEngine,
+  KmlKmzParserEngine,
+  TelecomWorkflowEngine,
+  TelecomCostingEngine,
 } from "@kwakopos2/domain";
+
 
 
 
@@ -1536,6 +1541,171 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, tierRule);
     return { success: true, data: result };
   });
+
+  // =========================================================================
+  // Phase 5: Dedicated Telecom & Technical Vertical Endpoints (/api/v1/telecom/*)
+  // =========================================================================
+
+  // Contracts
+  server.post("/api/v1/telecom/contracts", async (req, reply) => {
+    const contract = globalTelecomRepository.createContract(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: contract };
+  });
+
+  server.get("/api/v1/telecom/contracts", async (req) => {
+    const contracts = globalTelecomRepository.getContracts(req.tenantContext!);
+    return { success: true, data: contracts };
+  });
+
+  // Projects
+  server.post("/api/v1/telecom/projects", async (req, reply) => {
+    const project = globalTelecomRepository.createProject(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: project };
+  });
+
+  server.get("/api/v1/telecom/projects", async (req) => {
+    const projects = globalTelecomRepository.getProjects(req.tenantContext!);
+    return { success: true, data: projects };
+  });
+
+  server.get("/api/v1/telecom/projects/:id", async (req, reply) => {
+    const project = globalTelecomRepository.getProjectById(req.tenantContext!, (req.params as any).id);
+    if (!project) {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Project not found" } });
+    }
+    return { success: true, data: project };
+  });
+
+  // Sites & Geospatial Search
+  server.post("/api/v1/telecom/sites", async (req, reply) => {
+    const site = globalTelecomRepository.createSite(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: site };
+  });
+
+  server.get("/api/v1/telecom/sites", async (req) => {
+    const sites = globalTelecomRepository.getSites(req.tenantContext!);
+    return { success: true, data: sites };
+  });
+
+  server.get("/api/v1/telecom/sites/:id", async (req, reply) => {
+    const site = globalTelecomRepository.getSiteById(req.tenantContext!, (req.params as any).id);
+    if (!site) {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Site not found" } });
+    }
+    return { success: true, data: site };
+  });
+
+  server.get("/api/v1/telecom/sites/near", async (req) => {
+    const { lat, lon, radiusKm } = (req.query as any) || {};
+    const results = globalTelecomRepository.searchSitesNear(
+      req.tenantContext!,
+      parseFloat(lat) || 0,
+      parseFloat(lon) || 0,
+      parseFloat(radiusKm) || 25.0
+    );
+    return { success: true, data: results };
+  });
+
+  // RAN Sectors
+  server.post("/api/v1/telecom/ran/sectors", async (req, reply) => {
+    const sector = globalTelecomRepository.createRanSector(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: sector };
+  });
+
+  server.get("/api/v1/telecom/ran/sectors", async (req) => {
+    const { siteId } = (req.query as any) || {};
+    if (!siteId) return { success: true, data: Array.from(globalTelecomRepository.ranSectors.values()).filter((s) => s.tenantId === req.tenantContext!.tenantId) };
+    const sectors = globalTelecomRepository.getRanSectorsBySite(req.tenantContext!, siteId);
+    return { success: true, data: sectors };
+  });
+
+  // Microwave Links & Calculation
+  server.post("/api/v1/telecom/microwave/links", async (req, reply) => {
+    const link = globalTelecomRepository.createMicrowaveLink(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: link };
+  });
+
+  server.get("/api/v1/telecom/microwave/links", async (req) => {
+    const links = globalTelecomRepository.getMicrowaveLinks(req.tenantContext!);
+    return { success: true, data: links };
+  });
+
+  server.post("/api/v1/telecom/microwave/calculate", async (req) => {
+    const calculation = TelecomEngine.executeLinkBudgetCalculation(req.body as any);
+    return { success: true, data: calculation };
+  });
+
+  // Work Orders & Checklists
+  server.post("/api/v1/telecom/work-orders", async (req, reply) => {
+    const wo = globalTelecomRepository.createWorkOrder(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: wo };
+  });
+
+  server.get("/api/v1/telecom/work-orders", async (req) => {
+    const orders = Array.from(globalTelecomRepository.workOrders.values()).filter((w) => w.tenantId === req.tenantContext!.tenantId);
+    return { success: true, data: orders };
+  });
+
+  server.post("/api/v1/telecom/work-orders/:id/complete", async (req) => {
+    const { completionNotes } = (req.body as any) || {};
+    const wo = globalTelecomRepository.completeWorkOrder(req.tenantContext!, (req.params as any).id, completionNotes);
+    return { success: true, data: wo };
+  });
+
+  // Testing, Commissioning & Site Acceptance (SAT)
+  server.post("/api/v1/telecom/tests", async (req, reply) => {
+    const test = globalTelecomRepository.recordTest(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: test };
+  });
+
+  server.post("/api/v1/telecom/acceptance", async (req, reply) => {
+    const acceptance = globalTelecomRepository.createSiteAcceptance(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: acceptance };
+  });
+
+  // Maintenance & Service Tickets
+  server.post("/api/v1/telecom/maintenance/tickets", async (req, reply) => {
+    const ticket = globalTelecomRepository.createMaintenanceTicket(req.tenantContext!, req.body as any);
+    reply.status(201);
+    return { success: true, data: ticket };
+  });
+
+  server.get("/api/v1/telecom/maintenance/tickets", async (req) => {
+    const tickets = globalTelecomRepository.getMaintenanceTickets(req.tenantContext!);
+    return { success: true, data: tickets };
+  });
+
+  // KML / KMZ Parsing & Site Generation
+  server.post("/api/v1/telecom/imports/kml/parse", async (req, reply) => {
+    const { kmlContent, fileName } = (req.body as any) || {};
+    if (!kmlContent) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "kmlContent required" } });
+    }
+    const parseResult = KmlKmzParserEngine.parseKmlString(kmlContent, fileName || "import.kml");
+    const record = KmlKmzParserEngine.createImportRecord(req.tenantContext!, parseResult, fileName || "import.kml", "KML");
+    globalTelecomRepository.kmlImports.set(record.id, record);
+    reply.status(201);
+    return { success: true, data: record };
+  });
+
+  server.post("/api/v1/telecom/imports/kml/generate-sites", async (req) => {
+    const { importRecordId, selectedPlacemarkIds } = (req.body as any) || {};
+    const result = globalTelecomRepository.importKmlPlacemarksAsSites(
+      req.tenantContext!,
+      importRecordId,
+      selectedPlacemarkIds || []
+    );
+    return { success: true, data: result };
+  });
+
 
 
 

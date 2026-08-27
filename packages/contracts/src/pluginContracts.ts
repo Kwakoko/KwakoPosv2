@@ -400,48 +400,8 @@ export const ConstructionProjectSchema = z.object({
 });
 export type ConstructionProject = z.infer<typeof ConstructionProjectSchema>;
 
-// 5. TELECOM
-export const TelecomSiteTypeEnum = z.enum(["MACRO_TOWER", "ROOFTOP", "SMALL_CELL", "REPEATER"]);
-export type TelecomSiteType = z.infer<typeof TelecomSiteTypeEnum>;
+// 5. WHOLESALE
 
-export const TelecomMicrowaveLinkSchema = z.object({
-  id: z.string().uuid(),
-  nearSiteCode: z.string(),
-  farSiteCode: z.string(),
-  frequencyGhz: z.number().positive(), // e.g. 18 GHz
-  distanceKm: z.number().positive(),   // e.g. 12.5 km
-  txPowerDbm: z.number().default(20),  // e.g. +20 dBm
-  antennaGainDbi: z.number().default(38), // e.g. 38 dBi near and far
-  freeSpacePathLossDb: z.number().default(0),
-  receivedSignalLevelDbm: z.number().default(0),
-  fresnelZoneRadiusMeters: z.number().default(0),
-  isClearanceAdequate: z.boolean().default(true),
-  availabilityPercent: z.number().default(99.999),
-});
-export type TelecomMicrowaveLink = z.infer<typeof TelecomMicrowaveLinkSchema>;
-
-export const TelecomSiteSchema = z.object({
-  id: z.string().uuid(),
-  tenantId: z.string().uuid(),
-  branchId: z.string().uuid(),
-  siteCode: z.string(),
-  name: z.string(),
-  siteType: TelecomSiteTypeEnum.default("MACRO_TOWER"),
-  latitude: z.number(),
-  longitude: z.number(),
-  towerHeightMeters: z.number().default(45),
-  status: z.enum(["SURVEY", "CIVIL_WORKS", "INSTALLATION", "ON_AIR", "ACCEPTED"]).default("SURVEY"),
-  equipmentBOM: z.array(z.string()).default([]),
-  links: z.array(TelecomMicrowaveLinkSchema).default([]),
-  acceptanceCertificateNumber: z.string().nullable().default(null),
-  isAccepted: z.boolean().default(false),
-  acceptedAt: z.string().datetime().nullable().default(null),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-export type TelecomSite = z.infer<typeof TelecomSiteSchema>;
-
-// 6. WHOLESALE
 export const WholesaleQuantityTierSchema = z.object({
   minQuantity: z.number().int().positive(),
   unitPrice: z.number().positive(),

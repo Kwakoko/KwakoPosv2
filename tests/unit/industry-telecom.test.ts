@@ -13,11 +13,12 @@ describe("Industry Engine: Telecom & Microwave Link Engineering", () => {
 
   it("calculates Received Signal Level (RSL) and link budget", () => {
     const fspl = engine.calculateFreeSpacePathLoss(10, 18);
-    // RSL = +20 dBm (Tx) + 38 dBi (Tx Ant) + 38 dBi (Rx Ant) - 137.56 dB (FSPL) - 2 dB (Loss)
+    // RSL = +20 dBm (Tx) + 38 dBi (Tx Ant) + 38 dBi (Rx Ant) - 137.56 dB (FSPL) - 2 dB (Loss: 1dB + 1dB)
     // RSL = 20 + 38 + 38 - 137.56 - 2 = -43.56 dBm
-    const rsl = engine.calculateReceivedSignalLevel(20, 38, 38, fspl, 2);
+    const rsl = engine.calculateReceivedSignalLevel(20, 38, 38, fspl, 1, 1);
     expect(rsl).toBeCloseTo(-43.56, 1);
   });
+
 
   it("calculates Fresnel Zone clearance radius at mid-path", () => {
     // r = 8.657 * sqrt(10 / 18) = 8.657 * 0.74535 = 6.45 meters

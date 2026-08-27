@@ -122,7 +122,8 @@ import { ScopedFinanceRepository } from "./financeRepositories.js";
 import { ScopedWorkforceRepository } from "./workforceRepositories.js";
 import { ScopedPluginRepository } from "./scopedPluginRepository.js";
 import { hardenFinanceRepository, wireCommercialFinanceBridges } from "./financeHardening.js";
-export { ScopedCommercialRepository, ScopedFinanceRepository, ScopedWorkforceRepository, ScopedPluginRepository };
+import { ScopedTelecomRepository, globalTelecomRepository } from "./scopedTelecomRepository.js";
+export { ScopedCommercialRepository, ScopedFinanceRepository, ScopedWorkforceRepository, ScopedPluginRepository, ScopedTelecomRepository };
 export { hardenFinanceRepository, wireCommercialFinanceBridges };
 export { PrismaFinanceRepository } from "./prismaFinanceRepository.js";
 export { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
@@ -130,7 +131,9 @@ export const globalCommercialRepository = new ScopedCommercialRepository(globalI
 export const globalFinanceRepository = hardenFinanceRepository(new ScopedFinanceRepository(globalInMemoryStore));
 export const globalWorkforceRepository = new ScopedWorkforceRepository(globalInMemoryStore);
 export const globalPluginRepository = new ScopedPluginRepository(globalInMemoryStore);
+export { globalTelecomRepository };
 wireCommercialFinanceBridges(globalCommercialRepository, globalFinanceRepository);
+
 
 
 

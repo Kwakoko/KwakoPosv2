@@ -295,3 +295,10 @@ export * from "./garageEngine.js";
 export * from "./constructionEngine.js";
 export * from "./telecomEngine.js";
 export * from "./wholesaleEngine.js";
+
+// Phase 5: Telecom & Technical Vertical
+export * from "./telecomInvariants.js";
+export * from "./kmlKmzParserEngine.js";
+export * from "./telecomWorkflowEngine.js";
+export * from "./telecomCostingEngine.js";
+

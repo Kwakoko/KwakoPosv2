@@ -2188,4 +2188,6 @@ export const WorkforceAnalyticsReportSchema = z.object({
 });
 export type WorkforceAnalyticsReport = z.infer<typeof WorkforceAnalyticsReportSchema>;
 
-export * from "./pluginContracts.js";
+export * from "./pluginContracts.js";
+export * from "./telecomContracts.js";
+

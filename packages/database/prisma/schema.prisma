@@ -1767,14 +1767,24 @@ model ConstructionProjectRecord {
 model TelecomSiteRecord {
   id                          String    @id @default(uuid())
   tenantId                    String
-  branchId                    String
+  branchId                    String?
   siteCode                    String
   name                        String
-  siteType                    String    @default("MACRO_TOWER")
+  siteType                    String    @default("GREENFIELD_TOWER")
+  status                      String    @default("PLANNED")
   latitude                    Float
   longitude                   Float
+  elevationMeters             Float     @default(0)
   towerHeightMeters           Float     @default(45)
-  status                      String    @default("SURVEY") // SURVEY, CIVIL_WORKS, INSTALLATION, ON_AIR, ACCEPTED
+  address                     String?
+  region                      String
+  district                    String?
+  siteOwner                   String?
+  accessDetails               String?
+  powerSource                 String    @default("GRID_COMMERCIAL")
+  securityRestrictions        String?
+  photos                      Json      @default("[]")
+  documents                   Json      @default("[]")
   equipmentBOM                Json      @default("[]")
   links                       Json      @default("[]")
   acceptanceCertificateNumber String?
@@ -1783,7 +1793,282 @@ model TelecomSiteRecord {
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
-  @@unique([tenantId, branchId, siteCode])
-  @@index([tenantId, branchId, status])
+  @@unique([tenantId, siteCode])
+  @@index([tenantId, status])
   @@map("telecom_sites")
-}
+}
+
+model TelecomCustomerContractRecord {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  branchId              String?
+  customerId            String
+  contractNumber        String
+  title                 String
+  startDate             DateTime
+  endDate               DateTime
+  slaResponseHours      Int      @default(4)
+  slaResolutionHours    Int      @default(24)
+  availabilityTargetPct Float    @default(99.9)
+  contractValue         Decimal  @default(0) @db.Decimal(14, 2)
+  currency              String   @default("TZS")
+  billingTerms          String   @default("MILESTONE")
+  serviceScope          String?
+  supportPriority       String   @default("HIGH")
+  status                String   @default("ACTIVE")
+  renewalDate           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([tenantId, contractNumber])
+  @@index([tenantId, customerId])
+  @@map("telecom_contracts")
+}
+
+model TelecomProjectRecord {
+  id               String    @id @default(uuid())
+  tenantId         String
+  branchId         String?
+  contractId       String?
+  customerId       String
+  projectCode      String
+  name             String
+  projectManagerId String?
+  status           String    @default("PLANNING")
+  startDate        DateTime
+  targetEndDate    DateTime
+  actualEndDate    DateTime?
+  budgetAmount     Decimal   @default(0) @db.Decimal(14, 2)
+  actualCost       Decimal   @default(0) @db.Decimal(14, 2)
+  progressPct      Int       @default(0)
+  siteIds          Json      @default("[]")
+  billingStatus    String    @default("PENDING")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([tenantId, projectCode])
+  @@index([tenantId, status])
+  @@map("telecom_projects")
+}
+
+model TelecomSurveyRecord {
+  id                       String   @id @default(uuid())
+  tenantId                 String
+  branchId                 String?
+  siteId                   String
+  projectId                String?
+  surveyorId               String
+  surveyDate               DateTime @default(now())
+  measuredLatitude         Float
+  measuredLongitude        Float
+  measuredElevationMeters  Float
+  gpsAccuracyMeters        Float    @default(1.5)
+  towerType                String
+  towerHeightMeters        Float
+  shelterSpaceAvailable    Boolean  @default(true)
+  groundingSystemCondition String   @default("GOOD")
+  availablePowerKw         Float    @default(5.0)
+  cableRouteLengthMeters   Float    @default(30.0)
+  environmentalConstraints String?
+  photos                   Json     @default("[]")
+  status                   String   @default("SUBMITTED")
+  approvedById             String?
+  approvedAt               DateTime?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([tenantId, siteId])
+  @@map("telecom_surveys")
+}
+
+model TelecomRanSectorRecord {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  siteId                String
+  sectorName            String
+  sectorIndex           Int      @default(1)
+  technology            String   @default("4G_LTE")
+  frequencyBandMhz      Float
+  carrierBandwidthMhz   Float    @default(20)
+  antennaModel          String
+  antennaGainDbi        Float    @default(18)
+  azimuthDegrees        Float
+  mechanicalTiltDegrees Float    @default(0)
+  electricalTiltDegrees Float    @default(2)
+  antennaHeightMeters   Float    @default(30)
+  radioUnitModel        String?
+  radioUnitSerialNumber String?
+  txPowerWatts          Float    @default(40)
+  status                String   @default("PLANNED")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([tenantId, siteId])
+  @@map("telecom_ran_sectors")
+}
+
+model TelecomMicrowaveLinkRecord {
+  id                         String    @id @default(uuid())
+  tenantId                   String
+  projectId                  String?
+  linkCode                   String
+  name                       String
+  siteAId                    String
+  siteBId                    String
+  frequencyGhz               Float     @default(13.0)
+  channelBandwidthMhz        Float     @default(28.0)
+  txPowerDbm                 Float     @default(24.0)
+  antennaDiameterMetersSiteA Float     @default(0.6)
+  antennaDiameterMetersSiteB Float     @default(0.6)
+  antennaGainDbiSiteA        Float     @default(35.5)
+  antennaGainDbiSiteB        Float     @default(35.5)
+  polarization               String    @default("VERTICAL")
+  feederLossSiteADb          Float     @default(1.5)
+  feederLossSiteBDb          Float     @default(1.5)
+  siteAAntennaHeightMeters   Float     @default(30)
+  siteBAntennaHeightMeters   Float     @default(30)
+  expectedThroughputMbps     Float     @default(400)
+  availabilityTargetPct      Float     @default(99.995)
+  calculation                Json?
+  status                     String    @default("DESIGN")
+  approvedById               String?
+  approvedAt                 DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@unique([tenantId, linkCode])
+  @@index([tenantId, siteAId])
+  @@index([tenantId, siteBId])
+  @@map("telecom_microwave_links")
+}
+
+model TelecomWorkOrderRecord {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  branchId           String?
+  projectId          String?
+  siteId             String
+  workOrderNumber    String
+  title              String
+  workType           String    @default("RAN_INSTALLATION")
+  status             String    @default("PLANNED")
+  priority           String    @default("MEDIUM")
+  assignedTeam       String?
+  leadTechnicianId   String?
+  technicianIds      Json      @default("[]")
+  scheduledStartDate DateTime
+  scheduledEndDate   DateTime
+  actualStartTime    DateTime?
+  actualEndTime      DateTime?
+  totalLaborHours    Decimal   @default(0) @db.Decimal(8, 2)
+  laborCost          Decimal   @default(0) @db.Decimal(12, 2)
+  checklistVersion   Int       @default(1)
+  checklistItems     Json      @default("[]")
+  completionNotes    String?
+  idempotencyKey     String?   @unique
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([tenantId, workOrderNumber])
+  @@index([tenantId, siteId])
+  @@index([tenantId, status])
+  @@map("telecom_work_orders")
+}
+
+model TelecomTestRecordModel {
+  id                        String   @id @default(uuid())
+  tenantId                  String
+  siteId                    String
+  workOrderId               String?
+  testType                  String
+  parameterName             String
+  expectedValue             String
+  measuredValue             String
+  unit                      String   @default("dBm")
+  passed                    Boolean
+  testedById                String
+  testedAt                  DateTime @default(now())
+  testEquipmentSerialNumber String?
+  traceAttachmentUrl        String?
+  createdAt                 DateTime @default(now())
+
+  @@index([tenantId, siteId])
+  @@map("telecom_tests")
+}
+
+model TelecomAcceptanceRecordModel {
+  id                         String    @id @default(uuid())
+  tenantId                   String
+  projectId                  String
+  siteId                     String
+  satNumber                  String
+  acceptanceType             String    @default("PROVISIONAL_ACCEPTANCE")
+  status                     String    @default("ACCEPTED")
+  leadEngineerId             String
+  customerRepresentativeName String
+  customerSignatureUrl       String?
+  mandatoryTestsPassed       Boolean   @default(true)
+  openPunchlistItemsCount    Int       @default(0)
+  triggersBillingMilestone   Boolean   @default(true)
+  billingInvoiceId           String?
+  acceptedAt                 DateTime  @default(now())
+  remarks                    String?
+  handoverPackageSummary     Json      @default("{}")
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@unique([tenantId, satNumber])
+  @@index([tenantId, projectId])
+  @@index([tenantId, siteId])
+  @@map("telecom_acceptances")
+}
+
+model TelecomMaintenanceTicketRecord {
+  id                    String    @id @default(uuid())
+  tenantId              String
+  branchId              String?
+  siteId                String
+  ticketNumber          String
+  ticketType            String
+  severity              String    @default("MAJOR")
+  status                String    @default("REPORTED")
+  title                 String
+  reportedIssue         String
+  assignedTechnicianId  String?
+  reportedAt            DateTime  @default(now())
+  slaResponseDeadline   DateTime
+  slaResolutionDeadline DateTime
+  respondedAt           DateTime?
+  resolvedAt            DateTime?
+  slaBreached           Boolean   @default(false)
+  rootCause             String?
+  resolutionSummary     String?
+  sparePartsUsed        Json      @default("[]")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId, siteId])
+  @@index([tenantId, status])
+  @@map("telecom_maintenance_tickets")
+}
+
+model TelecomKmlImportRecord {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  fileName              String
+  fileType              String
+  fileSizeBytes         Int
+  sha256Hash            String
+  totalPlacemarksParsed Int      @default(0)
+  sitesCreated          Int      @default(0)
+  parsedPlacemarks      Json     @default("[]")
+  importedById          String
+  importedAt            DateTime @default(now())
+  status                String   @default("PARSED_PREVIEW")
+  errorMessage          String?
+
+  @@index([tenantId, sha256Hash])
+  @@map("telecom_kml_imports")
+}
+

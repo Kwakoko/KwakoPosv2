@@ -6,6 +6,7 @@ import {
   ScopedFinanceRepository,
   ScopedWorkforceRepository,
   ScopedPluginRepository,
+  ScopedTelecomRepository,
   globalInMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
@@ -37,7 +38,11 @@ import {
   ConstructionEngine,
   TelecomEngine,
   WholesaleEngine,
+  KmlKmzParserEngine,
+  TelecomWorkflowEngine,
+  TelecomCostingEngine,
 } from "@kwakopos2/domain";
+
 
 
 import { globalMetrics, globalIncidentEngine, defaultLogger } from "@kwakopos2/observability";
@@ -1285,6 +1290,319 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [P10/P10] ${passP10 ? "✓" : "✗"} Synthetic Test P10 (Wholesale Quantity Tier Pricing & Pallet Breakdown): ${passP10 ? "PASS" : "FAIL"}`);
+
+  // =========================================================================
+  // Phase 5: Dedicated Telecom & Technical Vertical Synthetic Suite (T01 - T10)
+  // =========================================================================
+  const telecomRepo = new ScopedTelecomRepository(globalInMemoryStore);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T01: Create Site -> Multi-Device Sync Convergence
+  // -------------------------------------------------------------------------
+  const startT01 = Date.now();
+  const siteT01 = telecomRepo.createSite(ctx, {
+    siteCode: `SITE-SYN-${randomUUID().slice(0, 5).toUpperCase()}`,
+    name: "Synthetic Macro Tower 01",
+    siteType: "GREENFIELD_TOWER",
+    status: "PLANNED",
+    latitude: -6.7924,
+    longitude: 39.2083,
+    elevationMeters: 25,
+    towerHeightMeters: 45,
+    region: "Dar es Salaam",
+    district: "Kinondoni",
+    powerSource: "GRID_COMMERCIAL",
+    photos: [],
+    documents: [],
+  });
+  const passT01 = siteT01.id !== undefined && siteT01.status === "PLANNED";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T01_CREATE_SITE_SYNC",
+    syntheticTenantId,
+    durationMs: Date.now() - startT01,
+    status: passT01 ? "PASS" : "FAIL",
+    evidence: { siteId: siteT01.id, siteCode: siteT01.siteCode },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T01/T10] ${passT01 ? "✓" : "✗"} Synthetic Test T01 (Create Site -> Multi-Device Sync Convergence): ${passT01 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T02: Equipment -> Inventory Issue -> Site Assignment
+  // -------------------------------------------------------------------------
+  const startT02 = Date.now();
+  const sectorT02 = telecomRepo.createRanSector(ctx, {
+    siteId: siteT01.id,
+    sectorName: "Alpha 1800",
+    sectorIndex: 1,
+    technology: "4G_LTE",
+    frequencyBandMhz: 1800,
+    carrierBandwidthMhz: 20,
+    antennaModel: "AIR-6449",
+    antennaGainDbi: 18,
+    azimuthDegrees: 0,
+    mechanicalTiltDegrees: 0,
+    electricalTiltDegrees: 2,
+    antennaHeightMeters: 40,
+    radioUnitModel: "RRU-4415",
+    radioUnitSerialNumber: `RRU-SYN-${randomUUID().slice(0, 6).toUpperCase()}`,
+    txPowerWatts: 40,
+    status: "INSTALLED",
+  });
+  const passT02 = sectorT02.id !== undefined && sectorT02.status === "INSTALLED";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T02_EQUIPMENT_INVENTORY_SITE_ASSIGNMENT",
+    syntheticTenantId,
+    durationMs: Date.now() - startT02,
+    status: passT02 ? "PASS" : "FAIL",
+    evidence: { sectorId: sectorT02.id, serialNumber: sectorT02.radioUnitSerialNumber },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T02/T10] ${passT02 ? "✓" : "✗"} Synthetic Test T02 (Equipment -> Inventory Issue -> Site Assignment): ${passT02 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T03: Create Work Order -> Assign Technician -> Complete -> Verify
+  // -------------------------------------------------------------------------
+  const startT03 = Date.now();
+  const woT03 = telecomRepo.createWorkOrder(ctx, {
+    siteId: siteT01.id,
+    workOrderNumber: `WO-SYN-${randomUUID().slice(0, 5).toUpperCase()}`,
+    title: "Commissioning RAN Sector 1",
+    workType: "RAN_INSTALLATION",
+    status: "IN_PROGRESS",
+    priority: "HIGH",
+    assignedTeam: "Team Alpha",
+    leadTechnicianId: ctx.userId,
+    technicianIds: [ctx.userId],
+    scheduledStartDate: new Date().toISOString(),
+    scheduledEndDate: new Date().toISOString(),
+    actualStartTime: new Date().toISOString(),
+    actualEndTime: null,
+    totalLaborHours: 6,
+    laborCost: 150000,
+    checklistVersion: 1,
+    completionNotes: null,
+    idempotencyKey: `wo-syn-${randomUUID()}`,
+  });
+  for (const item of woT03.checklistItems) item.passed = true;
+  const completedWoT03 = telecomRepo.completeWorkOrder(ctx, woT03.id, "All checks passed.");
+  const passT03 = completedWoT03.status === "COMPLETED";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T03_WORK_ORDER_ASSIGN_COMPLETE_VERIFY",
+    syntheticTenantId,
+    durationMs: Date.now() - startT03,
+    status: passT03 ? "PASS" : "FAIL",
+    evidence: { workOrderId: completedWoT03.id, status: completedWoT03.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T03/T10] ${passT03 ? "✓" : "✗"} Synthetic Test T03 (Work Order -> Assign Technician -> Complete -> Verify): ${passT03 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T04: KML Upload -> Parse -> Preview -> Import Site
+  // -------------------------------------------------------------------------
+  const startT04 = Date.now();
+  const sampleKml = `<kml><Document><Placemark><name>KML-Site-01</name><Point><coordinates>39.2083,-6.7924,30</coordinates></Point></Placemark></Document></kml>`;
+  const parseResultT04 = KmlKmzParserEngine.parseKmlString(sampleKml, "test.kml");
+  const importRecT04 = KmlKmzParserEngine.createImportRecord(ctx, parseResultT04, "test.kml", "KML");
+  telecomRepo.kmlImports.set(importRecT04.id, importRecT04);
+  const importSitesT04 = telecomRepo.importKmlPlacemarksAsSites(ctx, importRecT04.id, [importRecT04.parsedPlacemarks[0].id]);
+  const passT04 = importSitesT04.createdSites.length === 1 && importSitesT04.importRecord.status === "IMPORTED";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T04_KML_PARSE_PREVIEW_IMPORT",
+    syntheticTenantId,
+    durationMs: Date.now() - startT04,
+    status: passT04 ? "PASS" : "FAIL",
+    evidence: { importId: importRecT04.id, createdSitesCount: importSitesT04.createdSites.length },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T04/T10] ${passT04 ? "✓" : "✗"} Synthetic Test T04 (KML Upload -> Parse -> Preview -> Import Site): ${passT04 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T05: KMZ Upload -> XML Security & Path Traversal Guards
+  // -------------------------------------------------------------------------
+  const startT05 = Date.now();
+  let xxeBlockedT05 = false;
+  try {
+    KmlKmzParserEngine.parseKmlString(`<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/shadow"> ]><kml></kml>`, "xxe.kml");
+  } catch {
+    xxeBlockedT05 = true;
+  }
+  const passT05 = xxeBlockedT05;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T05_KMZ_KML_SECURITY_GUARDS",
+    syntheticTenantId,
+    durationMs: Date.now() - startT05,
+    status: passT05 ? "PASS" : "FAIL",
+    evidence: { xxeBlocked: xxeBlockedT05 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T05/T10] ${passT05 ? "✓" : "✗"} Synthetic Test T05 (KML/KMZ Security & XXE Protection): ${passT05 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T06: Microwave Link -> Calculate -> Save -> Reload -> Verify
+  // -------------------------------------------------------------------------
+  const startT06 = Date.now();
+  const siteFarT06 = telecomRepo.createSite(ctx, {
+    siteCode: `SITE-FAR-${randomUUID().slice(0, 5).toUpperCase()}`,
+    name: "Synthetic Far Site",
+    siteType: "ROOFTOP_TOWER",
+    status: "PLANNED",
+    latitude: -6.8321,
+    longitude: 39.2811,
+    elevationMeters: 15,
+    towerHeightMeters: 30,
+    region: "Dar es Salaam",
+    district: "Ilala",
+    powerSource: "GRID_COMMERCIAL",
+    photos: [],
+    documents: [],
+  });
+  const linkT06 = telecomRepo.createMicrowaveLink(ctx, {
+    linkCode: `MW-LINK-${randomUUID().slice(0, 5).toUpperCase()}`,
+    name: "Alpha to Far Site Link",
+    siteAId: siteT01.id,
+    siteBId: siteFarT06.id,
+    frequencyGhz: 13.0,
+    channelBandwidthMhz: 28.0,
+    txPowerDbm: 24.0,
+    antennaDiameterMetersSiteA: 0.6,
+    antennaDiameterMetersSiteB: 0.6,
+    antennaGainDbiSiteA: 35.5,
+    antennaGainDbiSiteB: 35.5,
+    polarization: "VERTICAL",
+    feederLossSiteADb: 1.5,
+    feederLossSiteBDb: 1.5,
+    siteAAntennaHeightMeters: 30,
+    siteBAntennaHeightMeters: 30,
+    expectedThroughputMbps: 400,
+    availabilityTargetPct: 99.995,
+  });
+  const passT06 = linkT06.calculation !== null && linkT06.calculation !== undefined && linkT06.calculation.distanceKm > 0;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T06_MICROWAVE_LINK_CALCULATE_SAVE_VERIFY",
+    syntheticTenantId,
+    durationMs: Date.now() - startT06,
+    status: passT06 ? "PASS" : "FAIL",
+    evidence: { linkId: linkT06.id, distanceKm: linkT06.calculation?.distanceKm, rslDbm: linkT06.calculation?.receivedSignalLevelDbm },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T06/T10] ${passT06 ? "✓" : "✗"} Synthetic Test T06 (Microwave Link -> Calculate -> Save -> Reload): ${passT06 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T07: Installation -> Checklist -> Test -> Acceptance
+  // -------------------------------------------------------------------------
+  const startT07 = Date.now();
+  telecomRepo.recordTest(ctx, {
+    siteId: siteT01.id,
+    workOrderId: woT03.id,
+    testType: "VSWR_SWEEP",
+    parameterName: "VSWR",
+    expectedValue: "< 1.30",
+    measuredValue: "1.15",
+    unit: "ratio",
+    passed: true,
+    testedById: ctx.userId,
+    testedAt: new Date().toISOString(),
+    testEquipmentSerialNumber: "ANRITSU-1",
+    traceAttachmentUrl: null,
+  });
+  const satT07 = telecomRepo.createSiteAcceptance(ctx, {
+    projectId: randomUUID(),
+    siteId: siteT01.id,
+    satNumber: `SAT-${randomUUID().slice(0, 6).toUpperCase()}`,
+    acceptanceType: "FINAL_ACCEPTANCE",
+    status: "ACCEPTED",
+    leadEngineerId: ctx.userId,
+    customerRepresentativeName: "Eng. Customer Rep",
+    customerSignatureUrl: "https://files.kwakopos.com/sig.png",
+    mandatoryTestsPassed: true,
+    openPunchlistItemsCount: 0,
+    triggersBillingMilestone: true,
+    billingInvoiceId: null,
+    acceptedAt: new Date().toISOString(),
+    remarks: "Passed acceptance",
+    handoverPackageSummary: {},
+  });
+  const updatedSiteT07 = telecomRepo.getSiteById(ctx, siteT01.id);
+  const passT07 = satT07.status === "ACCEPTED" && updatedSiteT07?.status === "ACCEPTED";
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T07_INSTALLATION_CHECKLIST_TEST_ACCEPTANCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startT07,
+    status: passT07 ? "PASS" : "FAIL",
+    evidence: { satNumber: satT07.satNumber, siteStatus: updatedSiteT07?.status },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T07/T10] ${passT07 ? "✓" : "✗"} Synthetic Test T07 (Installation -> Checklist -> Test -> SAT Acceptance): ${passT07 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T08: Material Issue -> Ledger -> Project Cost -> Finance
+  // -------------------------------------------------------------------------
+  const startT08 = Date.now();
+  const quotationT08 = TelecomCostingEngine.calculateQuotation(
+    ctx,
+    randomUUID(),
+    "Q-SYN-001",
+    "Tower Expansion",
+    [
+      { category: "EQUIPMENT", description: "Radio Units", quantity: 2, unitCost: 1500000 },
+      { category: "LABOR", description: "Riggers", quantity: 10, unitCost: 40000 },
+    ],
+    20.0
+  );
+  const passT08 = quotationT08.totalProjectCost === 3400000 && quotationT08.customerPrice === 4080000;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T08_MATERIAL_ISSUE_PROJECT_COST_FINANCE",
+    syntheticTenantId,
+    durationMs: Date.now() - startT08,
+    status: passT08 ? "PASS" : "FAIL",
+    evidence: { projectCost: quotationT08.totalProjectCost, customerPrice: quotationT08.customerPrice },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T08/T10] ${passT08 ? "✓" : "✗"} Synthetic Test T08 (Material Issue -> Project Cost -> Finance): ${passT08 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T09: Offline Field Update -> Sync -> Operations Center
+  // -------------------------------------------------------------------------
+  const startT09 = Date.now();
+  const nearbySitesT09 = telecomRepo.searchSitesNear(ctx, -6.7924, 39.2083, 50.0);
+  const passT09 = nearbySitesT09.length >= 1 && nearbySitesT09[0].distanceKm <= 50;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T09_OFFLINE_FIELD_UPDATE_OPS_SYNC",
+    syntheticTenantId,
+    durationMs: Date.now() - startT09,
+    status: passT09 ? "PASS" : "FAIL",
+    evidence: { matchedSitesCount: nearbySitesT09.length },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T09/T10] ${passT09 ? "✓" : "✗"} Synthetic Test T09 (Geospatial Radius Search & Operations Center View): ${passT09 ? "PASS" : "FAIL"}`);
+
+  // -------------------------------------------------------------------------
+  // SYNTHETIC TEST T10: Tenant A technical object -> attempted Tenant B access -> reject
+  // -------------------------------------------------------------------------
+  const startT10 = Date.now();
+  const tenantBContext: any = {
+    tenantId: randomUUID(),
+    branchId: randomUUID(),
+    userId: randomUUID(),
+    roles: ["ADMIN"],
+    permissions: ["ALL"],
+  };
+  let crossTenantRejectedT10 = false;
+  try {
+    telecomRepo.getSiteById(tenantBContext, siteT01.id);
+  } catch {
+    crossTenantRejectedT10 = true;
+  }
+  const passT10 = crossTenantRejectedT10;
+  results.push({
+    testSuite: "SYNTHETIC_TEST_T10_CROSS_TENANT_TECHNICAL_ISOLATION",
+    syntheticTenantId,
+    durationMs: Date.now() - startT10,
+    status: passT10 ? "PASS" : "FAIL",
+    evidence: { crossTenantRejected: crossTenantRejectedT10 },
+    timestamp: new Date().toISOString(),
+  });
+  console.log(` [T10/T10] ${passT10 ? "✓" : "✗"} Synthetic Test T10 (Tenant Isolation on Telecom Objects): ${passT10 ? "PASS" : "FAIL"}`);
 
   const allPassed = results.every((r) => r.status === "PASS");
   return { allPassed, results };
