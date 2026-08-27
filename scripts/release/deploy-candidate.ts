@@ -120,17 +120,23 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     }
 
     const deployJson = JSON.parse(deployStdout);
+    candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
 
     const serviceJson = JSON.parse(
       String(run(`gcloud run services describe ${serviceName} --project=${project} --region=${region} --format="json"`, "utf8"))
     );
 
+    if (!candidateRevision) {
+      candidateRevision = serviceJson?.status?.latestCreatedRevisionName || "";
+    }
+
     const taggedTraffic = Array.isArray(serviceJson?.status?.traffic)
-      ? serviceJson.status.traffic.find((entry: any) => entry.tag === tagArg)
+      ? serviceJson.status.traffic.find((entry: any) => entry.tag === tagArg || entry.revisionName === candidateRevision)
       : undefined;
 
-    candidateRevision = taggedTraffic?.revisionName || deployJson?.status?.latestCreatedRevisionName || serviceJson?.status?.latestCreatedRevisionName || "";
-    candidateUrl = taggedTraffic?.url || serviceJson?.status?.url || "";
+    const baseServiceUrl = serviceJson?.status?.url || "";
+    const computedTagUrl = baseServiceUrl.replace("https://", `https://${tagArg}---`);
+    candidateUrl = taggedTraffic?.url || computedTagUrl;
 
     if (!candidateRevision) throw new Error("RELEASE_BLOCKED: Cloud Run did not return a candidate revision");
     if (!candidateUrl) throw new Error(`RELEASE_BLOCKED: Cloud Run candidate URL was not found for ${tagArg}`);
@@ -139,6 +145,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     }
 
     assertValidCloudRunRevision(candidateRevision);
+
 
     const revisionJson = JSON.parse(
       String(run(`gcloud run revisions describe ${candidateRevision} --project=${project} --region=${region} --format="json"`, "utf8"))
