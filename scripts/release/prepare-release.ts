@@ -1,52 +1,83 @@
-import { calculateNextVersion, determineBumpFromCommits } from "../../packages/config/src/semverEngine.js";
+import { calculateNextVersion, determineBumpFromCommits, isValidSemVer } from "../../packages/config/src/semverEngine.js";
 import { generateReleaseManifest } from "./generate-release-manifest.js";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATCH" }) {
+function readPackageJson() {
+  const rootPkgPath = path.resolve(process.cwd(), "package.json");
+  return { path: rootPkgPath, value: JSON.parse(fs.readFileSync(rootPkgPath, "utf8")) };
+}
+
+function getLatestSemVerTag(): string | null {
+  try {
+    return execSync("git tag --merged HEAD --sort=-v:refname", { encoding: "utf8" })
+      .split("\n").map((tag) => tag.trim()).filter(Boolean).filter(isValidSemVer)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+function getCommitsSince(tag: string | null): string[] {
+  try {
+    const raw = tag
+      ? execSync(`git log ${tag}..HEAD --pretty=%B---END_COMMIT---`, { encoding: "utf8" })
+      : execSync("git log -20 --pretty=%B---END_COMMIT---", { encoding: "utf8" });
+    return raw.split("---END_COMMIT---").map((c) => c.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function prepareRelease(options?: {
+  forceBump?: "MAJOR" | "MINOR" | "PATCH";
+  dryRun?: boolean;
+}) {
   console.log("================================================================");
   console.log(" KWAKOPOS 2.0 AUTOMATED SEMVER RELEASE PREPARATION             ");
   console.log("================================================================");
 
-  const rootPkgPath = path.resolve(process.cwd(), "package.json");
-  const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
+  const { path: rootPkgPath, value: rootPkg } = readPackageJson();
   const currentVersion = rootPkg.version || "2.0.0";
-
-  let commitMessages: string[] = [];
-  try {
-    const rawCommits = execSync("git log -20 --pretty=%B---END_COMMIT---", { encoding: "utf8" });
-    commitMessages = rawCommits
-      .split("---END_COMMIT---")
-      .map((c) => c.trim())
-      .filter((c) => c.length > 0);
-  } catch {
-    commitMessages = ["fix: production release stability"];
-  }
-
+  const baselineTag = getLatestSemVerTag();
+  const baselineVersion = baselineTag || currentVersion;
+  const commitMessages = getCommitsSince(baselineTag);
   const bump = options?.forceBump || determineBumpFromCommits(commitMessages);
-  console.log(`[INFO] Current Version: ${currentVersion}`);
+
+  console.log(`[INFO] Current package.json Version: ${currentVersion}`);
+  console.log(`[INFO] Latest SemVer Tag: ${baselineTag || "none"}`);
+  console.log(`[INFO] Commits Since Baseline: ${commitMessages.length}`);
   console.log(`[INFO] Detected Bump Type: ${bump}`);
 
-  const nextVersion = options?.forceBump
-    ? calculateNextVersion(currentVersion, commitMessages, { forceBump: options.forceBump })
-    : currentVersion; // If no forced bump on release gate, preserve authoritative version
+  if (bump === "NONE") {
+    console.log("[INFO] No releasable Conventional Commit detected; version remains unchanged.");
+    return { changed: false, currentVersion, nextVersion: currentVersion, baselineTag, bump };
+  }
 
+  const nextVersion = calculateNextVersion(baselineVersion, commitMessages, { forceBump: bump });
   console.log(`[INFO] Target Release Version: ${nextVersion}`);
 
-  // Update root package.json if bumped
-  if (nextVersion !== currentVersion) {
+  if (!options?.dryRun) {
     rootPkg.version = nextVersion;
     fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + "\n", "utf8");
-    console.log(`✓ Updated package.json version to ${nextVersion}`);
+
+    const lockPath = path.resolve(process.cwd(), "package-lock.json");
+    if (fs.existsSync(lockPath)) {
+      const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      lock.version = nextVersion;
+      if (lock.packages?.[""]) lock.packages[""].version = nextVersion;
+      fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+    }
+    console.log(`✓ Updated authoritative version to ${nextVersion} in package.json and package-lock.json`);
   }
 
   const manifest = generateReleaseManifest({ certification: "PASS" });
   console.log(`✓ Release Manifest synchronized for version ${manifest.version} (Tag: ${manifest.tag})`);
   console.log("================================================================");
-  return manifest;
+  return { changed: true, currentVersion, nextVersion, baselineTag, bump, manifest };
 }
 
 if (process.argv[1]?.endsWith("prepare-release.ts")) {
-  prepareRelease();
+  const force = process.argv.find((arg) => arg.startsWith("--force="))?.split("=")[1] as "MAJOR" | "MINOR" | "PATCH" | undefined;
+  prepareRelease({ forceBump: force, dryRun: process.argv.includes("--dry-run") });
 }
