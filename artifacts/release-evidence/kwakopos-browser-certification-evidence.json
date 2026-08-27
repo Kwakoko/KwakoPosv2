@@ -1,7 +1,7 @@
 {
-  "candidateRevision": "kwakopos-production-service-00092-mux",
-  "candidateUrl": "https://rc-3df6e06---kwakopos-production-service-75x6obw55q-uc.a.run.app",
-  "testRunId": "PLAYWRIGHT-RUN-e3d914ef",
+  "candidateRevision": "kwakopos-production-service-00094-jev",
+  "candidateUrl": "https://rc-1c03fdf---kwakopos-production-service-75x6obw55q-uc.a.run.app",
+  "testRunId": "PLAYWRIGHT-RUN-ab3077c0",
   "browserAOperations": 4,
   "serverRecords": {
     "products": 1,
@@ -15,5 +15,5 @@
   "actualStockServer": 188,
   "actualStockBrowserB": 188,
   "finalConvergenceStatus": "PASS",
-  "timestamp": "2026-08-27T01:19:17.032Z"
+  "timestamp": "2026-08-27T01:34:49.690Z"
 }
