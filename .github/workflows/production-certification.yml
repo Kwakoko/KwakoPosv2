@@ -7,9 +7,14 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: kwakopos-production-certification-main
+  cancel-in-progress: false
+
 jobs:
   production-certification:
     name: Production Release Certification State Machine
+    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, 'chore(release): v')
     runs-on: ubuntu-latest
 
     permissions:
@@ -19,6 +24,9 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
@@ -57,7 +65,7 @@ jobs:
         run: npx tsx scripts/ops/synthetic-monitor.ts
 
       # Pull requests must never authenticate to GCP, deploy, promote, or mutate production.
-      # Real release certification is reserved for main pushes and manual dispatches.
+      # Real release certification is reserved for release commits on main and manual dispatches.
       - name: Validate Google Cloud Release Configuration
         if: github.event_name != 'pull_request'
         env:
