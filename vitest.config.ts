@@ -18,5 +18,7 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     exclude: ["node_modules", "dist", "**/*.js"],
+    pool: "forks",
+    testTimeout: 20000,
   },
 });

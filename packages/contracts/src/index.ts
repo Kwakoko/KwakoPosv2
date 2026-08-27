@@ -308,6 +308,8 @@ export const ProductSchema = z.object({
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
   categoryId: z.string().uuid().nullable().optional(),
+  brandId: z.string().uuid().nullable().optional(),
+  brand_id: z.string().uuid().nullable().optional(),
   name: z.string().min(1),
   description: z.string().nullable().optional(),
   sku: z.string().min(1),
@@ -333,6 +335,8 @@ export type CreateVariantRequest = z.infer<typeof CreateVariantRequestSchema>;
 export const CreateProductRequestSchema = z.object({
   id: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
+  brandId: z.string().uuid().optional(),
+  brand_id: z.string().uuid().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   sku: z.string().min(1),
@@ -347,9 +351,12 @@ export const UpdateProductRequestSchema = z.object({
   sku: z.string().min(1).optional(),
   category: z.string().optional(),
   categoryId: z.string().uuid().optional(),
+  brandId: z.string().uuid().optional(),
+  brand_id: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
 });
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequestSchema>;
+
 
 export const UpdateVariantRequestSchema = z.object({
   name: z.string().min(1).optional(),

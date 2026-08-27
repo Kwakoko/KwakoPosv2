@@ -58,8 +58,10 @@ export class ScopedProductRepository {
   createProduct(ctx: TenantContext, req: CreateProductRequest): Product {
     const productId = req.id || randomUUID();
     const now = new Date().toISOString();
+    const brandId = req.brandId || req.brand_id || null;
+    const brand_id = brandId;
     const createdVariants: ProductVariant[] = (req.variants || []).map((v) => ({ id: v.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId, name: v.name, sku: v.sku, barcode: v.barcode || null, price: v.price, costPrice: v.costPrice, isActive: v.isActive !== undefined ? v.isActive : true, createdAt: now, updatedAt: now }));
-    const product: Product = { id: productId, tenantId: ctx.tenantId, branchId: ctx.branchId, name: req.name, description: req.description || null, sku: req.sku, category: req.category || "General", isActive: true, variants: createdVariants, createdAt: now, updatedAt: now };
+    const product: Product = { id: productId, tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: req.categoryId || null, brandId, brand_id, name: req.name, description: req.description || null, sku: req.sku, category: req.category || "General", isActive: true, variants: createdVariants, createdAt: now, updatedAt: now };
     this.store.products.set(productId, product);
     for (const variant of createdVariants) this.store.variants.set(variant.id, variant);
     return product;
@@ -75,7 +77,9 @@ export class ScopedProductRepository {
   updateProduct(ctx: TenantContext, id: string, req: UpdateProductRequest): Product {
     const existing = this.getProductById(ctx, id); if (!existing) throw new Error(`Product ${id} not found`);
     assertProductVariantImmutability(existing.variants || [], (existing.variants || []).map((v) => v.id));
-    const updated = { ...existing, name: req.name ?? existing.name, description: req.description !== undefined ? req.description : existing.description, sku: req.sku ?? existing.sku, category: req.category ?? existing.category, isActive: req.isActive ?? existing.isActive, updatedAt: new Date().toISOString() };
+    const brandId = req.brandId !== undefined ? req.brandId : (req.brand_id !== undefined ? req.brand_id : existing.brandId);
+    const brand_id = brandId;
+    const updated: Product = { ...existing, name: req.name ?? existing.name, description: req.description !== undefined ? req.description : existing.description, sku: req.sku ?? existing.sku, category: req.category ?? existing.category, categoryId: req.categoryId !== undefined ? req.categoryId : existing.categoryId, brandId, brand_id, isActive: req.isActive ?? existing.isActive, updatedAt: new Date().toISOString() };
     this.store.products.set(id, updated); return updated;
   }
   addVariant(ctx: TenantContext, productId: string, req: CreateVariantRequest): ProductVariant {
@@ -84,6 +88,7 @@ export class ScopedProductRepository {
     const variant = { id: req.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId, name: req.name, sku: req.sku, barcode: req.barcode || null, price: req.price, costPrice: req.costPrice, isActive: req.isActive !== undefined ? req.isActive : true, createdAt: now, updatedAt: now };
     this.store.variants.set(variant.id, variant); return variant;
   }
+
   updateVariant(ctx: TenantContext, variantId: string, req: UpdateVariantRequest): ProductVariant {
     const existing = this.store.variants.get(variantId); if (!existing) throw new Error(`Variant ${variantId} not found`); assertTenantIsolation(ctx, existing.tenantId, existing.branchId); assertVariantIdentityPersistence(existing.id, variantId);
     const updated = { ...existing, name: req.name ?? existing.name, sku: req.sku ?? existing.sku, barcode: req.barcode !== undefined ? req.barcode : existing.barcode, price: req.price ?? existing.price, costPrice: req.costPrice ?? existing.costPrice, isActive: req.isActive ?? existing.isActive, updatedAt: new Date().toISOString() };
