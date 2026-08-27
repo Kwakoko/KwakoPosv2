@@ -1,10 +1,10 @@
 {
   "deploymentMode": "EXISTING_SERVICE",
-  "candidateRevision": "kwakopos-production-service-00120-wiz",
-  "candidateUrl": "https://rc-dc1709c---kwakopos-production-service-75x6obw55q-uc.a.run.app",
-  "imageDigest": "sha256:cde3e12499aef500f3945d02e0ed46ea991bf3dc1afa379ded45874c480b60ea",
-  "containerDigest": "sha256:cde3e12499aef500f3945d02e0ed46ea991bf3dc1afa379ded45874c480b60ea",
-  "gitSha": "dc1709cbe55cc1f38abcfae7a597ac3c89157df7",
+  "candidateRevision": "kwakopos-production-service-00122-hov",
+  "candidateUrl": "https://rc-5355563---kwakopos-production-service-75x6obw55q-uc.a.run.app",
+  "imageDigest": "sha256:c0ff8b54e61a58f5775317927122e2947478f00d0ffbc9d7eb6c37d9d7ca78e4",
+  "containerDigest": "sha256:c0ff8b54e61a58f5775317927122e2947478f00d0ffbc9d7eb6c37d9d7ca78e4",
+  "gitSha": "53555634c8adb11486eb06d3fc6a45dbaa9fb74d",
   "version": "2.4.0",
-  "timestamp": "2026-08-27T04:31:01.727Z"
+  "timestamp": "2026-08-27T05:09:58.794Z"
 }
