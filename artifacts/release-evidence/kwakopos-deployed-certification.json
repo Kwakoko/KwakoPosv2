@@ -1,12 +1,12 @@
 {
   "status": "PASS",
   "version": "2.2.0",
-  "gitSha": "3df6e066135d8da139c4ba583a67c609c5f77975",
-  "containerDigest": "sha256:2d7a4a0cbaa260780f45c0a312e1823efb1acedaa1aef6c82411d42fead90772",
-  "cloudRunRevision": "kwakopos-production-service-00092-mux",
-  "candidateUrl": "https://rc-3df6e06---kwakopos-production-service-75x6obw55q-uc.a.run.app",
+  "gitSha": "1c03fdf2955a783f3ae35895e60e605fcc85d5c9",
+  "containerDigest": "sha256:06c5e3162b467f44a608426e2eddfaf89e17ceddc38694e91705bcfa6863f458",
+  "cloudRunRevision": "kwakopos-production-service-00094-jev",
+  "candidateUrl": "https://rc-1c03fdf---kwakopos-production-service-75x6obw55q-uc.a.run.app",
   "health": "PASS",
   "readiness": "PASS",
   "identity": "PASS",
-  "timestamp": "2026-08-27T00:54:24.716Z"
+  "timestamp": "2026-08-27T01:29:47.481Z"
 }
