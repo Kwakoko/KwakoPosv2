@@ -12,7 +12,9 @@ COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
 COPY tests ./tests
+COPY src ./src
 COPY .env.example ./
+
 
 # Keep devDependencies in the builder so TypeScript, tsx and Prisma tooling are available.
 RUN npm install --include=dev
