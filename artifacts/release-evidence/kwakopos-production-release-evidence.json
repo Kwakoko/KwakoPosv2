@@ -2,11 +2,11 @@
   "status": "PASS",
   "deploymentMode": "EXISTING_SERVICE",
   "version": "2.4.0",
-  "gitSha": "20ad38de2369930e8356a95e709af979e62161ac",
-  "containerDigest": "sha256:7d7f8a75280d48d6e1ca3db64e7590b35b9548ffcc9fdfdf6f20bc952a058b47",
+  "gitSha": "212b86099efb25b61a2c74897dea5e9a2822f706",
+  "containerDigest": "sha256:9e67d650a54b34236dffa3524c5f921f8a8fa7fa78316f14978e876b2ab1f2d9",
   "cloudRunService": "kwakopos-production-service",
-  "cloudRunRevision": "kwakopos-production-service-00114-hup",
-  "candidateUrl": "https://rc-20ad38d---kwakopos-production-service-75x6obw55q-uc.a.run.app",
+  "cloudRunRevision": "kwakopos-production-service-00116-zek",
+  "candidateUrl": "https://rc-212b860---kwakopos-production-service-75x6obw55q-uc.a.run.app",
   "health": "PASS",
   "readiness": "PASS",
   "deployedIdentity": "PASS",
@@ -15,5 +15,5 @@
   "expectedStock": 188,
   "trafficPercent": 100,
   "liveIdentity": "PASS",
-  "timestamp": "2026-08-27T03:52:04.165Z"
+  "timestamp": "2026-08-27T04:16:21.441Z"
 }
