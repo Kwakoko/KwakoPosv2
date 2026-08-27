@@ -1,0 +1,73 @@
+name: KwakoPos Automatic SemVer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kwakopos-auto-semver-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  auto-semver:
+    name: Calculate and publish next SemVer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Skip release commits
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          subject="$(git log -1 --pretty=%s)"
+          if [[ "$subject" =~ ^chore\(release\):\ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release commit detected: $subject"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate automatic SemVer bump
+        if: steps.guard.outputs.skip != 'true'
+        run: npx tsx scripts/release/prepare-release.ts
+
+      - name: Commit generated version
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "No version bump required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${VERSION}"
+          git push origin HEAD:main
+
+      - name: Verify authoritative SemVer state
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          node -e "const fs=require('fs'); const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) { throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); } if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
