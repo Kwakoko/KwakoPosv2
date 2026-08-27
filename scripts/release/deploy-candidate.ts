@@ -50,19 +50,33 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     run(`gcloud auth configure-docker ${region}-docker.pkg.dev --quiet`);
 
     const tag = `${imageRepository}:${gitSha}`;
-    console.log(`[DEPLOY] Building immutable container image ${tag}...`);
+    let existingDigest = "";
     try {
-      run(`docker build -t ${tag} .`);
-      run(`docker push ${tag}`);
-    } catch (err: any) {
-      console.log(`[DEPLOY] Local docker build/push unavailable, submitting build to Cloud Build...`);
-      run(`gcloud builds submit --tag ${tag} . --project=${project}`);
+      existingDigest = String(
+        run(`gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`, "utf8")
+      ).trim();
+    } catch {
+      existingDigest = "";
     }
 
-    imageDigest = String(
-      run(`gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`, "utf8")
-    ).trim();
+    if (existingDigest) {
+      console.log(`[DEPLOY] Container image ${tag} already built and verified in registry (${existingDigest}).`);
+      imageDigest = existingDigest;
+    } else {
+      console.log(`[DEPLOY] Building immutable container image ${tag}...`);
+      try {
+        run(`docker build -t ${tag} .`);
+        run(`docker push ${tag}`);
+      } catch (err: any) {
+        console.log(`[DEPLOY] Local docker build/push unavailable, submitting build to Cloud Build...`);
+        run(`gcloud builds submit --tag ${tag} . --project=${project}`);
+      }
+      imageDigest = String(
+        run(`gcloud artifacts docker images describe ${tag} --project=${project} --format="value(image_summary.digest)"`, "utf8")
+      ).trim();
+    }
     assertValidContainerDigest(imageDigest);
+
 
     const fullImageRef = `${imageRepository}@${imageDigest}`;
     const tagArg = `rc-${gitSha.substring(0, 7)}`;
