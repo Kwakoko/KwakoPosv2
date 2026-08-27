@@ -1,12 +1,12 @@
 {
   "status": "PASS",
-  "promotedRevision": "kwakopos-production-service-00116-zek",
+  "promotedRevision": "kwakopos-production-service-00118-mis",
   "productionUrl": "https://kwakopos-production-service-75x6obw55q-uc.a.run.app",
   "trafficPercent": 100,
-  "liveGitSha": "212b86099efb25b61a2c74897dea5e9a2822f706",
-  "liveContainerDigest": "sha256:9e67d650a54b34236dffa3524c5f921f8a8fa7fa78316f14978e876b2ab1f2d9",
-  "liveCloudRunRevision": "kwakopos-production-service-00116-zek",
+  "liveGitSha": "2ee2745a312e364e960b1ae990fa0f5e221d04e3",
+  "liveContainerDigest": "sha256:005aed6899d32c94324c77decd404da11064391692020c48f73641f0cea96647",
+  "liveCloudRunRevision": "kwakopos-production-service-00118-mis",
   "liveVersion": "2.4.0",
   "liveIdentityMatch": "PASS",
-  "timestamp": "2026-08-27T04:16:21.437Z"
+  "timestamp": "2026-08-27T04:24:47.108Z"
 }
