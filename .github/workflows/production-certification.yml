@@ -14,7 +14,6 @@ concurrency:
 jobs:
   production-certification:
     name: Production Release Certification State Machine
-    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, 'chore(release): v')
     runs-on: ubuntu-latest
 
     permissions:
@@ -52,7 +51,7 @@ jobs:
       - name: Build All Monorepo Workspaces
         run: npm run build
 
-      - name: Execute Core Unit & Invariant Tests
+      - name: Execute Core Unit & Invariant Tests (including Finance-001 to Finance-018)
         run: npm run test:unit
 
       - name: Execute Integration API Tests
@@ -63,6 +62,9 @@ jobs:
 
       - name: Execute Continuous Synthetic Monitoring Suite
         run: npx tsx scripts/ops/synthetic-monitor.ts
+
+      - name: Execute Multi-Phase Foundation Certification Runner
+        run: npm run certify
 
       # Pull requests must never authenticate to GCP, deploy, promote, or mutate production.
       # Real release certification is reserved for release commits on main and manual dispatches.
