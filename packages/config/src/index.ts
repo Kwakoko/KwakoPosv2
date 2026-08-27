@@ -1,5 +1,18 @@
 import { z } from "zod";
 import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+
+function resolvePackageVersion(): string {
+  try {
+    const pkgPath = path.resolve(process.cwd(), "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+  } catch {
+    // Runtime may not include repository metadata; APP_VERSION can provide the value explicitly.
+  }
+  return "2.0.0";
+}
 
 export const ConfigSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production-certification", "production"]).default("development"),
@@ -12,7 +25,7 @@ export const ConfigSchema = z.object({
   GIT_SHA: z.string().optional(),
   CONTAINER_DIGEST: z.string().optional(),
   CLOUD_RUN_REVISION: z.string().optional(),
-  APP_VERSION: z.string().default("2.1.0"),
+  APP_VERSION: z.string().default(resolvePackageVersion()),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -104,4 +117,3 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity {
 }
 
 export * from "./semverEngine.js";
-
