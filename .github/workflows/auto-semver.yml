@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   auto-semver:
@@ -49,14 +50,34 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: npx tsx scripts/release/prepare-release.ts
 
-      - name: Commit generated version
+      - name: Resolve authoritative release candidate
         if: steps.guard.outputs.skip != 'true'
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          if [[ "$LATEST_TAG" != "v${VERSION}" ]]; then
+            echo "needs_release=true" >> "$GITHUB_OUTPUT"
+            echo "Release candidate required: ${VERSION}; latest tag=${LATEST_TAG:-none}"
+          else
+            echo "needs_release=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} already has authoritative tag ${LATEST_TAG}; no release dispatch required."
+          fi
+
+      - name: Commit generated version
+        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
+        id: commit_release
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           if git diff --quiet -- package.json package-lock.json; then
-            echo "No version bump required."
+            echo "No package version file changes; using current HEAD as release candidate."
+            echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
@@ -64,6 +85,23 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore(release): v${VERSION}"
           git push origin HEAD:main
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch exact production certification
+        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="${{ steps.commit_release.outputs.release_sha }}"
+          if [[ -z "$RELEASE_SHA" ]]; then RELEASE_SHA="$(git rev-parse HEAD)"; fi
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid release SHA $RELEASE_SHA"; exit 1; }
+          gh workflow run production-release-certification.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_sha="$RELEASE_SHA"
+          echo "Dispatched exact production certification for $RELEASE_SHA"
 
       - name: Verify authoritative SemVer state
         shell: bash
