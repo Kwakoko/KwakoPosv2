@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.2.0] - 2026-08-27
+
+### Added
+- **Enhanced Release Pipeline & Lifecycle Management**:
+  - Workspace version synchronization tool (`scripts/release/sync-workspace-versions.ts`) ensuring monorepo consistency.
+  - Automated SemVer calculation from conventional commits with zero manual version bumping.
+  - Canonical `ReleaseIdentity` with Git SHA, container digest, and Cloud Run revision binding.
+  - Version Consistency Enforcement Gate blocking releases with version drift across `package.json`, `release-manifest.json`, and runtime config.
+  - Automated GitHub Release publishing with changelog extraction and production acceptance evidence.
+  - Safe runtime version endpoints: `GET /api/system/version` and `GET /admin/releases/history`.
+  - PWA version tracker displaying `KwakoPos © 2026 • Version 2.2.0` with durable offline outbox upgrade protection.
+  - Workspace package alignment: all `@kwakopos2/*` packages synchronized to `2.2.0`.
+
+- **Monorepo Architecture & Workspace Governance**:
+  - Unified version numbering across root, apps (`@kwakopos2/api`, `@kwakopos2/web`), and packages (`@kwakopos2/config`, `@kwakopos2/domain`, `@kwakopos2/database`, `@kwakopos2/auth`, `@kwakopos2/sync`, `@kwakopos2/observability`, `@kwakopos2/contracts`).
+  - Dependency version pinning enforced at build time.
+  - Release scripts refactored for explicit workspace package management.
+
+### Changed
+- Promoted workspace versions from `2.0.0` → `2.2.0` for alignment with root package version.
+- Updated all `@kwakopos2/*` internal dependencies to point to `2.2.0`.
+- Enhanced `prepare-release.ts` to automatically sync workspace versions before generating release manifest.
+- Improved `version-consistency-gate.ts` to validate workspace package versions in addition to root version.
+- Updated npm scripts for explicit release lifecycle control: `release:sync-versions`, `release:prepare`, `release:validate-version`.
+
+### Fixed
+- Resolved version drift between monorepo root (`2.2.0`) and internal workspace packages (`2.0.0`).
+- Corrected `package-lock.json` synchronization to include all workspace package versions.
+- Added glob-based workspace discovery preventing hard-coded package list maintenance.
+
+---
+
 ## [2.1.0] - 2026-08-26
 
 ### Added
@@ -19,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Production Observability & Real-User Monitoring (RUM)**:
   - `@kwakopos2/observability` package with distributed tracing (`x-trace-id`, `x-span-id`, `x-correlation-id`).
   - Frontend RUM Collector capturing Web Vitals (FCP, LCP, INP, CLS, TTI), API request durations, and unhandled errors.
-  - Continuous inventory reconciler enforcing ${\text{Available Stock}} \equiv \sum \text{StockLedger movements}$.
+  - Continuous inventory reconciler enforcing ${{\text{Available Stock}} \equiv \sum \text{StockLedger movements}}$.
   - Tenant Reliability scoring ($0-100$) and incident lifecycle engine.
   - Automated continuous synthetic production suite (Tests A through F).
   - Super Admin Observability Center (`/admin/observability/*`).
@@ -35,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Production Observability & Real-User Monitoring (RUM)**:
   - Distributed tracing with correlation ID context (`x-trace-id`, `x-span-id`, `x-correlation-id`).
   - Frontend RUM Collector capturing Web Vitals (FCP, LCP, INP, CLS, TTI), API latencies, and JS errors.
-  - Automated continuous inventory reconciler (${\text{Available Stock}} \equiv \sum \text{StockLedger}$).
+  - Automated continuous inventory reconciler (${{\text{Available Stock}} \equiv \sum \text{StockLedger}}$).
   - Tenant Reliability scoring (0–100) and Incident Lifecycle management.
   - Continuous synthetic monitoring suite (Tests A through F).
   - Super Admin Observability Center (`/admin/observability/*`).

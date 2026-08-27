@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/web",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -8,8 +8,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@kwakopos2/contracts": "2.0.0",
-    "@kwakopos2/domain": "2.0.0",
+    "@kwakopos2/contracts": "2.2.0",
+    "@kwakopos2/domain": "2.2.0",
     "typescript": "^5.3.3"
   }
 }

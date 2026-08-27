@@ -62,7 +62,7 @@ export function syncWorkspaceVersions(targetVersion?: string): VersionSyncResult
           for (const depName in pkg.dependencies) {
             if (depName.startsWith("@kwakopos2/")) {
               // Check if this is a workspace internal dependency
-              if (pkg.dependencies[depName] === currentVersion || pkg.dependencies[depName].startsWith(currentVersion.split(".")[0])) {
+              if (pkg.dependencies[depName] === currentVersion || /^(2\.[0-9]+\.[0-9]+|\^2\..*|~2\..*)/.test(pkg.dependencies[depName])) {
                 pkg.dependencies[depName] = version;
               }
             }
@@ -73,7 +73,7 @@ export function syncWorkspaceVersions(targetVersion?: string): VersionSyncResult
         if (pkg.devDependencies) {
           for (const depName in pkg.devDependencies) {
             if (depName.startsWith("@kwakopos2/")) {
-              if (pkg.devDependencies[depName] === currentVersion || pkg.devDependencies[depName].startsWith(currentVersion.split(".")[0])) {
+              if (pkg.devDependencies[depName] === currentVersion || /^(2\.[0-9]+\.[0-9]+|\^2\..*|~2\..*)/.test(pkg.devDependencies[depName])) {
                 pkg.devDependencies[depName] = version;
               }
             }

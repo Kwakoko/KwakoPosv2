@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/api",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "main": "./dist/server.js",
   "scripts": {
     "build": "tsx ../../scripts/ci/harden-production-finance.ts && tsc -p tsconfig.json",
@@ -11,13 +11,13 @@
   "dependencies": {
     "fastify": "^4.26.0",
     "@fastify/cors": "^9.0.1",
-    "@kwakopos2/config": "2.0.0",
-    "@kwakopos2/contracts": "2.0.0",
-    "@kwakopos2/domain": "2.0.0",
-    "@kwakopos2/database": "2.0.0",
-    "@kwakopos2/auth": "2.0.0",
-    "@kwakopos2/sync": "2.0.0",
-    "@kwakopos2/observability": "2.0.0",
+    "@kwakopos2/config": "2.2.0",
+    "@kwakopos2/contracts": "2.2.0",
+    "@kwakopos2/domain": "2.2.0",
+    "@kwakopos2/database": "2.2.0",
+    "@kwakopos2/auth": "2.2.0",
+    "@kwakopos2/sync": "2.2.0",
+    "@kwakopos2/observability": "2.2.0",
     "typescript": "^5.3.3"
   }
 }
