@@ -2215,6 +2215,7 @@ export * from "./telecomContracts.js";
 export * from "./monetizationContracts.js";
 export * from "./certification.js";
 export * from "./resilience.js";
+export * from "./performance.js";
 
 
 

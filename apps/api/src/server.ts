@@ -2266,6 +2266,53 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // PHASE 14 PERFORMANCE & GLOBAL SCALE CERTIFICATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/performance/baseline", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: perfCert.evidencePackage.status,
+        overallScore: perfCert.evidencePackage.overallScore,
+        exerciseId: perfCert.evidencePackage.exerciseId,
+        baselineMetrics: perfCert.evidencePackage.baselineMetrics,
+        digest: perfCert.evidencePackage.digest,
+        evidencePath: perfCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/performance/capacity-model", async (req, reply) => {
+    const capacityModel = await globalReleaseService.getCapacityModel();
+    return reply.status(200).send({ success: true, data: capacityModel });
+  });
+
+  server.get("/api/v1/performance/scorecard", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        overallScore: perfCert.evidencePackage.overallScore,
+        baselineMetrics: perfCert.evidencePackage.baselineMetrics,
+        workload10x: perfCert.evidencePackage.workload10x,
+        workload50x: perfCert.evidencePackage.workload50x,
+        workload100x: perfCert.evidencePackage.workload100x,
+      },
+    });
+  });
+
+  server.post("/api/v1/performance/benchmark", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Performance & Global Scale benchmark complete",
+      data: perfCert,
+    });
+  });
+
 
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {

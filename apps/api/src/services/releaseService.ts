@@ -291,6 +291,16 @@ export class ReleaseService {
     const { KWAKOPOS_DR_RUNBOOKS } = await import("../../../../scripts/certification/dr-runbooks.js");
     return KWAKOPOS_DR_RUNBOOKS;
   }
+
+  async runPerformanceCertification() {
+    const { runPerformanceCertification } = await import("../../../../scripts/certification/runPerformanceCertification.js");
+    return runPerformanceCertification();
+  }
+
+  async getCapacityModel() {
+    const { generateKwakoPosCapacityModel } = await import("../../../../scripts/certification/capacity-model-generator.js");
+    return generateKwakoPosCapacityModel();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();

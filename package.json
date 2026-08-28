@@ -25,6 +25,7 @@
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
     "certify:security": "tsx scripts/security/runSecurityCertification.ts",
     "certify:resilience": "tsx scripts/certification/runResilienceCertification.ts",
+    "certify:performance": "tsx scripts/certification/runPerformanceCertification.ts",
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "db:generate": "npm run db:generate --workspace=@kwakopos2/database",
