@@ -38,6 +38,7 @@
     "certify:poultrylivestock": "tsx scripts/certification/runPoultryLivestockCertification.ts",
     "certify:vehiclefleet": "tsx scripts/certification/runVehicleFleetCertification.ts",
     "certify:hardware": "tsx scripts/certification/runHardwareCertification.ts",
+    "certify:electronics": "tsx scripts/certification/runElectronicsCertification.ts",
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "db:generate": "npm run db:generate --workspace=@kwakopos2/database",

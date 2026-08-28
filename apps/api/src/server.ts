@@ -2743,6 +2743,34 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, message: "Hardware & Building Materials Operating System certification complete", data: hwCert });
   });
 
+  // =========================================================================
+  // ADVANCED ELECTRONICS & DEVICE LIFECYCLE OPERATING SYSTEM MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/electronics/manifest", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    return reply.status(200).send({ success: true, data: globalElectronicsService.getManifest() });
+  });
+
+  server.get("/api/v1/electronics/serialized-devices", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalElectronicsService.getSerializedDevices(ctx) });
+  });
+
+  server.post("/api/v1/electronics/repairs/create", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const repairJob = globalElectronicsService.createRepairJob(ctx, body);
+    return reply.status(201).send({ success: true, data: repairJob });
+  });
+
+  server.post("/api/v1/electronics/certify", async (req, reply) => {
+    const elecCert = await globalReleaseService.runElectronicsCertification();
+    return reply.status(200).send({ success: true, message: "Advanced Electronics & Device Lifecycle Operating System certification complete", data: elecCert });
+  });
+
 
 
 

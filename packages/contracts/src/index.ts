@@ -2228,6 +2228,7 @@ export * from "./microfinanceContracts.js";
 export * from "./poultryLivestockContracts.js";
 export * from "./vehicleFleetContracts.js";
 export * from "./hardwareContracts.js";
+export * from "./electronicsContracts.js";
 
 
 

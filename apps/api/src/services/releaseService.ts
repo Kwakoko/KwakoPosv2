@@ -361,6 +361,11 @@ export class ReleaseService {
     const { runHardwareCertification } = await import("../../../../scripts/certification/runHardwareCertification.js");
     return runHardwareCertification();
   }
+
+  async runElectronicsCertification() {
+    const { runElectronicsCertification } = await import("../../../../scripts/certification/runElectronicsCertification.js");
+    return runElectronicsCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
