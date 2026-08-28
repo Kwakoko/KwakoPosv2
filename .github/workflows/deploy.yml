@@ -38,6 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: npm }
       - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build
       - run: npx tsx scripts/release/database-migration-gate.ts
 
   deploy-preproduction:
@@ -49,6 +51,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: npm }
       - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build
       - run: npx tsx scripts/release/verify-kwakopos-modules.ts
 
   deploy-production:
@@ -60,6 +64,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: npm }
       - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build
 
       - name: Run Release Quality Gates
         run: npx tsx scripts/release/quality-gates.ts

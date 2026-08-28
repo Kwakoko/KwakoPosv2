@@ -15,5 +15,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: npm }
       - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build
       - run: npm audit --audit-level=high || true
       - run: npx tsx scripts/release/quality-gates.ts
+      - run: npm run certify:security

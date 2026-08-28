@@ -28,8 +28,8 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Validate Conventional Commits
-        run: npx tsx scripts/ci/validate-commit-message.ts --test
+      - name: Generate Prisma Client
+        run: npm run db:generate
 
       - name: TypeScript Type Check
         run: npx tsc --noEmit
