@@ -2072,4 +2072,65 @@ model TelecomKmlImportRecord {
   @@index([tenantId, sha256Hash])
   @@map("telecom_kml_imports")
 }
+
+// ==========================================
+// PHASE 5: RELEASE MANAGEMENT & DEPLOYMENTS
+// ==========================================
+
+model AppVersion {
+  id               String              @id @default(uuid())
+  version          String              @unique
+  major            Int
+  minor            Int
+  patch            Int
+  prerelease       String?
+  releaseType      String              @default("PATCH") // MAJOR, MINOR, PATCH
+  gitTag           String
+  commitHash       String
+  releaseNotes     String?
+  releaseDate      DateTime            @default(now())
+  deploymentStatus String              @default("PENDING") // PENDING, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED
+  buildNumber      Int                 @default(1)
+  createdBy        String              @default("AUTOMATED_CI_CD")
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  changes          VersionChange[]
+  deployments      DeploymentHistory[]
+
+  @@map("app_versions")
+}
+
+model VersionChange {
+  id           String     @id @default(uuid())
+  appVersionId String
+  module       String     @default("CORE")
+  feature      String
+  changeType   String     @default("FEAT") // FEAT, FIX, PERF, REFACTOR, SECURITY, DOCS, BREAKING
+  commit       String
+  developer    String     @default("CI_BOT")
+  timestamp    DateTime   @default(now())
+  appVersion   AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+
+  @@index([appVersionId])
+  @@index([module])
+  @@map("version_changes")
+}
+
+model DeploymentHistory {
+  id                  String     @id @default(uuid())
+  appVersionId        String
+  environment         String     @default("production") // development, staging, preproduction, production
+  deploymentStart     DateTime   @default(now())
+  deploymentEnd       DateTime?
+  durationSeconds     Int        @default(0)
+  status              String     @default("IN_PROGRESS") // IN_PROGRESS, SUCCESSFUL, FAILED, ROLLED_BACK
+  rollbackInformation String?
+  createdAt           DateTime   @default(now())
+  appVersion          AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+
+  @@index([appVersionId])
+  @@index([environment, status])
+  @@map("deployment_history")
+}
+
 

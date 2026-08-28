@@ -1,6 +1,6 @@
 {
   "name": "kwakopos2-monorepo",
-  "version": "1.5.1",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "workspaces": [

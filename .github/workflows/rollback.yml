@@ -1,0 +1,27 @@
+name: Automated Rollback System
+
+on:
+  workflow_dispatch:
+    inputs:
+      failed_version:
+        description: 'Failed Version to Rollback'
+        required: true
+      target_stable_version:
+        description: 'Target Stable Version'
+        required: true
+        default: '2.2.0'
+      reason:
+        description: 'Rollback Reason'
+        required: true
+        default: 'Manual emergency rollback triggered'
+
+jobs:
+  execute-rollback:
+    name: Execute Automated Rollback
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm }
+      - run: npm ci
+      - run: npx tsx scripts/release/rollback-engine.ts ${{ github.event.inputs.failed_version }} ${{ github.event.inputs.target_stable_version }} "${{ github.event.inputs.reason }}"

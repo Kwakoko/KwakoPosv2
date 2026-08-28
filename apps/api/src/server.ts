@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
+import { globalReleaseService } from "./services/releaseService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 import {
   CreateProductRequestSchema,
@@ -2031,6 +2032,31 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.get("/api/v1/billing/reports/kpis", async (req, reply) => {
     const kpis = globalMonetizationRepository.getSaaSKpis();
     return reply.status(200).send({ success: true, data: kpis });
+  });
+
+  // =========================================================================
+  // Phase 7: Automated Release Management & Version Control Endpoints
+  // =========================================================================
+
+  server.get("/api/admin/releases/dashboard", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard });
+  });
+
+  server.post("/api/admin/releases/trigger", async (req, reply) => {
+    const body = (req.body as any) || {};
+    const result = await globalReleaseService.triggerReleasePipeline({ dryRun: body.dryRun });
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/admin/releases/rollback", async (req, reply) => {
+    const { failedVersion, targetStableVersion, reason } = (req.body as any) || {};
+    const result = await globalReleaseService.triggerRollback({
+      failedVersion: failedVersion || "2.3.0",
+      targetStableVersion: targetStableVersion || "2.2.0",
+      reason: reason || "Super Admin manual rollback trigger",
+    });
+    return reply.status(200).send({ success: true, data: result });
   });
 
   return server;

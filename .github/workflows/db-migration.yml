@@ -1,0 +1,20 @@
+name: Database Migration Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run Mode (true/false)'
+        required: false
+        default: 'false'
+
+jobs:
+  database-migration:
+    name: Validate and Deploy Database Migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm }
+      - run: npm ci
+      - run: npx tsx scripts/release/database-migration-gate.ts

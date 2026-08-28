@@ -1,0 +1,19 @@
+name: Scheduled Maintenance & Health Reports
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Nightly build
+    - cron: '0 6 * * 1' # Weekly health report on Mondays
+
+jobs:
+  nightly-build-and-health:
+    name: Nightly Build & Health Report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npx tsx scripts/release/health-check-gate.ts
