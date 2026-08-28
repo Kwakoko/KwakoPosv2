@@ -2131,6 +2131,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: pkg });
   });
 
+  server.get("/api/admin/certification/campaign", async (req, reply) => {
+    const res = await globalReleaseService.runCampaignCertification();
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
     const body = (req.body as any) || {};
     const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");

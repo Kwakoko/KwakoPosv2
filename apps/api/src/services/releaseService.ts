@@ -251,6 +251,12 @@ export class ReleaseService {
       modifiedModules: ["CORE", "DATABASE", "API", "WEB", "SYNC", "OBSERVABILITY"],
     };
   }
+
+  async runCampaignCertification() {
+    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
+    return runFullSystemCertificationEngine();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
+

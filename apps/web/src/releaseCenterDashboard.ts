@@ -141,6 +141,9 @@ export function renderReleaseCenterDashboard(): string {
         <p style="margin: 0.25rem 0 0 0; color: #94a3b8; font-size: 0.85rem;">Trigger Quality Gates, Inspect Release Candidates or Execute Emergency Rollback</p>
       </div>
       <div style="display: flex; gap: 0.75rem;">
+        <button onclick="fetch('/api/admin/certification/campaign').then(r=>r.json()).then(d=>alert('Full-System Certification Campaign Results:\\n' + JSON.stringify(d, null, 2)))" style="background: #10b981; color: white; border: none; padding: 0.65rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
+          🏆 Run 17-Domain Campaign
+        </button>
         <button onclick="fetch('/api/admin/releases/v2/candidates').then(r=>r.json()).then(d=>alert('Release Candidates:\\n' + JSON.stringify(d, null, 2)))" style="background: #475569; color: white; border: none; padding: 0.65rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.85rem;">
           📋 Release Candidates
         </button>
