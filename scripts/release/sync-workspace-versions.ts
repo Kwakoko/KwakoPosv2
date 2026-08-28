@@ -1,6 +1,23 @@
 import * as fs from "fs";
 import * as path from "path";
-import { globSync } from "glob";
+
+function findWorkspacePackages(): string[] {
+  const results: string[] = [];
+  const root = process.cwd();
+  for (const dir of ["apps", "packages"]) {
+    const fullDir = path.join(root, dir);
+    if (fs.existsSync(fullDir)) {
+      const subdirs = fs.readdirSync(fullDir);
+      for (const sub of subdirs) {
+        const pkgFile = path.join(dir, sub, "package.json");
+        if (fs.existsSync(path.join(root, pkgFile))) {
+          results.push(pkgFile);
+        }
+      }
+    }
+  }
+  return results;
+}
 
 export interface VersionSyncResult {
   status: "SUCCESS" | "PARTIAL" | "FAILED";
@@ -37,8 +54,7 @@ export function syncWorkspaceVersions(targetVersion?: string): VersionSyncResult
     console.log(`[INFO] Scanning workspace packages...`);
 
     // Find all package.json files in apps/* and packages/* directories
-    const patterns = ["apps/*/package.json", "packages/*/package.json"];
-    const packageFiles = patterns.flatMap((pattern) => globSync(pattern, { cwd: process.cwd() }));
+    const packageFiles = findWorkspacePackages();
 
     console.log(`[INFO] Found ${packageFiles.length} workspace package.json files`);
 
