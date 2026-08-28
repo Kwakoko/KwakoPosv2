@@ -36,7 +36,6 @@ export function generateReleaseManifest(options?: {
     version: targetVersion,
     tag: targetTag,
     gitSha: identity.gitSha,
-    gitSha: identity.gitSha,
     containerDigest: identity.containerDigest,
     cloudRunRevision: identity.cloudRunRevision,
     environment: identity.environment,

@@ -276,6 +276,11 @@ export class ReleaseService {
     const { getEnterpriseSecurityRiskRegister } = await import("../../../../scripts/security/enterprise-risk-register.js");
     return getEnterpriseSecurityRiskRegister();
   }
+
+  async runKpcpFullCertification(mode: "source" | "build" | "staging" | "deployed" | "full" = "full") {
+    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
+    return runFullSystemCertificationEngine(mode);
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
