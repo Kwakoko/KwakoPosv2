@@ -2217,6 +2217,7 @@ export * from "./certification.js";
 export * from "./resilience.js";
 export * from "./performance.js";
 export * from "./reliability.js";
+export * from "./commercial-portfolio.js";
 
 
 

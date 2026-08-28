@@ -306,6 +306,11 @@ export class ReleaseService {
     const { runReliabilityCertification } = await import("../../../../scripts/certification/runReliabilityCertification.js");
     return runReliabilityCertification();
   }
+
+  async runCommercialCertification() {
+    const { runCommercialCertification } = await import("../../../../scripts/certification/runCommercialCertification.js");
+    return runCommercialCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();

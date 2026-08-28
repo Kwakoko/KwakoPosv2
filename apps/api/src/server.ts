@@ -2357,6 +2357,56 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // PHASE 16 COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/commercial/portfolio", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      data: commCert.evidencePackage.portfolio,
+    });
+  });
+
+  server.get("/api/v1/commercial/verticals/:industryId", async (req, reply) => {
+    const { industryId } = req.params as { industryId: string };
+    const commCert = await globalReleaseService.runCommercialCertification();
+    const all = [
+      ...commCert.evidencePackage.portfolio.flagshipVerticals,
+      ...commCert.evidencePackage.portfolio.strategicVerticals,
+      ...commCert.evidencePackage.portfolio.specializedVerticals,
+    ];
+    const target = all.find((v) => v.industryId === industryId);
+    if (!target) {
+      return reply.status(404).send({ success: false, error: "Vertical not found in commercial portfolio" });
+    }
+    return reply.status(200).send({ success: true, data: target });
+  });
+
+  server.get("/api/v1/commercial/readiness-gates", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        flagshipVerticals: commCert.evidencePackage.portfolio.flagshipVerticals.map((v) => ({
+          industryId: v.industryId,
+          name: v.name,
+          gates: v.gates,
+        })),
+      },
+    });
+  });
+
+  server.post("/api/v1/commercial/evaluate", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Commercial Product Readiness portfolio evaluation complete",
+      data: commCert,
+    });
+  });
+
 
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
