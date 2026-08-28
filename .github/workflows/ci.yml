@@ -31,6 +31,9 @@ jobs:
       - name: Generate Prisma Client
         run: npm run db:generate
 
+      - name: Build All Monorepo Workspaces
+        run: npm run build
+
       - name: TypeScript Type Check
         run: npx tsc --noEmit
 
