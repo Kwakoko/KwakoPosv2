@@ -28,6 +28,7 @@
     "certify:performance": "tsx scripts/certification/runPerformanceCertification.ts",
     "certify:reliability": "tsx scripts/certification/runReliabilityCertification.ts",
     "certify:commercial": "tsx scripts/certification/runCommercialCertification.ts",
+    "certify:validation": "tsx scripts/certification/runPmfValidation.ts",
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "db:generate": "npm run db:generate --workspace=@kwakopos2/database",

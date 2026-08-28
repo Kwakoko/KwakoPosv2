@@ -2407,6 +2407,49 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // PHASE 17 PRODUCT-MARKET VALIDATION FRAMEWORK ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/validation/pmf-framework", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      data: pmfCert.evidencePackage.framework,
+    });
+  });
+
+  server.get("/api/v1/validation/verticals/:industryId", async (req, reply) => {
+    const { industryId } = req.params as { industryId: string };
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    const scorecard = pmfCert.evidencePackage.framework.scorecards.find((s) => s.industryId === industryId);
+    if (!scorecard) {
+      return reply.status(404).send({ success: false, error: "Vertical PMF scorecard not found" });
+    }
+    return reply.status(200).send({ success: true, data: scorecard });
+  });
+
+  server.get("/api/v1/validation/scorecard", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        scorecards: pmfCert.evidencePackage.framework.scorecards,
+        overallScore: pmfCert.evidencePackage.overallPmfScore,
+      },
+    });
+  });
+
+  server.post("/api/v1/validation/evaluate", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      message: "Product-Market Validation Framework evaluation complete",
+      data: pmfCert,
+    });
+  });
+
+
 
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
