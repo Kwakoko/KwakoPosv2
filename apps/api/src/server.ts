@@ -2449,6 +2449,77 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // RETAIL OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/retail/manifest", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getManifest(),
+    });
+  });
+
+  server.get("/api/v1/retail/settings", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getSettings(ctx),
+    });
+  });
+
+  server.post("/api/v1/retail/settings", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const updated = globalRetailService.updateSettings(ctx, body);
+    return reply.status(200).send({
+      success: true,
+      data: updated,
+    });
+  });
+
+  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const body = (req.body as any) || {};
+    const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
+    return reply.status(201).send({
+      success: true,
+      data: sale,
+    });
+  });
+
+  server.get("/api/v1/retail/replenishment", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getReplenishmentSuggestions(ctx),
+    });
+  });
+
+  server.get("/api/v1/retail/ai-insights", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getAiRecommendations(ctx),
+    });
+  });
+
+  server.post("/api/v1/retail/certify", async (req, reply) => {
+    const retCert = await globalReleaseService.runRetailCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Retail Industry Operating System certification complete",
+      data: retCert,
+    });
+  });
+
+
 
 
 

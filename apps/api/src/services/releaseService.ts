@@ -316,6 +316,11 @@ export class ReleaseService {
     const { runPmfValidation } = await import("../../../../scripts/certification/runPmfValidation.js");
     return runPmfValidation();
   }
+
+  async runRetailCertification() {
+    const { runRetailCertification } = await import("../../../../scripts/certification/runRetailCertification.js");
+    return runRetailCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();

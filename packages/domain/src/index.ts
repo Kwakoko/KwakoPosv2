@@ -305,4 +305,7 @@ export * from "./telecomCostingEngine.js";
 // Phase 6: SaaS Monetization & Revenue Management
 export * from "./monetizationEngine.js";
 
+// Retail Operating System Domain Engine
+export * from "./retailEngine.js";
+
 

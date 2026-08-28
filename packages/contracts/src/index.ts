@@ -2219,6 +2219,7 @@ export * from "./performance.js";
 export * from "./reliability.js";
 export * from "./commercial-portfolio.js";
 export * from "./pmf-validation.js";
+export * from "./retailContracts.js";
 
 
 
