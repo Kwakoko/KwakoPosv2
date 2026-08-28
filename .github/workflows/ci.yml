@@ -54,3 +54,10 @@ jobs:
 
       - name: Verify KwakoPos SaaS 15 Core Modules
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
+
+      - name: Execute 17-Domain Full-System Certification Campaign
+        run: npm run certify:campaign
+
+      - name: Execute Phase 12 Security & Compliance Certification Engine
+        run: npm run certify:security
+
