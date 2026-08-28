@@ -63,7 +63,7 @@ export const IndustryExpansionCatalog: PluginManifest[] = [
     industry: "Electronics",
     description: "Serial and IMEI tracking, device warranty lifecycle, bundles, accessories, and after-sales control.",
     author: "KwakoPos Core Team",
-    dependencies: ["commercial-core", "inventory", "finance", "customer"],
+    dependencies: ["commercial-core", "inventory", "finance"],
     capabilities: ["inventory.read", "inventory.write", "pos.read", "pos.write", "customer.read", "customer.write", "finance.post", "file.store"],
     permissions: ["electronics.serials.view", "electronics.serials.manage", "electronics.warranty.manage", "electronics.returns.manage"],
     routes: [
