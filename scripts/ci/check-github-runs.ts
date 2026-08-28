@@ -13,13 +13,12 @@ function getGithubToken(): string {
 }
 
 export async function checkGithubRuns() {
-  const token = getGithubToken();
-  const res = await fetch("https://api.github.com/repos/Kwakoko/KwakoPosv2/actions/runs?per_page=12", {
-    headers: {
-      "User-Agent": "KwakoPos-CI-Checker",
-      Authorization: `token ${token}`,
-    },
-  });
+  const token = process.env.GITHUB_TOKEN || getGithubToken();
+  const headers: Record<string, string> = {
+    "User-Agent": "KwakoPos-CI-Checker",
+    Authorization: `Bearer ${token}`,
+  };
+  const res = await fetch("https://api.github.com/repos/Kwakoko/KwakoPosv2/actions/runs?per_page=12", { headers });
   const data = (await res.json()) as any;
   if (!data.workflow_runs) {
     console.error("Error fetching runs:", data);
@@ -43,12 +42,7 @@ export async function checkGithubRuns() {
   // Print step details for top failed runs
   const failedRuns = runs.filter((r: any) => r.conclusion === "failure").slice(0, 5);
   for (const failed of failedRuns) {
-    const jobRes = await fetch(`https://api.github.com/repos/Kwakoko/KwakoPosv2/actions/runs/${failed.id}/jobs`, {
-      headers: {
-        "User-Agent": "KwakoPos-CI-Checker",
-        Authorization: `token ${token}`,
-      },
-    });
+    const jobRes = await fetch(`https://api.github.com/repos/Kwakoko/KwakoPosv2/actions/runs/${failed.id}/jobs`, { headers });
     const jobData = (await jobRes.json()) as any;
     if (jobData.jobs) {
       for (const job of jobData.jobs) {
