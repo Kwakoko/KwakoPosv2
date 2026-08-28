@@ -2313,6 +2313,50 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // PHASE 15 PRODUCTION RELIABILITY ENGINEERING (KPRS) ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/reliability/status", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: relCert.evidencePackage.status,
+        overallScore: relCert.evidencePackage.overallScore,
+        exerciseId: relCert.evidencePackage.exerciseId,
+        overallAvailabilityPct: relCert.evidencePackage.scorecard.overallAvailabilityPct,
+        digest: relCert.evidencePackage.digest,
+        evidencePath: relCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/reliability/error-budget", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: relCert.evidencePackage.scorecard.errorBudgets,
+    });
+  });
+
+  server.get("/api/v1/reliability/slo-scorecard", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: relCert.evidencePackage.scorecard,
+    });
+  });
+
+  server.post("/api/v1/reliability/remediate", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Production Reliability auto-remediation complete",
+      data: relCert.evidencePackage.scorecard.remediations,
+    });
+  });
+
 
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {

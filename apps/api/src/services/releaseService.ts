@@ -301,6 +301,11 @@ export class ReleaseService {
     const { generateKwakoPosCapacityModel } = await import("../../../../scripts/certification/capacity-model-generator.js");
     return generateKwakoPosCapacityModel();
   }
+
+  async runReliabilityCertification() {
+    const { runReliabilityCertification } = await import("../../../../scripts/certification/runReliabilityCertification.js");
+    return runReliabilityCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
