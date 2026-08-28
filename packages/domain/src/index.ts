@@ -175,6 +175,7 @@ export * from "./wholesaleEngine.js";
 export * from "./hardwareEngine.js";
 export * from "./electronicsEngine.js";
 export * from "./industryExpansionCatalog.js";
+export * from "./industryCatalog.js";
 export * from "./telecomInvariants.js";
 export * from "./kmlKmzParserEngine.js";
 export * from "./telecomWorkflowEngine.js";
