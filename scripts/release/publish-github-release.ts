@@ -37,7 +37,23 @@ export async function publishGitHubRelease() {
 
   // If running in GitHub Actions with GITHUB_TOKEN available
   const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPos-Version-2.0.0";
+  const repo = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPosv2";
+
+  // Create local git tag if not already existing
+  try {
+    execSync(`git tag -a ${tag} -m "Release ${tag}"`, { stdio: "ignore" });
+    console.log(`✓ Local Git tag ${tag} created.`);
+  } catch {
+    // Tag may already exist locally
+  }
+
+  // Push tag to remote if git origin available
+  try {
+    execSync(`git push origin ${tag}`, { stdio: "ignore" });
+    console.log(`✓ Git tag ${tag} pushed to remote origin.`);
+  } catch {
+    // Remote tag push optional fallback
+  }
 
   if (githubToken && repo) {
     try {
@@ -71,14 +87,6 @@ export async function publishGitHubRelease() {
     }
   } else {
     console.log(`[INFO] GITHUB_TOKEN not present in environment. Local tag creation simulated.`);
-  }
-
-  // Create local git tag if not already existing
-  try {
-    execSync(`git tag -a ${tag} -m "Release ${tag}"`, { stdio: "ignore" });
-    console.log(`✓ Local Git tag ${tag} created.`);
-  } catch {
-    // Tag may already exist locally
   }
 
   console.log("========================================================================");

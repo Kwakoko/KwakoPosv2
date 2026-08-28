@@ -164,3 +164,33 @@ Credit to: Kwakoko, github-actions[bot], nkala91186
 - **Container Digest**: `sha256:c1ba0a02098b1dbe46121c2822e2897ab69816b501009380e0cce38532cd3924`
 - **Active Cloud Run Revision**: `kwakopos-production-service-00028-kuf`
 - **Production Status**: `CERTIFIED_AND_ACCEPTED`
+
+
+## [2.3.0] - 2026-08-28
+
+### ✨ New Features
+- **security**: implement Phase 12 Security & Compliance Certification Platform
+- **certification**: implement 11.1 Full-System Certification & Continuous Assurance Platform
+- **cert**: implement Section 11.1 Full-System Certification Campaign runner
+- **cert**: incorporate Phases 7-10 into production certification runner
+- **release**: implement KwakoPos Release Engineering Platform v2
+
+### ⚡ Improvements & Enhancements
+- **release**: v2.4.0
+- **pillars**: lock mandatory rule - refine, verify, test, certify after every feature implementation
+- **cert**: update production certification evidence record for v2.2.0
+- **release**: synchronize workspace package versions to 2.2.0
+
+### 🐛 Bug Fixes
+- **workflows**: split multi-line run step into separate single-line steps in auto-semver.yml
+- **ci**: update check-github-runs.ts logging helper
+- **tsc**: resolve all TypeScript type errors and ESM import extensions across scripts
+- **release**: replace external glob dependency with zero-dependency workspace scanner in sync-workspace-versions.ts
+- **ci**: run npm run build before tsc --noEmit in ci.yml
+- **workflows**: ensure db:generate and build run before quality gates and type checks across all GitHub Action workflows
+- **ci**: handle GCP auth gracefully when secrets are unconfigured and fix test import paths
+- **package**: add missing root db:generate, db:push, and production release script commands
+- **ci**: update package-lock.json and add Phase 1-12 full-system & security certification gates to GitHub Workflows
+
+### 👥 Contributors
+Credit to: Kwakoko, github-actions[bot]
