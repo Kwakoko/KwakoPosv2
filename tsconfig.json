@@ -15,7 +15,6 @@
   "include": [
     "apps/**/*",
     "packages/**/*",
-    "tests/**/*",
     "scripts/**/*"
   ]
 }

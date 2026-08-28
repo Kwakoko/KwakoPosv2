@@ -439,7 +439,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbA.recordOutboxMutation({
     id: "OP-DEV-A-01",
-    entityType: "Customer",
+    entityType: "StockAdjustment",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
@@ -630,7 +630,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbStoreF06A.recordOutboxMutation({
     id: "op-fin-sync-1",
-    entityType: "Customer",
+    entityType: "StockAdjustment",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Financial Customer", creditLimit: 250000 },
@@ -1038,6 +1038,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const p03IdemKey = `plg-evt-idem-${randomUUID()}`;
   pluginRepo.logPluginEvent(ctx, {
     pluginId: "restaurant",
+    branchId: ctx.branchId || null,
     eventType: "TABLE_OPENED",
     operationId: "op-p03-1",
     idempotencyKey: p03IdemKey,
@@ -1048,6 +1049,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   try {
     pluginRepo.logPluginEvent(ctx, {
       pluginId: "restaurant",
+      branchId: ctx.branchId || null,
       eventType: "TABLE_OPENED",
       operationId: "op-p03-2",
       idempotencyKey: p03IdemKey,
@@ -1465,6 +1467,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     documents: [],
   });
   const linkT06 = telecomRepo.createMicrowaveLink(ctx, {
+    status: "DESIGN",
     linkCode: `MW-LINK-${randomUUID().slice(0, 5).toUpperCase()}`,
     name: "Alpha to Far Site Link",
     siteAId: siteT01.id,
@@ -1625,7 +1628,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const subB01 = monetizationRepo.createSubscription(ctx, {
     tenantId: ctx.tenantId,
     planId: starterPlan.id,
+    currency: "TZS",
     billingInterval: "MONTHLY",
+    autoRenew: true,
     startTrial: true,
   });
   const passB01 = subB01.status === "TRIAL" && subB01.planCode === "STARTER";

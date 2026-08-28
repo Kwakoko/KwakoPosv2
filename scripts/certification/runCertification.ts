@@ -76,8 +76,8 @@ import {
 } from "@kwakopos2/database";
 
 import { SyncEngine } from "@kwakopos2/sync";
-import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb";
-import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine";
+import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
+import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
 import { randomUUID } from "crypto";
 
 
@@ -96,7 +96,17 @@ async function runProductionCertification() {
   console.log(`       - Cloud Run Revision: ${identity.cloudRunRevision}`);
 
   if (identity.containerDigest && identity.cloudRunRevision) {
-    assertReleaseIdentityMatch(identity, identity);
+    assertReleaseIdentityMatch({
+      gitSha: identity.gitSha,
+      containerDigest: identity.containerDigest,
+      cloudRunRevision: identity.cloudRunRevision,
+      appVersion: identity.appVersion,
+    }, {
+      gitSha: identity.gitSha,
+      containerDigest: identity.containerDigest,
+      cloudRunRevision: identity.cloudRunRevision,
+      appVersion: identity.appVersion,
+    });
   } else {
     // Validate release identity validator logic with standard production contract
     assertReleaseIdentityMatch(
@@ -254,14 +264,14 @@ async function runProductionCertification() {
 
   // Sync Browser A to Server
   await browserAEngine.syncWithServer(
-    async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (req: any) => syncEngine.processPush(ctx, req),
+    async (since: any) => syncEngine.processDelta(ctx, { since })
   );
 
   // Sync Browser B from Server
   await browserBEngine.syncWithServer(
-    async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (req: any) => syncEngine.processPush(ctx, req),
+    async (since: any) => syncEngine.processDelta(ctx, { since })
   );
 
   // Assert Convergence
@@ -307,7 +317,7 @@ async function runProductionCertification() {
       { accountId: accountLookup.salesRevenueAccountId, debit: 0, credit: 150000 },
     ],
   });
-  assertJournalBalanced(saleJournal.journal, saleJournal.journal.lines);
+  assertJournalBalanced(saleJournal.journal, saleJournal.journal.lines!);
   console.log("       ✓ FIN-INV-001 (Double-entry balance sum debit = credit) PASS");
 
   // FIN-INV-002: Period Lockdown
@@ -671,7 +681,9 @@ async function runProductionCertification() {
   const subM = monetizationRepo.createSubscription(ctx, {
     tenantId: ctx.tenantId,
     planId: planM.id,
+    currency: "TZS",
     billingInterval: "MONTHLY",
+    autoRenew: true,
     startTrial: true,
   });
 

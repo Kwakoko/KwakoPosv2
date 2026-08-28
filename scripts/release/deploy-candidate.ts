@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { getRealGitSha } from "./releaseIdentity";
+import { getRealGitSha } from "./releaseIdentity.js";
 import { assertValidGitSha, assertValidContainerDigest, assertValidCloudRunRevision } from "@kwakopos2/domain";
 import { loadConfig } from "@kwakopos2/config";
 

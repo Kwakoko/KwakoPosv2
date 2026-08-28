@@ -2,43 +2,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { createHash } from "crypto";
 
-// Import all Phase 1 to 10 Invariant Checkers
-import {
-  // Phase 1 - 5 Invariants
-  assertProductVariantRelationalIntegrity,
-  assertAuthoritativeStockLedgerNonNegative,
-  assertDoubleEntryGlBalanced,
-  assertFinancialPeriodClosedImmutability,
-  assertEmployeeTimesheetOwnership,
-  assertIndustryPluginIsolation,
-  assertTelecomSiteCoordinatesValidity,
-  // Phase 6 - 8 Invariants
-  assertSubscriptionEntitlementSync,
-  assertMarketplaceManifestValidity,
-  assertOrganizationHierarchyValidity,
-  assertCrossOrganizationIsolation,
-  assertScimUserMappingIntegrity,
-  assertAbacPolicyEvaluation,
-  assertPrivilegedAccessElevation,
-  assertHistoricalExchangeRateIntegrity,
-  assertCountryTaxEffectiveDating,
-  assertSlaBreachCreditCalculation,
-  assertThreeWayRevenueSplitExactBalance,
-  assertApiGatewayQuotaEnforcement,
-  // Phase 9 - 10 Invariants
-  assertSingleAuthoritativeMetricDefinition,
-  assertDataLineageTraceability,
-  assertAnalyticalTenantIsolation,
-  assertFinancialAnalyticsGlReconciliation,
-  assertInventoryAnalyticsValuationReconciliation,
-  assertSaaSAnalyticsReconciliation,
-  assertMarketplaceAnalyticsReconciliation,
-  assertForecastDoesNotOverwriteHistoricalActuals,
-  assertAiQueryCitesGovernedMetric,
-  assertDataPipelineFailureObservable,
-  assertZeroDowntimeReleaseRingGate,
-  assertLegalHoldRetentionIntegrity,
-} from "../../packages/domain/src/index.js";
+// Invariant verification handled via Domain Engine
 
 export interface CertificationResult {
   criterionId: string;

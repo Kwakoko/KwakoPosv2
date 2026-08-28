@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { getAuthoritativeReleaseIdentity, getRealGitSha } from "./releaseIdentity";
-import { deployCandidateRevision } from "./deploy-candidate";
-import { certifyDeployedRevision } from "./certify-deployed";
-import { promoteCandidateRevision } from "./promote-revision";
+import { getAuthoritativeReleaseIdentity, getRealGitSha } from "./releaseIdentity.js";
+import { deployCandidateRevision } from "./deploy-candidate.js";
+import { certifyDeployedRevision } from "./certify-deployed.js";
+import { promoteCandidateRevision } from "./promote-revision.js";
 import {
   assertValidGitSha,
   assertValidContainerDigest,
