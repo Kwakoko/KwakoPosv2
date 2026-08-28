@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileInventoryLedger } from "../../scripts/ops/reconcile-data";
+import { reconcileInventoryLedger } from "../../scripts/ops/reconcile-data.js";
 import { assertInventoryLedgerIntegrity, assertNoOrphanAdjustments } from "@kwakopos2/domain";
 import type { ProductVariant, StockAdjustment, StockLedger } from "@kwakopos2/contracts";
 

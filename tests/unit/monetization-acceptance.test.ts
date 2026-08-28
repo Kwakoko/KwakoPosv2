@@ -50,6 +50,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenantCtx.tenantId,
       planId: starterPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: true,
     });
 
@@ -73,6 +75,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenantCtx.tenantId,
       planId: starterPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: false,
     });
 
@@ -127,6 +131,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenantCtx.tenantId,
       planId: businessPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: false,
     });
 
@@ -156,6 +162,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenantCtx.tenantId,
       planId: proPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: false,
     });
 
@@ -189,6 +197,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenantCtx.tenantId,
       planId: proPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: false,
     });
 
@@ -200,6 +210,8 @@ describe("Phase 6 — SaaS Monetization Acceptance Test Suite", () => {
       tenantId: tenant2Ctx.tenantId,
       planId: busPlan.id,
       billingInterval: "MONTHLY",
+      currency: "TZS",
+      autoRenew: true,
       startTrial: false,
     });
 
