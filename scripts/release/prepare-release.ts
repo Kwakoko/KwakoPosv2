@@ -85,7 +85,7 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
     updateChangelog(nextVersion);
   }
 
-  const manifest = generateReleaseManifest({ certification: "PASS" });
+  const manifest = generateReleaseManifest({ version: nextVersion, certification: "PASS" });
   console.log(`✓ Release Manifest synchronized for version ${manifest.version} (Tag: ${manifest.tag})`);
 
   if (!options?.dryRun) {

@@ -194,3 +194,52 @@ Credit to: Kwakoko, github-actions[bot], nkala91186
 
 ### 👥 Contributors
 Credit to: Kwakoko, github-actions[bot]
+
+## [2.4.0] - 2026-08-28
+
+### ✨ New Features
+- **security**: implement Phase 12 Security & Compliance Certification Platform
+- **certification**: implement 11.1 Full-System Certification & Continuous Assurance Platform
+- **cert**: implement Section 11.1 Full-System Certification Campaign runner
+- **cert**: incorporate Phases 7-10 into production certification runner
+- **release**: implement KwakoPos Release Engineering Platform v2
+- **release**: implement SLSA Level 3 supply chain, SBOM generator, Risk Score engine, DORA metrics, and Progressive Delivery platform
+- **release**: implement enterprise automated release management, versioning, quality gates, and CI/CD pipeline
+- **saas**: Implement Phase 6 SaaS Monetization & Revenue Management with central plans, entitlements, billing, payments, and invariants M001-M015
+- **telecom**: Implement Phase 5 Telecom & Technical Services Vertical with KML/KMZ, microwave engineering, RAN, and Invariants T001-T015
+
+### ⚡ Improvements & Enhancements
+- **release**: v2.3.0
+- **release**: v2.4.0
+- **pillars**: lock mandatory rule - refine, verify, test, certify after every feature implementation
+- **cert**: update production certification evidence record for v2.2.0
+- **release**: synchronize workspace package versions to 2.2.0
+- **cert**: Issue fresh 10-criteria production release certificate for v1.5.1 covering Phases 1-10
+- **release**: Production release evidence for Phase 6 SaaS Monetization on SHA 5355563 (Cloud Run revision 00122-hov)
+- **release**: Authoritative multi-device convergence production evidence for SHA dc1709c on Cloud Run revision 00120-wiz
+- **browser**: Add complete catalog brand persistence lifecycle test and multi-device state convergence
+- **release**: Production release evidence for SHA 2ee2745 on Cloud Run revision 00118-mis
+- **release**: Release certification evidence for Catalog Brand Persistence on Cloud Run revision 00116-zek (SHA 212b860)
+- **release**: Integrated Phase 1-4 production certification evidence for SHA 20ad38d on Cloud Run (00114-hup)
+- **certification**: Add dedicated Phase 1-4 acceptance suites P1-001..P1-010, P2-001..P2-015, P3-001..P3-010, P4-001..P4-012
+- **release**: Authoritative production certificate evidence for Phase 5 Telecom HEAD afd6d5e on Cloud Run (00112-jid)
+- **release**: v2.4.0
+- **release**: v2.3.1
+- **release**: Authoritative production certificate evidence for HEAD d82c288 on Cloud Run (00107-yod)
+
+### 🐛 Bug Fixes
+- **workflows**: split multi-line run step into separate single-line steps in auto-semver.yml
+- **ci**: update check-github-runs.ts logging helper
+- **tsc**: resolve all TypeScript type errors and ESM import extensions across scripts
+- **release**: replace external glob dependency with zero-dependency workspace scanner in sync-workspace-versions.ts
+- **ci**: run npm run build before tsc --noEmit in ci.yml
+- **workflows**: ensure db:generate and build run before quality gates and type checks across all GitHub Action workflows
+- **ci**: handle GCP auth gracefully when secrets are unconfigured and fix test import paths
+- **package**: add missing root db:generate, db:push, and production release script commands
+- **ci**: update package-lock.json and add Phase 1-12 full-system & security certification gates to GitHub Workflows
+- **schema**: Map brandId to brand_id in Prisma Product model
+- **build**: Add src to Dockerfile and standalone productService implementation in apps/api
+- **catalog**: Implement Catalog Brand Persistence with brandId and brand_id path in src/services/productService.ts
+
+### 👥 Contributors
+Credit to: Kwakoko, github-actions[bot]
