@@ -523,6 +523,101 @@ export class ReleaseRepository {
     };
   }
 
+  // V2 Platform Entities
+  private releaseCandidates = new Map<string, any>();
+  private releasePolicies = new Map<string, any>();
+  private releaseArtifacts = new Map<string, any>();
+  private certificationRuns = new Map<string, any>();
+  private rolloutStages = new Map<string, any>();
+  private deploymentHealth = new Map<string, any>();
+  private releaseIncidents = new Map<string, any>();
+
+  createReleaseCandidate(rc: any) {
+    const id = rc.id || `rc_${Date.now()}`;
+    const record = {
+      id,
+      rcNumber: rc.rcNumber || `RC-${new Date().toISOString().slice(0, 10)}-${String(this.releaseCandidates.size + 1).padStart(3, "0")}`,
+      version: rc.version || "2.2.0",
+      gitSha: rc.gitSha || "HEAD",
+      artifactDigest: rc.artifactDigest || "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      riskScore: rc.riskScore ?? 15.0,
+      riskLevel: rc.riskLevel || "LOW",
+      status: rc.status || "VALIDATING",
+      createdAt: new Date().toISOString(),
+    };
+    this.releaseCandidates.set(record.id, record);
+    return record;
+  }
+
+  getReleaseCandidates() {
+    return Array.from(this.releaseCandidates.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  recordCertificationRun(run: any) {
+    const id = run.id || `cert_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const record = {
+      id,
+      appVersionId: run.appVersionId || "v2.2.0",
+      suite: run.suite || "CORE",
+      status: run.status || "PASS",
+      score: run.score ?? 100.0,
+      evidence: run.evidence || "Certification suite passed 100%",
+      timestamp: new Date().toISOString(),
+    };
+    this.certificationRuns.set(record.id, record);
+    return record;
+  }
+
+  getCertificationRuns(appVersionId?: string) {
+    const list = Array.from(this.certificationRuns.values());
+    if (!appVersionId) return list;
+    return list.filter((r) => r.appVersionId === appVersionId);
+  }
+
+  recordRolloutStage(stage: any) {
+    const id = stage.id || `stage_${Date.now()}`;
+    const record = {
+      id,
+      deploymentId: stage.deploymentId || "dep_latest",
+      stage: stage.stage || "PERCENT_5",
+      trafficPercentage: stage.trafficPercentage ?? 5,
+      startedAt: new Date().toISOString(),
+      completedAt: stage.completedAt || new Date().toISOString(),
+      decision: stage.decision || "PROMOTED",
+    };
+    this.rolloutStages.set(record.id, record);
+    return record;
+  }
+
+  getRolloutStages(deploymentId?: string) {
+    const list = Array.from(this.rolloutStages.values());
+    if (!deploymentId) return list;
+    return list.filter((s) => s.deploymentId === deploymentId);
+  }
+
+  recordDeploymentHealth(health: any) {
+    const id = health.id || `health_${Date.now()}`;
+    const record = {
+      id,
+      deploymentId: health.deploymentId || "dep_latest",
+      metric: health.metric || "ERROR_RATE",
+      observedValue: health.observedValue || "0.01%",
+      threshold: health.threshold || "< 2.0%",
+      status: health.status || "HEALTHY",
+      timestamp: new Date().toISOString(),
+    };
+    this.deploymentHealth.set(record.id, record);
+    return record;
+  }
+
+  getDeploymentHealth(deploymentId?: string) {
+    const list = Array.from(this.deploymentHealth.values());
+    if (!deploymentId) return list;
+    return list.filter((h) => h.deploymentId === deploymentId);
+  }
+
   getReleaseMetrics() {
     const versions = this.getAllVersions();
     const deployments = this.getDeploymentHistory();
@@ -556,11 +651,14 @@ export class ReleaseRepository {
       releaseFrequencyPerWeek: dora.deploymentFrequencyPerWeek,
       developerContributions: developerContribs,
       doraMetrics: dora,
+      releaseCandidates: this.getReleaseCandidates(),
+      certificationRuns: this.getCertificationRuns(),
     };
   }
 }
 
 export const globalReleaseRepository = new ReleaseRepository(globalInMemoryStore);
+
 
 
 

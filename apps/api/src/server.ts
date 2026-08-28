@@ -69,6 +69,7 @@ import {
   globalPluginRepository,
   globalTelecomRepository,
   globalMonetizationRepository,
+  globalReleaseRepository,
   ScopedMonetizationRepository,
   PrismaProductRepository,
   PrismaStockRepository,
@@ -2093,6 +2094,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       reason: reason || "Super Admin manual rollback trigger",
     });
     return reply.status(200).send({ success: true, data: result });
+  });
+
+  // V2 API Extensions
+  server.get("/api/admin/releases/v2/candidates", async (req, reply) => {
+    const candidates = await globalReleaseRepository.getReleaseCandidates();
+    return reply.status(200).send({ success: true, data: candidates });
+  });
+
+  server.get("/api/admin/releases/v2/policy-decision", async (req, reply) => {
+    const version = (req.query as any)?.version || "2.2.0";
+    const decision = await globalReleaseService.evaluateReleasePolicies(version);
+    return reply.status(200).send({ success: true, data: decision });
+  });
+
+  server.get("/api/admin/releases/v2/change-impact", async (req, reply) => {
+    const analysis = await globalReleaseService.analyzeChangeImpact();
+    return reply.status(200).send({ success: true, data: analysis });
+  });
+
+  server.get("/api/admin/releases/v2/drift-reconciliation", async (req, reply) => {
+    const result = await globalReleaseService.detectDrift();
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.get("/api/admin/releases/v2/compare", async (req, reply) => {
+    const from = (req.query as any)?.from || "2.1.0";
+    const to = (req.query as any)?.to || "2.2.0";
+    const comparison = await globalReleaseService.compareReleases(from, to);
+    return reply.status(200).send({ success: true, data: comparison });
+  });
+
+  server.get("/api/admin/releases/v2/evidence-package", async (req, reply) => {
+    const version = (req.query as any)?.version || "2.2.0";
+    const pkg = await globalReleaseService.getEvidencePackage(version);
+    return reply.status(200).send({ success: true, data: pkg });
+  });
+
+  server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
+    const body = (req.body as any) || {};
+    const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");
+    return reply.status(201).send({ success: true, data: candidate });
   });
 
   return server;

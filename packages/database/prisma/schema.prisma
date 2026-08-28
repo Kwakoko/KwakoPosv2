@@ -2213,4 +2213,97 @@ model ReleaseApproval {
   @@map("release_approvals")
 }
 
+model ReleaseCandidate {
+  id             String   @id @default(uuid())
+  rcNumber       String   @unique // e.g. RC-2026-08-28-001
+  version        String
+  gitSha         String
+  artifactDigest String
+  riskScore      Float    @default(15.0)
+  riskLevel      String   @default("LOW") // LOW, MEDIUM, HIGH, CRITICAL
+  status         String   @default("VALIDATING") // DRAFT, VALIDATING, CERTIFIED, PROMOTED, FAILED
+  createdAt      DateTime @default(now())
+
+  @@map("release_candidates")
+}
+
+model ReleasePolicy {
+  id            String   @id @default(uuid())
+  policyVersion String   @default("production-release-v2")
+  environment   String   @default("production")
+  definition    String // YAML / JSON policy
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@map("release_policies")
+}
+
+model ReleaseArtifact {
+  id             String   @id @default(uuid())
+  appVersionId   String
+  artifactName   String
+  digest         String
+  registry       String   @default("ghcr.io/kwakopos")
+  sbom           String
+  provenance     String
+  attestation    String
+  createdAt      DateTime @default(now())
+
+  @@index([appVersionId])
+  @@map("release_artifacts")
+}
+
+model CertificationRun {
+  id           String   @id @default(uuid())
+  appVersionId String
+  suite        String // CORE, AUTH, POS, INVENTORY, STOCK_LEDGER, OFFLINE_SYNC, PWA
+  status       String   @default("PASS") // PASS, WARN, FAIL
+  score        Float    @default(100.0)
+  evidence     String
+  timestamp    DateTime @default(now())
+
+  @@index([appVersionId])
+  @@map("certification_runs")
+}
+
+model RolloutStage {
+  id                String    @id @default(uuid())
+  deploymentId      String
+  stage             String // INTERNAL, CANARY_TENANT, PERCENT_1, PERCENT_5, PERCENT_25, PERCENT_50, PERCENT_100
+  trafficPercentage Int
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  decision          String    @default("PROMOTED")
+
+  @@index([deploymentId])
+  @@map("rollout_stages")
+}
+
+model DeploymentHealth {
+  id            String   @id @default(uuid())
+  deploymentId  String
+  metric        String // ERROR_RATE, LATENCY_P95, AVAILABILITY, SYNC_FAILURE_RATE
+  observedValue String
+  threshold     String
+  status        String   @default("HEALTHY") // HEALTHY, BREACHED
+  timestamp     DateTime @default(now())
+
+  @@index([deploymentId])
+  @@map("deployment_health")
+}
+
+model ReleaseIncident {
+  id            String    @id @default(uuid())
+  appVersionId  String
+  incidentCode  String
+  detectionTime DateTime  @default(now())
+  impact        String
+  action        String    @default("AUTOMATED_ROLLBACK")
+  recovery      String
+  resolution    String?
+
+  @@index([appVersionId])
+  @@map("release_incidents")
+}
+
 
