@@ -2221,6 +2221,51 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // PHASE 13 DISASTER RECOVERY & RESILIENCE CERTIFICATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/resilience/status", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: resCert.evidencePackage.status,
+        overallScore: resCert.evidencePackage.overallScore,
+        exerciseId: resCert.evidencePackage.exerciseId,
+        scenariosPassed: resCert.evidencePackage.scenariosPassed,
+        scenariosExecuted: resCert.evidencePackage.scenariosExecuted,
+        digest: resCert.evidencePackage.digest,
+        evidencePath: resCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/resilience/scorecard", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        overallScore: resCert.evidencePackage.overallScore,
+        results: resCert.evidencePackage.results,
+      },
+    });
+  });
+
+  server.get("/api/v1/resilience/runbooks", async (req, reply) => {
+    const runbooks = await globalReleaseService.getDrRunbooks();
+    return reply.status(200).send({ success: true, data: runbooks });
+  });
+
+  server.post("/api/v1/resilience/simulate", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Disaster recovery resilience simulation complete",
+      data: resCert,
+    });
+  });
+
 
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {

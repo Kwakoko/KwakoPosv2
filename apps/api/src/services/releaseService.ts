@@ -281,6 +281,16 @@ export class ReleaseService {
     const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
     return runFullSystemCertificationEngine(mode);
   }
+
+  async runResilienceCertification() {
+    const { runResilienceCertification } = await import("../../../../scripts/certification/runResilienceCertification.js");
+    return runResilienceCertification();
+  }
+
+  async getDrRunbooks() {
+    const { KWAKOPOS_DR_RUNBOOKS } = await import("../../../../scripts/certification/dr-runbooks.js");
+    return KWAKOPOS_DR_RUNBOOKS;
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
