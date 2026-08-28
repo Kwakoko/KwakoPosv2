@@ -40,9 +40,9 @@ export async function checkGithubRuns() {
   console.log("=== LIVE GITHUB ACTIONS WORKFLOW RUNS ===");
   console.table(runs);
 
-  // Print step details for failed runs on head commit
-  const failedOnHead = runs.filter((r: any) => r.conclusion === "failure");
-  for (const failed of failedOnHead) {
+  // Print step details for top failed runs
+  const failedRuns = runs.filter((r: any) => r.conclusion === "failure").slice(0, 5);
+  for (const failed of failedRuns) {
     const jobRes = await fetch(`https://api.github.com/repos/Kwakoko/KwakoPosv2/actions/runs/${failed.id}/jobs`, {
       headers: {
         "User-Agent": "KwakoPos-CI-Checker",
@@ -53,10 +53,10 @@ export async function checkGithubRuns() {
     if (jobData.jobs) {
       for (const job of jobData.jobs) {
         if (job.conclusion === "failure") {
-          console.log(`\n❌ Failed Run #${failed.run_number} (${failed.name}) - Job: ${job.name}`);
+          console.log(`\n❌ Failed Run #${failed.run_number} (${failed.name}) [SHA ${failed.sha}] - Job: ${job.name} (${job.html_url})`);
           for (const step of job.steps) {
             if (step.conclusion === "failure") {
-              console.log(`   Step: ${step.name} (Step #${step.number})`);
+              console.log(`   FAILED STEP: ${step.name} (Step #${step.number})`);
             }
           }
         }
