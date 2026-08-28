@@ -307,5 +307,13 @@ export * from "./monetizationEngine.js";
 
 // Retail Operating System Domain Engine
 export * from "./retailEngine.js";
+export * from "./restaurantEngine.js";
+export * from "./pharmacyEngine.js";
+export * from "./lawFirmEngine.js";
+export * from "./saccoVicobaEngine.js";
+export * from "./microfinanceEngine.js";
+export * from "./poultryLivestockEngine.js";
+export * from "./vehicleFleetEngine.js";
+export * from "./hardwareEngine.js";
 
 

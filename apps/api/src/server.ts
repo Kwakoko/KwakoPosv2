@@ -2519,6 +2519,230 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
+  // =========================================================================
+  // RESTAURANT OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/restaurant/manifest", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    return reply.status(200).send({ success: true, data: globalRestaurantService.getManifest() });
+  });
+
+  server.get("/api/v1/restaurant/menu", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalRestaurantService.getMenuItems(ctx) });
+  });
+
+  server.post("/api/v1/restaurant/kds/orders", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const order = globalRestaurantService.createKitchenOrder(ctx, body);
+    return reply.status(201).send({ success: true, data: order });
+  });
+
+  server.post("/api/v1/restaurant/certify", async (req, reply) => {
+    const restCert = await globalReleaseService.runRestaurantCertification();
+    return reply.status(200).send({ success: true, message: "Restaurant Operating System certification complete", data: restCert });
+  });
+
+  // =========================================================================
+  // PHARMACY OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/pharmacy/manifest", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    return reply.status(200).send({ success: true, data: globalPharmacyService.getManifest() });
+  });
+
+  server.get("/api/v1/pharmacy/medicines", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalPharmacyService.getMedicines(ctx) });
+  });
+
+  server.post("/api/v1/pharmacy/dispense", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const result = globalPharmacyService.dispenseMedicineFEFO(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/pharmacy/certify", async (req, reply) => {
+    const pharmCert = await globalReleaseService.runPharmacyCertification();
+    return reply.status(200).send({ success: true, message: "Pharmacy Operating System certification complete", data: pharmCert });
+  });
+
+  // =========================================================================
+  // LAW FIRM OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/law-firm/manifest", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    return reply.status(200).send({ success: true, data: globalLawFirmService.getManifest() });
+  });
+
+  server.get("/api/v1/law-firm/matters", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalLawFirmService.getMatters(ctx) });
+  });
+
+  server.post("/api/v1/law-firm/conflicts/search", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const result = globalLawFirmService.runConflictCheck(ctx, body.targetName || "");
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/law-firm/certify", async (req, reply) => {
+    const lawCert = await globalReleaseService.runLawFirmCertification();
+    return reply.status(200).send({ success: true, message: "Law Firm Operating System certification complete", data: lawCert });
+  });
+
+  // =========================================================================
+  // SACCO / VICOBA OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/sacco-vicoba/manifest", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    return reply.status(200).send({ success: true, data: globalSaccoVicobaService.getManifest() });
+  });
+
+  server.get("/api/v1/sacco-vicoba/members", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalSaccoVicobaService.getMembers(ctx) });
+  });
+
+  server.post("/api/v1/sacco-vicoba/loans/apply", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const result = globalSaccoVicobaService.applyLoan(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/sacco-vicoba/certify", async (req, reply) => {
+    const saccoCert = await globalReleaseService.runSaccoVicobaCertification();
+    return reply.status(200).send({ success: true, message: "SACCO & VICOBA Operating System certification complete", data: saccoCert });
+  });
+
+  // =========================================================================
+  // MICROFINANCE & LENDING OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/microfinance/manifest", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    return reply.status(200).send({ success: true, data: globalMicrofinanceService.getManifest() });
+  });
+
+  server.get("/api/v1/microfinance/borrowers", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalMicrofinanceService.getBorrowers(ctx) });
+  });
+
+  server.post("/api/v1/microfinance/loans/assess-and-disburse", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const result = globalMicrofinanceService.assessAndDisburseLoan(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/microfinance/certify", async (req, reply) => {
+    const mfiCert = await globalReleaseService.runMicrofinanceCertification();
+    return reply.status(200).send({ success: true, message: "Microfinance & Lending Operating System certification complete", data: mfiCert });
+  });
+
+  // =========================================================================
+  // POULTRY & LIVESTOCK OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/poultry-livestock/manifest", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    return reply.status(200).send({ success: true, data: globalPoultryLivestockService.getManifest() });
+  });
+
+  server.get("/api/v1/poultry-livestock/flocks", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalPoultryLivestockService.getFlocks(ctx) });
+  });
+
+  server.post("/api/v1/poultry-livestock/egg-production/record", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const result = globalPoultryLivestockService.recordEggCollection(ctx, body);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/poultry-livestock/certify", async (req, reply) => {
+    const farmCert = await globalReleaseService.runPoultryLivestockCertification();
+    return reply.status(200).send({ success: true, message: "Poultry & Livestock Operating System certification complete", data: farmCert });
+  });
+
+  // =========================================================================
+  // VEHICLE & FLEET MANAGEMENT OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/vehicle-fleet/manifest", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    return reply.status(200).send({ success: true, data: globalVehicleFleetService.getManifest() });
+  });
+
+  server.get("/api/v1/vehicle-fleet/vehicles", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalVehicleFleetService.getVehicles(ctx) });
+  });
+
+  server.post("/api/v1/vehicle-fleet/trips/dispatch", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const trip = globalVehicleFleetService.dispatchTrip(ctx, body);
+    return reply.status(201).send({ success: true, data: trip });
+  });
+
+  server.post("/api/v1/vehicle-fleet/certify", async (req, reply) => {
+    const fleetCert = await globalReleaseService.runVehicleFleetCertification();
+    return reply.status(200).send({ success: true, message: "Vehicle & Fleet Management Operating System certification complete", data: fleetCert });
+  });
+
+  // =========================================================================
+  // HARDWARE & BUILDING MATERIALS OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/hardware/manifest", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    return reply.status(200).send({ success: true, data: globalHardwareService.getManifest() });
+  });
+
+  server.get("/api/v1/hardware/products", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    return reply.status(200).send({ success: true, data: globalHardwareService.getProducts(ctx) });
+  });
+
+  server.post("/api/v1/hardware/products/create", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const body = (req.body as any) || {};
+    const product = globalHardwareService.createProduct(ctx, body);
+    return reply.status(201).send({ success: true, data: product });
+  });
+
+  server.post("/api/v1/hardware/certify", async (req, reply) => {
+    const hwCert = await globalReleaseService.runHardwareCertification();
+    return reply.status(200).send({ success: true, message: "Hardware & Building Materials Operating System certification complete", data: hwCert });
+  });
+
 
 
 

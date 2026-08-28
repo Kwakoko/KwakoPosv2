@@ -321,6 +321,46 @@ export class ReleaseService {
     const { runRetailCertification } = await import("../../../../scripts/certification/runRetailCertification.js");
     return runRetailCertification();
   }
+
+  async runRestaurantCertification() {
+    const { runRestaurantCertification } = await import("../../../../scripts/certification/runRestaurantCertification.js");
+    return runRestaurantCertification();
+  }
+
+  async runPharmacyCertification() {
+    const { runPharmacyCertification } = await import("../../../../scripts/certification/runPharmacyCertification.js");
+    return runPharmacyCertification();
+  }
+
+  async runLawFirmCertification() {
+    const { runLawFirmCertification } = await import("../../../../scripts/certification/runLawFirmCertification.js");
+    return runLawFirmCertification();
+  }
+
+  async runSaccoVicobaCertification() {
+    const { runSaccoVicobaCertification } = await import("../../../../scripts/certification/runSaccoVicobaCertification.js");
+    return runSaccoVicobaCertification();
+  }
+
+  async runMicrofinanceCertification() {
+    const { runMicrofinanceCertification } = await import("../../../../scripts/certification/runMicrofinanceCertification.js");
+    return runMicrofinanceCertification();
+  }
+
+  async runPoultryLivestockCertification() {
+    const { runPoultryLivestockCertification } = await import("../../../../scripts/certification/runPoultryLivestockCertification.js");
+    return runPoultryLivestockCertification();
+  }
+
+  async runVehicleFleetCertification() {
+    const { runVehicleFleetCertification } = await import("../../../../scripts/certification/runVehicleFleetCertification.js");
+    return runVehicleFleetCertification();
+  }
+
+  async runHardwareCertification() {
+    const { runHardwareCertification } = await import("../../../../scripts/certification/runHardwareCertification.js");
+    return runHardwareCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
