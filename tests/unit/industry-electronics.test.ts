@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ElectronicsEngine } from "@kwakopos2/domain/src/electronicsEngine";
+import { ElectronicsEngine } from "@kwakopos2/domain";
 
 describe("Industry Engine: Electronics", () => {
   const engine = new ElectronicsEngine();
