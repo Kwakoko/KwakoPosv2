@@ -23,6 +23,7 @@
     "test:browser": "playwright test",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
+    "certify:security": "tsx scripts/security/runSecurityCertification.ts",
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "synthetic": "tsx scripts/ops/synthetic-monitor.ts",

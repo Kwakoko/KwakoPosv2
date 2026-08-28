@@ -256,7 +256,28 @@ export class ReleaseService {
     const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
     return runFullSystemCertificationEngine();
   }
+
+  async runSecurityCertification() {
+    const { runSecurityCertificationEngine } = await import("../../../../scripts/security/security-certification-engine.js");
+    return runSecurityCertificationEngine();
+  }
+
+  async getSecurityBaseline() {
+    const { getKwakoPosSecurityBaseline } = await import("../../../../scripts/security/kisb-security-baseline.js");
+    return getKwakoPosSecurityBaseline();
+  }
+
+  async getComplianceMatrix() {
+    const { getComplianceControlMatrix } = await import("../../../../scripts/security/compliance-control-matrix.js");
+    return getComplianceControlMatrix();
+  }
+
+  async getSecurityRisks() {
+    const { getEnterpriseSecurityRiskRegister } = await import("../../../../scripts/security/enterprise-risk-register.js");
+    return getEnterpriseSecurityRiskRegister();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
+
 

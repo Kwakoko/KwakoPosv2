@@ -2136,6 +2136,45 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: res });
   });
 
+  // Phase 12 Security & Compliance Endpoints
+  server.get("/api/admin/security/dashboard", async (req, reply) => {
+    const secRes = await globalReleaseService.runSecurityCertification();
+    const kisb = await globalReleaseService.getSecurityBaseline();
+    const compliance = await globalReleaseService.getComplianceMatrix();
+    const risks = await globalReleaseService.getSecurityRisks();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        assessmentReadinessState: "Security Controls Implemented and Assessment-Ready",
+        prohibitedClaimsNotice: compliance.prohibitedClaimsNotice,
+        certificationResult: secRes,
+        baseline: kisb,
+        compliance,
+        risks,
+      },
+    });
+  });
+
+  server.get("/api/admin/security/baseline", async (req, reply) => {
+    const data = await globalReleaseService.getSecurityBaseline();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.get("/api/admin/security/compliance-matrix", async (req, reply) => {
+    const data = await globalReleaseService.getComplianceMatrix();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.get("/api/admin/security/risks", async (req, reply) => {
+    const data = await globalReleaseService.getSecurityRisks();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/admin/security/certify", async (req, reply) => {
+    const data = await globalReleaseService.runSecurityCertification();
+    return reply.status(200).send({ success: true, data });
+  });
+
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
     const body = (req.body as any) || {};
