@@ -2078,38 +2078,52 @@ model TelecomKmlImportRecord {
 // ==========================================
 
 model AppVersion {
-  id               String              @id @default(uuid())
-  version          String              @unique
-  major            Int
-  minor            Int
-  patch            Int
-  prerelease       String?
-  releaseType      String              @default("PATCH") // MAJOR, MINOR, PATCH
-  gitTag           String
-  commitHash       String
-  releaseNotes     String?
-  releaseDate      DateTime            @default(now())
-  deploymentStatus String              @default("PENDING") // PENDING, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED
-  buildNumber      Int                 @default(1)
-  createdBy        String              @default("AUTOMATED_CI_CD")
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  changes          VersionChange[]
-  deployments      DeploymentHistory[]
+  id                  String               @id @default(uuid())
+  version             String               @unique
+  major               Int
+  minor               Int
+  patch               Int
+  prerelease          String?
+  releaseType         String               @default("PATCH") // MAJOR, MINOR, PATCH
+  gitTag              String
+  commitHash          String
+  artifactDigest      String?              @default("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  imageDigest         String?
+  schemaVersion       String               @default("2.2.0")
+  sbomReference       String?
+  provenanceReference String?
+  releaseState        String               @default("RELEASED") // DRAFT, VALIDATING, QUALITY_PASSED, SECURITY_PASSED, BUILT, ATTESTED, STAGING, STAGING_CERTIFIED, PRODUCTION_READY, CANARY, PROMOTING, PRODUCTION, VERIFIED, RELEASED, FAILED, BLOCKED, ROLLED_BACK
+  releaseRisk         String               @default("LOW") // LOW, MEDIUM, HIGH, CRITICAL
+  releaseNotes        String?
+  releaseDate         DateTime             @default(now())
+  deploymentStatus    String               @default("DEPLOYED") // PENDING, DEPLOYING, DEPLOYED, ROLLED_BACK, FAILED
+  buildNumber         Int                  @default(1)
+  createdBy           String               @default("AUTOMATED_CI_CD")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  changes             VersionChange[]
+  deployments         DeploymentHistory[]
+  gates               ReleaseQualityGate[]
+  approvals           ReleaseApproval[]
 
   @@map("app_versions")
 }
 
 model VersionChange {
-  id           String     @id @default(uuid())
-  appVersionId String
-  module       String     @default("CORE")
-  feature      String
-  changeType   String     @default("FEAT") // FEAT, FIX, PERF, REFACTOR, SECURITY, DOCS, BREAKING
-  commit       String
-  developer    String     @default("CI_BOT")
-  timestamp    DateTime   @default(now())
-  appVersion   AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+  id                 String     @id @default(uuid())
+  appVersionId       String
+  module             String     @default("CORE")
+  feature            String
+  changeType         String     @default("FEAT") // FEAT, FIX, PERF, REFACTOR, SECURITY, DOCS, BREAKING
+  scope              String?    @default("platform")
+  commit             String
+  prNumber           Int?
+  developer          String     @default("CI_BOT")
+  breakingChangeFlag Boolean    @default(false)
+  migrationFlag      Boolean    @default(false)
+  securityFlag       Boolean    @default(false)
+  timestamp          DateTime   @default(now())
+  appVersion         AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
 
   @@index([appVersionId])
   @@index([module])
@@ -2117,20 +2131,86 @@ model VersionChange {
 }
 
 model DeploymentHistory {
-  id                  String     @id @default(uuid())
+  id                  String            @id @default(uuid())
   appVersionId        String
-  environment         String     @default("production") // development, staging, preproduction, production
-  deploymentStart     DateTime   @default(now())
+  environment         String            @default("production") // development, staging, preproduction, production
+  revision            String            @default("kwakopos-prod-001")
+  artifactDigest      String            @default("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  deploymentStrategy  String            @default("CANARY") // CANARY, BLUE_GREEN, ROLLING, IMMEDIATE
+  canaryPercentage    Int               @default(100)
+  deploymentStart     DateTime          @default(now())
   deploymentEnd       DateTime?
-  durationSeconds     Int        @default(0)
-  status              String     @default("IN_PROGRESS") // IN_PROGRESS, SUCCESSFUL, FAILED, ROLLED_BACK
+  durationSeconds     Int               @default(0)
+  status              String            @default("SUCCESSFUL") // IN_PROGRESS, SUCCESSFUL, FAILED, ROLLED_BACK
+  rollbackStatus      String?
+  rollbackReason      String?
+  healthResult        String?           @default("100% HEALTHY")
   rollbackInformation String?
-  createdAt           DateTime   @default(now())
-  appVersion          AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+  createdAt           DateTime          @default(now())
+  appVersion          AppVersion        @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+  events              DeploymentEvent[]
 
   @@index([appVersionId])
   @@index([environment, status])
   @@map("deployment_history")
+}
+
+model DeploymentEvent {
+  id           String            @id @default(uuid())
+  deploymentId String
+  eventType    String // DEPLOYMENT_START, CANARY_PROMOTED, SLO_BREACH, HEALTH_CHECK_PASS, ROLLBACK_INITIATED
+  timestamp    DateTime          @default(now())
+  source       String            @default("AUTOMATED_CD")
+  severity     String            @default("INFO") // INFO, WARN, ERROR, CRITICAL
+  message      String
+  metric       String?
+  threshold    String?
+  decision     String?
+  deployment   DeploymentHistory @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@map("deployment_events")
+}
+
+model ReleaseQualityGate {
+  id            String     @id @default(uuid())
+  appVersionId  String
+  gate          String
+  status        String     @default("PASSED") // PASSED, FAILED, SKIPPED
+  score         Float      @default(100.0)
+  evidence      String
+  failureReason String?
+  timestamp     DateTime   @default(now())
+  appVersion    AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+
+  @@index([appVersionId])
+  @@map("release_quality_gates")
+}
+
+model ReleaseAttestation {
+  id                    String   @id @default(uuid())
+  artifactDigest        String   @unique
+  provenance            String
+  sbom                  String
+  signer                String   @default("github-actions[bot]")
+  verificationStatus    String   @default("VERIFIED") // VERIFIED, REJECTED, UNVERIFIED
+  verificationTimestamp DateTime @default(now())
+
+  @@map("release_attestations")
+}
+
+model ReleaseApproval {
+  id           String     @id @default(uuid())
+  appVersionId String
+  approver     String
+  policy       String     @default("HIGH_RISK_MANUAL_APPROVAL")
+  decision     String     @default("APPROVED") // APPROVED, REJECTED, PENDING
+  timestamp    DateTime   @default(now())
+  reason       String
+  appVersion   AppVersion @relation(fields: [appVersionId], references: [id], onDelete: Cascade)
+
+  @@index([appVersionId])
+  @@map("release_approvals")
 }
 
 

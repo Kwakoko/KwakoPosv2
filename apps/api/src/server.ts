@@ -2043,9 +2043,45 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: dashboard });
   });
 
+  server.get("/api/admin/releases/dora-metrics", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard.doraMetrics });
+  });
+
+  server.get("/api/admin/releases/risk-analysis", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard.riskAssessment });
+  });
+
+  server.get("/api/admin/releases/manifest", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard.releaseManifest });
+  });
+
+  server.get("/api/admin/releases/sbom", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard.sbom });
+  });
+
+  server.get("/api/admin/releases/attestations", async (req, reply) => {
+    const dashboard = await globalReleaseService.getDashboardData();
+    return reply.status(200).send({ success: true, data: dashboard.attestation });
+  });
+
   server.post("/api/admin/releases/trigger", async (req, reply) => {
     const body = (req.body as any) || {};
     const result = await globalReleaseService.triggerReleasePipeline({ dryRun: body.dryRun });
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/admin/releases/progressive/promote", async (req, reply) => {
+    const result = await globalReleaseService.promoteProgressiveDelivery();
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/admin/releases/progressive/halt", async (req, reply) => {
+    const body = (req.body as any) || {};
+    const result = await globalReleaseService.haltProgressiveDelivery(body.reason || "Manual Super Admin emergency halt");
     return reply.status(200).send({ success: true, data: result });
   });
 
