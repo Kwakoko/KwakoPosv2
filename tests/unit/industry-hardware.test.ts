@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HardwareEngine } from "@kwakopos2/domain/src/hardwareEngine";
+import { HardwareEngine } from "@kwakopos2/domain";
 
 describe("Industry Engine: Hardware", () => {
   const engine = new HardwareEngine();
