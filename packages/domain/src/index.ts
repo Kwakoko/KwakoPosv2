@@ -6,9 +6,6 @@ import type {
   TenantContext,
 } from "@kwakopos2/contracts";
 
-/**
- * Calculates stock balance strictly from append-only StockLedger records.
- */
 export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
   return ledgerEntries.reduce((total, entry) => {
     const qty = Number(entry.quantity);
@@ -30,228 +27,110 @@ export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
   }, 0);
 }
 
-/**
- * INVARIANT 001: Product cannot lose variants during product update.
- */
-export function assertProductVariantImmutability(
-  existingVariants: ProductVariant[],
-  retainedVariantIds: string[]
-): void {
+export function assertProductVariantImmutability(existingVariants: ProductVariant[], retainedVariantIds: string[]): void {
   for (const v of existingVariants) {
     if (!retainedVariantIds.includes(v.id)) {
-      throw new Error(
-        `INVARIANT_001_VIOLATION: Product update attempted to implicitly delete variant ${v.id}. Variant deletion must be explicit.`
-      );
+      throw new Error(`INVARIANT_001_VIOLATION: Product update attempted to implicitly delete variant ${v.id}. Variant deletion must be explicit.`);
     }
   }
 }
 
-/**
- * INVARIANT 002: Variant identity survives synchronization.
- */
-export function assertVariantIdentityPersistence(
-  existingVariantId: string,
-  incomingVariantId: string
-): void {
+export function assertVariantIdentityPersistence(existingVariantId: string, incomingVariantId: string): void {
   if (existingVariantId !== incomingVariantId) {
-    throw new Error(
-      `INVARIANT_002_VIOLATION: Variant identity mismatch! Expected persistent ID ${existingVariantId}, but received ${incomingVariantId}.`
-    );
+    throw new Error(`INVARIANT_002_VIOLATION: Variant identity mismatch! Expected persistent ID ${existingVariantId}, but received ${incomingVariantId}.`);
   }
 }
 
-/**
- * INVARIANT 003: Stock changes require ledger movements.
- */
-export function assertLedgerRequiredForStockMutation(
-  movementType: StockMovementType,
-  quantity: number
-): void {
+export function assertLedgerRequiredForStockMutation(movementType: StockMovementType, quantity: number): void {
   if (!movementType) {
-    throw new Error(
-      `INVARIANT_003_VIOLATION: Stock mutation missing movementType. All inventory changes must be recorded in StockLedger.`
-    );
+    throw new Error(`INVARIANT_003_VIOLATION: Stock mutation missing movementType. All inventory changes must be recorded in StockLedger.`);
   }
   if (isNaN(quantity)) {
-    throw new Error(
-      `INVARIANT_003_VIOLATION: Invalid quantity ${quantity} for stock movement.`
-    );
+    throw new Error(`INVARIANT_003_VIOLATION: Invalid quantity ${quantity} for stock movement.`);
   }
 }
 
-/**
- * INVARIANT 004: Every stock adjustment is auditable.
- */
 export function assertAdjustmentAuditable(adjustment: Partial<StockAdjustment>): void {
   if (!adjustment.createdByUserId || !adjustment.reason || !adjustment.deviceId || !adjustment.operationId || !adjustment.idempotencyKey) {
-    throw new Error(
-      `INVARIANT_004_VIOLATION: Stock adjustment missing audit metadata (createdByUserId, reason, deviceId, operationId, idempotencyKey).`
-    );
+    throw new Error(`INVARIANT_004_VIOLATION: Stock adjustment missing audit metadata (createdByUserId, reason, deviceId, operationId, idempotencyKey).`);
   }
 }
 
-/**
- * INVARIANT 007: Tenant isolation is mandatory.
- */
-export function assertTenantIsolation(
-  requestContext: TenantContext,
-  resourceTenantId: string,
-  resourceBranchId?: string
-): void {
+export function assertTenantIsolation(requestContext: TenantContext, resourceTenantId: string, resourceBranchId?: string): void {
   if (requestContext.tenantId !== resourceTenantId) {
-    throw new Error(
-      `INVARIANT_007_VIOLATION: Cross-tenant access denied! Context tenant ${requestContext.tenantId} cannot access resource tenant ${resourceTenantId}.`
-    );
+    throw new Error(`INVARIANT_007_VIOLATION: Cross-tenant access denied! Context tenant ${requestContext.tenantId} cannot access resource tenant ${resourceTenantId}.`);
   }
   if (resourceBranchId && requestContext.branchId !== resourceBranchId) {
-    throw new Error(
-      `INVARIANT_007_VIOLATION: Cross-branch access denied! Context branch ${requestContext.branchId} cannot access resource branch ${resourceBranchId}.`
-    );
+    throw new Error(`INVARIANT_007_VIOLATION: Cross-branch access denied! Context branch ${requestContext.branchId} cannot access resource branch ${resourceBranchId}.`);
   }
 }
 
-/**
- * INVARIANT 008: Unverified Cloud Run revisions cannot receive production traffic.
- */
-export function assertVerifiedTrafficPromotion(
-  isCertified: boolean,
-  trafficPercent: number
-): void {
+export function assertVerifiedTrafficPromotion(isCertified: boolean, trafficPercent: number): void {
   if (!isCertified && trafficPercent > 0) {
-    throw new Error(
-      `INVARIANT_008_VIOLATION: Unverified Cloud Run candidate revision cannot receive ${trafficPercent}% production traffic prior to zero-traffic certification.`
-    );
+    throw new Error(`INVARIANT_008_VIOLATION: Unverified Cloud Run candidate revision cannot receive ${trafficPercent}% production traffic prior to zero-traffic certification.`);
   }
 }
 
-/**
- * Validates strict 40-character Git SHA format.
- * Rejects truncated, zero-padded, or simulated SHAs.
- */
 export function assertValidGitSha(gitSha: string): void {
   if (!gitSha || typeof gitSha !== "string" || !/^[0-9a-f]{40}$/i.test(gitSha)) {
-    throw new Error(
-      `SECURITY_VIOLATION: Invalid Git SHA '${gitSha}'. Must be an exact 40-character hexadecimal string.`
-    );
+    throw new Error(`SECURITY_VIOLATION: Invalid Git SHA '${gitSha}'. Must be an exact 40-character hexadecimal string.`);
   }
   if (gitSha === "0000000000000000000000000000000000000000" || gitSha.includes("MOCK")) {
     throw new Error(`SECURITY_VIOLATION: Zero-padded or synthetic Git SHA '${gitSha}' is forbidden in production.`);
   }
 }
 
-/**
- * Validates strict SHA-256 Container Digest format.
- * Rejects 'latest', mutable tags, or fake digests.
- */
 export function assertValidContainerDigest(containerDigest: string): void {
   if (!containerDigest || typeof containerDigest !== "string" || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) {
-    throw new Error(
-      `SECURITY_VIOLATION: Invalid Container Digest '${containerDigest}'. Must match sha256:<64-hex-chars>. Mutable tags like ':latest' are forbidden.`
-    );
+    throw new Error(`SECURITY_VIOLATION: Invalid Container Digest '${containerDigest}'. Must match sha256:<64-hex-chars>. Mutable tags like ':latest' are forbidden.`);
   }
 }
 
-/**
- * Validates Cloud Run Revision format.
- */
 export function assertValidCloudRunRevision(revision: string): void {
   if (!revision || typeof revision !== "string" || revision.length < 5 || revision.includes("MOCK") || revision.includes("SIMULATED")) {
-    throw new Error(
-      `SECURITY_VIOLATION: Invalid or synthetic Cloud Run Revision '${revision}'.`
-    );
+    throw new Error(`SECURITY_VIOLATION: Invalid or synthetic Cloud Run Revision '${revision}'.`);
   }
 }
 
-/**
- * INVARIANT 009: Production release identity must match Git SHA + digest + revision.
- */
-export function assertReleaseIdentityMatch(
-  actual: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string },
-  expected: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string }
-): void {
+export function assertReleaseIdentityMatch(actual: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string }, expected: { gitSha: string; containerDigest: string; cloudRunRevision: string; appVersion: string }): void {
   assertValidGitSha(actual.gitSha);
   assertValidGitSha(expected.gitSha);
   assertValidContainerDigest(actual.containerDigest);
   assertValidContainerDigest(expected.containerDigest);
   assertValidCloudRunRevision(actual.cloudRunRevision);
   assertValidCloudRunRevision(expected.cloudRunRevision);
-
-  if (
-    actual.gitSha.toLowerCase() !== expected.gitSha.toLowerCase() ||
-    actual.containerDigest.toLowerCase() !== expected.containerDigest.toLowerCase() ||
-    actual.cloudRunRevision !== expected.cloudRunRevision ||
-    actual.appVersion !== expected.appVersion
-  ) {
-    throw new Error(
-      `INVARIANT_009_VIOLATION: Production release identity mismatch!\n` +
-      `Deployed: ${JSON.stringify(actual)}\n` +
-      `Expected: ${JSON.stringify(expected)}`
-    );
+  if (actual.gitSha.toLowerCase() !== expected.gitSha.toLowerCase() || actual.containerDigest.toLowerCase() !== expected.containerDigest.toLowerCase() || actual.cloudRunRevision !== expected.cloudRunRevision || actual.appVersion !== expected.appVersion) {
+    throw new Error(`INVARIANT_009_VIOLATION: Production release identity mismatch!\nDeployed: ${JSON.stringify(actual)}\nExpected: ${JSON.stringify(expected)}`);
   }
 }
 
-/**
- * INVARIANT 010: Total available stock must match exactly the algebraic sum of stock ledger records.
- */
-export function assertInventoryLedgerIntegrity(
-  variantId: string,
-  reportedStock: number,
-  ledgerEntries: StockLedger[]
-): void {
+export function assertInventoryLedgerIntegrity(variantId: string, reportedStock: number, ledgerEntries: StockLedger[]): void {
   const calculated = calculateAvailableStock(ledgerEntries);
   if (reportedStock !== calculated) {
-    throw new Error(
-      `INVARIANT_010_VIOLATION: Inventory integrity mismatch for variant ${variantId}. Reported: ${reportedStock}, Calculated from ledger: ${calculated}`
-    );
+    throw new Error(`INVARIANT_010_VIOLATION: Inventory integrity mismatch for variant ${variantId}. Reported: ${reportedStock}, Calculated from ledger: ${calculated}`);
   }
 }
 
-/**
- * INVARIANT 011: No orphaned stock adjustment without its ledger record.
- */
-export function assertNoOrphanAdjustments(
-  adjustments: StockAdjustment[],
-  ledgers: StockLedger[]
-): void {
+export function assertNoOrphanAdjustments(adjustments: StockAdjustment[], ledgers: StockLedger[]): void {
   const ledgerMap = new Set(ledgers.map((l) => l.idempotencyKey));
   for (const adj of adjustments) {
     if (!ledgerMap.has(adj.idempotencyKey)) {
-      throw new Error(
-        `INVARIANT_011_VIOLATION: Orphaned adjustment ${adj.id} (key: ${adj.idempotencyKey}) has no matching ledger entry.`
-      );
+      throw new Error(`INVARIANT_011_VIOLATION: Orphaned adjustment ${adj.id} (key: ${adj.idempotencyKey}) has no matching ledger entry.`);
     }
   }
 }
 
-export interface FeatureFlagRule {
-  key: string;
-  enabled: boolean;
-  tenantId?: string | null;
-  branchId?: string | null;
-}
+export interface FeatureFlagRule { key: string; enabled: boolean; tenantId?: string | null; branchId?: string | null; }
 
-export function evaluateFeatureFlag(
-  flags: FeatureFlagRule[],
-  key: string,
-  context?: { tenantId?: string; branchId?: string }
-): boolean {
-  // 1. Branch specific match
+export function evaluateFeatureFlag(flags: FeatureFlagRule[], key: string, context?: { tenantId?: string; branchId?: string }): boolean {
   if (context?.tenantId && context?.branchId) {
-    const branchMatch = flags.find(
-      (f) => f.key === key && f.tenantId === context.tenantId && f.branchId === context.branchId
-    );
+    const branchMatch = flags.find((f) => f.key === key && f.tenantId === context.tenantId && f.branchId === context.branchId);
     if (branchMatch !== undefined) return branchMatch.enabled;
   }
-
-  // 2. Tenant specific match
   if (context?.tenantId) {
-    const tenantMatch = flags.find(
-      (f) => f.key === key && f.tenantId === context.tenantId && !f.branchId
-    );
+    const tenantMatch = flags.find((f) => f.key === key && f.tenantId === context.tenantId && !f.branchId);
     if (tenantMatch !== undefined) return tenantMatch.enabled;
   }
-
-  // 3. Global fallback
   const globalMatch = flags.find((f) => f.key === key && !f.tenantId && !f.branchId);
   return globalMatch ? globalMatch.enabled : false;
 }
@@ -280,8 +159,6 @@ export * from "./commissionEngine.js";
 export * from "./payrollInputEngine.js";
 export * from "./laborCostingEngine.js";
 export * from "./workforceAnalyticsEngine.js";
-
-// Phase 4: Industry Plugin Framework & Domain Engines
 export * from "./pluginInvariants.js";
 export * from "./pluginRegistryEngine.js";
 export * from "./pluginConfigEngine.js";
@@ -295,14 +172,11 @@ export * from "./garageEngine.js";
 export * from "./constructionEngine.js";
 export * from "./telecomEngine.js";
 export * from "./wholesaleEngine.js";
-
-// Phase 5: Telecom & Technical Vertical
+export * from "./hardwareEngine.js";
+export * from "./electronicsEngine.js";
+export * from "./industryExpansionCatalog.js";
 export * from "./telecomInvariants.js";
 export * from "./kmlKmzParserEngine.js";
 export * from "./telecomWorkflowEngine.js";
 export * from "./telecomCostingEngine.js";
-
-// Phase 6: SaaS Monetization & Revenue Management
 export * from "./monetizationEngine.js";
-
-
