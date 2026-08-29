@@ -349,6 +349,7 @@ export * from "./crmEngine.js";
 export * from "./integrationEngine.js";
 export * from "./documentEngine.js";
 export * from "./securityEngine.js";
+export * from "./notificationEngine.js";
 
 
 

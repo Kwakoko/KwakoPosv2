@@ -4158,6 +4158,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSecurityService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/notifications/health", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalNotificationService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

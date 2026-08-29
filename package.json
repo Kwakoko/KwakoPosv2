@@ -61,6 +61,7 @@
     "certify:integration": "tsx scripts/certification/runIntegrationCertification.ts",
     "certify:documents": "tsx scripts/certification/runDocumentCertification.ts",
     "certify:security-risk": "tsx scripts/certification/runSecurityCertification.ts",
+    "certify:notifications": "tsx scripts/certification/runNotificationCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 
