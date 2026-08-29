@@ -347,6 +347,7 @@ export * from "./supplyChainEngine.js";
 export * from "./workforceEngine.js";
 export * from "./crmEngine.js";
 export * from "./integrationEngine.js";
+export * from "./documentEngine.js";
 
 
 
