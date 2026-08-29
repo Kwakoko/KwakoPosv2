@@ -3105,6 +3105,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalGlobalExpansionService.getDashboardMetrics() });
   });
 
+  // Phase 21 — AI-Native Business Operations Endpoints
+  server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const body = (req.body as any) || {};
+    const rec = globalAiNativeService.requestRecommendation({
+      tenantId: body.tenantId || "TENANT-AI-01",
+      branchId: body.branchId || "BRANCH-01",
+      domain: body.domain || "INVENTORY",
+      proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
+      riskLevel: body.riskLevel || "LEVEL_2_CONTROLLED_OPERATIONAL",
+      confidenceScore: body.confidenceScore || 0.92,
+      evidenceSummary: body.evidenceSummary || "Historical sales + seasonal demand spike",
+    });
+    return reply.status(201).send({ success: true, data: rec });
+  });
+
+  server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const { recommendationId, maxLimitUsd, proposedLimitUsd } = req.body as any;
+    const res = globalAiNativeService.validatePolicy(recommendationId, { maxLimitUsd: maxLimitUsd || 5000, proposedLimitUsd: proposedLimitUsd || 1200 });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const { scope, targetId } = req.body as any;
+    const status = globalAiNativeService.triggerKillSwitch(scope || "AGENT", targetId || "INVENTORY_AGENT");
+    return reply.status(200).send({ success: true, data: status });
+  });
+
+  server.get("/api/v1/ai-native/ledger", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
+  });
+
+  server.get("/api/v1/ai-native/dashboard", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getDashboardMetrics() });
+  });
+
+
 
 
 
