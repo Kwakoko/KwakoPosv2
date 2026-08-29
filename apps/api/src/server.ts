@@ -3458,6 +3458,34 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getDashboardMetrics() });
   });
 
+  // Phase 27 — Core Operating UI Endpoints
+  server.get("/api/v1/core-operating-ui/dashboard", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const role = ((req.query as any)?.role || "EXECUTIVE") as any;
+    return reply.status(200).send({ success: true, data: globalCoreOperatingUiService.getRoleDashboard(role) });
+  });
+
+  server.post("/api/v1/core-operating-ui/pos/checkout", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalCoreOperatingUiService.checkout(body, body.isOnline !== false);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/core-operating-ui/financial-traceability/:id", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const saleId = (req.params as any).id || "SALE-101";
+    return reply.status(200).send({ success: true, data: globalCoreOperatingUiService.traceFinancialTransaction(saleId) });
+  });
+
+  server.post("/api/v1/core-operating-ui/approvals/decide", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalCoreOperatingUiService.processApproval(body.approvalId, body.decision, body.reason);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+
 
 
 

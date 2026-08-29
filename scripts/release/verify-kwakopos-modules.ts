@@ -67,7 +67,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Advanced Workforce Tracking & Time Management Operating System",
     "Phase 25 — KwakoPos System UI & Experience Architecture",
     "Phase 26 — KwakoPos Design System (KDS)",
+    "Phase 27 — Core Operating UI",
   ];
+
 
 
 
@@ -136,7 +138,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "30 System UI Pillars & Universal Shell Active";
       } else if (mod.includes("Design System")) {
         message = "65 KDS Design Pillars & Token Architecture Active";
+      } else if (mod.includes("Core Operating UI")) {
+        message = "73 Core Operating UI Pillars & 13 Workspaces Active";
       }
+
 
 
 
