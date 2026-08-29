@@ -3313,6 +3313,85 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalPlatformGovernanceService.getDashboardMetrics() });
   });
 
+  // Advanced Workforce Tracking & Time Management Endpoints
+  server.post("/api/v1/workforce-tracking/workers", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const worker = globalWorkforceTrackingService.createWorker({
+      employeeNumber: body.employeeNumber || "EMP-001",
+      name: body.name || "Rashid Juma",
+      email: body.email || "rashid.juma@kwakopos.com",
+      department: body.department || "Field Engineering",
+      team: body.team || "Telecom Infrastructure Team A",
+      role: body.role || "Senior Field Technician",
+      workerType: body.workerType || "FIELD_TECHNICIAN",
+      skills: body.skills || ["Fibre Splicing", "Electrical Wiring"],
+      certifications: body.certifications || [{ name: "Electrical Safety Cert Level 2", issuedDate: "2025-01-01", expiryDate: "2027-01-01" }],
+      costRateTzs: body.costRateTzs || 20000,
+      billingRateTzs: body.billingRateTzs || 35000,
+    });
+    return reply.status(201).send({ success: true, data: worker });
+  });
+
+  server.post("/api/v1/workforce-tracking/shifts", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const shift = globalWorkforceTrackingService.createShift({
+      name: body.name || "Day Shift Alpha",
+      startTime: body.startTime || "08:00",
+      endTime: body.endTime || "17:00",
+      breakDurationMinutes: body.breakDurationMinutes || 60,
+      requiredStaffing: body.requiredStaffing || 5,
+      location: body.location || "Main Site TZ-100",
+    });
+    return reply.status(201).send({ success: true, data: shift });
+  });
+
+  server.post("/api/v1/workforce-tracking/clock-events", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkforceTrackingService.recordClockEvent({
+      workerId: body.workerId || "WRK-001",
+      shiftId: body.shiftId || "SHF-001",
+      eventType: body.eventType || "CLOCK_IN",
+      deviceId: body.deviceId || "DEV-MOB-01",
+      locationMetadata: body.locationMetadata || { latitude: -6.7924, longitude: 39.2083, siteId: "SITE-TZ-01" },
+    });
+    if (!res.success) {
+      return reply.status(400).send({ success: false, error: res.errorMessage });
+    }
+    return reply.status(201).send({ success: true, data: res.event });
+  });
+
+  server.post("/api/v1/workforce-tracking/timesheets/generate", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const timesheet = globalWorkforceTrackingService.generateTimesheet(
+      body.workerId || "WRK-001",
+      body.regularHours || 160,
+      body.overtimeHours || 12.5
+    );
+    return reply.status(201).send({ success: true, data: timesheet });
+  });
+
+  server.post("/api/v1/workforce-tracking/costing/calculate", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const costing = globalWorkforceTrackingService.calculateProjectLaborCost(
+      body.projectId || "PRJ-CONSTR-101",
+      body.taskId || "TSK-FOUNDATION-01",
+      body.workerId || "WRK-001",
+      body.approvedHours || 40
+    );
+    return reply.status(200).send({ success: true, data: costing });
+  });
+
+  server.get("/api/v1/workforce-tracking/dashboard", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    return reply.status(200).send({ success: true, data: globalWorkforceTrackingService.getDashboardMetrics() });
+  });
+
+
 
 
 

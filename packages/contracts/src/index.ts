@@ -2244,6 +2244,8 @@ export * from "./aiNativeContracts.js";
 export * from "./autonomousOperationsContracts.js";
 export * from "./kwakoposCertificationContracts.js";
 export * from "./platformGovernanceContracts.js";
+export * from "./workforceTrackingContracts.js";
+
 
 
 

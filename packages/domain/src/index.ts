@@ -331,6 +331,8 @@ export * from "./aiNativeEngine.js";
 export * from "./autonomousOperationsEngine.js";
 export * from "./kwakoposCertificationEngine.js";
 export * from "./platformGovernanceEngine.js";
+export * from "./workforceTrackingEngine.js";
+
 
 
 

@@ -64,7 +64,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 22 — Autonomous Operations (KAOF)",
     "Phase 23 — KwakoPos Certification Program (KCA)",
     "Phase 24 — Platform Governance (KPGA)",
+    "Advanced Workforce Tracking & Time Management Operating System",
   ];
+
 
 
 
@@ -124,7 +126,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "48 KCS Certification Pillars & Evidence Authority Active";
       } else if (mod.includes("Platform Governance")) {
         message = "58 KPGA Governance Pillars & Fitness Gate Active";
+      } else if (mod.includes("Workforce Tracking")) {
+        message = "58 WOS Workforce Pillars & Attendance Gate Active";
       }
+
 
 
 
