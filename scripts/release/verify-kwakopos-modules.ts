@@ -75,6 +75,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 32 — BI / Analytics OS",
     "Phase 33 — AI Operating Layer OS",
     "Phase 34 — Enterprise Approvals OS",
+    "Phase 35 — Finance & Treasury OS",
   ];
 
 
@@ -167,6 +168,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "75 AI Pillars & KAIOL Operating Layer Active";
       } else if (mod.includes("Enterprise Approvals")) {
         message = "85 Approval Pillars & KEAE Approval Engine Active";
+      } else if (mod.includes("Finance & Treasury")) {
+        message = "90 Treasury Pillars & KFTL Operating Layer Active";
       }
 
 
@@ -198,7 +201,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 42 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 43 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }

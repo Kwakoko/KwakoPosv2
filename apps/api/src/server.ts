@@ -3774,7 +3774,163 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(result.success ? 201 : 422).send(result);
   });
 
+
+  // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
+  server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listBankAccounts(tenantId) });
+  });
+
+  server.post("/api/v1/treasury/bank-accounts", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.registerBankAccount(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/statements/import", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.importBankStatement(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/reconciliation/run", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.runReconciliation(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/cash-position", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const pos = globalFinanceTreasuryService.calculateCashPosition({
+      tenantId: query.tenantId || "default-tenant",
+      branchId: query.branchId,
+      currency: query.currency || "TZS",
+      pendingReceipts: Number(query.pendingReceipts || 0),
+      pendingDisbursements: Number(query.pendingDisbursements || 0),
+      outstandingObligations: Number(query.outstandingObligations || 0),
+      minimumLiquidityBuffer: Number(query.minimumLiquidityBuffer || 500000),
+    });
+    return reply.status(200).send({ success: true, data: pos });
+  });
+
+  server.get("/api/v1/treasury/liquidity/forecast", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const fcst = globalFinanceTreasuryService.generateLiquidityForecast({
+      tenantId: query.tenantId || "default-tenant",
+      scenario: query.scenario || "BASE",
+      horizonDays: Number(query.horizonDays || 30),
+      currency: query.currency || "TZS",
+      openingBalance: Number(query.openingBalance || 10000000),
+      dailyInflows: Number(query.dailyInflows || 500000),
+      dailyOutflows: Number(query.dailyOutflows || 300000),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: fcst });
+  });
+
+  server.get("/api/v1/treasury/working-capital", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const wc = globalFinanceTreasuryService.calculateWorkingCapital({
+      tenantId: query.tenantId || "default-tenant",
+      currency: query.currency || "TZS",
+      totalReceivables: Number(query.totalReceivables || 0),
+      totalPayables: Number(query.totalPayables || 0),
+      inventoryValue: Number(query.inventoryValue || 0),
+      operatingCash: Number(query.operatingCash || 0),
+      averageDailyRevenue: Number(query.averageDailyRevenue || 1),
+      averageDailyCOGS: Number(query.averageDailyCOGS || 1),
+      averageDailyPurchases: Number(query.averageDailyPurchases || 1),
+    });
+    return reply.status(200).send({ success: true, data: wc });
+  });
+
+  server.post("/api/v1/treasury/payment-runs", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.createPaymentRun(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.performLiquidityCheck(id, Number(body.availableLiquidity || 0));
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/approve", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.approvePaymentRun(id, body.approvalRef || "APR-001", body.approvedBy || "USR-FINANCE");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/execute", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.executePaymentRun(id, body.executorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/beneficiaries", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.registerBeneficiary(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/beneficiaries/:id/change", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.requestBeneficiaryChange({
+      beneficiaryId: id,
+      changedBy: body.changedBy || "SYSTEM",
+      field: body.field || "",
+      newValue: body.newValue || "",
+      approvalRef: body.approvalRef || "APR-001",
+    });
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/exceptions", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listExceptions(tenantId) });
+  });
+
+  server.post("/api/v1/treasury/exceptions/:id/resolve", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.resolveException(id, body.resolvedBy || "SYSTEM", body.notes || "");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/audit", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getAuditTrail(tenantId) });
+  });
+
+  server.get("/api/v1/treasury/dashboard/health", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
+
 
     const body = (req.body as any) || {};
     const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");
