@@ -2771,6 +2771,44 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, message: "Advanced Electronics & Device Lifecycle Operating System certification complete", data: elecCert });
   });
 
+  // =========================================================================
+  // PHASE 16 — COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/commercial/portfolio", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    return reply.status(200).send({ success: true, data: globalCommercialReadinessService.getCommercialPortfolioSummary() });
+  });
+
+  server.post("/api/v1/commercial/evaluate-score", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const body = (req.body as any) || {};
+    const result = globalCommercialReadinessService.evaluateVerticalPriorityScore(body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/commercial/gates/:verticalId", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const params = (req.params as any) || {};
+    const gates = globalCommercialReadinessService.getVerticalReadinessGates(params.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: gates });
+  });
+
+  server.get("/api/v1/commercial/vertical-package/:verticalId", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const params = (req.params as any) || {};
+    const pkg = globalCommercialReadinessService.getVerticalPackageDetails(params.verticalId || "retail");
+    if (!pkg) return reply.status(404).send({ success: false, error: "Vertical package not found" });
+    return reply.status(200).send({ success: true, data: pkg });
+  });
+
+  server.post("/api/v1/commercial/onboard-template", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const body = (req.body as any) || {};
+    const template = globalCommercialReadinessService.generateOnboardingTemplate(body.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: template });
+  });
+
 
 
 

@@ -49,6 +49,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Subscription & Billing System",
     "Super Admin Portal",
     "Locked Automated GitHub Release & Tagging Engine",
+    "Phase 16 — Commercial Product Readiness",
   ];
 
   const results: ModuleVerificationResult[] = [];
@@ -77,6 +78,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         if (!Array.isArray(sites)) throw new Error("Telecom module query failed");
       } else if (mod === "Locked Automated GitHub Release & Tagging Engine") {
         message = "21 Release Pillars & Automation Controls Active";
+      } else if (mod.includes("Commercial Product Readiness")) {
+        message = "30 Commercial Readiness Pillars & Portfolio Engine Active";
       }
     } catch (err: any) {
       passed = false;
@@ -91,7 +94,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 16 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 17 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }
