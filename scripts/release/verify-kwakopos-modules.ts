@@ -81,6 +81,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 38 — CRM OS",
     "Phase 39 — Integration Center OS",
     "Phase 40 — Document & Asset OS",
+    "Phase 41 — Security & Risk OS",
   ];
 
 
@@ -185,6 +186,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "100 Integration Pillars & KIOL Operating Layer Active";
       } else if (mod.includes("Document & Asset OS")) {
         message = "100 Document Pillars & KDAOL Operating Layer Active";
+      } else if (mod.includes("Security & Risk OS")) {
+        message = "100 Security Pillars & KSROL Operating Layer Active";
       }
 
 
@@ -216,7 +219,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 48 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 49 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }

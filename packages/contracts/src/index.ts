@@ -2237,6 +2237,7 @@ export * from "./workforceContracts.js";
 export * from "./crmContracts.js";
 export * from "./integrationContracts.js";
 export * from "./documentContracts.js";
+export * from "./securityContracts.js";
 
 
 
