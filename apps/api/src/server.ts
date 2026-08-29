@@ -3551,6 +3551,32 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
   });
 
+  // Phase 30 — UI Certification Endpoints
+  server.get("/api/v1/ui-certification/overview", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/ui-certification/certify-domain", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    const body = (req.body as any) || {};
+    const ev = globalUiCertificationService.generateEvidence(body.releaseVersion || "2.5.0", body.gitSha || "1b33c0c");
+    return reply.status(200).send({ success: true, data: ev });
+  });
+
+  server.post("/api/v1/ui-certification/revalidate", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    const body = (req.body as any) || {};
+    const sm = globalUiCertificationService.triggerRevalidation(body.certificationId, body.reason || "Material code mutation");
+    return reply.status(200).send({ success: true, data: sm });
+  });
+
+  server.get("/api/v1/ui-certification/dashboard", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
+  });
+
+
 
 
 

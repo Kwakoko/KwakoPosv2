@@ -70,7 +70,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 27 — Core Operating UI",
     "Phase 28 — Dynamic Module UI",
     "Phase 29 — Super Admin & Platform UI",
+    "Phase 30 — UI Certification",
   ];
+
 
 
 
@@ -148,7 +150,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "74 DMUI Pillars & Manifest Engine Active";
       } else if (mod.includes("Super Admin & Platform UI")) {
         message = "70 Super Admin Pillars & Plane Isolation Active";
+      } else if (mod.includes("UI Certification")) {
+        message = "80 UICERT Pillars & 12 Domains Certified";
       }
+
 
 
 

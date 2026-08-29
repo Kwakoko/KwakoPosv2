@@ -2250,6 +2250,8 @@ export * from "./kwakoposDesignSystemContracts.js";
 export * from "./coreOperatingUiContracts.js";
 export * from "./dynamicModuleUiContracts.js";
 export * from "./superAdminPlatformContracts.js";
+export * from "./uiCertificationContracts.js";
+
 
 
 
