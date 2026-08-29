@@ -1,0 +1,11 @@
+import { runConstructionCertification } from "./construction-certification-engine.js";
+
+async function main() {
+  const report = await runConstructionCertification();
+  if (!report.overallPassed) process.exit(1);
+}
+
+main().catch((err) => {
+  console.error("Fatal error during Construction certification:", err);
+  process.exit(1);
+});

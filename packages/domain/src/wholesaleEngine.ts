@@ -1,50 +1,68 @@
-import type {
-  WholesaleProductTierRule,
-  WholesaleQuantityTier,
+import {
+  UnitConversionRule,
+  CustomerCreditAccount,
+  WholesalePricingTier,
+  SalesOrderRecord,
+  WholesaleFinancialSummary,
 } from "@kwakopos2/contracts";
 
 export class WholesaleEngine {
-  calculateUnitPrice(
-    quantity: number,
-    basePrice: number,
-    tierRule?: WholesaleProductTierRule | null
-  ): { unitPrice: number; discountPercent: number; appliedTier?: WholesaleQuantityTier } {
-    if (!tierRule || tierRule.tiers.length === 0) {
-      return { unitPrice: basePrice, discountPercent: 0 };
+  /**
+   * Converts unit quantities deterministically based on product unit conversion rules (e.g. 1 Carton = 24 Pieces).
+   */
+  public convertUnits(quantity: number, conversionRule: UnitConversionRule): number {
+    return Math.round(quantity * conversionRule.conversionFactor * 1000) / 1000;
+  }
+
+  /**
+   * Evaluates B2B Customer Available Credit and enforces Credit Limit controls:
+   * Available Credit = Credit Limit - Outstanding Exposure - Reserved Exposure
+   */
+  public evaluateCustomerCredit(
+    account: CustomerCreditAccount,
+    orderAmountUsd: number
+  ): { isApproved: boolean; availableCreditUsd: number; reason?: string } {
+    const availableCreditUsd = account.creditLimitUsd - account.currentExposureUsd - account.reservedExposureUsd;
+
+    if (account.isCreditHold) {
+      return { isApproved: false, availableCreditUsd, reason: "Customer account is currently on CREDIT HOLD." };
     }
-
-    // Sort descending by minQuantity
-    const sortedTiers = [...tierRule.tiers].sort((a, b) => b.minQuantity - a.minQuantity);
-    const matchedTier = sortedTiers.find((t) => quantity >= t.minQuantity);
-
-    if (matchedTier) {
+    if (orderAmountUsd > availableCreditUsd) {
       return {
-        unitPrice: matchedTier.unitPrice,
-        discountPercent: matchedTier.discountPercent,
-        appliedTier: matchedTier,
+        isApproved: false,
+        availableCreditUsd,
+        reason: `Order amount ($${orderAmountUsd}) exceeds available credit ($${availableCreditUsd}).`,
       };
     }
-
-    return { unitPrice: basePrice, discountPercent: 0 };
+    return { isApproved: true, availableCreditUsd };
   }
 
-  calculatePalletBreakdown(
-    totalUnits: number,
-    unitsPerCase = 12,
-    casesPerPallet = 50
-  ): { fullPallets: number; fullCases: number; looseUnits: number } {
-    const unitsPerPallet = unitsPerCase * casesPerPallet;
+  /**
+   * Calculates Tier Pricing based on bulk volume purchase quantity.
+   */
+  public calculateTierPrice(
+    baseWholesalePrice: number,
+    quantity: number,
+    tiers: WholesalePricingTier[]
+  ): number {
+    const sortedTiers = [...tiers].sort((a, b) => b.minQuantity - a.minQuantity);
+    const applicableTier = sortedTiers.find((t) => quantity >= t.minQuantity);
+    return applicableTier ? applicableTier.unitPriceUsd : baseWholesalePrice;
+  }
 
-    const fullPallets = Math.floor(totalUnits / unitsPerPallet);
-    let rem = totalUnits % unitsPerPallet;
-
-    const fullCases = Math.floor(rem / unitsPerCase);
-    const looseUnits = rem % unitsPerCase;
-
-    return {
-      fullPallets,
-      fullCases,
-      looseUnits,
-    };
+  /**
+   * Validates Wholesale Financial Reconciliation Invariants:
+   * Net Margin = Sales Revenue - COGS - Freight
+   */
+  public calculateWholesaleProfitability(
+    salesRevenueUsd: number,
+    cogsUsd: number,
+    freightCostUsd: number
+  ): { grossProfitUsd: number; marginPct: number } {
+    const grossProfitUsd = Math.round((salesRevenueUsd - cogsUsd - freightCostUsd) * 100) / 100;
+    const marginPct = salesRevenueUsd > 0 ? Math.round((grossProfitUsd / salesRevenueUsd) * 1000) / 10 : 0;
+    return { grossProfitUsd, marginPct };
   }
 }
+
+export const globalWholesaleEngine = new WholesaleEngine();

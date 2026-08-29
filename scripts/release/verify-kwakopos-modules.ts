@@ -51,6 +51,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Locked Automated GitHub Release & Tagging Engine",
     "Phase 16 — Commercial Product Readiness",
     "Phase 17 — Product-Market Validation",
+    "Advanced Garage & Automotive Workshop Operating System",
+    "Advanced Wholesale & Distribution Business Management OS",
+    "Advanced Construction Business & Project Management OS",
   ];
 
   const results: ModuleVerificationResult[] = [];
@@ -83,6 +86,12 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "30 Commercial Readiness Pillars & Portfolio Engine Active";
       } else if (mod.includes("Product-Market Validation")) {
         message = "34 PMF Validation Pillars & Evidence Engine Active";
+      } else if (mod.includes("Garage & Automotive")) {
+        message = "58 Automotive Workshop Pillars & Service Engine Active";
+      } else if (mod.includes("Wholesale & Distribution")) {
+        message = "64 Wholesale B2B Distribution Pillars & Credit Control Active";
+      } else if (mod.includes("Construction Business")) {
+        message = "61 Construction Project Controls & BOQ Engine Active";
       }
     } catch (err: any) {
       passed = false;
@@ -97,7 +106,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 18 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 21 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }

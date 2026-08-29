@@ -2851,6 +2851,60 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: feedback });
   });
 
+  // =========================================================================
+  // GARAGE & AUTOMOTIVE WORKSHOP ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/garage/vehicles", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getVehicles() });
+  });
+
+  server.get("/api/v1/garage/job-cards", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getJobCards() });
+  });
+
+  server.get("/api/v1/garage/financial-summary", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getFinancialSummary() });
+  });
+
+  // =========================================================================
+  // WHOLESALE & DISTRIBUTION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/wholesale/orders", async (req, reply) => {
+    const { globalWholesaleService } = await import("./services/wholesaleService.js");
+    return reply.status(200).send({ success: true, data: globalWholesaleService.getSalesOrders() });
+  });
+
+  server.get("/api/v1/wholesale/financial-summary", async (req, reply) => {
+    const { globalWholesaleService } = await import("./services/wholesaleService.js");
+    return reply.status(200).send({ success: true, data: globalWholesaleService.getFinancialSummary() });
+  });
+
+  // =========================================================================
+  // CONSTRUCTION & PROJECT MANAGEMENT ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/construction/projects", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    return reply.status(200).send({ success: true, data: globalConstructionService.getProjects() });
+  });
+
+  server.get("/api/v1/construction/projects/:id/earned-value", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    const params = (req.params as any) || {};
+    return reply.status(200).send({ success: true, data: globalConstructionService.getEarnedValue(params.id || "00000000-0000-0000-0000-000000000001") });
+  });
+
+  server.get("/api/v1/construction/financial-summary", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    return reply.status(200).send({ success: true, data: globalConstructionService.getFinancialSummary() });
+  });
+
+
 
 
 
