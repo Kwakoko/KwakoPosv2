@@ -43,7 +43,9 @@
     "certify:ai": "tsx scripts/certification/runAiNativeCertification.ts",
     "certify:autonomous": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
     "certify:program": "tsx scripts/certification/runKwakoPosCertificationProgram.ts",
+    "certify:governance": "tsx scripts/certification/runPlatformGovernanceCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
 
 

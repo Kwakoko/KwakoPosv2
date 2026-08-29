@@ -3251,6 +3251,69 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getDashboardMetrics() });
   });
 
+  // Phase 24 — Platform Governance (KPGA) Endpoints
+  server.post("/api/v1/platform-governance/adrs", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const adr = globalPlatformGovernanceService.createAdr({
+      title: body.title || "ADR-001: Enforce Single Core Monorepo & Zero Codebase Forks",
+      context: body.context || "Global Expansion across 50 countries requires single core architecture.",
+      decision: body.decision || "All country packs and industry plugins extend single core KwakoPos.",
+      consequences: body.consequences || ["Eliminates code fragmentation", "Improves security auditing"],
+      owner: body.owner || "KwakoPos Chief Architect",
+    });
+    return reply.status(201).send({ success: true, data: adr });
+  });
+
+  server.post("/api/v1/platform-governance/api/validate", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const res = globalPlatformGovernanceService.evaluateApiContract({
+      path: body.path || "/api/v1/sales/quotes",
+      method: body.method || "POST",
+      version: body.version || "v1.0.0",
+      ownerDomain: body.ownerDomain || "Commercial",
+      hasRequestSchema: body.hasRequestSchema ?? true,
+      hasResponseSchema: body.hasResponseSchema ?? true,
+      hasDocumentation: body.hasDocumentation ?? true,
+      isBreakingChange: body.isBreakingChange ?? false,
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/platform-governance/fitness/evaluate", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const res = globalPlatformGovernanceService.evaluateFitnessRules({
+      hasUnauthorizedRawDbAccess: body.hasUnauthorizedRawDbAccess ?? false,
+      hasCrossTenantDataPaths: body.hasCrossTenantDataPaths ?? false,
+      hasUndocumentedPublicApis: body.hasUndocumentedPublicApis ?? false,
+      hasDuplicateFinancialLedgers: body.hasDuplicateFinancialLedgers ?? false,
+      hasDuplicateInventoryBalances: body.hasDuplicateInventoryBalances ?? false,
+      hasUnmanagedSecrets: body.hasUnmanagedSecrets ?? false,
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/platform-governance/deprecations", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const item = globalPlatformGovernanceService.registerDeprecation({
+      subjectName: body.subjectName || "Legacy XML Sync Protocol v1",
+      subjectType: body.subjectType || "SYNC_PROTOCOL",
+      replacementSubject: body.replacementSubject || "JSON Sync Engine v2",
+      migrationGuideUrl: body.migrationGuideUrl || "https://docs.kwakopos.com/migration/sync-v2",
+      owner: body.owner || "Sync Engine Team",
+    });
+    return reply.status(201).send({ success: true, data: item });
+  });
+
+  server.get("/api/v1/platform-governance/dashboard", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    return reply.status(200).send({ success: true, data: globalPlatformGovernanceService.getDashboardMetrics() });
+  });
+
+
 
 
 

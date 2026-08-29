@@ -330,6 +330,8 @@ export * from "./globalExpansionEngine.js";
 export * from "./aiNativeEngine.js";
 export * from "./autonomousOperationsEngine.js";
 export * from "./kwakoposCertificationEngine.js";
+export * from "./platformGovernanceEngine.js";
+
 
 
 
