@@ -4176,6 +4176,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalMultiSiteService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/licensing/health", async (req, reply) => {
+    const { globalLicensingService } = await import("./services/licensingService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalLicensingService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 
