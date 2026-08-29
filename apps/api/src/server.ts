@@ -4170,6 +4170,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalComplianceService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/multisite/health", async (req, reply) => {
+    const { globalMultiSiteService } = await import("./services/multiSiteService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalMultiSiteService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

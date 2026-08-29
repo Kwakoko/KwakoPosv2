@@ -63,6 +63,7 @@
     "certify:security-risk": "tsx scripts/certification/runSecurityCertification.ts",
     "certify:notifications": "tsx scripts/certification/runNotificationCertification.ts",
     "certify:compliance-risk": "tsx scripts/certification/runComplianceCertification.ts",
+    "certify:multisite": "tsx scripts/certification/runMultiSiteCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 
