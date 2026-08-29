@@ -58,6 +58,7 @@
     "certify:treasury": "tsx scripts/certification/runFinanceTreasuryCertification.ts",
     "certify:supply-chain": "tsx scripts/certification/runSupplyChainCertification.ts",
     "certify:crm": "tsx scripts/certification/runCrmCertification.ts",
+    "certify:integration": "tsx scripts/certification/runIntegrationCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 
