@@ -3391,6 +3391,52 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkforceTrackingService.getDashboardMetrics() });
   });
 
+  // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
+  server.post("/api/v1/system-ui/navigation", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const permissions = body.permissions || ["pos.access", "inventory.read", "workforce.read"];
+    const nav = globalSystemUiService.generateNavigation(permissions);
+    return reply.status(200).send({ success: true, data: nav });
+  });
+
+  server.post("/api/v1/system-ui/search", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalSystemUiService.executeGlobalSearch(
+      body.query || "Cement",
+      body.tenantId || "TNT-TZ-001",
+      body.branchId || "BR-DSM-01"
+    );
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/system-ui/commands/execute", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalSystemUiService.executeCommand(
+      body.actionId || "CMD-CREATE-SALE",
+      body.permissions || ["pos.access"]
+    );
+    if (!res.success) {
+      return reply.status(403).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/system-ui/shell-state", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const tenantId = (req.query as any)?.tenantId || "TNT-TZ-001";
+    const branchId = (req.query as any)?.branchId || "BR-DSM-01";
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(tenantId, branchId, true) });
+  });
+
+  server.get("/api/v1/system-ui/dashboard", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
+  });
+
+
 
 
 
