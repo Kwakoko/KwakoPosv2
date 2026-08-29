@@ -39,7 +39,9 @@
     "certify:telecom": "tsx scripts/certification/runTelecomCertification.ts",
     "certify:onboarding": "tsx scripts/certification/runEnterpriseOnboardingCertification.ts",
     "certify:partner": "tsx scripts/certification/runPartnerEcosystemCertification.ts",
+    "certify:global": "tsx scripts/certification/runGlobalExpansionCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
 
 

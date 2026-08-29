@@ -59,7 +59,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Advanced Telecom & Technical Services Management Operating System",
     "Phase 18 — Enterprise Customer Onboarding (KEIF)",
     "Phase 19 — Partner Ecosystem Scale (KPP)",
+    "Phase 20 — Global Expansion (KGF)",
   ];
+
 
 
 
@@ -104,7 +106,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "40 KEIF Onboarding Pillars & Implementation Tower Active";
       } else if (mod.includes("Partner Ecosystem Scale")) {
         message = "48 KPP Partner Scaling Pillars & Marketplace Tower Active";
+      } else if (mod.includes("Global Expansion")) {
+        message = "55 KGF Globalization Pillars & Country Control Tower Active";
       }
+
 
 
     } catch (err: any) {

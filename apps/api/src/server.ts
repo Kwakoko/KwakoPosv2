@@ -3074,6 +3074,38 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getCapacityMetrics(count) });
   });
 
+  // Phase 20 — Global Expansion (KGF) Endpoints
+  server.get("/api/v1/global-expansion/countries/:code", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const { code } = req.params as { code: string };
+    const pack = globalGlobalExpansionService.getCountryPack(code);
+    return reply.status(200).send({ success: true, data: pack });
+  });
+
+  server.post("/api/v1/global-expansion/currency/convert", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.convertCurrency(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/global-expansion/tax/calculate", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.calculateTax(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/global-expansion/readiness/evaluate", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.evaluateMarketReadiness(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/global-expansion/dashboard", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    return reply.status(200).send({ success: true, data: globalGlobalExpansionService.getDashboardMetrics() });
+  });
+
+
 
 
 

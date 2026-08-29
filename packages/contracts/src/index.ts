@@ -2239,6 +2239,8 @@ export * from "./barLoungeContracts.js";
 export * from "./telecomContracts.js";
 export * from "./enterpriseOnboardingContracts.js";
 export * from "./partnerEcosystemContracts.js";
+export * from "./globalExpansionContracts.js";
+
 
 
 
