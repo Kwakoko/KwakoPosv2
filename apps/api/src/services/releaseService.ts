@@ -1,27 +1,31 @@
 import { globalReleaseRepository } from "@kwakopos2/database";
-import { runReleaseQualityGates } from "../../../../scripts/release/quality-gates.js";
-import { executeAutomatedRollback } from "../../../../scripts/release/rollback-engine.js";
-import { generateAIReleaseSummary } from "../../../../scripts/release/ai-release-notes-generator.js";
-import { generateReleaseManifest } from "../../../../scripts/release/release-manifest-generator.js";
-import { generateSBOM } from "../../../../scripts/release/sbom-generator.js";
-import { generateArtifactAttestation } from "../../../../scripts/release/artifact-attestor.js";
-import { evaluateReleaseRisk } from "../../../../scripts/release/release-risk-engine.js";
-import { ReleaseStateMachineEngine } from "../../../../scripts/release/release-state-machine.js";
-import { ProgressiveDeliveryController } from "../../../../scripts/release/progressive-delivery-controller.js";
-import { computeDORAMetrics } from "../../../../scripts/release/dora-metrics-engine.js";
-import { runDisasterRecoveryVerification } from "../../../../scripts/release/disaster-recovery-verifier.js";
 import { globalReleaseNotificationService } from "./releaseNotificationService.js";
 import * as fs from "fs";
 import * as path from "path";
 
-const globalProgressiveController = new ProgressiveDeliveryController("2.2.0");
-
 export class ReleaseService {
+  private progressiveController: any = null;
+
+  private async getProgressiveController() {
+    if (!this.progressiveController) {
+      const { ProgressiveDeliveryController } = await import("../../../../scripts/release/progressive-delivery-controller.js");
+      this.progressiveController = new ProgressiveDeliveryController("2.5.0");
+    }
+    return this.progressiveController;
+  }
   async getDashboardData() {
     const rootPkg = JSON.parse(
       fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
     );
-    const currentVersion = rootPkg.version || "2.2.0";
+    const currentVersion = rootPkg.version || "2.5.0";
+
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const { generateSBOM } = await import("../../../../scripts/release/sbom-generator.js");
+    const { generateArtifactAttestation } = await import("../../../../scripts/release/artifact-attestor.js");
+    const { evaluateReleaseRisk } = await import("../../../../scripts/release/release-risk-engine.js");
+    const { computeDORAMetrics } = await import("../../../../scripts/release/dora-metrics-engine.js");
+    const { runDisasterRecoveryVerification } = await import("../../../../scripts/release/disaster-recovery-verifier.js");
+    const { generateAIReleaseSummary } = await import("../../../../scripts/release/ai-release-notes-generator.js");
 
     const manifest = generateReleaseManifest({ version: currentVersion });
     const sbom = generateSBOM(currentVersion);
@@ -29,7 +33,8 @@ export class ReleaseService {
     const risk = evaluateReleaseRisk();
     const dora = computeDORAMetrics();
     const dr = runDisasterRecoveryVerification();
-    const progressive = globalProgressiveController.getStatus();
+    const progController = await this.getProgressiveController();
+    const progressive = progController.getStatus();
 
     const versions = globalReleaseRepository.getAllVersions();
     const deployments = globalReleaseRepository.getDeploymentHistory();
@@ -68,18 +73,18 @@ export class ReleaseService {
       },
       releaseTimeline: versions.length > 0 ? versions : [
         {
-          id: "VER-2.2.0",
-          version: "2.2.0",
+          id: `VER-${currentVersion}`,
+          version: currentVersion,
           major: 2,
-          minor: 2,
+          minor: 5,
           patch: 0,
           releaseType: "MINOR",
-          gitTag: "v2.2.0",
+          gitTag: `v${currentVersion}`,
           commitHash: manifest.gitSha,
           artifactDigest: attestation.digest,
           releaseState: "RELEASED",
           releaseRisk: risk.riskLevel,
-          releaseNotes: generateAIReleaseSummary("2.2.0"),
+          releaseNotes: generateAIReleaseSummary(currentVersion),
           releaseDate: new Date().toISOString(),
           deploymentStatus: "DEPLOYED",
           buildNumber: 15,
@@ -89,7 +94,7 @@ export class ReleaseService {
       deploymentHistory: deployments.length > 0 ? deployments : [
         {
           id: "DEP-001",
-          appVersionId: "VER-2.2.0",
+          appVersionId: `VER-${currentVersion}`,
           environment: "production",
           revision: "kwakopos-prod-001",
           artifactDigest: attestation.digest,
@@ -108,6 +113,14 @@ export class ReleaseService {
   }
 
   async triggerReleasePipeline(options?: { dryRun?: boolean }) {
+    const { ReleaseStateMachineEngine } = await import("../../../../scripts/release/release-state-machine.js");
+    const { runReleaseQualityGates } = await import("../../../../scripts/release/quality-gates.js");
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const { generateSBOM } = await import("../../../../scripts/release/sbom-generator.js");
+    const { generateArtifactAttestation } = await import("../../../../scripts/release/artifact-attestor.js");
+    const { evaluateReleaseRisk } = await import("../../../../scripts/release/release-risk-engine.js");
+    const { generateAIReleaseSummary } = await import("../../../../scripts/release/ai-release-notes-generator.js");
+
     const sm = new ReleaseStateMachineEngine("DRAFT");
     sm.transitionTo("VALIDATING", "Release trigger initiated");
 
@@ -120,7 +133,7 @@ export class ReleaseService {
     sm.transitionTo("SECURITY_PASSED", "Zero high/critical vulnerabilities");
 
     const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8"));
-    const version = pkg.version || "2.2.0";
+    const version = pkg.version || "2.5.0";
 
     const manifest = generateReleaseManifest({ version });
     const sbom = generateSBOM(version);
@@ -190,14 +203,17 @@ export class ReleaseService {
   }
 
   async promoteProgressiveDelivery() {
-    return globalProgressiveController.promoteStage();
+    const prog = await this.getProgressiveController();
+    return prog.promoteStage();
   }
 
   async haltProgressiveDelivery(reason: string) {
-    return globalProgressiveController.haltRollout(reason);
+    const prog = await this.getProgressiveController();
+    return prog.haltRollout(reason);
   }
 
   async triggerRollback(req: { failedVersion: string; targetStableVersion: string; reason: string }) {
+    const { executeAutomatedRollback } = await import("../../../../scripts/release/rollback-engine.js");
     const rollbackRes = await executeAutomatedRollback(req);
     await globalReleaseNotificationService.notifyReleaseEvent({
       version: req.targetStableVersion,
@@ -227,12 +243,14 @@ export class ReleaseService {
 
   async detectDrift(runningState: any = {}) {
     const { detectReleaseDrift } = await import("../../../../scripts/release/release-reconciliation-engine.js");
-    const manifest = generateReleaseManifest({ version: "2.2.0" });
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const manifest = generateReleaseManifest({ version: "2.5.0" });
     return detectReleaseDrift(manifest, runningState);
   }
 
-  async getEvidencePackage(version: string = "2.2.0") {
+  async getEvidencePackage(version: string = "2.5.0") {
     const { buildReleaseEvidencePackage } = await import("../../../../scripts/release/release-evidence-package-builder.js");
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
     const manifest = generateReleaseManifest({ version });
     return buildReleaseEvidencePackage(`rel_${version}`, version, manifest.gitSha, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   }

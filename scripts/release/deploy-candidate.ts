@@ -105,7 +105,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       console.log(`[DEPLOY] Deploying candidate revision to existing service with 0% traffic...`);
       deployStdout = String(
         run(
-          `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --no-traffic --allow-unauthenticated ${envFlags} --tag=${tagArg} --format="json"`,
+          `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --no-traffic --allow-unauthenticated ${envFlags} --tag=${tagArg} --format="json"`,
           "utf8"
         )
       );
@@ -113,7 +113,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       console.log(`[DEPLOY] Creating initial Cloud Run service (bootstrap candidate path)...`);
       deployStdout = String(
         run(
-          `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --allow-unauthenticated ${envFlags} --tag=${tagArg} --format="json"`,
+          `gcloud run deploy ${serviceName} --project=${project} --image=${fullImageRef} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --allow-unauthenticated ${envFlags} --tag=${tagArg} --format="json"`,
           "utf8"
         )
       );
