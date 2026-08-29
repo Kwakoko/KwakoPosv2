@@ -1924,30 +1924,6 @@ export const CreateLeaveRequestSchema = z.object({
 });
 export type CreateLeaveRequest = z.infer<typeof CreateLeaveRequestSchema>;
 
-export const WorkforceTaskSchema = z.object({
-  id: z.string().uuid(),
-  tenantId: z.string().uuid(),
-  branchId: z.string().uuid(),
-  title: z.string().min(1),
-  description: z.string().nullable().optional(),
-  taskType: z.enum(["GENERAL", "STOCK_COUNT", "MAINTENANCE", "CLEANING", "SERVICE", "INSPECTION"]).default("GENERAL"),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
-  status: z.enum(["BACKLOG", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "VERIFIED", "CANCELLED"]).default("BACKLOG"),
-  assignedEmployeeId: z.string().uuid().nullable().optional(),
-  assignedTeam: z.string().nullable().optional(),
-  dueDate: z.string().or(z.date()).nullable().optional(),
-  checklist: z.array(z.object({ item: z.string(), done: z.boolean() })).optional(),
-  attachments: z.array(z.string()).default([]),
-  relatedEntityType: z.string().nullable().optional(),
-  relatedEntityId: z.string().nullable().optional(),
-  completedAt: z.string().or(z.date()).nullable().optional(),
-  verifiedById: z.string().uuid().nullable().optional(),
-  verifiedAt: z.string().or(z.date()).nullable().optional(),
-  createdAt: z.string().or(z.date()),
-  updatedAt: z.string().or(z.date()),
-});
-export type WorkforceTask = z.infer<typeof WorkforceTaskSchema>;
-
 export const CreateWorkforceTaskRequestSchema = z.object({
   id: z.string().uuid().optional(),
   title: z.string().min(1),
@@ -2257,6 +2233,7 @@ export * from "./aiOperatingLayerContracts.js";
 export * from "./enterpriseApprovalsContracts.js";
 export * from "./financeTreasuryContracts.js";
 export * from "./supplyChainContracts.js";
+export * from "./workforceContracts.js";
 
 
 

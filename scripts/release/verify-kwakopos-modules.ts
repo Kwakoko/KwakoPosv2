@@ -77,6 +77,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 34 — Enterprise Approvals OS",
     "Phase 35 — Finance & Treasury OS",
     "Phase 36 — Supply Chain OS",
+    "Phase 37 — Workforce OS",
   ];
 
 
@@ -173,6 +174,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "90 Treasury Pillars & KFTL Operating Layer Active";
       } else if (mod.includes("Supply Chain")) {
         message = "100 Supply Chain Pillars & KSCOL Operating Layer Active";
+      } else if (mod.includes("Workforce OS")) {
+        message = "100 Workforce Pillars & KWOL Operating Layer Active";
       }
 
 
@@ -204,7 +207,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 44 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 45 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }

@@ -4031,6 +4031,98 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
+  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
+  server.get("/api/v1/workforce/employees", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
+  });
+
+  server.post("/api/v1/workforce/employees", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.registerEmployee(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/employees/:id/transition", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.transitionEmployeeStatus(id, body.status, body.reason || "Status transition", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/employees/:id/onboard", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.onboardEmployee(id, body.workflowRef || "WF-ONB-01", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/employees/:id/offboard", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.offboardEmployee(id, body.reason || "Termination", body.approvalRef || "APR-OFF-01", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/workforce/shifts", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalWorkforceService.listShifts(tenantId) });
+  });
+
+  server.post("/api/v1/workforce/shifts", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.createShift(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/attendance/check-in", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.recordCheckIn(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/attendance/check-out", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.recordCheckOut(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/leave", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.requestLeave(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce/leave/:id/approve", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.approveLeave(id, body.approvalRef || "APR-LEV-01", body.approvedBy || "USR-MGR");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/workforce/analytics", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalWorkforceService.getWorkforceAnalytics(tenantId) });
+  });
+
+  server.get("/api/v1/workforce/health", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalWorkforceService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 
