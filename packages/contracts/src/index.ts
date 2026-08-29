@@ -2238,6 +2238,8 @@ export * from "./realEstateContracts.js";
 export * from "./barLoungeContracts.js";
 export * from "./telecomContracts.js";
 export * from "./enterpriseOnboardingContracts.js";
+export * from "./partnerEcosystemContracts.js";
+
 
 
 

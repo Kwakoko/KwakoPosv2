@@ -38,7 +38,9 @@
     "certify:barlounge": "tsx scripts/certification/runBarLoungeCertification.ts",
     "certify:telecom": "tsx scripts/certification/runTelecomCertification.ts",
     "certify:onboarding": "tsx scripts/certification/runEnterpriseOnboardingCertification.ts",
+    "certify:partner": "tsx scripts/certification/runPartnerEcosystemCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
 
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",

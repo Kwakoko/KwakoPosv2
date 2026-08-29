@@ -3020,6 +3020,61 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: kit });
   });
 
+  // Phase 19 — Partner Ecosystem Scale (KPP) Endpoints
+  server.post("/api/v1/partner-ecosystem/partners/apply", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const body = (req.body as any) || {};
+    const profile = globalPartnerEcosystemService.applyPartner({
+      legalEntityName: body.legalEntityName || "Partner Systems Ltd",
+      category: body.category || "IMPLEMENTATION",
+      territory: body.territory || "Tanzania & East Africa",
+      contactEmail: body.contactEmail || "partner@example.com",
+      contactPhone: body.contactPhone || "+255700000000",
+      technicalCapabilityScore: body.technicalCapabilityScore || 85,
+      financialStabilityScore: body.financialStabilityScore || 80,
+      securityMaturityScore: body.securityMaturityScore || 85,
+    });
+    return reply.status(201).send({ success: true, data: profile });
+  });
+
+  server.get("/api/v1/partner-ecosystem/partners/registry/public", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getPublicRegistry() });
+  });
+
+  server.post("/api/v1/partner-ecosystem/partners/:id/certify", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const cert = globalPartnerEcosystemService.certifyPartner(
+      id,
+      body.certType || "IMPLEMENTATION_CERTIFIED",
+      body.assessmentScore || 90,
+      body.verticalSpecialization || "retail"
+    );
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/partner-ecosystem/partners/:id/sandbox", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const { id } = req.params as { id: string };
+    const sandbox = globalPartnerEcosystemService.provisionSandbox(id);
+    return reply.status(200).send({ success: true, data: sandbox });
+  });
+
+  server.post("/api/v1/partner-ecosystem/marketplace/extensions/validate", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const res = globalPartnerEcosystemService.validateAndRegisterExtension(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/partner-ecosystem/capacity", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const count = Number((req.query as any)?.partners) || 10;
+    return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getCapacityMetrics(count) });
+  });
+
+
 
 
 

@@ -58,7 +58,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Advanced Bar / Pub / Lounge Management Operating System",
     "Advanced Telecom & Technical Services Management Operating System",
     "Phase 18 — Enterprise Customer Onboarding (KEIF)",
+    "Phase 19 — Partner Ecosystem Scale (KPP)",
   ];
+
 
 
 
@@ -100,7 +102,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "61 Construction Project Controls & BOQ Engine Active";
       } else if (mod.includes("Enterprise Customer Onboarding")) {
         message = "40 KEIF Onboarding Pillars & Implementation Tower Active";
+      } else if (mod.includes("Partner Ecosystem Scale")) {
+        message = "48 KPP Partner Scaling Pillars & Marketplace Tower Active";
       }
+
 
     } catch (err: any) {
       passed = false;
