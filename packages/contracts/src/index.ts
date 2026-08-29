@@ -2242,6 +2242,7 @@ export * from "./notificationContracts.js";
 export * from "./complianceContracts.js";
 export * from "./multiSiteContracts.js";
 export * from "./licensingContracts.js";
+export * from "./marketplaceContracts.js";
 
 
 

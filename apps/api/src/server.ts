@@ -4182,6 +4182,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalLicensingService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/marketplace/health", async (req, reply) => {
+    const { globalMarketplaceService } = await import("./services/marketplaceService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalMarketplaceService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

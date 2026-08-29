@@ -353,6 +353,7 @@ export * from "./notificationEngine.js";
 export * from "./complianceEngine.js";
 export * from "./multiSiteEngine.js";
 export * from "./licensingEngine.js";
+export * from "./marketplaceEngine.js";
 
 
 

@@ -65,6 +65,7 @@
     "certify:compliance-risk": "tsx scripts/certification/runComplianceCertification.ts",
     "certify:multisite": "tsx scripts/certification/runMultiSiteCertification.ts",
     "certify:licensing-tenant": "tsx scripts/certification/runLicensingCertification.ts",
+    "certify:marketplace": "tsx scripts/certification/runMarketplaceCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 

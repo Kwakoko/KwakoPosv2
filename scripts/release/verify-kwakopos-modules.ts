@@ -86,6 +86,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 43 — Compliance & Audit OS",
     "Phase 44 — Multi-Site & Enterprise Admin OS",
     "Phase 45 — Platform Licensing & Monetization OS",
+    "Phase 40 — Marketplace & Commercial Ecosystem OS",
   ];
 
 
@@ -200,6 +201,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "100 Multi-Site Pillars & KMAOL Operating Layer Active";
       } else if (mod.includes("Platform Licensing & Monetization OS")) {
         message = "100 Licensing Pillars & KPLOL Operating Layer Active";
+      } else if (mod.includes("Marketplace & Commercial Ecosystem OS")) {
+        message = "100 Marketplace Pillars & KMKOL Operating Layer Active";
       }
 
 
@@ -231,7 +234,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 53 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 54 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }
