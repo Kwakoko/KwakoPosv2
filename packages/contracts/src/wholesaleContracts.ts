@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-export const UnitConversionRuleSchema = z.object({
+export const WholesaleUnitConversionRuleSchema = z.object({
   productId: z.string().uuid(),
   fromUnit: z.string(), // e.g. "CARTON"
   toUnit: z.string(),   // e.g. "PIECE"
   conversionFactor: z.number().positive(), // e.g. 24
 });
-export type UnitConversionRule = z.infer<typeof UnitConversionRuleSchema>;
+export type WholesaleUnitConversionRule = z.infer<typeof WholesaleUnitConversionRuleSchema>;
+
 
 export const CustomerSegmentSchema = z.enum([
   "DEALER",

@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { runTamperDetection } from "./tamper-detector.js";
 import { runReleaseQualityGates } from "./quality-gates.js";
-import { publishGitHubRelease } from "./publish-github-release.ts";
+import { publishGitHubRelease } from "./publish-github-release.js";
+
 
 export interface EmergencyReleaseRequest {
   authorizer: string;

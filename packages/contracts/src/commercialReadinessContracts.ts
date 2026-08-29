@@ -1,11 +1,16 @@
 import { z } from "zod";
 
-export const PortfolioTierSchema = z.enum([
+export const CommercialReadinessPortfolioTierSchema = z.enum([
   "TIER1_FLAGSHIP",
   "TIER2_STRATEGIC",
   "TIER3_SPECIALIZED",
+  "TIER_1_FLAGSHIP",
+  "TIER_2_STRATEGIC",
+  "TIER_3_SPECIALIZED",
 ]);
-export type PortfolioTier = z.infer<typeof PortfolioTierSchema>;
+export type CommercialReadinessPortfolioTier = z.infer<typeof CommercialReadinessPortfolioTierSchema>;
+
+
 
 export const CommercialDecisionActionSchema = z.enum([
   "INVEST",
@@ -47,7 +52,7 @@ export type UnitEconomics = z.infer<typeof UnitEconomicsSchema>;
 export const VerticalCommercialProfileSchema = z.object({
   verticalId: z.string(),
   displayName: z.string(),
-  tier: PortfolioTierSchema,
+  tier: CommercialReadinessPortfolioTierSchema,
   targetCustomer: z.string(),
   valueProposition: z.string(),
   primaryPromise: z.string(),
@@ -87,7 +92,7 @@ export const PortfolioPriorityScoreOutputSchema = z.object({
   verticalId: z.string(),
   rawScore: z.number(),
   normalizedScore: z.number().min(0).max(100),
-  tierAssignment: PortfolioTierSchema,
+  tierAssignment: CommercialReadinessPortfolioTierSchema,
   actionRecommendation: CommercialDecisionActionSchema,
   evaluatedAt: z.string(),
 });

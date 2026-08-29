@@ -99,14 +99,16 @@ export function assertStockIssueHasLedgerRecord(
  */
 export function assertWorkOrderChecklistComplete(workOrder: TelecomWorkOrder): void {
   if (workOrder.status === "COMPLETED" || workOrder.status === "VERIFIED") {
-    const unpassedRequired = workOrder.checklistItems.filter((i) => i.isRequired && !i.passed);
+    const items = workOrder.checklistItems || [];
+    const unpassedRequired = items.filter((i: any) => i.isRequired && !i.passed);
     if (unpassedRequired.length > 0) {
       throw new Error(
-        `INVARIANT_T007_VIOLATION: Work order ${workOrder.workOrderNumber} cannot be marked completed. Unmet checklist items: ${unpassedRequired.map((i) => i.title).join(", ")}.`
+        `INVARIANT_T007_VIOLATION: Work order ${workOrder.workOrderNumber} cannot be marked completed. Unmet checklist items: ${unpassedRequired.map((i: any) => i.title).join(", ")}.`
       );
     }
   }
 }
+
 
 /**
  * INVARIANT T008: Every accepted site has passing mandatory tests.
@@ -169,12 +171,14 @@ export function assertMicrowaveCalculationReproducibility(
  * INVARIANT T011: Every KML/KMZ import has immutable source evidence.
  */
 export function assertKmlImportSourceEvidence(importRecord: KmlImportRecord): void {
-  if (!importRecord.sha256Hash || importRecord.sha256Hash.length < 32 || importRecord.fileSizeBytes <= 0) {
+  const fileSize = importRecord.fileSizeBytes ?? 0;
+  if (!importRecord.sha256Hash || importRecord.sha256Hash.length < 32 || fileSize <= 0) {
     throw new Error(
       `INVARIANT_T011_VIOLATION: KML/KMZ import '${importRecord.id}' lacks immutable SHA-256 hash or valid file size.`
     );
   }
 }
+
 
 /**
  * INVARIANT T012: Field-device changes converge to server state.

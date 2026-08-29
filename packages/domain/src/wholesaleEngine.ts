@@ -1,5 +1,5 @@
 import {
-  UnitConversionRule,
+  WholesaleUnitConversionRule,
   CustomerCreditAccount,
   WholesalePricingTier,
   SalesOrderRecord,
@@ -10,9 +10,12 @@ export class WholesaleEngine {
   /**
    * Converts unit quantities deterministically based on product unit conversion rules (e.g. 1 Carton = 24 Pieces).
    */
-  public convertUnits(quantity: number, conversionRule: UnitConversionRule): number {
-    return Math.round(quantity * conversionRule.conversionFactor * 1000) / 1000;
+  public convertUnits(quantity: number, conversionRule: WholesaleUnitConversionRule): number {
+    const factor = conversionRule.conversionFactor ?? (conversionRule as any).multiplier ?? 1;
+    return Math.round(quantity * factor * 1000) / 1000;
   }
+
+
 
   /**
    * Evaluates B2B Customer Available Credit and enforces Credit Limit controls:
@@ -51,6 +54,37 @@ export class WholesaleEngine {
   }
 
   /**
+   * Alias for calculateTierPrice for backward compatibility.
+   */
+  public calculateUnitPrice(
+    baseWholesalePrice: number,
+    quantity: number,
+    tiers: WholesalePricingTier[]
+  ): number {
+    return this.calculateTierPrice(baseWholesalePrice, quantity, tiers);
+  }
+
+  /**
+   * Pallet breakdown helper: returns pieces, cartons, pallets.
+   */
+  public calculatePalletBreakdown(
+    totalPieces: number,
+    piecesPerCarton = 24,
+    cartonsPerPallet = 40
+  ): { pieces: number; cartons: number; pallets: number } {
+    const totalCartons = Math.floor(totalPieces / piecesPerCarton);
+    const piecesRemaining = totalPieces % piecesPerCarton;
+    const pallets = Math.floor(totalCartons / cartonsPerPallet);
+    const cartonsRemaining = totalCartons % cartonsPerPallet;
+
+    return {
+      pieces: piecesRemaining,
+      cartons: cartonsRemaining,
+      pallets,
+    };
+  }
+
+  /**
    * Validates Wholesale Financial Reconciliation Invariants:
    * Net Margin = Sales Revenue - COGS - Freight
    */
@@ -66,3 +100,4 @@ export class WholesaleEngine {
 }
 
 export const globalWholesaleEngine = new WholesaleEngine();
+

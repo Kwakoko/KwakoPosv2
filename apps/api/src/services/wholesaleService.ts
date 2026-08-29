@@ -27,8 +27,11 @@ export class WholesaleService {
           quantityDispatched: 10,
           quantityDelivered: 10,
           unitPriceUsd: 450.0,
+          taxPct: 18.0,
+          discountUsd: 0.0,
           totalUsd: 4500.0,
         },
+
       ],
       subtotalUsd: 4500.0,
       taxTotalUsd: 810.0,

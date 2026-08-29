@@ -54,7 +54,11 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Advanced Garage & Automotive Workshop Operating System",
     "Advanced Wholesale & Distribution Business Management OS",
     "Advanced Construction Business & Project Management OS",
+    "Advanced Real Estate & Property Management Operating System",
+    "Advanced Bar / Pub / Lounge Management Operating System",
+    "Advanced Telecom & Technical Services Management Operating System",
   ];
+
 
   const results: ModuleVerificationResult[] = [];
   let allPassed = true;

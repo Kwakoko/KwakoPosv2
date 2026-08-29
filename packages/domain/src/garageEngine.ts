@@ -70,6 +70,20 @@ export class GarageEngine {
   }
 
   /**
+   * Calculates total work order / job card cost.
+   */
+  public calculateWorkOrderCost(partsTotalUsd: number, laborTotalUsd: number, taxUsd = 0, discountUsd = 0): number {
+    return Math.round((partsTotalUsd + laborTotalUsd + taxUsd - discountUsd) * 100) / 100;
+  }
+
+  /**
+   * Asserts whether Quality Control QA signoff is allowed before vehicle release.
+   */
+  public assertQaSignoffAllowed(jobCard: { status: string; isQualityPassed?: boolean }): boolean {
+    return jobCard.status === "REPAIR_COMPLETED" || jobCard.status === "TESTING";
+  }
+
+  /**
    * Validates financial reconciliation invariant for a Job Card:
    * Invoice Total = Parts Total + Labor Total + Tax - Discount
    */
@@ -91,3 +105,4 @@ export class GarageEngine {
 }
 
 export const globalGarageEngine = new GarageEngine();
+

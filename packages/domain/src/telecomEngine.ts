@@ -1,8 +1,10 @@
-import type {
-  TelecomMicrowaveLink,
-  TelecomSite,
-  MicrowaveLinkCalculation,
-  GeoCoordinate,
+import {
+  TechnicalAssetRecord,
+  WorkOrderIncidentRecord,
+  FiberTestResultRecord,
+  CustomerAcceptanceRecord,
+  TelecomFinancialSummary,
+  TechnicalAssetLifecycle,
 } from "@kwakopos2/contracts";
 
 export interface MicrowaveCalculationInputs {
@@ -14,21 +16,108 @@ export interface MicrowaveCalculationInputs {
   antennaGainDbiSiteB: number;
   feederLossSiteADb?: number;
   feederLossSiteBDb?: number;
-  receiverSensitivityDbm?: number; // default e.g. -70 dBm
+  receiverSensitivityDbm?: number;
+}
+
+export interface MicrowaveLinkCalculation {
+  distanceKm: number;
+  trueAzimuthDegreesSiteAToB: number;
+  reverseAzimuthDegreesSiteBToA: number;
+  elevationAngleDegreesSiteAToB: number;
+  freeSpacePathLossDb: number;
+  fresnelZoneRadiusMeters: number;
+  receivedSignalLevelDbm: number;
+  fadeMarginDb: number;
+  linkBudgetValid: boolean;
+  calculationVersion: number;
+  calculatedAt: string;
 }
 
 export class TelecomEngine {
   public static readonly CURRENT_CALCULATION_ENGINE_VERSION = 2;
 
-  /**
-   * Calculates Great-Circle Distance between two coordinates in Kilometers using Haversine formula.
-   */
+  private validAssetTransitions: Record<TechnicalAssetLifecycle, TechnicalAssetLifecycle[]> = {
+    PROCURED: ["RECEIVED"],
+    RECEIVED: ["INSPECTED"],
+    INSPECTED: ["IN_STOCK"],
+    IN_STOCK: ["RESERVED", "INSTALLED"],
+    RESERVED: ["INSTALLED", "IN_STOCK"],
+    INSTALLED: ["ACTIVE", "FAULTED"],
+    ACTIVE: ["MAINTENANCE", "FAULTED", "RETIRED"],
+    MAINTENANCE: ["ACTIVE", "FAULTED", "RETIRED"],
+    FAULTED: ["REPAIRED", "RETIRED"],
+    REPAIRED: ["ACTIVE", "IN_STOCK"],
+    RETIRED: [],
+  };
+
+  public validateAssetLifecycleTransition(
+    currentStatus: TechnicalAssetLifecycle,
+    newStatus: TechnicalAssetLifecycle
+  ): boolean {
+    if (currentStatus === newStatus) return true;
+    const allowed = this.validAssetTransitions[currentStatus] || [];
+    return allowed.includes(newStatus);
+  }
+
+  public validateFiberOtdrTest(otdrLossDb: number, maxAllowedLossDb = 0.5): boolean {
+    return otdrLossDb <= maxAllowedLossDb;
+  }
+
+  public evaluateSlaBreach(
+    actualResponseHours: number,
+    targetResponseHours: number,
+    actualResolutionHours: number,
+    targetResolutionHours: number
+  ): boolean {
+    return actualResponseHours > targetResponseHours || actualResolutionHours > targetResolutionHours;
+  }
+
+  public calculateSiteMaterialBalance(
+    issuedQuantity: number,
+    installedQuantity: number,
+    returnedQuantity: number
+  ): number {
+    const balance = issuedQuantity - installedQuantity - returnedQuantity;
+    if (balance < 0) {
+      throw new Error(`Invalid site material balance: cannot be negative (${balance})`);
+    }
+    return balance;
+  }
+
+  public calculateTelecomFinancialSummary(
+    workOrders: WorkOrderIncidentRecord[],
+    equipmentRevenueUsd: number,
+    laborRevenueUsd: number,
+    materialCostUsd: number,
+    slaPenaltyUsd = 0
+  ): TelecomFinancialSummary {
+    const totalWorkOrdersCount = workOrders.length;
+    const totalRevenueUsd = equipmentRevenueUsd + laborRevenueUsd;
+    const grossMarginUsd = totalRevenueUsd - materialCostUsd - slaPenaltyUsd;
+    const grossMarginPct =
+      totalRevenueUsd > 0 ? Math.round((grossMarginUsd / totalRevenueUsd) * 1000) / 10 : 0;
+
+    return {
+      totalWorkOrdersCount,
+      totalEquipmentRevenueUsd: Math.round(equipmentRevenueUsd * 100) / 100,
+      totalLaborRevenueUsd: Math.round(laborRevenueUsd * 100) / 100,
+      totalMaterialCostUsd: Math.round(materialCostUsd * 100) / 100,
+      totalSlaPenaltyDeductionsUsd: Math.round(slaPenaltyUsd * 100) / 100,
+      grossMarginUsd: Math.round(grossMarginUsd * 100) / 100,
+      grossMarginPct,
+    };
+  }
+
+  // =========================================================================
+  // Microwave Link Budget Calculations
+  // =========================================================================
+
   static calculateGreatCircleDistanceKm(
     coordA: { latitude: number; longitude: number },
     coordB: { latitude: number; longitude: number }
   ): number {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const R = 6371.0; // Earth radius in km
+    const R = 6371.0;
 
     const dLat = toRad(coordB.latitude - coordA.latitude);
     const dLon = toRad(coordB.longitude - coordA.longitude);
@@ -44,15 +133,7 @@ export class TelecomEngine {
     return Math.round(dist * 1000) / 1000;
   }
 
-  /**
-   * Computes True Azimuth bearing between two geographic coordinates in degrees (0 - 360).
-   */
-  static calculateAzimuth(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number {
+  static calculateAzimuth(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
     const toDeg = (rad: number) => (rad * 180) / Math.PI;
 
@@ -70,26 +151,11 @@ export class TelecomEngine {
     return Math.round(bearing * 100) / 100;
   }
 
-  /**
-   * Computes Reverse Azimuth from far site back to near site in degrees (0 - 360).
-   */
-  static calculateReverseAzimuth(
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number {
+  static calculateReverseAzimuth(lat1: number, lon1: number, lat2: number, lon2: number): number {
     return this.calculateAzimuth(lat2, lon2, lat1, lon1);
   }
 
-  /**
-   * Computes Antenna Elevation / Tilt Angle between Site A and Site B in degrees.
-   */
-  static calculateElevationAngle(
-    heightA: number,
-    heightB: number,
-    distanceKm: number
-  ): number {
+  static calculateElevationAngle(heightA: number, heightB: number, distanceKm: number): number {
     if (distanceKm <= 0) return 0;
     const heightDiffKm = (heightB - heightA) / 1000;
     const angleRad = Math.atan2(heightDiffKm, distanceKm);
@@ -97,30 +163,18 @@ export class TelecomEngine {
     return Math.round(angleDeg * 100) / 100;
   }
 
-  /**
-   * Calculates Free Space Path Loss (FSPL) in dB:
-   * FSPL = 92.45 + 20*log10(f_GHz) + 20*log10(d_km)
-   */
   static calculateFreeSpacePathLoss(distanceKm: number, frequencyGhz: number): number {
     if (distanceKm <= 0 || frequencyGhz <= 0) return 0;
     const fspl = 92.45 + 20 * Math.log10(distanceKm) + 20 * Math.log10(frequencyGhz);
     return Math.round(fspl * 100) / 100;
   }
 
-  /**
-   * Calculates 1st Fresnel Zone Radius at mid-path (meters):
-   * r_1 = 8.656 * sqrt(d_km / f_GHz)
-   */
   static calculateFresnelZoneRadius(distanceKm: number, frequencyGhz: number): number {
     if (distanceKm <= 0 || frequencyGhz <= 0) return 0;
     const r = 8.656 * Math.sqrt(distanceKm / frequencyGhz);
     return Math.round(r * 100) / 100;
   }
 
-  /**
-   * Calculates Received Signal Level (RSL) in dBm:
-   * RSL = TxPower + TxGain + RxGain - FSPL - FeederLossA - FeederLossB
-   */
   static calculateReceivedSignalLevel(
     txPowerDbm: number,
     nearGainDbi: number,
@@ -133,18 +187,11 @@ export class TelecomEngine {
     return Math.round(rsl * 100) / 100;
   }
 
-  /**
-   * Calculates Fade Margin in dB:
-   * Fade Margin = Received Signal Level - Receiver Sensitivity
-   */
   static calculateFadeMargin(rslDbm: number, receiverSensitivityDbm = -70.0): number {
     const fm = rslDbm - receiverSensitivityDbm;
     return Math.round(fm * 100) / 100;
   }
 
-  /**
-   * Executes a complete, reproducible Microwave Link Budget calculation.
-   */
   static executeLinkBudgetCalculation(inputs: MicrowaveCalculationInputs): MicrowaveLinkCalculation {
     const distanceKm = this.calculateGreatCircleDistanceKm(inputs.siteA, inputs.siteB);
     const trueAzimuthDegreesSiteAToB = this.calculateAzimuth(
@@ -179,7 +226,7 @@ export class TelecomEngine {
     const receiverSensitivity = inputs.receiverSensitivityDbm !== undefined ? inputs.receiverSensitivityDbm : -70.0;
     const fadeMarginDb = this.calculateFadeMargin(receivedSignalLevelDbm, receiverSensitivity);
 
-    const linkBudgetValid = fadeMarginDb >= 15.0; // Adequate fade margin threshold >= 15 dB
+    const linkBudgetValid = fadeMarginDb >= 15.0;
 
     return {
       distanceKm,
@@ -195,10 +242,6 @@ export class TelecomEngine {
       calculatedAt: new Date().toISOString(),
     };
   }
-
-  // =========================================================================
-  // Unit System Presentation Helpers
-  // =========================================================================
 
   static convertDistance(km: number, targetUnit: "KM" | "MILES" | "METERS" | "FEET"): number {
     switch (targetUnit) {
@@ -226,7 +269,6 @@ export class TelecomEngine {
     }
   }
 
-  // Instance delegation methods
   calculateFreeSpacePathLoss(distanceKm: number, frequencyGhz: number): number {
     return TelecomEngine.calculateFreeSpacePathLoss(distanceKm, frequencyGhz);
   }
@@ -250,4 +292,3 @@ export class TelecomEngine {
     return TelecomEngine.calculateAzimuth(lat1, lon1, lat2, lon2);
   }
 }
-

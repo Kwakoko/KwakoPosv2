@@ -1550,9 +1550,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/plugins/wholesale/calculate-price", async (req) => {
     const { quantity, basePrice, variantId } = (req.body as any) || {};
     const tierRule = variantId ? globalPluginRepository.wholesaleTierRules.get(variantId) : null;
-    const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, tierRule);
+    const pricingTiers = tierRule?.tiers
+      ? tierRule.tiers.map((t: any) => ({ minQuantity: t.minQuantity, productId: variantId || "", unitPriceUsd: t.unitPrice }))
+      : [];
+    const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, pricingTiers);
     return { success: true, data: result };
   });
+
 
   // =========================================================================
   // Phase 5: Dedicated Telecom & Technical Vertical Endpoints (/api/v1/telecom/*)
@@ -2903,6 +2907,55 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalConstructionService } = await import("./services/constructionService.js");
     return reply.status(200).send({ success: true, data: globalConstructionService.getFinancialSummary() });
   });
+
+  // Real Estate Endpoints
+  server.get("/api/v1/real-estate/properties", async (req, reply) => {
+    const { globalRealEstateService } = await import("./services/realEstateService.js");
+    return reply.status(200).send({ success: true, data: globalRealEstateService.getProperties() });
+  });
+
+  server.get("/api/v1/real-estate/financial-summary", async (req, reply) => {
+    const { globalRealEstateService } = await import("./services/realEstateService.js");
+    return reply.status(200).send({ success: true, data: globalRealEstateService.getFinancialSummary() });
+  });
+
+  // Bar / Pub / Lounge Endpoints
+  server.get("/api/v1/bar-lounge/tables", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getTables() });
+  });
+
+  server.get("/api/v1/bar-lounge/tabs", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getTabs() });
+  });
+
+  server.get("/api/v1/bar-lounge/financial-summary", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getFinancialSummary() });
+  });
+
+  // Telecom & Technical Services Endpoints
+  server.get("/api/v1/telecom/sites", async (req, reply) => {
+    const { globalTelecomService } = await import("./services/telecomService.js");
+    return reply.status(200).send({ success: true, data: globalTelecomService.getSites() });
+  });
+
+  server.get("/api/v1/telecom/assets", async (req, reply) => {
+    const { globalTelecomService } = await import("./services/telecomService.js");
+    return reply.status(200).send({ success: true, data: globalTelecomService.getAssets() });
+  });
+
+  server.get("/api/v1/telecom/work-orders", async (req, reply) => {
+    const { globalTelecomService } = await import("./services/telecomService.js");
+    return reply.status(200).send({ success: true, data: globalTelecomService.getWorkOrders() });
+  });
+
+  server.get("/api/v1/telecom/financial-summary", async (req, reply) => {
+    const { globalTelecomService } = await import("./services/telecomService.js");
+    return reply.status(200).send({ success: true, data: globalTelecomService.getFinancialSummary() });
+  });
+
 
 
 

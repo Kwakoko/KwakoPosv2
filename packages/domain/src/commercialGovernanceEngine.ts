@@ -9,6 +9,7 @@ import {
   UnitEconomics,
 } from "@kwakopos2/contracts";
 
+
 export class CommercialGovernanceEngine {
   /**
    * Calculates Portfolio Priority Score based on 10 dimensions:
@@ -32,19 +33,20 @@ export class CommercialGovernanceEngine {
     // Normalize to 0-100 scale: (rawScore + 30) / 100 * 100
     const normalizedScore = Math.min(100, Math.max(0, Math.round(((rawScore + 30) / 100) * 100)));
 
-    let tierAssignment: PortfolioTier = "TIER3_SPECIALIZED";
+    let tierAssignment: PortfolioTier = "TIER_3_SPECIALIZED";
     let actionRecommendation: CommercialDecisionAction = "MAINTAIN";
 
     if (normalizedScore >= 75) {
-      tierAssignment = "TIER1_FLAGSHIP";
+      tierAssignment = "TIER_1_FLAGSHIP";
       actionRecommendation = normalizedScore >= 88 ? "INVEST" : "GROW";
     } else if (normalizedScore >= 50) {
-      tierAssignment = "TIER2_STRATEGIC";
+      tierAssignment = "TIER_2_STRATEGIC";
       actionRecommendation = normalizedScore >= 62 ? "MAINTAIN" : "PILOT";
     } else {
-      tierAssignment = "TIER3_SPECIALIZED";
+      tierAssignment = "TIER_3_SPECIALIZED";
       actionRecommendation = normalizedScore < 30 ? "RETIRE" : "PAUSE";
     }
+
 
     return {
       verticalId: input.verticalId,

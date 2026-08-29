@@ -124,8 +124,9 @@ export class TelecomWorkflowEngine {
     isResolutionBreached: boolean;
   } {
     const asOfMs = asOfDate.getTime();
-    const respDeadlineMs = new Date(ticket.slaResponseDeadline).getTime();
-    const resDeadlineMs = new Date(ticket.slaResolutionDeadline).getTime();
+    const respDeadlineMs = ticket.slaResponseDeadline ? new Date(ticket.slaResponseDeadline).getTime() : Date.now();
+    const resDeadlineMs = ticket.slaResolutionDeadline ? new Date(ticket.slaResolutionDeadline).getTime() : Date.now();
+
 
     const isResponseBreached = !ticket.respondedAt && asOfMs > respDeadlineMs;
     const isResolutionBreached = ticket.status !== "CLOSED" && ticket.status !== "RESOLVED" && asOfMs > resDeadlineMs;

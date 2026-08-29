@@ -1221,7 +1221,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     mileage: 45000,
     customerId: randomUUID(),
   });
-  const { laborCostTotal: laborP08, grandTotal: grandP08 } = garageEngine.calculateWorkOrderCost(200000, 4, 35000);
+  const laborCostP08 = 4 * 35000;
+  const grandP08 = garageEngine.calculateWorkOrderCost(200000, laborCostP08);
   const woP08 = pluginRepo.createGarageWorkOrder(ctx, {
     branchId: ctx.branchId,
     workOrderNumber: "WO-SYN-881",
@@ -1234,15 +1235,14 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     partsCostTotal: 200000,
     laborHours: 4,
     laborRate: 35000,
-    laborCostTotal: laborP08,
+    laborCostTotal: laborCostP08,
     grandTotal: grandP08,
     qaPassed: false,
     qaInspectorId: null,
   });
   let qaAllowedP08 = false;
   try {
-    garageEngine.assertQaSignoffAllowed(woP08);
-    qaAllowedP08 = true;
+    qaAllowedP08 = garageEngine.assertQaSignoffAllowed(woP08);
   } catch {}
   const passP08 = qaAllowedP08 && woP08.grandTotal === 340000;
   results.push({
@@ -1288,18 +1288,19 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
       { minQuantity: 50, unitPrice: 9000, discountPercent: 10 },
     ],
   });
-  const priceP10 = wholesaleEngine.calculateUnitPrice(150, 10000, wholesaleRuleP10);
+  const priceP10 = wholesaleEngine.calculateUnitPrice(10000, 150, wholesaleRuleP10.tiers as any);
   const palletP10 = wholesaleEngine.calculatePalletBreakdown(1250, 12, 50);
-  const passP10 = priceP10.unitPrice === 8000 && palletP10.fullPallets === 2 && palletP10.looseUnits === 2;
+  const passP10 = priceP10 === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;
   results.push({
     testSuite: "SYNTHETIC_TEST_P10_WHOLESALE_TIER_PRICING_PALLET_MATH",
     syntheticTenantId,
     durationMs: Date.now() - startP10,
     status: passP10 ? "PASS" : "FAIL",
-    evidence: { tierUnitPrice: priceP10.unitPrice, fullPallets: palletP10.fullPallets, looseUnits: palletP10.looseUnits },
+    evidence: { tierUnitPrice: priceP10, fullPallets: palletP10.pallets, looseUnits: palletP10.pieces },
     timestamp: new Date().toISOString(),
   });
   console.log(` [P10/P10] ${passP10 ? "✓" : "✗"} Synthetic Test P10 (Wholesale Quantity Tier Pricing & Pallet Breakdown): ${passP10 ? "PASS" : "FAIL"}`);
+
 
   // =========================================================================
   // Phase 5: Dedicated Telecom & Technical Vertical Synthetic Suite (T01 - T10)
@@ -1313,6 +1314,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const siteT01 = telecomRepo.createSite(ctx, {
     siteCode: `SITE-SYN-${randomUUID().slice(0, 5).toUpperCase()}`,
     name: "Synthetic Macro Tower 01",
+    siteName: "Synthetic Macro Tower 01",
+    address: "Kinondoni, Dar es Salaam",
     siteType: "GREENFIELD_TOWER",
     status: "PLANNED",
     latitude: -6.7924,
@@ -1325,6 +1328,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     photos: [],
     documents: [],
   });
+
   const passT01 = siteT01.id !== undefined && siteT01.status === "PLANNED";
   results.push({
     testSuite: "SYNTHETIC_TEST_T01_CREATE_SITE_SYNC",
@@ -1393,7 +1397,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     completionNotes: null,
     idempotencyKey: `wo-syn-${randomUUID()}`,
   });
-  for (const item of woT03.checklistItems) item.passed = true;
+  for (const item of woT03.checklistItems || []) item.passed = true;
+
   const completedWoT03 = telecomRepo.completeWorkOrder(ctx, woT03.id, "All checks passed.");
   const passT03 = completedWoT03.status === "COMPLETED";
   results.push({
@@ -1454,6 +1459,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const siteFarT06 = telecomRepo.createSite(ctx, {
     siteCode: `SITE-FAR-${randomUUID().slice(0, 5).toUpperCase()}`,
     name: "Synthetic Far Site",
+    siteName: "Synthetic Far Site",
+    address: "Ilala, Dar es Salaam",
     siteType: "ROOFTOP_TOWER",
     status: "PLANNED",
     latitude: -6.8321,
@@ -1466,6 +1473,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     photos: [],
     documents: [],
   });
+
   const linkT06 = telecomRepo.createMicrowaveLink(ctx, {
     status: "DESIGN",
     linkCode: `MW-LINK-${randomUUID().slice(0, 5).toUpperCase()}`,

@@ -34,7 +34,11 @@
     "certify:garage": "tsx scripts/certification/runGarageCertification.ts",
     "certify:wholesale": "tsx scripts/certification/runWholesaleCertification.ts",
     "certify:construction": "tsx scripts/certification/runConstructionCertification.ts",
+    "certify:realestate": "tsx scripts/certification/runRealEstateCertification.ts",
+    "certify:barlounge": "tsx scripts/certification/runBarLoungeCertification.ts",
+    "certify:telecom": "tsx scripts/certification/runTelecomCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",
     "certify:pharmacy": "tsx scripts/certification/runPharmacyCertification.ts",
     "certify:lawfirm": "tsx scripts/certification/runLawFirmCertification.ts",
