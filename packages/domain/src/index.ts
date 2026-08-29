@@ -329,6 +329,8 @@ export * from "./partnerEcosystemEngine.js";
 export * from "./globalExpansionEngine.js";
 export * from "./aiNativeEngine.js";
 export * from "./autonomousOperationsEngine.js";
+export * from "./kwakoposCertificationEngine.js";
+
 
 
 

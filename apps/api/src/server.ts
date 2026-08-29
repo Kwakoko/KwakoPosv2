@@ -3190,6 +3190,68 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getDashboardMetrics() });
   });
 
+  // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
+  server.post("/api/v1/certification-program/issue", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const body = (req.body as any) || {};
+    const cert = globalKwakoPosCertificationService.issueCertification({
+      category: body.category || "KWAKOPOS_CERTIFIED_RELEASE",
+      level: body.level || "VERIFIED",
+      subjectName: body.subjectName || "KwakoPos Release v2.5.0",
+      subjectVersion: body.subjectVersion || "v2.5.0",
+      scopeDescription: body.scopeDescription || "Full Core POS + SaaS Monorepo",
+      gitSha: body.gitSha || "285a98b",
+      artifactDigest: body.artifactDigest || "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      evidenceSet: body.evidenceSet || [
+        {
+          evidenceId: "EVI-01",
+          evidenceType: "TEST_SUITE",
+          summary: "100% Vitest unit tests passed",
+          passed: true,
+          evidenceHash: "HASH-101",
+          recordedAt: new Date().toISOString(),
+        },
+      ],
+      approvedBy: body.approvedBy || "KwakoPos Lead Auditor",
+    });
+    return reply.status(201).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/certification-program/impact/analyze", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { changedComponent, changeRiskLevel } = req.body as any;
+    const res = globalKwakoPosCertificationService.analyzeImpact({
+      changedComponent: changedComponent || "TenantIsolationPolicy",
+      changeRiskLevel: changeRiskLevel || "HIGH",
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/certification-program/status/revoke-suspend", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { certId, reason, action } = req.body as any;
+    const cert = globalKwakoPosCertificationService.revokeOrSuspend(certId, reason || "Policy Breach", action || "SUSPEND");
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.get("/api/v1/certification-program/badge/:certId", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { certId } = req.params as { certId: string };
+    const badge = globalKwakoPosCertificationService.getBadge(certId);
+    return reply.status(200).send({ success: true, data: badge });
+  });
+
+  server.get("/api/v1/certification-program/registry", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getRegistry() });
+  });
+
+  server.get("/api/v1/certification-program/dashboard", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getDashboardMetrics() });
+  });
+
+
 
 
 

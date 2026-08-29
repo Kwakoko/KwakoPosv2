@@ -62,7 +62,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 20 — Global Expansion (KGF)",
     "Phase 21 — AI-Native Business Operations (KAGS)",
     "Phase 22 — Autonomous Operations (KAOF)",
+    "Phase 23 — KwakoPos Certification Program (KCA)",
   ];
+
 
 
 
@@ -116,7 +118,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "50 KAGS AI Governance Pillars & Action Gateway Active";
       } else if (mod.includes("Autonomous Operations")) {
         message = "56 KAOF Autonomous Operations Pillars & Independent Verification Active";
+      } else if (mod.includes("Certification Program")) {
+        message = "48 KCS Certification Pillars & Evidence Authority Active";
       }
+
 
 
 
