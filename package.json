@@ -37,7 +37,9 @@
     "certify:realestate": "tsx scripts/certification/runRealEstateCertification.ts",
     "certify:barlounge": "tsx scripts/certification/runBarLoungeCertification.ts",
     "certify:telecom": "tsx scripts/certification/runTelecomCertification.ts",
+    "certify:onboarding": "tsx scripts/certification/runEnterpriseOnboardingCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",
     "certify:pharmacy": "tsx scripts/certification/runPharmacyCertification.ts",

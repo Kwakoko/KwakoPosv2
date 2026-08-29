@@ -2956,6 +2956,71 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalTelecomService.getFinancialSummary() });
   });
 
+  // Phase 18 — Enterprise Customer Onboarding (KEIF) Endpoints
+  server.post("/api/v1/enterprise-onboarding/projects", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const body = (req.body as any) || {};
+    const proj = globalEnterpriseOnboardingService.createProject({
+      tenantId: body.tenantId || "TENANT-ENT-001",
+      customerName: body.customerName || "Enterprise Customer Inc.",
+      industryId: body.industryId || "retail",
+    });
+    return reply.status(201).send({ success: true, data: proj });
+  });
+
+  server.get("/api/v1/enterprise-onboarding/projects/:id", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const proj = globalEnterpriseOnboardingService.getProject(id);
+    if (!proj) return reply.status(404).send({ success: false, error: { message: "Project not found" } });
+    return reply.status(200).send({ success: true, data: proj });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/discovery", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const res = globalEnterpriseOnboardingService.submitDiscoveryProfile(id, req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/data-readiness", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const card = globalEnterpriseOnboardingService.assessDataReadiness(id, req.body as any);
+    return reply.status(200).send({ success: true, data: card });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/migration-reconcile", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const report = globalEnterpriseOnboardingService.reconcileMigration(id, body.source, body.target);
+    return reply.status(200).send({ success: true, data: report });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/integration-certify", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const cert = globalEnterpriseOnboardingService.certifyIntegration(id, body.integrationName || "ERP Sync", body.targetSystem || "SAP");
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/go-live-gate", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const gate = globalEnterpriseOnboardingService.evaluateGoLiveGate(id, req.body as any);
+    return reply.status(200).send({ success: true, data: gate });
+  });
+
+  server.get("/api/v1/enterprise-onboarding/kits/:industryId", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { industryId } = req.params as { industryId: string };
+    const kit = globalEnterpriseOnboardingService.getIndustryOnboardingKit(industryId);
+    return reply.status(200).send({ success: true, data: kit });
+  });
+
+
 
 
 

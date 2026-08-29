@@ -57,7 +57,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Advanced Real Estate & Property Management Operating System",
     "Advanced Bar / Pub / Lounge Management Operating System",
     "Advanced Telecom & Technical Services Management Operating System",
+    "Phase 18 — Enterprise Customer Onboarding (KEIF)",
   ];
+
 
 
   const results: ModuleVerificationResult[] = [];
@@ -96,7 +98,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "64 Wholesale B2B Distribution Pillars & Credit Control Active";
       } else if (mod.includes("Construction Business")) {
         message = "61 Construction Project Controls & BOQ Engine Active";
+      } else if (mod.includes("Enterprise Customer Onboarding")) {
+        message = "40 KEIF Onboarding Pillars & Implementation Tower Active";
       }
+
     } catch (err: any) {
       passed = false;
       message = `Verification FAIL: ${err.message}`;

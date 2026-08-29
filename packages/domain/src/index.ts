@@ -324,5 +324,7 @@ export * from "./constructionEngine.js";
 export * from "./realEstateEngine.js";
 export * from "./barLoungeEngine.js";
 export * from "./telecomEngine.js";
+export * from "./enterpriseOnboardingEngine.js";
+
 
 
