@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/observability",
-  "version": "v2.4.0",
+  "version": "2.5.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

@@ -30,11 +30,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced `prepare-release.ts` to automatically sync workspace versions before generating release manifest.
 - Improved `version-consistency-gate.ts` to validate workspace package versions in addition to root version.
 - Updated npm scripts for explicit release lifecycle control: `release:sync-versions`, `release:prepare`, `release:validate-version`.
+# KwakoPos SaaS — Official Changelog
+
+All notable changes to KwakoPos will be documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [2.5.0] - 2026-08-29
+
+### Added
+- **Major Enterprise Industry Vertical Operating Systems Platform (435 Pillars Certified)**:
+  - **Retail Operating System (30 Pillars)**: Deep multi-tenant, offline-first retail operating system with product variants, inventory replenishment, margin protection, POS, StockLedger integration, and retail analytics.
+  - **Restaurant Operating System (36 Pillars)**: Kitchen Display System (KDS), Table Management, Recipe BOM & Real-Time Food Costing, QR Ordering, Waste Ledger, and AI Menu Engineering.
+  - **Pharmacy Management Operating System (28 Pillars)**: FEFO (First Expiry, First Out) dispensing, Batch Expiry Tracking, Prescription Lifecycle Management, Patient Profiles, and AI Drug Interaction Safety Engine.
+  - **Law Firm Management Operating System (41 Pillars)**: Client & Matter Management, Court Hearing Schedules, Legal Document Vault, Billable Hours Tracking, Retainers, Trust Accounting, Conflict Checks, and Legal AI Copilot.
+  - **SACCO / VICOBA Operating System (46 Pillars)**: Member Registration (KYC), Voluntary/Compulsory Savings Accounts, Share Capital Ledger, Group Meeting Cycles, Repayment Schedules, PAR 30/60/90+ tracking, Dividends, and SACCO Accounting.
+  - **Microfinance & Lending Operating System (48 Pillars)**: Borrower 360, Individual & Solidarity Group Lending, Loan Formulas (Reducing Balance vs Flat Rate), Collateral Registration, Credit Scoring, Field Agent Mobile Receipts, and IFRS 9 ECL Provisioning.
+  - **Poultry & Livestock Operating System (52 Pillars)**: Flock & Herd Lifecycle Engine, Egg Production Ledger, Feed Conversion Ratio (FCR), Animal Health & Vaccination Schedules, Daily Milk Yield, Cull Sales, and AI Outbreak Warnings.
+  - **Vehicle & Fleet Management Operating System (50 Pillars)**: Digital Fleet OS managing vehicles, drivers, trip dispatching, GPS telematics, fuel fraud detection, preventive maintenance, tyres, and cost per kilometer calculation.
+  - **Hardware Business Operating System (55 Pillars)**: Multi-Tier Unit Conversion Engine (Box → Piece, Bag → Kg, Sheet → Sqm), Contractor Project Billing, Multi-Tier Pricing (Retail, Wholesale, Contractor, Dealer), Delivery Dispatch, and Margin Controls.
+  - **Advanced Electronics & Device Lifecycle OS (49 Pillars)**: Device Hierarchy (Category → Brand → Family → Model → Variant → Serial/IMEI), State Machine, Warranty Registration & Claims, Technical Repair Jobs, Spare Parts, Refurbishment Grading, and AI Diagnostic Assistant.
+
+- **Monorepo Version Synchronization & Production Certification**:
+  - Synchronized all 10 workspace packages (`apps/api`, `apps/web`, `@kwakopos2/config`, `@kwakopos2/domain`, `@kwakopos2/database`, `@kwakopos2/auth`, `@kwakopos2/sync`, `@kwakopos2/observability`, `@kwakopos2/contracts`) to `2.5.0`.
+  - 100% 435-Pillar Industry Certification PASSED across all CLI certification campaigns (`certify:retail`, `certify:restaurant`, `certify:pharmacy`, `certify:lawfirm`, `certify:saccovicoba`, `certify:microfinance`, `certify:poultrylivestock`, `certify:vehiclefleet`, `certify:hardware`, `certify:electronics`).
+
+---
+
+## [2.2.0] - 2026-08-27
+
+### Added
+- **Enhanced Release Pipeline & Lifecycle Management**:
+  - Workspace version synchronization tool (`scripts/release/sync-workspace-versions.ts`) ensuring monorepo consistency.
+  - Automated SemVer calculation from conventional commits with zero manual version bumping.
+  - Canonical `ReleaseIdentity` with Git SHA, container digest, and Cloud Run revision binding.
+  - Version Consistency Enforcement Gate blocking releases with version drift across `package.json`, `release-manifest.json`, and runtime config.
+  - Automated GitHub Release publishing with changelog extraction and production acceptance evidence.
+  - Safe runtime version endpoints: `GET /api/system/version` and `GET /admin/releases/history`.
+  - PWA version tracker displaying `KwakoPos © 2026 • Version 2.2.0` with durable offline outbox upgrade protection.
+  - Workspace package alignment: all `@kwakopos2/*` packages synchronized to `2.2.0`.
+
+- **Monorepo Architecture & Workspace Governance**:
+  - Unified version numbering across root, apps (`@kwakopos2/api`, `@kwakopos2/web`), and packages (`@kwakopos2/config`, `@kwakopos2/domain`, `@kwakopos2/database`, `@kwakopos2/auth`, `@kwakopos2/sync`, `@kwakopos2/observability`, `@kwakopos2/contracts`).
+  - Dependency version pinning enforced at build time.
+  - Release scripts refactored for explicit workspace package management.
+
+### Changed
+- Promoted workspace versions from `2.0.0` → `2.2.0` for alignment with root package version.
+- Updated all `@kwakopos2/*` internal dependencies to point to `2.2.0`.
+- Enhanced `prepare-release.ts` to automatically sync workspace versions before generating release manifest.
+- Improved `version-consistency-gate.ts` to validate workspace package versions in addition to root version.
+- Updated npm scripts for explicit release lifecycle control: `release:sync-versions`, `release:prepare`, `release:validate-version`.
 
 ### Fixed
 - Resolved version drift between monorepo root (`2.2.0`) and internal workspace packages (`2.0.0`).
 - Corrected `package-lock.json` synchronization to include all workspace package versions.
 - Added glob-based workspace discovery preventing hard-coded package list maintenance.
+---
 
 ---
 
