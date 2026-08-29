@@ -3608,6 +3608,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
   });
 
+  // Phase 32 — BI / Analytics OS Endpoints
+  server.get("/api/v1/bi-analytics/overview", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/bi-analytics/define-metric", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const body = (req.body as any) || {};
+    const res = globalBiAnalyticsService.defineMetric(body);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/bi-analytics/query", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const body = (req.body as any) || {};
+    const res = globalBiAnalyticsService.querySemantic(body.queryText || "What was gross margin?", body.permissions || ["finance.read"]);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/bi-analytics/insights", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const tenantId = (req.query as any)?.tenantId || "TEN-001";
+    const res = globalBiAnalyticsService.getInsightsAndForecasts(tenantId);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/bi-analytics/dashboard", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
+  });
+
+
 
 
 

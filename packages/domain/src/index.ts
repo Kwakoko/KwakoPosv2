@@ -339,6 +339,8 @@ export * from "./dynamicModuleUiEngine.js";
 export * from "./superAdminPlatformEngine.js";
 export * from "./uiCertificationEngine.js";
 export * from "./workflowAutomationEngine.js";
+export * from "./biAnalyticsEngine.js";
+
 
 
 
