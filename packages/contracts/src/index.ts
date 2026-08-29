@@ -2239,6 +2239,7 @@ export * from "./integrationContracts.js";
 export * from "./documentContracts.js";
 export * from "./securityContracts.js";
 export * from "./notificationContracts.js";
+export * from "./complianceContracts.js";
 
 
 

@@ -350,6 +350,7 @@ export * from "./integrationEngine.js";
 export * from "./documentEngine.js";
 export * from "./securityEngine.js";
 export * from "./notificationEngine.js";
+export * from "./complianceEngine.js";
 
 
 
