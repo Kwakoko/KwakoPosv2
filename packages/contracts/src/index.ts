@@ -2251,6 +2251,8 @@ export * from "./coreOperatingUiContracts.js";
 export * from "./dynamicModuleUiContracts.js";
 export * from "./superAdminPlatformContracts.js";
 export * from "./uiCertificationContracts.js";
+export * from "./workflowAutomationContracts.js";
+
 
 
 

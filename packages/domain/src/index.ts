@@ -338,6 +338,8 @@ export * from "./coreOperatingUiEngine.js";
 export * from "./dynamicModuleUiEngine.js";
 export * from "./superAdminPlatformEngine.js";
 export * from "./uiCertificationEngine.js";
+export * from "./workflowAutomationEngine.js";
+
 
 
 

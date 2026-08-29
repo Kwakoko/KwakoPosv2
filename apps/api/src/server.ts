@@ -3576,6 +3576,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
   });
 
+  // Phase 31 — Workflow, Automation & Business Process OS Endpoints
+  server.get("/api/v1/workflow-automation/overview", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/workflow-automation/register", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.registerWorkflow(body);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/workflow-automation/dispatch", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.dispatchTrigger(body.eventType || "EVENT_STOCK_LOW", body.payload || {});
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/workflow-automation/approval", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, body.approverId || "USER-001");
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/workflow-automation/dashboard", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
+  });
+
+
 
 
 
