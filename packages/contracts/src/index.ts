@@ -2256,6 +2256,7 @@ export * from "./biAnalyticsContracts.js";
 export * from "./aiOperatingLayerContracts.js";
 export * from "./enterpriseApprovalsContracts.js";
 export * from "./financeTreasuryContracts.js";
+export * from "./supplyChainContracts.js";
 
 
 

@@ -343,6 +343,7 @@ export * from "./biAnalyticsEngine.js";
 export * from "./aiOperatingLayerEngine.js";
 export * from "./enterpriseApprovalsEngine.js";
 export * from "./financeTreasuryEngine.js";
+export * from "./supplyChainEngine.js";
 
 
 

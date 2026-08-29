@@ -3929,6 +3929,108 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
   });
 
+  // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
+  server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalSupplyChainService.listSuppliers(tenantId) });
+  });
+
+  server.post("/api/v1/supply-chain/suppliers", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.registerSupplier(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/suppliers/:id/scorecard", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.calculateSupplierScorecard({ ...body, supplierId: id });
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.createPurchaseOrder(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders/:id/approve", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.approvePurchaseOrder(id, body.approvalRef || "APR-001", body.approvedBy || "USR-MGR");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders/:id/send", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.sendPurchaseOrder(id, body.sentBy || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/shipments", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.trackShipment(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/receiving", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.processGoodsReceiving(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/3way-match", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.performThreeWayMatch(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/supply-chain/replenishment", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const query = (req.query as any) || {};
+    const rec = globalSupplyChainService.generateReplenishmentRecommendation({
+      tenantId: query.tenantId || "default-tenant",
+      productId: query.productId || "PRD-DEFAULT",
+      currentStock: Number(query.currentStock || 0),
+      inboundStock: Number(query.inboundStock || 0),
+      averageDailyDemand: Number(query.averageDailyDemand || 1),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: rec });
+  });
+
+  server.get("/api/v1/supply-chain/forecast", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const query = (req.query as any) || {};
+    const fst = globalSupplyChainService.generateDemandForecast({
+      tenantId: query.tenantId || "default-tenant",
+      productId: query.productId || "PRD-DEFAULT",
+      scenario: query.scenario || "BASE",
+      horizonDays: Number(query.horizonDays || 30),
+      historicalBaselineDailyDemand: Number(query.historicalBaselineDailyDemand || 10),
+      seasonalityFactor: Number(query.seasonalityFactor || 1.0),
+      promotionImpactPct: Number(query.promotionImpactPct || 0),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: fst });
+  });
+
+  server.get("/api/v1/supply-chain/control-tower", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 
