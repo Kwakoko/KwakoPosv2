@@ -41,7 +41,9 @@
     "certify:partner": "tsx scripts/certification/runPartnerEcosystemCertification.ts",
     "certify:global": "tsx scripts/certification/runGlobalExpansionCertification.ts",
     "certify:ai": "tsx scripts/certification/runAiNativeCertification.ts",
+    "certify:autonomous": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
 
 

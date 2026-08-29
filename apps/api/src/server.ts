@@ -3145,6 +3145,52 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAiNativeService.getDashboardMetrics() });
   });
 
+  // Phase 22 — Autonomous Operations (KAOF) Endpoints
+  server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const body = (req.body as any) || {};
+    const res = globalAutonomousOperationsService.detectAndRemediate({
+      tenantId: body.tenantId || "TENANT-AUTO-01",
+      branchId: body.branchId || "BRANCH-01",
+      targetService: body.targetService || "CloudRunWorkerPool",
+      failureClass: body.failureClass || "TransientConnectionTimeout",
+      proposedRemediation: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
+      maturityLevel: body.maturityLevel || "LEVEL_3_GUARDED_AUTOMATION",
+      blastRadiusScope: body.blastRadiusScope || "SINGLE_INSTANCE",
+      rollbackAvailable: body.rollbackAvailable ?? true,
+    });
+    return reply.status(201).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const body = (req.body as any) || {};
+    const sim = globalAutonomousOperationsService.runDryRunSimulation({
+      tenantId: body.tenantId || "TENANT-AUTO-01",
+      targetService: body.targetService || "SyncWorkerQueue",
+      proposedRemediation: body.proposedRemediation || "Rebalance Sync Consumers",
+    });
+    return reply.status(200).send({ success: true, data: sim });
+  });
+
+  server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const { scope, targetId } = req.body as any;
+    const status = globalAutonomousOperationsService.triggerKillSwitch(scope || "SERVICE", targetId || "CloudRunWorkerPool");
+    return reply.status(200).send({ success: true, data: status });
+  });
+
+  server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getLedger() });
+  });
+
+  server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getDashboardMetrics() });
+  });
+
+
 
 
 
