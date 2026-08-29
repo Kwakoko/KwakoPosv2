@@ -3436,6 +3436,29 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
+  // Phase 26 — KwakoPos Design System (KDS) Endpoints
+  server.get("/api/v1/design-system/theme", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    const mode = ((req.query as any)?.mode || "DARK") as any;
+    return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getTheme(mode) });
+  });
+
+  server.post("/api/v1/design-system/ai-pattern/validate", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    const body = (req.body as any) || {};
+    const res = globalKwakoPosDesignSystemService.validateAiPattern(body);
+    if (!res.valid) {
+      return reply.status(422).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/design-system/dashboard", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getDashboardMetrics() });
+  });
+
+
 
 
 

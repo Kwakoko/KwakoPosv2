@@ -66,7 +66,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 24 — Platform Governance (KPGA)",
     "Advanced Workforce Tracking & Time Management Operating System",
     "Phase 25 — KwakoPos System UI & Experience Architecture",
+    "Phase 26 — KwakoPos Design System (KDS)",
   ];
+
 
 
 
@@ -132,7 +134,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "58 WOS Workforce Pillars & Attendance Gate Active";
       } else if (mod.includes("System UI")) {
         message = "30 System UI Pillars & Universal Shell Active";
+      } else if (mod.includes("Design System")) {
+        message = "65 KDS Design Pillars & Token Architecture Active";
       }
+
 
 
 

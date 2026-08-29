@@ -333,6 +333,8 @@ export * from "./kwakoposCertificationEngine.js";
 export * from "./platformGovernanceEngine.js";
 export * from "./workforceTrackingEngine.js";
 export * from "./systemUiEngine.js";
+export * from "./kwakoposDesignSystemEngine.js";
+
 
 
 
