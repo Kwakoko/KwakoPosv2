@@ -3485,6 +3485,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: res });
   });
 
+  // Phase 28 — Dynamic Module UI Endpoints
+  server.post("/api/v1/dynamic-module-ui/register", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalDynamicModuleUiService.registerModule(body);
+    if (!res.success) {
+      return reply.status(400).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/dynamic-module-ui/navigation/compose", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const permissions = body.permissions || ["restaurant.tables", "pharmacy.rx"];
+    const activeModuleIds = body.activeModuleIds;
+    const nav = globalDynamicModuleUiService.composeNavigation(permissions, activeModuleIds);
+    return reply.status(200).send({ success: true, data: nav });
+  });
+
+  server.post("/api/v1/dynamic-module-ui/module/toggle", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const state = globalDynamicModuleUiService.setStatus(body.moduleId, body.status, body.message);
+    return reply.status(200).send({ success: true, data: state });
+  });
+
+  server.get("/api/v1/dynamic-module-ui/dashboard", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    return reply.status(200).send({ success: true, data: globalDynamicModuleUiService.getDashboardMetrics() });
+  });
+
+
 
 
 

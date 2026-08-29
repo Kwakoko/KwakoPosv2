@@ -2248,6 +2248,8 @@ export * from "./workforceTrackingContracts.js";
 export * from "./systemUiContracts.js";
 export * from "./kwakoposDesignSystemContracts.js";
 export * from "./coreOperatingUiContracts.js";
+export * from "./dynamicModuleUiContracts.js";
+
 
 
 

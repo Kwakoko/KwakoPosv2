@@ -68,7 +68,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 25 — KwakoPos System UI & Experience Architecture",
     "Phase 26 — KwakoPos Design System (KDS)",
     "Phase 27 — Core Operating UI",
+    "Phase 28 — Dynamic Module UI",
   ];
+
 
 
 
@@ -140,7 +142,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "65 KDS Design Pillars & Token Architecture Active";
       } else if (mod.includes("Core Operating UI")) {
         message = "73 Core Operating UI Pillars & 13 Workspaces Active";
+      } else if (mod.includes("Dynamic Module UI")) {
+        message = "74 DMUI Pillars & Manifest Engine Active";
       }
+
 
 
 

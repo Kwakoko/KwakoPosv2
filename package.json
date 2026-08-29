@@ -48,7 +48,9 @@
     "certify:ui": "tsx scripts/certification/runSystemUiCertification.ts",
     "certify:kds": "tsx scripts/certification/runKwakoPosDesignSystemCertification.ts",
     "certify:core-ui": "tsx scripts/certification/runCoreOperatingUiCertification.ts",
+    "certify:dmui": "tsx scripts/certification/runDynamicModuleUiCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
+
 
 
 
