@@ -5,15 +5,16 @@ import { renderKpcpCommercialDashboard } from "../../apps/web/src/kpcpCommercial
 import { globalReleaseService } from "../../apps/api/src/services/releaseService.js";
 
 describe("Phase 16 — Commercial Product Readiness Test Suite", () => {
-  it("should evaluate 3-tier commercial portfolio with 10 Tier 1 Flagship verticals", async () => {
+  it("should evaluate 3-tier commercial portfolio with 15 Tier 1 Flagship verticals", async () => {
     const res = await evaluateCommercialPortfolio();
     expect(res.allGatesPassed).toBe(true);
     expect(res.overallScore).toBe(100);
-    expect(res.portfolio.tier1Count).toBe(10);
-    expect(res.portfolio.tier2Count).toBe(7);
+    expect(res.portfolio.tier1Count).toBe(15);
+    expect(res.portfolio.tier2Count).toBe(2);
     expect(res.portfolio.tier3Count).toBe(1);
     expect(res.portfolio.unitEconomics.grossMarginPct).toBe(88.5);
   });
+
 
   it("should verify Readiness Gates A-D for all Tier 1 Flagship verticals", async () => {
     const res = await evaluateCommercialPortfolio();
@@ -43,6 +44,7 @@ describe("Phase 16 — Commercial Product Readiness Test Suite", () => {
   it("should expose commercial certification in ReleaseService", async () => {
     const cert = await globalReleaseService.runCommercialCertification();
     expect(cert.evidencePackage.overallScore).toBe(100);
-    expect(cert.evidencePackage.portfolio.tier1Count).toBe(10);
+    expect(cert.evidencePackage.portfolio.tier1Count).toBe(15);
+
   });
 });

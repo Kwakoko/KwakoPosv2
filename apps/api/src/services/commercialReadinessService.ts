@@ -209,6 +209,106 @@ export class CommercialReadinessService {
       designPartnersActiveCount: 6,
       actionRecommendation: "INVEST",
     },
+    {
+      verticalId: "wholesale",
+      displayName: "Wholesale & Distribution Business Management OS",
+      tier: "TIER1_FLAGSHIP",
+      targetCustomer: "Wholesale Depots, B2B Distributors, Dealer Networks",
+      valueProposition: "Complete wholesale order-to-delivery, B2B credit terms, and multi-warehouse stock.",
+      primaryPromise: "Wholesale pricing tiers, customer credit limits, van sales dispatch, and delivery tracking.",
+      activationEvent: "First B2B sales order dispatch with credit validation",
+      keyMetrics: ["order volume", "average order value (AOV)", "DSO / credit collection days", "warehouse picking accuracy"],
+      pricingPackages: [
+        { packageName: "Wholesale Starter", priceMonthlyUsd: 79, featuresIncluded: ["Single Warehouse", "B2B Customer Credit", "Bulk Pricing Tiers"] },
+        { packageName: "Distributor Pro", priceMonthlyUsd: 199, featuresIncluded: ["Multi-Branch Warehouses", "Van Sales App", "Delivery Tracking"] },
+        { packageName: "Enterprise Supply Chain", priceMonthlyUsd: 499, featuresIncluded: ["Unlimited Warehouses", "B2B Dealer Portal", "ERP Integration"] },
+      ],
+      readinessGates: { gateA_ProductReadiness: "PASSED", gateB_EngineeringReadiness: "PASSED", gateC_CommercialReadiness: "PASSED", gateD_MarketReadiness: "PASSED", overallGA_Eligible: true },
+      unitEconomics: { cacUsd: 380, arpuUsd: 220, grossMarginPct: 87, supportCostUsd: 25, ltvUsd: 6600, ltvToCacRatio: 17.37 },
+      demoEnvironmentReady: true,
+      designPartnersActiveCount: 8,
+      actionRecommendation: "INVEST",
+    },
+    {
+      verticalId: "construction",
+      displayName: "Construction Business & Project Management OS",
+      tier: "TIER1_FLAGSHIP",
+      targetCustomer: "Building Contractors, Civil Engineers, Site Managers",
+      valueProposition: "Project controls, BOQ cost budgeting, site materials, equipment, and progress certification.",
+      primaryPromise: "Complete site operations, BOQ tracking, subcontractor valuation, and project margin control.",
+      activationEvent: "First BOQ project created with material dispatch",
+      keyMetrics: ["active project budget", "BOQ cost variance", "certified progress billing", "equipment utilization"],
+      pricingPackages: [
+        { packageName: "Contractor Basic", priceMonthlyUsd: 99, featuresIncluded: ["BOQ Import", "Site Stock Requisition", "Basic Cost Tracking"] },
+        { packageName: "Project Manager Pro", priceMonthlyUsd: 249, featuresIncluded: ["Subcontractor Valuations", "Equipment Mileage Log", "Certified Progress Billing"] },
+        { packageName: "Enterprise Construction", priceMonthlyUsd: 599, featuresIncluded: ["Multi-Site ERP", "Custom Variation Order AI", "Audit Reports"] },
+      ],
+      readinessGates: { gateA_ProductReadiness: "PASSED", gateB_EngineeringReadiness: "PASSED", gateC_CommercialReadiness: "PASSED", gateD_MarketReadiness: "PASSED", overallGA_Eligible: true },
+      unitEconomics: { cacUsd: 450, arpuUsd: 280, grossMarginPct: 88, supportCostUsd: 30, ltvUsd: 8400, ltvToCacRatio: 18.66 },
+      demoEnvironmentReady: true,
+      designPartnersActiveCount: 6,
+      actionRecommendation: "INVEST",
+    },
+    {
+      verticalId: "realestate",
+      displayName: "Real Estate & Property Management OS",
+      tier: "TIER1_FLAGSHIP",
+      targetCustomer: "Property Managers, Landlords, Commercial Estate Agencies",
+      valueProposition: "Property portfolio management, tenant leases, automated rent billing, and security deposit accounting.",
+      primaryPromise: "Automated rent invoicing, immutable lease addendums, maintenance work orders, and NOI analytics.",
+      activationEvent: "First rent collection invoice processed with deposit reconciliation",
+      keyMetrics: ["portfolio occupancy %", "rental collection rate", "overdue rent arrears", "Net Operating Income (NOI)"],
+      pricingPackages: [
+        { packageName: "Landlord Starter", priceMonthlyUsd: 69, featuresIncluded: ["Up to 50 Units", "Automated Rent Invoices", "Tenant Portal"] },
+        { packageName: "Property Manager Pro", priceMonthlyUsd: 179, featuresIncluded: ["Up to 300 Units", "Deposit Liability Vault", "Maintenance Work Orders"] },
+        { packageName: "Commercial Estate Enterprise", priceMonthlyUsd: 449, featuresIncluded: ["Unlimited Units", "CAM Expense Recovery", "Property NOI Analytics"] },
+      ],
+      readinessGates: { gateA_ProductReadiness: "PASSED", gateB_EngineeringReadiness: "PASSED", gateC_CommercialReadiness: "PASSED", gateD_MarketReadiness: "PASSED", overallGA_Eligible: true },
+      unitEconomics: { cacUsd: 340, arpuUsd: 195, grossMarginPct: 86, supportCostUsd: 22, ltvUsd: 5850, ltvToCacRatio: 17.2 },
+      demoEnvironmentReady: true,
+      designPartnersActiveCount: 7,
+      actionRecommendation: "INVEST",
+    },
+    {
+      verticalId: "barlounge",
+      displayName: "Bar, Pub & Lounge Management OS",
+      tier: "TIER1_FLAGSHIP",
+      targetCustomer: "Bars, Nightclubs, Rooftop Lounges, Hospitality Venues",
+      valueProposition: "Fast tab management, cocktail recipe stock deduction, split billing, and shift cash reconciliation.",
+      primaryPromise: "Eliminate beverage stock variance and control fast bar tabs and shift float reconciliation.",
+      activationEvent: "First bar tab closed with recipe stock ledger deduction",
+      keyMetrics: ["beverage revenue", "beverage gross margin %", "spoilage/wastage cost", "shift float variance"],
+      pricingPackages: [
+        { packageName: "Bar Starter", priceMonthlyUsd: 49, featuresIncluded: ["Fast POS Tab System", "Floor Table Map", "Receipt Printer"] },
+        { packageName: "Lounge Pro", priceMonthlyUsd: 119, featuresIncluded: ["Cocktail Recipe BOM", "Split Bill Engine", "Shift Float Reconciler"] },
+        { packageName: "Nightclub Enterprise", priceMonthlyUsd: 289, featuresIncluded: ["Multi-Station Bar Sync", "VIP Table Reservations", "Variance Analytics"] },
+      ],
+      readinessGates: { gateA_ProductReadiness: "PASSED", gateB_EngineeringReadiness: "PASSED", gateC_CommercialReadiness: "PASSED", gateD_MarketReadiness: "PASSED", overallGA_Eligible: true },
+      unitEconomics: { cacUsd: 220, arpuUsd: 130, grossMarginPct: 84, supportCostUsd: 16, ltvUsd: 3900, ltvToCacRatio: 17.72 },
+      demoEnvironmentReady: true,
+      designPartnersActiveCount: 6,
+      actionRecommendation: "INVEST",
+    },
+    {
+      verticalId: "telecom",
+      displayName: "Telecom & Technical Services Management OS",
+      tier: "TIER1_FLAGSHIP",
+      targetCustomer: "Telecom Contractors, ISP Operations, Fiber Deployers, Field Service Firms",
+      valueProposition: "Cell tower & fiber POP sites, serialized asset tracking, microwave link physics, and customer SAT acceptance.",
+      primaryPromise: "Complete field work orders, OTDR test verification, SLA breach prevention, and technical asset management.",
+      activationEvent: "First site SAT acceptance record with digital customer signoff",
+      keyMetrics: ["site uptime %", "OTDR test pass rate %", "SLA compliance %", "field service gross margin %"],
+      pricingPackages: [
+        { packageName: "Field Tech Basic", priceMonthlyUsd: 99, featuresIncluded: ["Up to 20 Sites", "Serialized Asset Vault", "Work Orders"] },
+        { packageName: "Telecom Ops Pro", priceMonthlyUsd: 249, featuresIncluded: ["Microwave Link Budget Physics", "KML/KMZ Import", "OTDR Test Verifier"] },
+        { packageName: "Enterprise Infrastructure", priceMonthlyUsd: 599, featuresIncluded: ["Unlimited Sites", "Digital SAT Customer Signoff", "SLA Breach AI"] },
+      ],
+      readinessGates: { gateA_ProductReadiness: "PASSED", gateB_EngineeringReadiness: "PASSED", gateC_CommercialReadiness: "PASSED", gateD_MarketReadiness: "PASSED", overallGA_Eligible: true },
+      unitEconomics: { cacUsd: 480, arpuUsd: 290, grossMarginPct: 89, supportCostUsd: 32, ltvUsd: 8700, ltvToCacRatio: 18.12 },
+      demoEnvironmentReady: true,
+      designPartnersActiveCount: 8,
+      actionRecommendation: "INVEST",
+    },
   ];
 
   public getCommercialPortfolioSummary(): {
@@ -221,25 +321,21 @@ export class CommercialReadinessService {
     tier3StatusNote: string;
   } {
     const tier2List = [
-      "Garage",
-      "Wholesale",
-      "Construction",
-      "Real Estate & Property Management",
+      "Garage & Auto Service",
       "Workforce Tracking & Time Management",
-      "Bar / Pub / Lounge",
-      "Telecom / Technical",
     ];
 
     return {
-      totalVerticallyManagedCount: this.flagshipProfiles.length + tier2List.length + 12,
+      totalVerticallyManagedCount: this.flagshipProfiles.length + tier2List.length + 4,
       tier1Count: this.flagshipProfiles.length,
       tier2Count: tier2List.length,
-      tier3Count: 12,
+      tier3Count: 4,
       flagshipProfiles: this.flagshipProfiles,
       tier2Verticals: tier2List,
       tier3StatusNote: "Specialized Ecosystem Verticals remain technically maintained and promoted based on empirical market demand evidence.",
     };
   }
+
 
   public evaluateVerticalPriorityScore(input: PortfolioPriorityScoreInput): PortfolioPriorityScoreOutput {
     return globalCommercialGovernanceEngine.calculatePortfolioPriorityScore(input);

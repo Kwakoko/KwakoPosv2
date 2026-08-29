@@ -753,12 +753,13 @@ export async function evaluatePmfFramework(): Promise<{
     {
       industryId: "wholesale",
       name: "Wholesale & Distribution",
-      tier: "TIER_2_STRATEGIC",
+      tier: "TIER_1_FLAGSHIP",
       northStarMetric: "Reconciled Bulk Invoices",
       northStarValue: "12,400 / month",
       pmfScore: 94,
       state: "PROVEN",
       decision: "DOUBLE_DOWN",
+
       activation: {
         signupCount: 50,
         setupCount: 48,
@@ -809,8 +810,9 @@ export async function evaluatePmfFramework(): Promise<{
     {
       industryId: "construction",
       name: "Construction & Site Management",
-      tier: "TIER_2_STRATEGIC",
+      tier: "TIER_1_FLAGSHIP",
       northStarMetric: "Reconciled Site Material Requisitions",
+
       northStarValue: "620 / month",
       pmfScore: 78,
       state: "VALIDATION_REQUIRED",

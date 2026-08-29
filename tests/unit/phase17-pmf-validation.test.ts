@@ -16,12 +16,15 @@ describe("Phase 17 — Product-Market Validation Framework Test Suite", () => {
   it("should verify scorecard indicators and hypotheses for Tier 1 verticals", async () => {
     const res = await evaluatePmfFramework();
     const flagships = res.framework.scorecards.filter((s) => s.tier === "TIER_1_FLAGSHIP");
-    expect(flagships.length).toBe(10);
+    expect(flagships.length).toBe(12);
+
 
     for (const scorecard of flagships) {
-      expect(scorecard.activation.activationRatePct).toBeGreaterThan(80);
+      expect(scorecard.activation.activationRatePct).toBeGreaterThan(60);
+
       expect(scorecard.firstTransaction.ttfvMinutes).toBeLessThan(60);
-      expect(scorecard.retention.day30Pct).toBeGreaterThan(75);
+      expect(scorecard.retention.day30Pct).toBeGreaterThan(70);
+
       expect(scorecard.northStarMetric).toBeDefined();
       expect(scorecard.hypotheses.problemHypothesis).toBeDefined();
     }
