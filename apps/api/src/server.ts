@@ -3517,6 +3517,41 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalDynamicModuleUiService.getDashboardMetrics() });
   });
 
+  // Phase 29 — Super Admin & Platform UI Endpoints
+  server.get("/api/v1/super-admin/overview", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
+    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
+    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
+    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+  });
+
+  server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const body = (req.body as any) || {};
+    const adminId = body.adminId || "ADM-001";
+    const tenantId = body.tenantId || "TENANT-001";
+    const reason = body.reason || "Audited customer support ticket investigation";
+    const ctx = globalSuperAdminPlatformService.initiateContextSwitch(adminId, tenantId, reason, body.timeLimitMinutes);
+    return reply.status(200).send({ success: true, data: ctx });
+  });
+
+  server.post("/api/v1/super-admin/emergency-kill-switch", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const body = (req.body as any) || {};
+    const target = body.target || "GLOBAL_AI";
+    const reason = body.reason || "Emergency security container isolation";
+    const adminId = body.adminId || "ADM-SEC-01";
+    const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target, reason, adminId);
+    return reply.status(200).send({ success: true, data: ks });
+  });
+
+  server.get("/api/v1/super-admin/dashboard", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
+  });
+
+
 
 
 
