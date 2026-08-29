@@ -2230,6 +2230,7 @@ export * from "./vehicleFleetContracts.js";
 export * from "./hardwareContracts.js";
 export * from "./electronicsContracts.js";
 export * from "./commercialReadinessContracts.js";
+export * from "./pmfValidationContracts.js";
 
 
 

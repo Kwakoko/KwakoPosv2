@@ -2809,6 +2809,48 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: template });
   });
 
+  // =========================================================================
+  // PHASE 17 — PRODUCT-MARKET VALIDATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/pmf/summary", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    return reply.status(200).send({ success: true, data: globalPmfValidationService.getAllVerticalPmfProfiles() });
+  });
+
+  server.post("/api/v1/pmf/evaluate-health", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const body = (req.body as any) || {};
+    const result = globalPmfValidationService.evaluatePmfHealth(body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/pmf/retention/:verticalId", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const params = (req.params as any) || {};
+    const retention = globalPmfValidationService.getCohortRetention(params.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: retention });
+  });
+
+  server.get("/api/v1/pmf/anomalies", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const anomalies = globalPmfValidationService.getFalsePmfAnomalies();
+    return reply.status(200).send({ success: true, data: anomalies });
+  });
+
+  server.post("/api/v1/pmf/feedback/submit", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const body = (req.body as any) || {};
+    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001" };
+    const feedback = globalPmfValidationService.submitCustomerFeedback(
+      ctx.tenantId,
+      body.verticalId || "retail",
+      body.rawContent || "General feedback",
+      body.sourceChannel || "IN_APP"
+    );
+    return reply.status(201).send({ success: true, data: feedback });
+  });
+
 
 
 
