@@ -1,0 +1,10 @@
+{
+  "releaseType": "EMERGENCY_PRODUCTION_HOTFIX",
+  "authorizer": "SECURITY_OFFICER",
+  "incidentId": "INC-TEST-999",
+  "reason": "Test emergency vulnerability resolution",
+  "version": "2.5.0",
+  "gitSha": "1f19f212dc0646b6b8d6b525347fac8069bef535",
+  "qualityGatesPassed": true,
+  "timestamp": "2026-08-29T05:31:31.472Z"
+}
