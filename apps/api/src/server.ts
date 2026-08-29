@@ -3640,6 +3640,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
   });
 
+  // Phase 33 — AI Operating Layer OS Endpoints
+  server.get("/api/v1/ai-operating-layer/overview", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const params = req.params as any;
+    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+  });
+
+
 
 
 

@@ -73,7 +73,9 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 30 — UI Certification",
     "Phase 31 — Workflow, Automation & Business Process OS",
     "Phase 32 — BI / Analytics OS",
+    "Phase 33 — AI Operating Layer OS",
   ];
+
 
 
 
@@ -160,7 +162,10 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "75 Workflow Pillars & Automation Engine Active";
       } else if (mod.includes("BI / Analytics")) {
         message = "85 BI Pillars & KBI Intelligence Layer Active";
+      } else if (mod.includes("AI Operating Layer")) {
+        message = "75 AI Pillars & KAIOL Operating Layer Active";
       }
+
 
 
 

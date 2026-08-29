@@ -340,6 +340,8 @@ export * from "./superAdminPlatformEngine.js";
 export * from "./uiCertificationEngine.js";
 export * from "./workflowAutomationEngine.js";
 export * from "./biAnalyticsEngine.js";
+export * from "./aiOperatingLayerEngine.js";
+
 
 
 
