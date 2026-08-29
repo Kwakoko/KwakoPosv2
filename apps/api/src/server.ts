@@ -3702,7 +3702,80 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
 
+
+  // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
+  server.get("/api/v1/approvals/policies", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
+  });
+
+  server.post("/api/v1/approvals/requests", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.submitRequest(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/decisions", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.recordDecision(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/execute", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, body.executorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/cancel", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.cancelRequest(id, body.cancelledBy || "SYSTEM", body.reason || "");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/escalate", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.escalateRequest(id, body.escalatedBy || "SYSTEM", body.reason || "SLA exceeded");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/approvals/:id", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const request = globalEnterpriseApprovalsService.getRequest(id);
+    return request
+      ? reply.status(200).send({ success: true, data: request })
+      : reply.status(404).send({ success: false, error: "Approval request not found" });
+  });
+
+  server.get("/api/v1/approvals/:id/audit", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id) });
+  });
+
+  server.get("/api/v1/approvals/dashboard/health", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/approvals/delegations", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.registerDelegation(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
+
     const body = (req.body as any) || {};
     const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");
     return reply.status(201).send({ success: true, data: candidate });

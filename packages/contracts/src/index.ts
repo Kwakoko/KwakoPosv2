@@ -2254,6 +2254,8 @@ export * from "./uiCertificationContracts.js";
 export * from "./workflowAutomationContracts.js";
 export * from "./biAnalyticsContracts.js";
 export * from "./aiOperatingLayerContracts.js";
+export * from "./enterpriseApprovalsContracts.js";
+
 
 
 
