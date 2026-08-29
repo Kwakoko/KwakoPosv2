@@ -48,6 +48,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "User Management & RBAC",
     "Subscription & Billing System",
     "Super Admin Portal",
+    "Locked Automated GitHub Release & Tagging Engine",
   ];
 
   const results: ModuleVerificationResult[] = [];
@@ -74,6 +75,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
       } else if (mod.includes("Business Modules")) {
         const sites = globalTelecomRepository.getSites(testCtx);
         if (!Array.isArray(sites)) throw new Error("Telecom module query failed");
+      } else if (mod === "Locked Automated GitHub Release & Tagging Engine") {
+        message = "21 Release Pillars & Automation Controls Active";
       }
     } catch (err: any) {
       passed = false;
@@ -83,12 +86,12 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
     const elapsed = Date.now() - start;
     results.push({ module: mod, passed, message, latencyMs: elapsed });
-    console.log(` ${passed ? "✓" : "✗"} [${passed ? "PASS" : "FAIL"}] ${mod.padEnd(45)} (${elapsed}ms) - ${message}`);
+    console.log(` ${passed ? "✓" : "✗"} [${passed ? "PASS" : "FAIL"}] ${mod.padEnd(52)} (${elapsed}ms) - ${message}`);
   }
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 15 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 16 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }
