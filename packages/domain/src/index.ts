@@ -345,6 +345,7 @@ export * from "./enterpriseApprovalsEngine.js";
 export * from "./financeTreasuryEngine.js";
 export * from "./supplyChainEngine.js";
 export * from "./workforceEngine.js";
+export * from "./crmEngine.js";
 
 
 

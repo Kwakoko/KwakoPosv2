@@ -4123,6 +4123,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkforceService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/crm/health", async (req, reply) => {
+    const { globalCrmService } = await import("./services/crmService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalCrmService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/crm/customers", async (req, reply) => {
+    const { globalCrmService } = await import("./services/crmService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalCrmService.listCustomers(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

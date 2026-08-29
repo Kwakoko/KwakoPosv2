@@ -78,6 +78,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
     "Phase 35 — Finance & Treasury OS",
     "Phase 36 — Supply Chain OS",
     "Phase 37 — Workforce OS",
+    "Phase 38 — CRM OS",
   ];
 
 
@@ -176,6 +177,8 @@ export async function verifyAllKwakoPosModules(): Promise<{
         message = "100 Supply Chain Pillars & KSCOL Operating Layer Active";
       } else if (mod.includes("Workforce OS")) {
         message = "100 Workforce Pillars & KWOL Operating Layer Active";
+      } else if (mod.includes("CRM OS")) {
+        message = "100 CRM Pillars & KCRML Operating Layer Active";
       }
 
 
@@ -207,7 +210,7 @@ export async function verifyAllKwakoPosModules(): Promise<{
 
   console.log("========================================================================");
   if (allPassed) {
-    console.log(" 🎉 ALL 45 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
+    console.log(" 🎉 ALL 46 KWAKOPOS MODULES VERIFIED & OPERATIONAL");
   } else {
     console.error(" ❌ MODULE VERIFICATION FAILED FOR ONE OR MORE MODULES");
   }
