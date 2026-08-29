@@ -47,4 +47,4 @@ COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8080
 
-CMD ["node", "apps/api/dist/server.js"]
+CMD ["sh", "-c", "if [ -f apps/api/dist/server.js ]; then node apps/api/dist/server.js; elif [ -f apps/api/dist/src/server.js ]; then node apps/api/dist/src/server.js; else node apps/api/dist/apps/api/src/server.js; fi"]
