@@ -65,7 +65,7 @@ function runAtomicTwoProcessRace(lockPath: string): { oneWon: boolean; oneLost: 
 }
 
 function initializeGitFixture(dir: string, version: string): string {
-  fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "KwakoPos", version }), "utf8");
   try {
     execSync("git init -q", { cwd: dir, stdio: "ignore" });
