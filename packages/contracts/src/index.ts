@@ -2248,6 +2248,7 @@ export * from "./autonomousBusinessContracts.js";
 export * from "./platformSecurityContracts.js";
 export * from "./autonomousOperationsContracts.js";
 export * from "./platformIntelligenceContracts.js";
+export * from "./fullSystemCertificationContracts.js";
 
 
 

@@ -359,6 +359,7 @@ export * from "./autonomousBusinessEngine.js";
 export * from "./platformSecurityEngine.js";
 export * from "./autonomousOperationsEngine.js";
 export * from "./platformIntelligenceEngine.js";
+export * from "./fullSystemCertificationEngine.js";
 
 
 

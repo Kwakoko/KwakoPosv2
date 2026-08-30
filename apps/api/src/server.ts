@@ -2204,7 +2204,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       success: true,
       data: {
         totalDomains: 22,
-        domainsPassed: Object.values(cert.evidencePackage.domainScorecard).filter((d) => d.status === "PASS").length,
+        domainsPassed: Object.values(cert.evidencePackage.domainScorecard).filter((d: any) => d.status === "PASS").length,
         scorecard: cert.evidencePackage.domainScorecard,
       },
     });
@@ -4218,6 +4218,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalPlatformIntelligenceService } = await import("./services/platformIntelligenceService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalPlatformIntelligenceService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/full-system-certification/health", async (req, reply) => {
+    const { globalFullSystemCertificationService } = await import("./services/fullSystemCertificationService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalFullSystemCertificationService.getHealthSummary(tenantId) });
   });
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
