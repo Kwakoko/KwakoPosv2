@@ -1,70 +1,34 @@
-import {
-  AutonomousActionRequest,
-  AutonomousMaturityLevel,
-  AutonomousPolicyEvaluation,
-  AutonomousVerificationResult,
-  AutonomousActionLedgerEntry,
-  AutonomousKillSwitchConfig,
-  AutonomousCommandCenterSummary,
-} from "@kwakopos2/contracts";
-import { globalAutonomousOperationsEngine } from "@kwakopos2/domain";
+import { AutonomousOperationsEngine } from "@kwakopos2/domain";
 
 export class AutonomousOperationsService {
-  public detectAndRemediate(input: {
-    tenantId: string;
-    branchId: string;
-    targetService: string;
-    failureClass: string;
-    proposedRemediation: string;
-    maturityLevel: AutonomousMaturityLevel;
-    blastRadiusScope: "SINGLE_INSTANCE" | "SINGLE_SERVICE" | "SINGLE_TENANT" | "SINGLE_BRANCH" | "REGIONAL" | "GLOBAL";
-    rollbackAvailable: boolean;
-  }): {
-    request: AutonomousActionRequest;
-    policy: AutonomousPolicyEvaluation;
-    executionResult?: { ledgerEntry: AutonomousActionLedgerEntry; verification: AutonomousVerificationResult };
-  } {
-    const request = globalAutonomousOperationsEngine.detectAndDiagnose(input);
-    const policy = globalAutonomousOperationsEngine.evaluatePolicy(request.requestId, {
-      maxHourlyActions: 50,
-      currentHourlyActions: 5,
-      maxBlastScopeAllowed: "SINGLE_TENANT",
-    });
+  private engine: AutonomousOperationsEngine;
 
-    if (policy.approvedForExecution) {
-      const executionResult = globalAutonomousOperationsEngine.executeActionGateway(
-        request.requestId,
-        () => ({ success: true, details: `Remediation ${input.proposedRemediation} executed on ${input.targetService}` }),
-        () => ({ healthy: true, details: `Independent verification confirmed service ${input.targetService} is healthy (100% SLO compliance)` })
-      );
-      return { request, policy, executionResult };
-    }
-
-    return { request, policy };
+  constructor(engine?: AutonomousOperationsEngine) {
+    this.engine = engine ?? new AutonomousOperationsEngine();
   }
 
-  public runDryRunSimulation(input: {
-    tenantId: string;
-    targetService: string;
-    proposedRemediation: string;
-  }): { dryRunApproved: boolean; expectedOutcome: string; blastRadius: string } {
-    return {
-      dryRunApproved: true,
-      expectedOutcome: `Simulation dry-run confirmed safe mitigation of ${input.proposedRemediation} on ${input.targetService}`,
-      blastRadius: "SINGLE_INSTANCE (Zero Tenant Impact)",
-    };
+  public getEngine(): AutonomousOperationsEngine {
+    return this.engine;
   }
 
-  public triggerKillSwitch(scope: "GLOBAL" | "REGION" | "COUNTRY" | "TENANT" | "SERVICE" | "AGENT" | "ACTION", targetId: string): AutonomousKillSwitchConfig {
-    return globalAutonomousOperationsEngine.triggerKillSwitch(scope, targetId);
+  public registerAgentCapability(params: Parameters<AutonomousOperationsEngine["registerAgentCapability"]>[0]) {
+    return this.engine.registerAgentCapability(params);
   }
 
-  public getDashboardMetrics(): AutonomousCommandCenterSummary {
-    return globalAutonomousOperationsEngine.getAutonomousCommandCenterSummary();
+  public executeAutonomousRequest(params: Parameters<AutonomousOperationsEngine["executeAutonomousRequest"]>[0]) {
+    return this.engine.executeAutonomousRequest(params);
   }
 
-  public getLedger(): AutonomousActionLedgerEntry[] {
-    return globalAutonomousOperationsEngine.getLedger();
+  public verifyActionResult(requestId: string, isSuccessful: boolean) {
+    return this.engine.verifyActionResult(requestId, isSuccessful);
+  }
+
+  public activateAgentKillSwitch(tenantId: string, agentId: string, actorId: string) {
+    return this.engine.activateAgentKillSwitch(tenantId, agentId, actorId);
+  }
+
+  public getHealthSummary(tenantId: string) {
+    return this.engine.getHealthSummary(tenantId);
   }
 }
 

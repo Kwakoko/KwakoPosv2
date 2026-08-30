@@ -1,4 +1,4 @@
-import { globalAutonomousOperationsEngine } from "@kwakopos2/domain";
+import { AutonomousOperationsEngine } from "@kwakopos2/domain";
 
 export interface PillarVerificationResult {
   pillarId: string;
@@ -14,6 +14,7 @@ export function runAutonomousOperationsCertification(): {
   successRatePct: number;
   results: PillarVerificationResult[];
 } {
+  const globalAutonomousOperationsEngine: any = new AutonomousOperationsEngine();
   const results: PillarVerificationResult[] = [];
 
   const addResult = (id: string, name: string, passed: boolean, details: string) => {

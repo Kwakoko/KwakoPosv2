@@ -357,6 +357,7 @@ export * from "./marketplaceEngine.js";
 export * from "./globalPlatformEngine.js";
 export * from "./autonomousBusinessEngine.js";
 export * from "./platformSecurityEngine.js";
+export * from "./autonomousOperationsEngine.js";
 
 
 

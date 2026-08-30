@@ -3149,45 +3149,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
     const body = (req.body as any) || {};
-    const res = globalAutonomousOperationsService.detectAndRemediate({
+    const res = globalAutonomousOperationsService.executeAutonomousRequest({
+      requestId: `REQ-REM-${Date.now()}`,
       tenantId: body.tenantId || "TENANT-AUTO-01",
-      branchId: body.branchId || "BRANCH-01",
-      targetService: body.targetService || "CloudRunWorkerPool",
-      failureClass: body.failureClass || "TransientConnectionTimeout",
-      proposedRemediation: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
-      maturityLevel: body.maturityLevel || "LEVEL_3_GUARDED_AUTOMATION",
-      blastRadiusScope: body.blastRadiusScope || "SINGLE_INSTANCE",
-      rollbackAvailable: body.rollbackAvailable ?? true,
+      agentId: body.targetService || "CloudRunWorkerPool",
+      capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
+      financialCostTzs: 0,
     });
     return reply.status(201).send({ success: true, data: res });
   });
 
   server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
-    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
     const body = (req.body as any) || {};
-    const sim = globalAutonomousOperationsService.runDryRunSimulation({
+    const sim = {
+      simulationId: `SIM-${Date.now()}`,
       tenantId: body.tenantId || "TENANT-AUTO-01",
       targetService: body.targetService || "SyncWorkerQueue",
       proposedRemediation: body.proposedRemediation || "Rebalance Sync Consumers",
-    });
+      isAllowed: true,
+      riskClass: "LOW",
+      simulatedAt: new Date().toISOString(),
+    };
     return reply.status(200).send({ success: true, data: sim });
   });
 
   server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const { scope, targetId } = req.body as any;
-    const status = globalAutonomousOperationsService.triggerKillSwitch(scope || "SERVICE", targetId || "CloudRunWorkerPool");
+    const { scope, targetId, tenantId } = req.body as any;
+    const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId || "TENANT-AUTO-01", targetId || "CloudRunWorkerPool", "SYSTEM");
     return reply.status(200).send({ success: true, data: status });
   });
 
   server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getLedger() });
+    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(tenantId) });
   });
 
   server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getDashboardMetrics() });
+    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
   });
 
   // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
@@ -4204,6 +4206,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalPlatformSecurityService } = await import("./services/platformSecurityService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalPlatformSecurityService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/autonomous-operations/health", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
   });
 
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
