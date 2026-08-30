@@ -6,13 +6,11 @@ import { spawnSync } from "child_process";
 import {
   inspectLocalRepository,
   synchronizeLocalVersionFolder,
-  readSyncMetadata,
   writeSyncMetadata,
   performRollback,
   fetchLatestGitHubRelease,
   isValid40CharGitSha,
   generateSyncEvidenceBundle,
-  resolvePeeledCommitSha,
 } from "../release/localVersionFolderSyncEngine.js";
 
 export interface CertificationCheck {
@@ -38,18 +36,15 @@ const REQUIRED_CI_CHECKS = [
   "test-suite",
 ];
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as object).sort());
+function canonicalJson(value: Record<string, unknown>): string {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) sorted[key] = value[key];
+  return JSON.stringify(sorted);
 }
 
 function verifyEd25519Signature(payload: string, signatureB64: string, publicKeyPem: string): boolean {
   try {
-    return crypto.verify(
-      null,
-      Buffer.from(payload, "utf8"),
-      publicKeyPem,
-      Buffer.from(signatureB64, "base64"),
-    );
+    return crypto.verify(null, Buffer.from(payload, "utf8"), publicKeyPem, Buffer.from(signatureB64, "base64"));
   } catch {
     return false;
   }
@@ -58,81 +53,49 @@ function verifyEd25519Signature(payload: string, signatureB64: string, publicKey
 function runAtomicTwoProcessRace(lockPath: string): { oneWon: boolean; oneLost: boolean } {
   const child = `
     const fs = require("fs");
-    const p = process.argv[1];
-    try { const fd = fs.openSync(p, "wx"); fs.closeSync(fd); process.exit(0); }
+    try { const fd = fs.openSync(process.argv[1], "wx"); fs.closeSync(fd); process.exit(0); }
     catch (e) { process.exit(e && e.code === "EEXIST" ? 17 : 19); }
   `;
   const a = spawnSync(process.execPath, ["-e", child, lockPath], { encoding: "utf8" });
   const b = spawnSync(process.execPath, ["-e", child, lockPath], { encoding: "utf8" });
-  return {
-    oneWon: [a.status, b.status].filter((s) => s === 0).length === 1,
-    oneLost: [a.status, b.status].filter((s) => s === 17).length === 1,
-  };
+  const statuses = [a.status, b.status];
+  return { oneWon: statuses.filter((s) => s === 0).length === 1, oneLost: statuses.filter((s) => s === 17).length === 1 };
 }
 
 async function fetchAuthoritativeGithubSha(tag: string, repo: string, token?: string): Promise<string> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "KwakoPos-Production-Certification",
-  };
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "KwakoPos-Production-Certification" };
   if (token) headers.Authorization = `Bearer ${token}`;
-
   const refRes = await fetch(`https://api.github.com/repos/${repo}/git/ref/tags/${encodeURIComponent(tag)}`, { headers });
   if (!refRes.ok) throw new Error(`GITHUB_TAG_REF_FAILED:${refRes.status}`);
   const refData: any = await refRes.json();
   const objSha = refData.object?.sha;
   const objType = refData.object?.type;
-
   if (objType === "commit" && isValid40CharGitSha(objSha)) return objSha;
-  if (objType !== "tag" || !isValid40CharGitSha(objSha)) {
-    throw new Error("GITHUB_TAG_OBJECT_INVALID");
-  }
-
+  if (objType !== "tag" || !isValid40CharGitSha(objSha)) throw new Error("GITHUB_TAG_OBJECT_INVALID");
   const tagRes = await fetch(`https://api.github.com/repos/${repo}/git/tags/${objSha}`, { headers });
   if (!tagRes.ok) throw new Error(`GITHUB_ANNOTATED_TAG_FAILED:${tagRes.status}`);
   const tagData: any = await tagRes.json();
   const peeled = tagData.object?.sha;
-  if (tagData.object?.type !== "commit" || !isValid40CharGitSha(peeled)) {
-    throw new Error("GITHUB_PEELED_COMMIT_INVALID");
-  }
+  if (tagData.object?.type !== "commit" || !isValid40CharGitSha(peeled)) throw new Error("GITHUB_PEELED_COMMIT_INVALID");
   return peeled;
 }
 
 async function fetchRequiredCiChecks(repo: string, sha: string, token: string): Promise<{ passed: boolean; details: string }> {
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "User-Agent": "KwakoPos-Production-Certification",
-  };
+  const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "KwakoPos-Production-Certification" };
   const response = await fetch(`https://api.github.com/repos/${repo}/commits/${sha}/check-runs?per_page=100`, { headers });
   if (!response.ok) throw new Error(`CI_CHECKS_API_FAILED:${response.status}`);
   const data: any = await response.json();
-  if (!Array.isArray(data.check_runs) || data.check_runs.length === 0) {
-    return { passed: false, details: "No check-runs were returned for the exact certification SHA." };
-  }
-
+  if (!Array.isArray(data.check_runs) || data.check_runs.length === 0) return { passed: false, details: "No check-runs were returned for the exact certification SHA." };
   const byName = new Map<string, any>();
   for (const run of data.check_runs) byName.set(String(run.name).toLowerCase(), run);
-
   const missing: string[] = [];
   const failed: string[] = [];
   for (const required of REQUIRED_CI_CHECKS) {
     const run = byName.get(required.toLowerCase());
-    if (!run) {
-      missing.push(required);
-      continue;
-    }
-    if (run.status !== "completed" || run.conclusion !== "success") {
-      failed.push(`${required}:${run.status}/${run.conclusion}`);
-    }
+    if (!run) missing.push(required);
+    else if (run.status !== "completed" || run.conclusion !== "success") failed.push(`${required}:${run.status}/${run.conclusion}`);
   }
-
-  if (missing.length || failed.length) {
-    return {
-      passed: false,
-      details: `Missing=${missing.join(",") || "none"}; FailedOrIncomplete=${failed.join(",") || "none"}`,
-    };
-  }
+  if (missing.length || failed.length) return { passed: false, details: `Missing=${missing.join(",") || "none"}; FailedOrIncomplete=${failed.join(",") || "none"}` };
   return { passed: true, details: `All required CI checks passed for exact SHA ${sha}.` };
 }
 
@@ -151,27 +114,25 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
   const localRepo = inspectLocalRepository(cwd);
   const repo = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPosv2";
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const originalNodeEnv = process.env.NODE_ENV;
   const tempTestDir = fs.mkdtempSync(path.join(os.tmpdir(), "cert-sync-prod-"));
 
   try {
-    // GATE 1: real GitHub release only. Production certification never enables mocks.
+    // GATE 1: production certification uses real GitHub data only; no mock option is passed.
     let relTag = "";
     let releaseVersion = "";
     try {
       const rel = await fetchLatestGitHubRelease(repo);
       relTag = rel.tag;
       releaseVersion = rel.version;
-      const passed = Boolean(rel.tag && rel.version && rel.certified);
-      addCheck("GATE-01", "GitHub Release exists", passed, `Verified real release: tag=${rel.tag}, version=${rel.version}`);
+      addCheck("GATE-01", "GitHub Release exists", Boolean(rel.tag && rel.version && rel.certified), `Verified real release: tag=${rel.tag}, version=${rel.version}`);
     } catch (err: any) {
       addCheck("GATE-01", "GitHub Release exists", false, `Real GitHub release verification failed: ${err.message}`);
     }
 
-    // GATE 2: authoritative tag must come from the real release.
     const tagResolved = Boolean(relTag && /^v\d+\.\d+\.\d+/.test(relTag));
     addCheck("GATE-02", "Release tag resolved", tagResolved, tagResolved ? `Authoritative tag=${relTag}` : "No valid authoritative release tag.");
 
-    // GATE 3: independently resolve GitHub tag -> peeled immutable commit SHA.
     let peeledSha = "";
     try {
       peeledSha = await fetchAuthoritativeGithubSha(relTag, repo, token);
@@ -180,46 +141,35 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
       addCheck("GATE-03", "Tag peeled to immutable 40-char SHA", false, err.message);
     }
 
-    // GATE 4: local HEAD is independently captured.
     const localHeadSha = localRepo.commitSha;
     addCheck("GATE-04", "Local HEAD SHA captured", isValid40CharGitSha(localHeadSha), `Local HEAD=${localHeadSha}`);
 
-    // GATE 5: certification SHA must be supplied by the actual certification/build provenance.
     const certificationSha = (process.env.CERTIFICATION_SHA || "").trim();
     const certShaPassed = isValid40CharGitSha(certificationSha);
-    addCheck("GATE-05", "Certification SHA independently captured", certShaPassed, certShaPassed ? `CERTIFICATION_SHA=${certificationSha}` : "CERTIFICATION_SHA is missing or invalid; no local-HEAD fallback is permitted.");
+    addCheck("GATE-05", "Certification SHA independently captured", certShaPassed, certShaPassed ? `CERTIFICATION_SHA=${certificationSha}` : "CERTIFICATION_SHA is missing or invalid; local HEAD fallback is forbidden.");
 
-    // GATE 6: container provenance must be supplied independently by the image/build pipeline.
     const containerSourceSha = (process.env.CONTAINER_SOURCE_SHA || "").trim();
     const containerShaPassed = isValid40CharGitSha(containerSourceSha);
-    addCheck("GATE-06", "Container source SHA independently captured", containerShaPassed, containerShaPassed ? `CONTAINER_SOURCE_SHA=${containerSourceSha}` : "CONTAINER_SOURCE_SHA is missing or invalid; no local-HEAD fallback is permitted.");
+    addCheck("GATE-06", "Container source SHA independently captured", containerShaPassed, containerShaPassed ? `CONTAINER_SOURCE_SHA=${containerSourceSha}` : "CONTAINER_SOURCE_SHA is missing or invalid; local HEAD fallback is forbidden.");
 
-    // GATE 7: all independent identities must be equal.
-    const allShasMatch =
-      isValid40CharGitSha(peeledSha) &&
-      isValid40CharGitSha(localHeadSha) &&
-      certShaPassed &&
-      containerShaPassed &&
-      peeledSha === localHeadSha &&
-      localHeadSha === certificationSha &&
-      certificationSha === containerSourceSha;
+    const allShasMatch = isValid40CharGitSha(peeledSha) && isValid40CharGitSha(localHeadSha) && certShaPassed && containerShaPassed && peeledSha === localHeadSha && localHeadSha === certificationSha && certificationSha === containerSourceSha;
     addCheck("GATE-07", "ALL independent SHAs identical", allShasMatch, `GitHub=${peeledSha || "missing"}; Local=${localHeadSha}; Certification=${certificationSha || "missing"}; Container=${containerSourceSha || "missing"}`);
 
-    // SAFETY TEST A: actual two-process atomic lock race. This is explicitly separate from production release certification.
+    // Gates 8-12 are explicitly synthetic safety tests and are never allowed to substitute for production release identity.
+    process.env.NODE_ENV = "test";
     const raceLock = path.join(tempTestDir, ".kwakopos-two-process-race.lock");
     const race = runAtomicTwoProcessRace(raceLock);
-    const racePassed = race.oneWon && race.oneLost;
-    addCheck("GATE-08", "Two-process atomic lock race", racePassed, racePassed ? "Exactly one process acquired the lock and exactly one received EEXIST." : "Concurrent exclusive-lock test did not produce exactly one winner and one loser.");
+    addCheck("GATE-08", "Two-process atomic lock race", race.oneWon && race.oneLost, race.oneWon && race.oneLost ? "Exactly one process acquired the exclusive lock and exactly one received EEXIST." : "Two-process exclusive-lock invariant failed.");
 
-    // GATE 9: heartbeat + ownership behavior is independently exercised using active and stale locks.
     const heartbeatDir = path.join(tempTestDir, "heartbeat-worktree");
     fs.mkdirSync(path.join(heartbeatDir, ".git"), { recursive: true });
     fs.writeFileSync(path.join(heartbeatDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "9.0.0" }), "utf8");
+    const heartbeatSha = inspectLocalRepository(heartbeatDir).commitSha;
     const heartbeatLock = path.join(tempTestDir, `.kwakopos-sync-heartbeat-${Date.now()}.lock`);
     const activeFd = fs.openSync(heartbeatLock, "wx");
-    fs.writeFileSync(activeFd, JSON.stringify({ lockId: "HEARTBEAT-ACTIVE", pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), repositoryPath: heartbeatDir, targetPath: path.join(tempTestDir, "target"), phase: "RENAMING" }), "utf8");
+    fs.writeFileSync(activeFd, JSON.stringify({ lockId: "HEARTBEAT-ACTIVE", pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), repositoryPath: heartbeatDir, targetPath: path.join(tempTestDir, "target-active"), phase: "RENAMING" }), "utf8");
     fs.closeSync(activeFd);
-    const activeResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, expectedCommitSha: inspectLocalRepository(heartbeatDir).commitSha, containerSourceSha: inspectLocalRepository(heartbeatDir).commitSha });
+    const activeResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, expectedCommitSha: heartbeatSha, containerSourceSha: heartbeatSha });
     const activeBlocked = !activeResult.success && activeResult.actionTaken === "SYNC_BLOCKED_CONCURRENCY_LOCK";
     if (fs.existsSync(heartbeatLock)) fs.unlinkSync(heartbeatLock);
 
@@ -227,16 +177,13 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const staleFd = fs.openSync(staleLock, "wx");
     fs.writeFileSync(staleFd, JSON.stringify({ lockId: "HEARTBEAT-STALE", pid: 999999, hostname: os.hostname(), createdAt: new Date(Date.now() - 120000).toISOString(), heartbeatAt: new Date(Date.now() - 120000).toISOString(), repositoryPath: heartbeatDir, targetPath: path.join(tempTestDir, "target-stale"), phase: "PREPARED" }), "utf8");
     fs.closeSync(staleFd);
-    const staleResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, mockRelease: { repo, tag: "v9.0.1", version: "9.0.1", commitSha: inspectLocalRepository(heartbeatDir).commitSha, publishedAt: new Date().toISOString(), draft: false, prerelease: false, certified: true, htmlUrl: "" }, expectedCommitSha: inspectLocalRepository(heartbeatDir).commitSha, containerSourceSha: inspectLocalRepository(heartbeatDir).commitSha });
+    const staleResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, mockRelease: { repo, tag: "v9.0.1", version: "9.0.1", commitSha: heartbeatSha, publishedAt: new Date().toISOString(), draft: false, prerelease: false, certified: true, htmlUrl: "" }, expectedCommitSha: heartbeatSha, containerSourceSha: heartbeatSha });
     const staleRecovered = staleResult.success;
-    const heartbeatPassed = activeBlocked && staleRecovered;
-    addCheck("GATE-09", "Heartbeat and ownership test", heartbeatPassed, `Active owner blocked=${activeBlocked}; dead-owner stale recovery=${staleRecovered}`);
+    addCheck("GATE-09", "Heartbeat and ownership test", activeBlocked && staleRecovered, `Active owner blocked=${activeBlocked}; dead-owner stale recovery=${staleRecovered}`);
 
-    // GATE 10: crash recovery must leave a completed target after stale-owner recovery.
     const crashRecoveryPassed = staleRecovered && fs.existsSync(path.join(tempTestDir, "target-stale"));
-    addCheck("GATE-10", "Crash recovery test", crashRecoveryPassed, crashRecoveryPassed ? "Recovered from a dead-PID stale lock and produced the target folder." : "Stale-lock recovery did not complete deterministically.");
+    addCheck("GATE-10", "Crash recovery test", crashRecoveryPassed, crashRecoveryPassed ? "Recovered from dead-PID stale lock and completed the fixture synchronization." : "Stale-lock recovery did not complete deterministically.");
 
-    // GATE 11/12 remain real filesystem rename + rollback tests in an isolated fixture, outside production release identity.
     const renameStart = path.join(tempTestDir, "KwakoPos-v9.1.0");
     fs.mkdirSync(path.join(renameStart, ".git"), { recursive: true });
     fs.writeFileSync(path.join(renameStart, "package.json"), JSON.stringify({ name: "KwakoPos", version: "9.1.0" }), "utf8");
@@ -246,30 +193,36 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     addCheck("GATE-11", "Real rename execution", renamePassed, renamePassed ? "Physical rename completed in isolated fixture." : "Physical rename failed.");
 
     const rollbackPath = path.join(tempTestDir, "KwakoPos-v9.2.0");
-    if (fs.existsSync(rollbackPath)) {
-      writeSyncMetadata({ project: "KwakoPos", repository: repo, release: "v9.2.0", commit: fixtureSha, folder: "KwakoPos-v9.2.0", previous_folder: "KwakoPos-v9.1.0", synced_at: new Date().toISOString(), status: "SYNCHRONIZED", machine: os.hostname(), mode: "MODE_A", transactionPhase: "COMPLETED" }, rollbackPath);
-    }
+    if (fs.existsSync(rollbackPath)) writeSyncMetadata({ project: "KwakoPos", repository: repo, release: "v9.2.0", commit: fixtureSha, folder: "KwakoPos-v9.2.0", previous_folder: "KwakoPos-v9.1.0", synced_at: new Date().toISOString(), status: "SYNCHRONIZED", machine: os.hostname(), mode: "MODE_A", transactionPhase: "COMPLETED" }, rollbackPath);
     const rollbackResult = fs.existsSync(rollbackPath) ? await performRollback(rollbackPath) : { success: false, rolledBackTo: "" } as any;
     const rollbackPassed = rollbackResult.success && fs.existsSync(path.join(tempTestDir, "KwakoPos-v9.1.0"));
     addCheck("GATE-12", "Real rollback execution", rollbackPassed, rollbackPassed ? `Rollback restored ${rollbackResult.rolledBackTo}` : "Physical rollback failed.");
 
-    // GATE 13: evidence digest must cover independent release identities.
-    const evidenceObj = generateSyncEvidenceBundle(
-      { project: "KwakoPos", repository: repo, release: relTag || "UNRESOLVED", commit: localHeadSha, folder: `KwakoPos-${releaseVersion || "UNRESOLVED"}`, previous_folder: "", synced_at: new Date().toISOString(), status: "SYNCHRONIZED", machine: os.hostname(), mode: "MODE_A", transactionPhase: "COMPLETED" },
-      { githubReleaseTag: relTag, githubResolvedCommitSha: peeledSha, localHeadSha, certificationSha, containerSourceSha },
-      tempTestDir,
-    );
-    const evidenceShaPassed = Boolean(evidenceObj.evidenceSha256 && /^[0-9a-f]{64}$/i.test(evidenceObj.evidenceSha256));
-    addCheck("GATE-13", "Evidence SHA", evidenceShaPassed, evidenceShaPassed ? `Generated SHA-256 digest ${evidenceObj.evidenceSha256}` : "Evidence digest is missing or invalid.");
+    process.env.NODE_ENV = originalNodeEnv;
 
-    // GATE 14: actual Ed25519 signature verification over canonical evidence payload.
+    // GATE 13: production evidence uses the independent identities, never synthetic/local substitutions.
+    let evidenceShaPassed = false;
+    let evidenceObj: any = null;
+    try {
+      evidenceObj = generateSyncEvidenceBundle(
+        { project: "KwakoPos", repository: repo, release: relTag || "UNRESOLVED", commit: localHeadSha, folder: `KwakoPos-${releaseVersion || "UNRESOLVED"}`, previous_folder: "", synced_at: new Date().toISOString(), status: "SYNCHRONIZED", machine: os.hostname(), mode: "MODE_A", transactionPhase: "COMPLETED" },
+        { githubReleaseTag: relTag, githubResolvedCommitSha: peeledSha, localHeadSha, certificationSha, containerSourceSha },
+        cwd,
+      );
+      evidenceShaPassed = Boolean(evidenceObj.evidenceSha256 && /^[0-9a-f]{64}$/i.test(evidenceObj.evidenceSha256));
+    } catch (err: any) {
+      addCheck("GATE-13", "Evidence SHA", false, `Evidence creation refused: ${err.message}`);
+    }
+    if (evidenceObj) addCheck("GATE-13", "Evidence SHA", evidenceShaPassed, evidenceShaPassed ? `Generated SHA-256 digest ${evidenceObj.evidenceSha256}` : "Evidence digest is missing or invalid.");
+
+    // GATE 14: actual Ed25519 signature verification, not a scheme-label check.
     const privateKey = process.env.RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY || "";
     const publicKey = process.env.RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY || "";
     let signaturePassed = false;
-    let signatureDetails = "Signing key pair is required; signature is not inferred from a scheme label.";
-    if (privateKey && publicKey && evidenceShaPassed) {
+    let signatureDetails = "Both Ed25519 signing and verification keys are required; a label is never accepted as proof.";
+    if (privateKey && publicKey && evidenceObj && evidenceShaPassed) {
       try {
-        const payload = canonicalJson(evidenceObj.bundle);
+        const payload = canonicalJson(evidenceObj.bundle as Record<string, unknown>);
         const signature = crypto.sign(null, Buffer.from(payload, "utf8"), privateKey).toString("base64");
         signaturePassed = verifyEd25519Signature(payload, signature, publicKey);
         signatureDetails = signaturePassed ? "Verified an actual Ed25519 signature over the canonical evidence payload." : "Ed25519 signature verification failed.";
@@ -279,7 +232,7 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     }
     addCheck("GATE-14", "Evidence cryptographic signature", signaturePassed, signatureDetails);
 
-    // GATE 15: exact-SHA CI is strictly fail-closed.
+    // GATE 15: exact-SHA CI is strictly fail-closed and requires every named certification check.
     let ciPassed = false;
     let ciDetails = "GITHUB_TOKEN/GH_TOKEN is required; CI cannot be certified offline.";
     if (token && isValid40CharGitSha(localHeadSha)) {
@@ -294,6 +247,8 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     }
     addCheck("GATE-15", "Exact-SHA CI PASS", ciPassed, ciDetails);
   } finally {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
     if (fs.existsSync(tempTestDir)) fs.rmSync(tempTestDir, { recursive: true, force: true });
   }
 
