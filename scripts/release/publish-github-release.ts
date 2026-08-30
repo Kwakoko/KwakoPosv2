@@ -140,6 +140,27 @@ export async function publishGitHubRelease() {
   console.log("========================================================================");
   console.log(` 🎉 RELEASE AUTOMATION COMPLETE: ${tag}`);
   console.log("========================================================================");
+
+  // Trigger Local Semantic Version Folder Synchronization Engine Hook
+  try {
+    const { synchronizeLocalVersionFolder } = await import("./localVersionFolderSyncEngine.js");
+    console.log("[RELEASE_HOOK] Emitting RELEASE_PUBLISHED event for Local Version Folder Synchronization...");
+    await synchronizeLocalVersionFolder({
+      mockRelease: {
+        repo,
+        tag,
+        version: identity.appVersion,
+        commitSha: identity.gitSha,
+        publishedAt: new Date().toISOString(),
+        draft: false,
+        prerelease: identity.appVersion.includes("-"),
+        certified: true,
+        htmlUrl: "",
+      },
+    });
+  } catch (syncErr: any) {
+    console.warn(`[RELEASE_HOOK] Local Folder Synchronization hook warning: ${syncErr.message}`);
+  }
 }
 
 if (process.argv[1]?.endsWith("publish-github-release.ts")) {

@@ -20,6 +20,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:sync": "vitest run tests/sync",
+    "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
+    "certify:version-sync": "tsx scripts/certification/runVersionSyncCertification.ts",
     "test:browser": "playwright test",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
