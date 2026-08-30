@@ -72,6 +72,7 @@
     "certify:autonomous-operations": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
     "certify:platform-intelligence": "tsx scripts/certification/runPlatformIntelligenceCertification.ts",
     "certify:full-system": "tsx scripts/certification/runFullSystemCertification.ts",
+    "certify:golive": "tsx scripts/release/generate-golive-certificate.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",
     "certify:pharmacy": "tsx scripts/certification/runPharmacyCertification.ts",
