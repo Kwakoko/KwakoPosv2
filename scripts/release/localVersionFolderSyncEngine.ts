@@ -141,13 +141,10 @@ export function isValidSemVer(versionStr: string): boolean {
   return SEMVER_REGEX.test(versionStr.trim());
 }
 
-/**
- * True SemVer 2.0.0 Section 11 Prerelease Comparison Algorithm
- */
 export function comparePrerelease(p1?: string, p2?: string): number {
   if (!p1 && !p2) return 0;
-  if (!p1 && p2) return 1; // Normal version has higher precedence than prerelease
-  if (p1 && !p2) return -1; // Prerelease has lower precedence than normal version
+  if (!p1 && p2) return 1;
+  if (p1 && !p2) return -1;
 
   const parts1 = p1!.split(".");
   const parts2 = p2!.split(".");
@@ -167,7 +164,7 @@ export function comparePrerelease(p1?: string, p2?: string): number {
       const num2 = parseInt(id2, 10);
       if (num1 !== num2) return num1 - num2;
     } else if (isNum1 && !isNum2) {
-      return -1; // Numeric identifiers have lower precedence than non-numeric
+      return -1;
     } else if (!isNum1 && isNum2) {
       return 1;
     } else {
@@ -295,11 +292,17 @@ export async function fetchLatestGitHubRelease(
   targetRepo: string = "Kwakoko/KwakoPosv2",
   options?: { token?: string; mockRelease?: GitHubReleaseInfo; allowOfflineMock?: boolean }
 ): Promise<GitHubReleaseInfo> {
-  if (options?.mockRelease) {
+  const isProdCert = process.env.NODE_ENV === "production-certification";
+
+  if (isProdCert && (options?.mockRelease || options?.allowOfflineMock)) {
+    console.warn("[SYNC_ENGINE] Production Certification Mode: Mocking disallowed. Forcing real GitHub Release verification...");
+  }
+
+  if (!isProdCert && options?.mockRelease) {
     return options.mockRelease;
   }
 
-  const isAllowOffline = options?.allowOfflineMock || process.env.SYNC_ALLOW_OFFLINE_MOCK === "true";
+  const isAllowOffline = !isProdCert && (options?.allowOfflineMock || process.env.SYNC_ALLOW_OFFLINE_MOCK === "true");
   const envMock = process.env.SYNC_OFFLINE_MOCK_RELEASE;
   if (isAllowOffline && envMock) {
     try {
@@ -325,7 +328,6 @@ export async function fetchLatestGitHubRelease(
 
     if (!response.ok) {
       if (isAllowOffline) {
-        // Mock fallback allowed only when explicit offline mock flag is true
         return {
           repo: targetRepo,
           tag: "v2.5.0",
@@ -371,7 +373,6 @@ export async function fetchLatestGitHubRelease(
       };
     }
 
-    // FAIL CLOSED: Throw explicit verification failure when network is unavailable
     throw new Error(`RELEASE_VERIFICATION_FAILED: Network/GitHub API unavailable to verify authoritative release for ${targetRepo}: ${err.message}. Fail-open fallback disabled.`);
   }
 }
@@ -602,8 +603,10 @@ export async function performRollback(cwd: string): Promise<{ success: boolean; 
 }
 
 // ============================================================================
-// 9. Atomic Rename & Mode B Archive Engine
+// 9. Atomic Rename & Mode B Archive Engine with Concurrency & Crash Recovery
 // ============================================================================
+
+const LOCK_TTL_MS = 60000; // 60 seconds TTL for synchronization locks
 
 export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): Promise<SyncResult> {
   const logs: string[] = [];
@@ -711,7 +714,6 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
   let targetPath = path.join(parentDir, canonicalName);
 
   if (mode === "MODE_B") {
-    // Mode B: Release Archive Mode with directory pointer
     const archiveRootDir = path.join(parentDir, "releases");
     if (!fs.existsSync(archiveRootDir)) {
       fs.mkdirSync(archiveRootDir, { recursive: true });
@@ -753,9 +755,49 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     };
   }
 
-  // Step 8: Atomic Lock & Rename / Archive Operation
-  const lockFile = path.join(parentDir, `.kwakopos-sync-${Date.now()}.lock`);
-  fs.writeFileSync(lockFile, JSON.stringify({ currentPath: cwd, targetPath, timestamp: new Date().toISOString() }), "utf8");
+  // Step 8: Concurrency Locking & Stale Lock Crash Recovery
+  const now = Date.now();
+  const existingLocks = fs.readdirSync(parentDir).filter((f) => f.startsWith(".kwakopos-sync-") && f.endsWith(".lock"));
+
+  for (const lockFileName of existingLocks) {
+    const lockFilePath = path.join(parentDir, lockFileName);
+    try {
+      const lockRaw = fs.readFileSync(lockFilePath, "utf8");
+      const lockData = JSON.parse(lockRaw);
+      const lockTime = new Date(lockData.timestamp).getTime();
+
+      if (now - lockTime < LOCK_TTL_MS) {
+        // Active lock held by another process
+        const err = `SYNC_BLOCKED_CONCURRENCY_LOCK: Active folder synchronization lock held by process (Lock: ${lockFileName}, Age: ${Math.round((now - lockTime) / 1000)}s).`;
+        log(`[ERROR] ${err}`);
+        return {
+          success: false,
+          status: "BLOCKED",
+          previousVersion: drift.folderVersion,
+          targetVersion: remoteRelease.version,
+          previousPath: cwd,
+          targetPath,
+          actionTaken: "SYNC_BLOCKED_CONCURRENCY_LOCK",
+          logs,
+          error: err,
+        };
+      } else {
+        // Stale lock from crashed process -> Clean up safely
+        log(`[CRASH_RECOVERY] Found stale lock file from previous crashed process (${lockFileName}). Removing stale lock file...`);
+        fs.unlinkSync(lockFilePath);
+      }
+    } catch {
+      // Clean up corrupt lock file
+      try {
+        fs.unlinkSync(lockFilePath);
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  const lockFile = path.join(parentDir, `.kwakopos-sync-${now}.lock`);
+  fs.writeFileSync(lockFile, JSON.stringify({ currentPath: cwd, targetPath, timestamp: new Date(now).toISOString() }), "utf8");
 
   try {
     log(`Executing atomic folder synchronization: ${localRepo.folderName} -> ${canonicalName} (${mode})`);
@@ -763,7 +805,6 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     if (mode === "MODE_A") {
       fs.renameSync(cwd, targetPath);
     } else {
-      // Mode B: Archive copy/move into releases archive
       fs.renameSync(cwd, targetPath);
       const pointerPath = path.join(parentDir, "current.ptr");
       fs.writeFileSync(pointerPath, JSON.stringify({ currentRelease: canonicalName, path: targetPath, updatedAt: new Date().toISOString() }), "utf8");
@@ -797,7 +838,6 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     const evidence = generateSyncEvidenceBundle(metadata, localRepo.commitSha, checkDir);
     log(`Evidence bundle generated: ${evidence.evidencePath} (SHA: ${evidence.evidenceSha256.slice(0, 8)}...)`);
 
-    // Remove lock file
     if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
 
     log(`🎉 SUCCESS: Local project folder synchronized to ${canonicalName}`);

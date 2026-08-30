@@ -113,7 +113,6 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       fs.mkdirSync(mockProjectDir, { recursive: true });
       fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
 
-      // Inject mock active process test
       const result = await synchronizeLocalVersionFolder({
         cwd: mockProjectDir,
         mockRelease: {
@@ -130,7 +129,6 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
         skipProcessCheck: false,
       });
 
-      // Under node execution, processCheck is active, so it should block unless force is passed
       if (!result.success && result.actionTaken === "BLOCKED_ACTIVE_PROCESSES") {
         expect(result.error).toContain("BLOCKED_ACTIVE_PROCESSES");
       }
@@ -227,9 +225,83 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       const evidence = generateSyncEvidenceBundle(meta, "abc1234567890", mockProjectDir);
 
       expect(fs.existsSync(evidence.evidencePath)).toBe(true);
-      expect(evidence.evidenceSha256.length).toBe(64); // Valid SHA-256 hex string length
+      expect(evidence.evidenceSha256.length).toBe(64);
       expect(evidence.bundle.certificationPassed).toBe(true);
       expect(evidence.bundle.signatureScheme).toBe("SHA256-HMAC-KWAKOPOS-RELEASE-EVIDENCE");
+    });
+  });
+
+  describe("7. Concurrency Locking & Crash Recovery", () => {
+    it("should block sync attempt if an active concurrency lock is held (< 60s old)", async () => {
+      const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
+      fs.mkdirSync(mockProjectDir, { recursive: true });
+      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+
+      // Inject active lock file
+      const activeLockPath = path.join(tempDir, `.kwakopos-sync-${Date.now()}.lock`);
+      fs.writeFileSync(
+        activeLockPath,
+        JSON.stringify({ currentPath: mockProjectDir, targetPath: path.join(tempDir, "KwakoPos-v2.8.0"), timestamp: new Date().toISOString() }),
+        "utf8"
+      );
+
+      const result = await synchronizeLocalVersionFolder({
+        cwd: mockProjectDir,
+        mockRelease: {
+          repo: "Kwakoko/KwakoPosv2",
+          tag: "v2.8.0",
+          version: "2.8.0",
+          commitSha: "abc1234",
+          publishedAt: new Date().toISOString(),
+          draft: false,
+          prerelease: false,
+          certified: true,
+          htmlUrl: "",
+        },
+        force: true,
+        skipProcessCheck: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.actionTaken).toBe("SYNC_BLOCKED_CONCURRENCY_LOCK");
+      expect(result.error).toContain("SYNC_BLOCKED_CONCURRENCY_LOCK");
+    });
+
+    it("should recover from stale lock file (>60s old) created by a crashed process and complete sync", async () => {
+      const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
+      fs.mkdirSync(mockProjectDir, { recursive: true });
+      fs.mkdirSync(path.join(mockProjectDir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+
+      // Inject stale lock file from 2 minutes ago
+      const staleTimestamp = new Date(Date.now() - 120000).toISOString();
+      const staleLockPath = path.join(tempDir, `.kwakopos-sync-${Date.now() - 120000}.lock`);
+      fs.writeFileSync(
+        staleLockPath,
+        JSON.stringify({ currentPath: mockProjectDir, targetPath: path.join(tempDir, "KwakoPos-v2.8.0"), timestamp: staleTimestamp }),
+        "utf8"
+      );
+
+      const result = await synchronizeLocalVersionFolder({
+        cwd: mockProjectDir,
+        mockRelease: {
+          repo: "Kwakoko/KwakoPosv2",
+          tag: "v2.8.0",
+          version: "2.8.0",
+          commitSha: "abc1234",
+          publishedAt: new Date().toISOString(),
+          draft: false,
+          prerelease: false,
+          certified: true,
+          htmlUrl: "",
+        },
+        force: true,
+        skipProcessCheck: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(fs.existsSync(staleLockPath)).toBe(false); // Stale lock file cleaned up!
+      expect(fs.existsSync(path.join(tempDir, "KwakoPos-v2.8.0"))).toBe(true);
     });
   });
 });
