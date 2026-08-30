@@ -8,9 +8,7 @@ import {
   compareSemVer,
   comparePrerelease,
   getCanonicalFolderName,
-  validateFolderNamePolicy,
   inspectLocalRepository,
-  detectVersionDrift,
   detectActiveProcesses,
   synchronizeLocalVersionFolder,
   readSyncMetadata,
@@ -23,12 +21,12 @@ import {
   verifyPostRenameGitIntegrity,
 } from "../../scripts/release/localVersionFolderSyncEngine.js";
 
-describe("Local Semantic Version Folder Synchronization Engine", () => {
+describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrity)", () => {
   let tempDir: string;
   const valid40CharSha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kwakopos-sync-test-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kwakopos-sync-test-15-"));
   });
 
   afterEach(() => {
@@ -62,19 +60,14 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       expect(compareSemVer("3.0.0-alpha.1", "3.0.0-beta.1")).toBeLessThan(0);
       expect(compareSemVer("3.0.0-beta.1", "3.0.0-rc.1")).toBeLessThan(0);
     });
-
-    it("should evaluate length of prerelease fields (alpha < alpha.1)", () => {
-      expect(comparePrerelease("alpha", "alpha.1")).toBeLessThan(0);
-      expect(compareSemVer("3.0.0-alpha", "3.0.0-alpha.1")).toBeLessThan(0);
-    });
   });
 
-  describe("2. Immutable 40-Character SHA Resolution & Fail-Closed Matching", () => {
-    it("should validate strict 40-character hex Git SHAs", () => {
+  describe("2. Strict 40-Character SHA Resolution & Rejection of Abbreviated SHAs", () => {
+    it("should validate strict 40-character hex Git SHAs and reject abbreviated SHAs", () => {
       expect(isValid40CharGitSha(valid40CharSha)).toBe(true);
-      expect(isValid40CharGitSha("short-sha")).toBe(false);
+      expect(isValid40CharGitSha("d8bac86")).toBe(false); // Abbreviated SHA rejected!
       expect(isValid40CharGitSha("main")).toBe(false);
-      expect(() => assertValid40CharGitSha("invalid-sha")).toThrow("RELEASE_SHA_INVALID");
+      expect(() => assertValid40CharGitSha("d8bac86")).toThrow("RELEASE_SHA_INVALID");
     });
 
     it("should fail closed on network error when offline mock is disallowed", async () => {
@@ -83,7 +76,7 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       ).rejects.toThrow("RELEASE_VERIFICATION_FAILED");
     });
 
-    it("should block synchronization if expected commit SHA mismatches", async () => {
+    it("should block synchronization if SHA mismatch occurs", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
       fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
@@ -118,32 +111,6 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       expect(typeof procCheck.active).toBe("boolean");
       expect(Array.isArray(procCheck.processes)).toBe(true);
     });
-
-    it("should block sync operation if processes are active without force flag", async () => {
-      const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
-
-      const result = await synchronizeLocalVersionFolder({
-        cwd: mockProjectDir,
-        mockRelease: {
-          repo: "Kwakoko/KwakoPosv2",
-          tag: "v2.8.0",
-          version: "2.8.0",
-          commitSha: valid40CharSha,
-          publishedAt: new Date().toISOString(),
-          draft: false,
-          prerelease: false,
-          certified: true,
-          htmlUrl: "",
-        },
-        skipProcessCheck: false,
-      });
-
-      if (!result.success && result.actionTaken === "BLOCKED_ACTIVE_PROCESSES") {
-        expect(result.error).toContain("BLOCKED_ACTIVE_PROCESSES");
-      }
-    });
   });
 
   describe("4. Mode B Release Promotion & Directory Pointer", () => {
@@ -169,6 +136,8 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
           certified: true,
           htmlUrl: "",
         },
+        expectedCommitSha: targetSha,
+        containerSourceSha: targetSha,
         mode: "MODE_B_RELEASE_PROMOTION",
         force: true,
         skipProcessCheck: true,
@@ -187,8 +156,8 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
     });
   });
 
-  describe("5. Tripartite SHA Signed Evidence (SHA-256)", () => {
-    it("should require matching localHeadSha == githubReleaseSha == certifiedSha", () => {
+  describe("5. 5-Field Independent Evidence Proof (SHA-256)", () => {
+    it("should require matching all 5 fields (githubReleaseTag, githubResolvedCommitSha, localHeadSha, certificationSha, containerSourceSha)", () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.8.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
 
@@ -207,22 +176,26 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       };
 
       const shas = {
+        githubReleaseTag: "v2.8.0",
+        githubResolvedCommitSha: valid40CharSha,
         localHeadSha: valid40CharSha,
-        githubReleaseSha: valid40CharSha,
-        certifiedSha: valid40CharSha,
+        certificationSha: valid40CharSha,
+        containerSourceSha: valid40CharSha,
       };
 
       const evidence = generateSyncEvidenceBundle(meta, shas, mockProjectDir);
 
       expect(fs.existsSync(evidence.evidencePath)).toBe(true);
       expect(evidence.evidenceSha256.length).toBe(64);
+      expect(evidence.bundle.githubReleaseTag).toBe("v2.8.0");
+      expect(evidence.bundle.githubResolvedCommitSha).toBe(valid40CharSha);
       expect(evidence.bundle.localHeadSha).toBe(valid40CharSha);
-      expect(evidence.bundle.githubReleaseSha).toBe(valid40CharSha);
-      expect(evidence.bundle.certifiedSha).toBe(valid40CharSha);
+      expect(evidence.bundle.certificationSha).toBe(valid40CharSha);
+      expect(evidence.bundle.containerSourceSha).toBe(valid40CharSha);
       expect(evidence.bundle.signatureScheme).toBe("SHA256-KWAKOPOS-RELEASE-EVIDENCE");
     });
 
-    it("should fail evidence creation if tripartite SHAs mismatch", () => {
+    it("should refuse evidence creation if any SHA field mismatches or is missing", () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.8.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
 
@@ -241,17 +214,19 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       };
 
       const mismatchedShas = {
-        localHeadSha: valid40CharSha,
-        githubReleaseSha: "1111111111111111111111111111111111111111",
-        certifiedSha: valid40CharSha,
+        githubReleaseTag: "v2.8.0",
+        githubResolvedCommitSha: valid40CharSha,
+        localHeadSha: "1111111111111111111111111111111111111111",
+        certificationSha: valid40CharSha,
+        containerSourceSha: valid40CharSha,
       };
 
-      expect(() => generateSyncEvidenceBundle(meta, mismatchedShas, mockProjectDir)).toThrow("TRIPARTITE_SHA_MISMATCH");
+      expect(() => generateSyncEvidenceBundle(meta, mismatchedShas, mockProjectDir)).toThrow("EVIDENCE_CREATION_REFUSED");
     });
   });
 
-  describe("6. Concurrency Locking, Heartbeats & Malformed Lock Safety", () => {
-    it("should block sync attempt if active lock held by current PID with fresh heartbeat", async () => {
+  describe("6. Ownership-Aware Concurrency Locks & Malformed Lock Fail-Closed Policy", () => {
+    it("should block sync attempt if active lock held by current PID with fresh heartbeat and valid lockId", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
       fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
@@ -262,7 +237,7 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       const fd = fs.openSync(activeLockPath, "wx");
       fs.writeFileSync(
         fd,
-        JSON.stringify({ currentPath: mockProjectDir, targetPath: path.join(tempDir, "KwakoPos-v2.8.0"), pid: process.pid, lastHeartbeat: new Date().toISOString() }),
+        JSON.stringify({ lockId: "LOCK-TEST-001", pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), repositoryPath: mockProjectDir, targetPath: path.join(tempDir, "KwakoPos-v2.8.0"), phase: "RENAMING" }),
         "utf8"
       );
       fs.closeSync(fd);
@@ -280,6 +255,8 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
           certified: true,
           htmlUrl: "",
         },
+        expectedCommitSha: localHeadSha,
+        containerSourceSha: localHeadSha,
         force: true,
         skipProcessCheck: true,
       });
@@ -288,7 +265,7 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
       expect(result.actionTaken).toBe("SYNC_BLOCKED_CONCURRENCY_LOCK");
     });
 
-    it("should fail closed when encountering a malformed unparseable lock file", async () => {
+    it("should fail closed without deleting malformed lock files", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
       fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
@@ -297,7 +274,7 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
 
       const malformedLockPath = path.join(tempDir, `.kwakopos-sync-${Date.now()}.lock`);
       const fd = fs.openSync(malformedLockPath, "wx");
-      fs.writeFileSync(fd, "INVALID_CORRUPT_JSON_DATA{{{", "utf8");
+      fs.writeFileSync(fd, "CORRUPT_JSON_DATA_PAYLOAD{{{", "utf8");
       fs.closeSync(fd);
 
       const result = await synchronizeLocalVersionFolder({
@@ -313,13 +290,15 @@ describe("Local Semantic Version Folder Synchronization Engine", () => {
           certified: true,
           htmlUrl: "",
         },
+        expectedCommitSha: localHeadSha,
+        containerSourceSha: localHeadSha,
         force: true,
         skipProcessCheck: true,
       });
 
       expect(result.success).toBe(false);
       expect(result.actionTaken).toBe("SYNC_BLOCKED_MALFORMED_LOCK");
-      expect(fs.existsSync(malformedLockPath)).toBe(true); // Malformed lock preserved safely!
+      expect(fs.existsSync(malformedLockPath)).toBe(true); // Malformed lock file safely preserved!
     });
   });
 

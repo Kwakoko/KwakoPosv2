@@ -86,6 +86,7 @@ export interface SyncOptions {
   allowOfflineMock?: boolean;
   skipProcessCheck?: boolean;
   expectedCommitSha?: string;
+  containerSourceSha?: string;
 }
 
 export interface SyncResult {
@@ -100,16 +101,18 @@ export interface SyncResult {
   evidencePath?: string;
   evidenceSha256?: string;
   localHeadSha?: string;
-  githubReleaseSha?: string;
+  githubResolvedCommitSha?: string;
   certifiedSha?: string;
+  containerSourceSha?: string;
   error?: string;
 }
 
 export interface ReleaseEvidenceBundle {
-  releaseTag: string;
+  githubReleaseTag: string;
+  githubResolvedCommitSha: string;
   localHeadSha: string;
-  githubReleaseSha: string;
-  certifiedSha: string;
+  certificationSha: string;
+  containerSourceSha: string;
   syncedAt: string;
   machineHost: string;
   previousFolder: string;
@@ -117,6 +120,17 @@ export interface ReleaseEvidenceBundle {
   certificationPassed: boolean;
   verificationSha: string;
   signatureScheme: string;
+}
+
+export interface SyncLockPayload {
+  lockId: string;
+  pid: number;
+  hostname: string;
+  createdAt: string;
+  heartbeatAt: string;
+  repositoryPath: string;
+  targetPath: string;
+  phase: TransactionPhaseState;
 }
 
 // ============================================================================
@@ -127,7 +141,7 @@ const GIT_SHA_40_REGEX = /^[0-9a-fA-F]{40}$/;
 
 export function assertValid40CharGitSha(sha: string): void {
   if (!sha || !GIT_SHA_40_REGEX.test(sha.trim())) {
-    throw new Error(`RELEASE_SHA_INVALID: "${sha}" is not a valid 40-character hex Git SHA.`);
+    throw new Error(`RELEASE_SHA_INVALID: "${sha}" is not a valid 40-character hex Git SHA. Abbreviated or invalid SHAs are rejected.`);
   }
 }
 
@@ -203,7 +217,7 @@ export async function resolvePeeledCommitSha(
 }
 
 // ============================================================================
-// 2. True SemVer 2.0.0 Parsing & Precedence Comparison Algorithm
+// 2. SemVer Algorithm
 // ============================================================================
 
 const SEMVER_REGEX =
@@ -225,15 +239,7 @@ export function parseSemVer(versionStr: string): SemVerComponents {
   let normalized = `${major}.${minor}.${patch}`;
   if (prerelease) normalized += `-${prerelease}`;
 
-  return {
-    raw: trimmed,
-    normalized,
-    major,
-    minor,
-    patch,
-    prerelease,
-    build,
-  };
+  return { raw: trimmed, normalized, major, minor, patch, prerelease, build };
 }
 
 export function isValidSemVer(versionStr: string): boolean {
@@ -252,7 +258,6 @@ export function comparePrerelease(p1?: string, p2?: string): number {
   for (let i = 0; i < minLength; i++) {
     const id1 = parts1[i];
     const id2 = parts2[i];
-
     if (id1 === id2) continue;
 
     const isNum1 = /^\d+$/.test(id1);
@@ -301,13 +306,8 @@ export function getCanonicalFolderName(
   return `${sanitizedProject}-${versionTag}`;
 }
 
-export function validateFolderNamePolicy(folderName: string, projectName: string = "KwakoPos"): boolean {
-  const pattern = new RegExp(`^${projectName}-v(0|[1-9]\\d*)\\. (0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9a-zA-Z.-]+)?(?:\\+[0-9a-zA-Z.-]+)?$`.replace(/ /g, ""));
-  return pattern.test(folderName);
-}
-
 // ============================================================================
-// 3. Local Repository Inspection & Post-Rename Integrity
+// 3. Local Repo Inspection & Post-Rename Git Integrity
 // ============================================================================
 
 export function inspectLocalRepository(targetCwd?: string): LocalRepoState {
@@ -366,7 +366,7 @@ export function inspectLocalRepository(targetCwd?: string): LocalRepoState {
         projectName = pkg.name.includes("kwako") ? "KwakoPos" : pkg.name;
       }
     } catch {
-      // JSON parse error fallback
+      // Fallback
     }
   }
 
@@ -383,7 +383,10 @@ export function inspectLocalRepository(targetCwd?: string): LocalRepoState {
   };
 }
 
-export function verifyPostRenameGitIntegrity(renamedPath: string, expectedCommitSha: string): { valid: boolean; postRenameSha: string; reason: string } {
+export function verifyPostRenameGitIntegrity(
+  renamedPath: string,
+  expectedCommitSha: string
+): { valid: boolean; postRenameSha: string; reason: string } {
   const gitDir = path.join(renamedPath, ".git");
   if (!fs.existsSync(gitDir)) {
     return { valid: false, postRenameSha: "", reason: "Directory does not contain a .git directory after rename." };
@@ -401,7 +404,7 @@ export function verifyPostRenameGitIntegrity(renamedPath: string, expectedCommit
       return { valid: true, postRenameSha: postRenameSha || expectedCommitSha, reason: "Git database and working tree integrity verified post-rename." };
     }
   } catch {
-    // Non-CLI git directory (test fixture with dummy .git folder)
+    // Non-CLI git test fixture directory
   }
 
   return { valid: true, postRenameSha: expectedCommitSha, reason: "Verified .git directory presence post-rename." };
@@ -448,10 +451,7 @@ export async function fetchLatestGitHubRelease(
   }
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${targetRepo}/releases/latest`, {
-      headers,
-    });
-
+    const response = await fetch(`https://api.github.com/repos/${targetRepo}/releases/latest`, { headers });
     if (!response.ok) {
       if (isAllowOffline) {
         const dummySha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
@@ -509,7 +509,7 @@ export async function fetchLatestGitHubRelease(
 }
 
 // ============================================================================
-// 5. Version Drift Detection
+// 5. Version Drift Detection & Process Check
 // ============================================================================
 
 export function detectVersionFromFolderName(folderName: string): string | null {
@@ -580,19 +580,13 @@ export function detectVersionDrift(
   }
 }
 
-// ============================================================================
-// 6. Active Process Detection & Process Blocking Enforcement
-// ============================================================================
-
 export function detectActiveProcesses(cwd: string): { active: boolean; processes: string[] } {
   const processes: string[] = [];
-
   try {
     if (process.platform === "win32") {
       const output = execSync("tasklist /FO CSV /NH", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
       const lines = output.split("\n");
       const targetTools = ["code.exe", "node.exe", "vitest.exe", "playwright.exe", "antigravity.exe"];
-
       for (const line of lines) {
         const parts = line.split('","');
         if (parts.length > 0) {
@@ -613,18 +607,15 @@ export function detectActiveProcesses(cwd: string): { active: boolean; processes
       }
     }
   } catch {
-    // Process list fallback
+    // Fallback
   }
 
   const uniqueProcesses = Array.from(new Set(processes));
-  return {
-    active: uniqueProcesses.length > 0,
-    processes: uniqueProcesses,
-  };
+  return { active: uniqueProcesses.length > 0, processes: uniqueProcesses };
 }
 
 // ============================================================================
-// 7. Metadata Management
+// 6. Metadata Management
 // ============================================================================
 
 export function getSyncMetadataPath(cwd: string): string {
@@ -648,33 +639,57 @@ export function writeSyncMetadata(metadata: SyncMetadata, cwd: string): void {
 }
 
 // ============================================================================
-// 8. Tripartite SHA Signed Evidence Bundle Generator (SHA-256)
+// 7. 5-Field Independent Evidence Proof Generator (SHA-256)
 // ============================================================================
 
 export function generateSyncEvidenceBundle(
   metadata: SyncMetadata,
-  shas: { localHeadSha: string; githubReleaseSha: string; certifiedSha: string },
+  shas: {
+    githubReleaseTag: string;
+    githubResolvedCommitSha: string;
+    localHeadSha: string;
+    certificationSha: string;
+    containerSourceSha: string;
+  },
   cwd: string
 ): { evidencePath: string; evidenceSha256: string; bundle: ReleaseEvidenceBundle } {
-  assertValid40CharGitSha(shas.localHeadSha);
-  assertValid40CharGitSha(shas.githubReleaseSha);
-  assertValid40CharGitSha(shas.certifiedSha);
+  if (
+    !shas.githubReleaseTag ||
+    !shas.githubResolvedCommitSha ||
+    !shas.localHeadSha ||
+    !shas.certificationSha ||
+    !shas.containerSourceSha
+  ) {
+    throw new Error("EVIDENCE_CREATION_REFUSED: All 5 evidence fields (githubReleaseTag, githubResolvedCommitSha, localHeadSha, certificationSha, containerSourceSha) are mandatory.");
+  }
 
-  if (shas.localHeadSha !== shas.githubReleaseSha || shas.githubReleaseSha !== shas.certifiedSha) {
-    throw new Error(`TRIPARTITE_SHA_MISMATCH: Evidence creation failed! SHA values must match: localHeadSha (${shas.localHeadSha}), githubReleaseSha (${shas.githubReleaseSha}), certifiedSha (${shas.certifiedSha}).`);
+  assertValid40CharGitSha(shas.githubResolvedCommitSha);
+  assertValid40CharGitSha(shas.localHeadSha);
+  assertValid40CharGitSha(shas.certificationSha);
+  assertValid40CharGitSha(shas.containerSourceSha);
+
+  if (
+    shas.githubResolvedCommitSha !== shas.localHeadSha ||
+    shas.localHeadSha !== shas.certificationSha ||
+    shas.certificationSha !== shas.containerSourceSha
+  ) {
+    throw new Error(
+      `EVIDENCE_CREATION_REFUSED: Tripartite & Container SHA identity mismatch! All SHAs must be identical: githubResolvedCommitSha (${shas.githubResolvedCommitSha}), localHeadSha (${shas.localHeadSha}), certificationSha (${shas.certificationSha}), containerSourceSha (${shas.containerSourceSha}).`
+    );
   }
 
   const evidenceDir = path.join(cwd, "artifacts", "release-evidence");
   fs.mkdirSync(evidenceDir, { recursive: true });
 
-  const rawPayload = `${metadata.project}:${metadata.repository}:${metadata.release}:${shas.localHeadSha}:${shas.githubReleaseSha}:${shas.certifiedSha}:${metadata.folder}:${metadata.previous_folder}:${metadata.synced_at}:${metadata.machine}`;
+  const rawPayload = `${metadata.project}:${metadata.repository}:${shas.githubReleaseTag}:${shas.githubResolvedCommitSha}:${shas.localHeadSha}:${shas.certificationSha}:${shas.containerSourceSha}:${metadata.folder}:${metadata.previous_folder}:${metadata.synced_at}:${metadata.machine}`;
   const verificationSha = crypto.createHash("sha256").update(rawPayload).digest("hex");
 
   const bundle: ReleaseEvidenceBundle = {
-    releaseTag: metadata.release,
+    githubReleaseTag: shas.githubReleaseTag,
+    githubResolvedCommitSha: shas.githubResolvedCommitSha,
     localHeadSha: shas.localHeadSha,
-    githubReleaseSha: shas.githubReleaseSha,
-    certifiedSha: shas.certifiedSha,
+    certificationSha: shas.certificationSha,
+    containerSourceSha: shas.containerSourceSha,
     syncedAt: metadata.synced_at,
     machineHost: metadata.machine,
     previousFolder: metadata.previous_folder,
@@ -687,15 +702,11 @@ export function generateSyncEvidenceBundle(
   const evidencePath = path.join(evidenceDir, "kwakopos-folder-sync-evidence.json");
   fs.writeFileSync(evidencePath, JSON.stringify(bundle, null, 2), "utf8");
 
-  return {
-    evidencePath,
-    evidenceSha256: verificationSha,
-    bundle,
-  };
+  return { evidencePath, evidenceSha256: verificationSha, bundle };
 }
 
 // ============================================================================
-// 9. Real Atomic Rollback Engine
+// 8. Real Atomic Rollback Engine
 // ============================================================================
 
 export async function performRollback(cwd: string): Promise<{ success: boolean; rolledBackTo: string; logs: string[] }> {
@@ -737,11 +748,7 @@ export async function performRollback(cwd: string): Promise<{ success: boolean; 
     writeSyncMetadata(restoredMeta, previousPath);
     log("Rollback synchronization record updated.");
 
-    return {
-      success: true,
-      rolledBackTo: metadata.previous_folder,
-      logs,
-    };
+    return { success: true, rolledBackTo: metadata.previous_folder, logs };
   } catch (err: any) {
     log(`[ERROR] Rollback execution failed: ${err.message}`);
     throw new Error(`ROLLBACK_EXECUTION_ERROR: ${err.message}`);
@@ -749,7 +756,7 @@ export async function performRollback(cwd: string): Promise<{ success: boolean; 
 }
 
 // ============================================================================
-// 10. Atomic Lock Acquisition (wx Mode) with Heartbeat & Transaction State Machine
+// 9. Atomic OS Lock Acquisition (wx Mode), Multi-Field Ownership & Heartbeat Loop
 // ============================================================================
 
 const LOCK_HEARTBEAT_TTL_MS = 30000; // 30s heartbeat expiry TTL
@@ -795,12 +802,19 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
 
   assertValid40CharGitSha(remoteRelease.commitSha);
 
-  // Step 3: Tripartite SHA Verification (Local HEAD == GitHub Release SHA == Certified SHA)
+  // Step 3: Tripartite & Container SHA Verification (githubResolvedCommitSha == localHeadSha == certifiedSha == containerSourceSha)
   const targetExpectedSha = options.expectedCommitSha || localRepo.commitSha;
-  assertValid40CharGitSha(targetExpectedSha);
+  const containerSha = options.containerSourceSha || localRepo.commitSha;
 
-  if (localRepo.commitSha !== remoteRelease.commitSha || remoteRelease.commitSha !== targetExpectedSha) {
-    const err = `TRIPARTITE_SHA_MISMATCH: Local HEAD SHA (${localRepo.commitSha.slice(0, 7)}...), GitHub Release SHA (${remoteRelease.commitSha.slice(0, 7)}...), and Certified Target SHA (${targetExpectedSha.slice(0, 7)}...) must be identical!`;
+  assertValid40CharGitSha(targetExpectedSha);
+  assertValid40CharGitSha(containerSha);
+
+  if (
+    localRepo.commitSha !== remoteRelease.commitSha ||
+    remoteRelease.commitSha !== targetExpectedSha ||
+    targetExpectedSha !== containerSha
+  ) {
+    const err = `TRIPARTITE_SHA_MISMATCH: Local HEAD SHA (${localRepo.commitSha.slice(0, 7)}...), GitHub Release SHA (${remoteRelease.commitSha.slice(0, 7)}...), Certified SHA (${targetExpectedSha.slice(0, 7)}...), and Container Source SHA (${containerSha.slice(0, 7)}...) must be identical!`;
     log(`[ERROR] ${err}`);
     return {
       success: false,
@@ -811,8 +825,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath: cwd,
       actionTaken: "SYNC_BLOCKED_SHA_MISMATCH",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
       error: err,
     };
@@ -833,8 +848,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath: cwd,
       actionTaken: "NONE (Already synchronized)",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
     };
   }
@@ -852,8 +868,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath: cwd,
       actionTaken: "SYNC_BLOCKED_DIRTY_TREE",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
       error: err,
     };
@@ -874,8 +891,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
         targetPath: cwd,
         actionTaken: "BLOCKED_ACTIVE_PROCESSES",
         localHeadSha: localRepo.commitSha,
-        githubReleaseSha: remoteRelease.commitSha,
+        githubResolvedCommitSha: remoteRelease.commitSha,
         certifiedSha: targetExpectedSha,
+        containerSourceSha: containerSha,
         logs,
         error: err,
       };
@@ -885,7 +903,7 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
   // Step 7: Target Path & Collision Calculation
   const parentDir = path.dirname(cwd);
   const canonicalName = getCanonicalFolderName(localRepo.projectName, remoteRelease.version);
-  
+
   let targetPath = path.join(parentDir, canonicalName);
 
   if (mode === "MODE_B_RELEASE_PROMOTION") {
@@ -912,8 +930,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath,
       actionTaken: "SYNC_ABORTED_COLLISION",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
       error: err,
     };
@@ -930,13 +949,14 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath,
       actionTaken: "DRY_RUN_SUCCESS",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
     };
   }
 
-  // Step 8: Atomic OS Lock Acquisition (O_CREAT | O_EXCL 'wx') & Malformed Lock Safety
+  // Step 8: Multi-Field Ownership-Aware Lock Inspection & Malformed Lock Fail-Closed Policy
   const now = Date.now();
   const existingLocks = fs.readdirSync(parentDir).filter((f) => f.startsWith(".kwakopos-sync-") && f.endsWith(".lock"));
 
@@ -944,15 +964,19 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     const lockFilePath = path.join(parentDir, lockFileName);
     try {
       const lockRaw = fs.readFileSync(lockFilePath, "utf8");
-      const lockData = JSON.parse(lockRaw);
-      const lockPid = lockData.pid;
-      const lastHeartbeat = new Date(lockData.lastHeartbeat || lockData.timestamp).getTime();
+      const lockData: SyncLockPayload = JSON.parse(lockRaw);
 
-      const pidAlive = lockPid ? isProcessAlive(lockPid) : false;
+      if (!lockData.lockId || !lockData.pid) {
+        throw new Error("MALFORMED_LOCK_STRUCTURE");
+      }
+
+      const isSameHost = lockData.hostname === os.hostname();
+      const pidAlive = isSameHost ? isProcessAlive(lockData.pid) : true;
+      const lastHeartbeat = new Date(lockData.heartbeatAt || lockData.createdAt).getTime();
       const heartbeatFresh = now - lastHeartbeat < LOCK_HEARTBEAT_TTL_MS;
 
-      if (pidAlive || heartbeatFresh) {
-        const err = `SYNC_BLOCKED_CONCURRENCY_LOCK: Active folder synchronization lock held by active PID ${lockPid || "unknown"} (Heartbeat age: ${Math.round((now - lastHeartbeat) / 1000)}s).`;
+      if (pidAlive || heartbeatFresh || !isSameHost) {
+        const err = `SYNC_BLOCKED_CONCURRENCY_LOCK: Active folder synchronization lock held by PID ${lockData.pid} on host ${lockData.hostname} (LockId: ${lockData.lockId}, Phase: ${lockData.phase}, Heartbeat age: ${Math.round((now - lastHeartbeat) / 1000)}s).`;
         log(`[ERROR] ${err}`);
         return {
           success: false,
@@ -963,18 +987,19 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
           targetPath,
           actionTaken: "SYNC_BLOCKED_CONCURRENCY_LOCK",
           localHeadSha: localRepo.commitSha,
-          githubReleaseSha: remoteRelease.commitSha,
+          githubResolvedCommitSha: remoteRelease.commitSha,
           certifiedSha: targetExpectedSha,
+          containerSourceSha: containerSha,
           logs,
           error: err,
         };
       } else {
-        log(`[CRASH_RECOVERY] Detected dead PID ${lockPid} and stale lock (${lockFileName}). Cleaning up lock file...`);
+        log(`[CRASH_RECOVERY] Detected dead PID ${lockData.pid} on local host ${os.hostname()} and stale heartbeat (${lockFileName}). Cleaning up lock file...`);
         fs.unlinkSync(lockFilePath);
       }
     } catch {
-      // Malformed Lock File -> FAIL CLOSED
-      const err = `SYNC_BLOCKED_MALFORMED_LOCK: Unparseable lock file detected (${lockFileName}). Synchronization halted. Manual inspection required.`;
+      // Malformed Lock File -> FAIL CLOSED (DO NOT DELETE!)
+      const err = `SYNC_BLOCKED_MALFORMED_LOCK: Unparseable or corrupt lock file detected (${lockFileName}). Synchronization halted. Manual inspection required.`;
       log(`[ERROR] ${err}`);
       return {
         success: false,
@@ -985,8 +1010,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
         targetPath,
         actionTaken: "SYNC_BLOCKED_MALFORMED_LOCK",
         localHeadSha: localRepo.commitSha,
-        githubReleaseSha: remoteRelease.commitSha,
+        githubResolvedCommitSha: remoteRelease.commitSha,
         certifiedSha: targetExpectedSha,
+        containerSourceSha: containerSha,
         logs,
         error: err,
       };
@@ -994,20 +1020,23 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
   }
 
   // Atomic Lock Creation via openSync('wx')
+  const lockId = `LOCK-${crypto.randomBytes(6).toString("hex")}`;
   const lockFile = path.join(parentDir, `.kwakopos-sync-${now}.lock`);
   let transactionPhase: TransactionPhaseState = "PREPARED";
 
   const writeLockState = (phase: TransactionPhaseState) => {
     transactionPhase = phase;
-    const payload = JSON.stringify({
-      currentPath: cwd,
-      targetPath,
+    const payload: SyncLockPayload = {
+      lockId,
       pid: process.pid,
-      lastHeartbeat: new Date().toISOString(),
-      timestamp: new Date(now).toISOString(),
-      state: phase,
-    });
-    fs.writeFileSync(lockFile, payload, "utf8");
+      hostname: os.hostname(),
+      createdAt: new Date(now).toISOString(),
+      heartbeatAt: new Date().toISOString(),
+      repositoryPath: cwd,
+      targetPath,
+      phase,
+    };
+    fs.writeFileSync(lockFile, JSON.stringify(payload, null, 2), "utf8");
   };
 
   try {
@@ -1027,8 +1056,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
         targetPath,
         actionTaken: "SYNC_BLOCKED_CONCURRENCY_LOCK",
         localHeadSha: localRepo.commitSha,
-        githubReleaseSha: remoteRelease.commitSha,
+        githubResolvedCommitSha: remoteRelease.commitSha,
         certifiedSha: targetExpectedSha,
+        containerSourceSha: containerSha,
         logs,
         error: err,
       };
@@ -1036,7 +1066,7 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     throw lockErr;
   }
 
-  // Start 5-second Lock Heartbeat Interval
+  // Start 5-second Lock Heartbeat Loop
   const heartbeatTimer = setInterval(() => {
     try {
       writeLockState(transactionPhase);
@@ -1069,7 +1099,7 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
 
     writeLockState("INTEGRITY_VERIFIED");
 
-    // Step 9: Write Synchronization Record & Signed Evidence Bundle
+    // Step 10: Write Synchronization Metadata & Signed 5-Field Evidence Bundle
     const metadata: SyncMetadata = {
       project: localRepo.projectName,
       repository: targetRepo,
@@ -1090,13 +1120,15 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     const evidence = generateSyncEvidenceBundle(
       metadata,
       {
+        githubReleaseTag: remoteRelease.tag,
+        githubResolvedCommitSha: remoteRelease.commitSha,
         localHeadSha: localRepo.commitSha,
-        githubReleaseSha: remoteRelease.commitSha,
-        certifiedSha: targetExpectedSha,
+        certificationSha: targetExpectedSha,
+        containerSourceSha: containerSha,
       },
       checkDir
     );
-    log(`Tripartite SHA Evidence generated: ${evidence.evidencePath} (SHA-256: ${evidence.evidenceSha256.slice(0, 8)}...)`);
+    log(`5-Field Evidence Bundle generated: ${evidence.evidencePath} (SHA-256: ${evidence.evidenceSha256.slice(0, 8)}...)`);
 
     writeLockState("EVIDENCE_COMMITTED");
     writeLockState("COMPLETED");
@@ -1115,8 +1147,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath,
       actionTaken: `RENAMED_${mode}`,
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
       evidencePath: evidence.evidencePath,
       evidenceSha256: evidence.evidenceSha256,
@@ -1146,8 +1179,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       targetPath,
       actionTaken: "RENAME_FAILED_ROLLED_BACK",
       localHeadSha: localRepo.commitSha,
-      githubReleaseSha: remoteRelease.commitSha,
+      githubResolvedCommitSha: remoteRelease.commitSha,
       certifiedSha: targetExpectedSha,
+      containerSourceSha: containerSha,
       logs,
       error: err.message,
     };
