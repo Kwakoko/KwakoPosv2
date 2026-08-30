@@ -2,12 +2,9 @@
   "isTampered": true,
   "protectedFilesChecked": 7,
   "modifiedProtectedFiles": [
-    ".github/workflows/locked-release-engine.yml",
-    "scripts/release/emergency-release.ts",
-    "scripts/release/semver-calculator.ts",
-    "scripts/release/tamper-detector.ts"
+    ".github/workflows/production-release-certification.yml"
   ],
   "branchName": "main",
-  "gitSha": "1f19f212dc0646b6b8d6b525347fac8069bef535",
-  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/locked-release-engine.yml, scripts/release/emergency-release.ts, scripts/release/semver-calculator.ts, scripts/release/tamper-detector.ts"
+  "gitSha": "50d9974c5fc4c90c941b4234884a5b1073772902",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/production-release-certification.yml"
 }

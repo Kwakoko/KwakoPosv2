@@ -118,6 +118,10 @@ export class SessionManager {
       createdAt: new Date(),
     };
 
+    if (!this.storeProvider && (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification")) {
+      throw new Error("SECURITY_FATAL: Persistent PostgreSQL session store provider is MANDATORY in production environments!");
+    }
+
     if (this.storeProvider) {
       await this.storeProvider.create(record);
     } else {

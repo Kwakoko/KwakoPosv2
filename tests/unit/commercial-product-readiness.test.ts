@@ -45,7 +45,7 @@ describe("Phase 16 — Commercial Product Readiness Engine Suite", () => {
 
       // Positive = 66, Negative = 5 -> Raw = 61. Normalized = (61 + 30) = 91
       expect(result.normalizedScore).toBeGreaterThanOrEqual(88);
-      expect(result.tierAssignment).toBe("TIER1_FLAGSHIP");
+      expect(result.tierAssignment).toBe("TIER_1_FLAGSHIP");
       expect(result.actionRecommendation).toBe("INVEST");
     });
 
@@ -64,7 +64,7 @@ describe("Phase 16 — Commercial Product Readiness Engine Suite", () => {
         complianceRiskScore: 2,
       });
 
-      expect(result.tierAssignment).toBe("TIER2_STRATEGIC");
+      expect(result.tierAssignment).toBe("TIER_2_STRATEGIC");
       expect(["MAINTAIN", "PILOT"]).toContain(result.actionRecommendation);
     });
   });

@@ -1,6 +1,6 @@
 {
   "name": "kwakopos2-monorepo",
-  "version": "2.5.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -73,24 +73,6 @@
     "certify:platform-intelligence": "tsx scripts/certification/runPlatformIntelligenceCertification.ts",
     "certify:full-system": "tsx scripts/certification/runFullSystemCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     "certify:restaurant": "tsx scripts/certification/runRestaurantCertification.ts",
     "certify:pharmacy": "tsx scripts/certification/runPharmacyCertification.ts",
     "certify:lawfirm": "tsx scripts/certification/runLawFirmCertification.ts",

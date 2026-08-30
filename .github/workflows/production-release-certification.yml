@@ -136,9 +136,9 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
-          if (!fs.existsSync(p)) { console.log('Candidate deployment evidence missing, skipping identity export'); process.exit(0); }
+          if (!fs.existsSync(p)) { console.error('RELEASE_BLOCKED: Candidate deployment evidence file missing'); process.exit(1); }
           const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (!c.candidateUrl || !c.candidateRevision) { console.log('Candidate identity incomplete, skipping'); process.exit(0); }
+          if (!c.candidateUrl || !c.candidateRevision) { console.error('RELEASE_BLOCKED: Candidate identity incomplete'); process.exit(1); }
           fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\n`);
           NODE
 
