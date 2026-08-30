@@ -153,8 +153,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const server = Fastify({ logger: true });
   const productionPersistence = opts.productionPersistence ?? isProductionEnv(config);
 
-  // Fastify CORS setup
-  server.register(cors, { origin: "*" });
+  // Fastify CORS setup - locked in production
+  const corsOrigin = isProductionEnv(config)
+    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
+    : "*";
+  server.register(cors, { origin: corsOrigin });
 
   const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
@@ -236,17 +239,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      const testTenantId = req.headers["x-tenant-id"] as string;
-      const testBranchId = req.headers["x-branch-id"] as string;
-      const testUserId = req.headers["x-user-id"] as string;
-      if (testTenantId && testBranchId && testUserId) {
-        req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
-        if (req.traceContext) {
-          req.traceContext.tenantId = testTenantId;
-          req.traceContext.branchId = testBranchId;
-          req.traceContext.userId = testUserId;
+      // In production environments, test headers MUST NOT bypass authentication
+      if (!isProductionEnv(config)) {
+        const testTenantId = req.headers["x-tenant-id"] as string;
+        const testBranchId = req.headers["x-branch-id"] as string;
+        const testUserId = req.headers["x-user-id"] as string;
+        if (testTenantId && testBranchId && testUserId) {
+          req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
+          if (req.traceContext) {
+            req.traceContext.tenantId = testTenantId;
+            req.traceContext.branchId = testBranchId;
+            req.traceContext.userId = testUserId;
+          }
+          return;
         }
-        return;
       }
       return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization header" } });
     }

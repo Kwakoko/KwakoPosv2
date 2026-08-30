@@ -54,7 +54,16 @@ export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Confi
     ...process.env,
     ...overrideEnv,
   };
-  return ConfigSchema.parse(env);
+  const parsed = ConfigSchema.parse(env);
+  if (parsed.NODE_ENV === "production" || parsed.NODE_ENV === "production-certification") {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("SECURITY_FATAL: DATABASE_URL environment variable is MANDATORY in production!");
+    }
+    if (!process.env.JWT_SECRET) {
+      throw new Error("SECURITY_FATAL: JWT_SECRET environment variable is MANDATORY in production!");
+    }
+  }
+  return parsed;
 }
 
 export interface ReleaseIdentity {

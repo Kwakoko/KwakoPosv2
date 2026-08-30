@@ -81,18 +81,16 @@ jobs:
         run: npx tsx scripts/ops/synthetic-monitor.ts
 
       - name: Validate Google Cloud configuration
-        continue-on-error: true
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
-          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
           [[ -n "$GCP_PROJECT_ID" ]] || { echo "RELEASE_BLOCKED: GCP project missing"; exit 1; }
           [[ -n "$GCP_WIF_PROVIDER" && -n "$GCP_SERVICE_ACCOUNT" ]] || { echo "RELEASE_BLOCKED: GCP WIF configuration missing"; exit 1; }
 
       - name: Authenticate to Google Cloud
-        continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -100,13 +98,11 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup Google Cloud SDK
-        continue-on-error: true
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Verify Google Cloud access
-        continue-on-error: true
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
           gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .
@@ -114,31 +110,26 @@ jobs:
           gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectId)' | grep -Fx "$GCP_PROJECT_ID"
 
       - name: Configure Artifact Registry authentication
-        continue-on-error: true
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Install Chromium
-        continue-on-error: true
         run: npm run production:browser:install
 
       - name: Synchronize production database schema
-        continue-on-error: true
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require' }}
-        run: npm run db:push
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
 
       - name: Deploy immutable Cloud Run candidate at 0 percent traffic
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
         run: npm run release:deploy-candidate
 
       - name: Export and validate exact candidate identity
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -152,38 +143,33 @@ jobs:
           NODE
 
       - name: Certify exact candidate over HTTPS
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:certify:deployed
 
       - name: Run Browser A → Cloud Run → Browser B certification
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
         run: npm run production:browser
 
       - name: Promote exact certified revision to 100 percent
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
         run: npm run release:promote
 
       - name: Publish official GitHub release and immutable tag
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx tsx scripts/release/publish-github-release.ts
 
       - name: Execute production operations and governance gate
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'

@@ -77,8 +77,20 @@ export interface SessionRecord {
   createdAt: Date;
 }
 
+export interface SessionStoreProvider {
+  create(record: SessionRecord): Promise<void>;
+  get(sessionId: string): Promise<SessionRecord | null>;
+  update(record: SessionRecord): Promise<void>;
+  revokeAllForUser(tenantId: string, userId: string): Promise<number>;
+}
+
 export class SessionManager {
   private inMemorySessions = new Map<string, SessionRecord>();
+  private storeProvider: SessionStoreProvider | null = null;
+
+  public setStoreProvider(provider: SessionStoreProvider) {
+    this.storeProvider = provider;
+  }
 
   hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
@@ -106,7 +118,11 @@ export class SessionManager {
       createdAt: new Date(),
     };
 
-    this.inMemorySessions.set(sessionId, record);
+    if (this.storeProvider) {
+      await this.storeProvider.create(record);
+    } else {
+      this.inMemorySessions.set(sessionId, record);
+    }
     return { sessionId, refreshToken, expiresAt };
   }
 
@@ -115,7 +131,10 @@ export class SessionManager {
     providedRefreshToken: string,
     userPayload: Omit<JwtPayload, "deviceId">
   ): Promise<{ accessToken: string; refreshToken: string } | null> {
-    const session = this.inMemorySessions.get(sessionId);
+    const session = this.storeProvider
+      ? await this.storeProvider.get(sessionId)
+      : this.inMemorySessions.get(sessionId);
+
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
       return null;
     }
@@ -123,11 +142,17 @@ export class SessionManager {
     const providedHash = this.hashToken(providedRefreshToken);
     if (session.refreshTokenHash !== providedHash) {
       session.revokedAt = new Date();
+      if (this.storeProvider) {
+        await this.storeProvider.update(session);
+      }
       return null;
     }
 
     const newRefreshToken = generateRefreshToken();
     session.refreshTokenHash = this.hashToken(newRefreshToken);
+    if (this.storeProvider) {
+      await this.storeProvider.update(session);
+    }
 
     const payload: JwtPayload = {
       ...userPayload,
@@ -139,15 +164,24 @@ export class SessionManager {
   }
 
   async revokeSession(sessionId: string): Promise<boolean> {
-    const session = this.inMemorySessions.get(sessionId);
+    const session = this.storeProvider
+      ? await this.storeProvider.get(sessionId)
+      : this.inMemorySessions.get(sessionId);
+
     if (session) {
       session.revokedAt = new Date();
+      if (this.storeProvider) {
+        await this.storeProvider.update(session);
+      }
       return true;
     }
     return false;
   }
 
   async revokeAllUserSessions(tenantId: string, userId: string): Promise<number> {
+    if (this.storeProvider) {
+      return this.storeProvider.revokeAllForUser(tenantId, userId);
+    }
     let count = 0;
     for (const session of this.inMemorySessions.values()) {
       if (session.tenantId === tenantId && session.userId === userId && !session.revokedAt) {
