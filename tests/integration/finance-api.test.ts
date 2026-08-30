@@ -16,7 +16,7 @@ describe("KwakoPos Finance REST API Integration Tests (/api/v1/finance/*)", () =
   });
 
   afterAll(async () => {
-    await server.close();
+    if (server) await server.close();
   });
 
   it("retrieves Chart of Accounts and creates custom account", async () => {

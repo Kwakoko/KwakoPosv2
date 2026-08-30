@@ -68,13 +68,17 @@ function initializeGitFixture(dir: string, version: string): string {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "KwakoPos", version }), "utf8");
   try {
-    execSync("git init -q", { cwd: dir, stdio: "ignore" });
-    execSync("git config user.email 'certification@kwakopos.local'", { cwd: dir, stdio: "ignore" });
-    execSync("git config user.name 'KwakoPos Certification'", { cwd: dir, stdio: "ignore" });
+    try {
+      execSync("git init -b main", { cwd: dir, stdio: "ignore" });
+    } catch {
+      execSync("git init", { cwd: dir, stdio: "ignore" });
+    }
+    execSync("git config user.email certification@kwakopos.local", { cwd: dir, stdio: "ignore" });
+    execSync("git config user.name KwakoPosCertification", { cwd: dir, stdio: "ignore" });
     execSync("git add package.json", { cwd: dir, stdio: "ignore" });
-    execSync("git commit -qm 'certification fixture'", { cwd: dir, stdio: "ignore" });
-  } catch {
-    throw new Error(`CERTIFICATION_FIXTURE_GIT_INIT_FAILED:${dir}`);
+    execSync("git commit -m \"certification fixture\"", { cwd: dir, stdio: "ignore" });
+  } catch (err: any) {
+    throw new Error(`CERTIFICATION_FIXTURE_GIT_INIT_FAILED:${dir} - ${err?.message || err}`);
   }
   return inspectLocalRepository(dir).commitSha;
 }
@@ -185,7 +189,7 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const activeFd = fs.openSync(heartbeatLock, "wx");
     fs.writeFileSync(activeFd, JSON.stringify({ lockId: "HEARTBEAT-ACTIVE", pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), repositoryPath: heartbeatDir, targetPath: path.join(tempTestDir, "target-active"), phase: "RENAMING" }), "utf8");
     fs.closeSync(activeFd);
-    const activeResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, expectedCommitSha: heartbeatSha, containerSourceSha: heartbeatSha });
+    const activeResult = await synchronizeLocalVersionFolder({ cwd: heartbeatDir, force: true, skipProcessCheck: true, mockRelease: { repo, tag: "v9.0.0", version: "9.0.0", commitSha: heartbeatSha, publishedAt: new Date().toISOString(), draft: false, prerelease: false, certified: true, htmlUrl: "" }, expectedCommitSha: heartbeatSha, containerSourceSha: heartbeatSha });
     const activeBlocked = !activeResult.success && activeResult.actionTaken === "SYNC_BLOCKED_CONCURRENCY_LOCK";
     if (fs.existsSync(heartbeatLock)) fs.unlinkSync(heartbeatLock);
 

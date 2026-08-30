@@ -2785,7 +2785,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // PHASE 16 — COMMERCIAL PRODUCT READINESS ENDPOINTS
   // =========================================================================
 
-  server.get("/api/v1/commercial/portfolio", async (req, reply) => {
+  server.get("/api/v1/commercial/summary", async (req, reply) => {
     const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
     return reply.status(200).send({ success: true, data: globalCommercialReadinessService.getCommercialPortfolioSummary() });
   });
@@ -2941,26 +2941,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalBarLoungeService.getFinancialSummary() });
   });
 
-  // Telecom & Technical Services Endpoints
-  server.get("/api/v1/telecom/sites", async (req, reply) => {
-    const { globalTelecomService } = await import("./services/telecomService.js");
-    return reply.status(200).send({ success: true, data: globalTelecomService.getSites() });
-  });
 
-  server.get("/api/v1/telecom/assets", async (req, reply) => {
-    const { globalTelecomService } = await import("./services/telecomService.js");
-    return reply.status(200).send({ success: true, data: globalTelecomService.getAssets() });
-  });
-
-  server.get("/api/v1/telecom/work-orders", async (req, reply) => {
-    const { globalTelecomService } = await import("./services/telecomService.js");
-    return reply.status(200).send({ success: true, data: globalTelecomService.getWorkOrders() });
-  });
-
-  server.get("/api/v1/telecom/financial-summary", async (req, reply) => {
-    const { globalTelecomService } = await import("./services/telecomService.js");
-    return reply.status(200).send({ success: true, data: globalTelecomService.getFinancialSummary() });
-  });
 
   // Phase 18 — Enterprise Customer Onboarding (KEIF) Endpoints
   server.post("/api/v1/enterprise-onboarding/projects", async (req, reply) => {
@@ -4040,20 +4021,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
-  server.get("/api/v1/workforce/employees", async (req, reply) => {
+  server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
   });
 
-  server.post("/api/v1/workforce/employees", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/employees", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.registerEmployee(body);
     return reply.status(result.success ? 201 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/employees/:id/transition", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/employees/:id/transition", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -4061,7 +4042,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/employees/:id/onboard", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/employees/:id/onboard", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -4069,7 +4050,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/employees/:id/offboard", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/employees/:id/offboard", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -4077,41 +4058,41 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
-  server.get("/api/v1/workforce/shifts", async (req, reply) => {
+  server.get("/api/v1/workforce-ops/shifts", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalWorkforceService.listShifts(tenantId) });
   });
 
-  server.post("/api/v1/workforce/shifts", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/shifts", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.createShift(body);
     return reply.status(result.success ? 201 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/attendance/check-in", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/attendance/check-in", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.recordCheckIn(body);
     return reply.status(result.success ? 201 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/attendance/check-out", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/attendance/check-out", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.recordCheckOut(body);
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/leave", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/leave", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.requestLeave(body);
     return reply.status(result.success ? 201 : 422).send(result);
   });
 
-  server.post("/api/v1/workforce/leave/:id/approve", async (req, reply) => {
+  server.post("/api/v1/workforce-ops/leave/:id/approve", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -4119,13 +4100,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
-  server.get("/api/v1/workforce/analytics", async (req, reply) => {
+  server.get("/api/v1/workforce-ops/analytics", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalWorkforceService.getWorkforceAnalytics(tenantId) });
   });
 
-  server.get("/api/v1/workforce/health", async (req, reply) => {
+  server.get("/api/v1/workforce-ops/health", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = (req.query as any)?.tenantId || "default-tenant";
     return reply.status(200).send({ success: true, data: globalWorkforceService.getHealthSummary(tenantId) });

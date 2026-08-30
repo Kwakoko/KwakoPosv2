@@ -156,8 +156,8 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
     });
   });
 
-  describe("5. 5-Field Independent Evidence Proof (SHA-256)", () => {
-    it("should require matching all 5 fields (githubReleaseTag, githubResolvedCommitSha, localHeadSha, certificationSha, containerSourceSha)", () => {
+  describe("5. 6-Field Independent Evidence Proof (SHA-256 & Ed25519)", () => {
+    it("should require matching all 6 fields (githubReleaseTag, githubResolvedCommitSha, localHeadSha, certificationSha, buildSourceSha, containerSourceSha, candidateSourceSha)", () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.8.0");
       fs.mkdirSync(mockProjectDir, { recursive: true });
 
@@ -180,7 +180,9 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
         githubResolvedCommitSha: valid40CharSha,
         localHeadSha: valid40CharSha,
         certificationSha: valid40CharSha,
+        buildSourceSha: valid40CharSha,
         containerSourceSha: valid40CharSha,
+        candidateSourceSha: valid40CharSha,
       };
 
       const evidence = generateSyncEvidenceBundle(meta, shas, mockProjectDir);
@@ -191,8 +193,10 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
       expect(evidence.bundle.githubResolvedCommitSha).toBe(valid40CharSha);
       expect(evidence.bundle.localHeadSha).toBe(valid40CharSha);
       expect(evidence.bundle.certificationSha).toBe(valid40CharSha);
+      expect(evidence.bundle.buildSourceSha).toBe(valid40CharSha);
       expect(evidence.bundle.containerSourceSha).toBe(valid40CharSha);
-      expect(evidence.bundle.signatureScheme).toBe("SHA256-KWAKOPOS-RELEASE-EVIDENCE");
+      expect(evidence.bundle.candidateSourceSha).toBe(valid40CharSha);
+      expect(evidence.bundle.signatureScheme).toBe("SHA256-ED25519-KWAKOPOS-RELEASE-EVIDENCE");
     });
 
     it("should refuse evidence creation if any SHA field mismatches or is missing", () => {

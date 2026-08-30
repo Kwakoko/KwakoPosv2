@@ -76,11 +76,10 @@ jobs:
       # Real release certification is reserved for release commits on main and manual dispatches.
       - name: Validate Google Cloud Release Configuration
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
-          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/234544603047/locations/global/workloadIdentityPools/github-pool/providers/github-provider' }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT || 'firebase-app-hosting-compute@kwakoposv2.iam.gserviceaccount.com' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER || vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT || vars.GCP_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
           [[ -n "${GCP_PROJECT_ID}" ]] || { echo "RELEASE_BLOCKED: GCP project is not configured."; exit 1; }
@@ -89,7 +88,6 @@ jobs:
 
       - name: Authenticate to Google Cloud via Workload Identity Federation
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -98,14 +96,12 @@ jobs:
 
       - name: Setup Google Cloud SDK
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Verify Google Cloud Authentication and Project Access
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
           gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . || { echo "RELEASE_BLOCKED: no active Google credential"; exit 1; }
@@ -126,27 +122,23 @@ jobs:
 
       - name: Configure Docker Authentication for Artifact Registry
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Install Chromium for Real Production Browser Certification
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         run: npm run production:browser:install
 
       - name: Synchronize Database Schema
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run db:push
 
       - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
@@ -154,16 +146,15 @@ jobs:
 
       - name: Export Exact Candidate Identity
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           node - <<'NODE'
           const fs = require('fs');
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
-          if (!fs.existsSync(p)) { console.log('Candidate deployment evidence missing, skipping identity export'); process.exit(0); }
+          if (!fs.existsSync(p)) { console.log('Candidate deployment evidence missing, halting pipeline'); process.exit(1); }
           const candidate = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (!candidate.candidateUrl || !candidate.candidateRevision) { console.log('Candidate identity incomplete, skipping'); process.exit(0); }
+          if (!candidate.candidateUrl || !candidate.candidateRevision) { console.log('Candidate identity incomplete, halting pipeline'); process.exit(1); }
           fs.appendFileSync(process.env.GITHUB_ENV, [
             `CANDIDATE_URL=${candidate.candidateUrl}`,
             `CLOUD_RUN_REVISION=${candidate.candidateRevision}`,
@@ -175,7 +166,6 @@ jobs:
 
       - name: Certify Exact Deployed Candidate over HTTPS
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
@@ -183,7 +173,6 @@ jobs:
 
       - name: Run Real Chromium Browser A → Cloud Run → Browser B Certification
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
@@ -191,11 +180,10 @@ jobs:
 
       - name: Promote Exact Certified Revision to 100% Traffic
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID || 'kwakoposv2' }}
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
           GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
@@ -203,14 +191,12 @@ jobs:
 
       - name: Publish Official GitHub Release and Immutable Git Tag
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx tsx scripts/release/publish-github-release.ts
 
       - name: Execute Continuous Production Operations & Governance Gate
         if: github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'

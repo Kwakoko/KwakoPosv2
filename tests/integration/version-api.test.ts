@@ -16,7 +16,7 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
   });
 
   afterAll(async () => {
-    await server.close();
+    if (server) await server.close();
   });
 
   it("GET /api/system/version returns non-sensitive canonical release metadata", async () => {

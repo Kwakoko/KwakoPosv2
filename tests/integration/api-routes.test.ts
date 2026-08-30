@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { buildServer } from "../../apps/api/src/server";
 import { globalInMemoryStore } from "@kwakopos2/database";
 import type { TenantContext } from "@kwakopos2/contracts";
@@ -8,13 +8,17 @@ import { randomUUID } from "crypto";
 describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
   let server: FastifyInstance;
 
-  beforeEach(() => {
-    globalInMemoryStore.clear();
+  beforeAll(async () => {
     server = buildServer();
+    await server.ready();
   });
 
-  afterEach(async () => {
-    await server.close();
+  afterAll(async () => {
+    if (server) await server.close();
+  });
+
+  beforeEach(() => {
+    globalInMemoryStore.clear();
   });
 
   it("GET /health returns 200 OK with system status", async () => {

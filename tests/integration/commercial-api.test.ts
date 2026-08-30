@@ -16,7 +16,7 @@ describe("Commercial Core REST API Routes (/api/v1/*)", () => {
   });
 
   afterAll(async () => {
-    await server.close();
+    if (server) await server.close();
   });
 
   it("creates customer and retrieves customer list", async () => {

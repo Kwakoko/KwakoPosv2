@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import { loadConfig } from "@kwakopos2/config";
 import { runPerformanceBenchmarkSuite } from "./performance-benchmark-engine.js";
 import { generateKwakoPosCapacityModel } from "./capacity-model-generator.js";
+import { getRealGitSha } from "../release/releaseIdentity.js";
 export async function runPerformanceCertification() {
     const config = loadConfig();
     const sim = await runPerformanceBenchmarkSuite();
@@ -13,8 +14,8 @@ export async function runPerformanceCertification() {
         exerciseId,
         timestamp: new Date().toISOString(),
         environment: config.NODE_ENV || "production",
-        appVersion: config.APP_VERSION || "2.4.0",
-        gitSha: process.env.GIT_SHA || "46dd97e09ef2b1c8f1e6b8c9d0a1b2c3d4e5f6a7",
+        appVersion: config.APP_VERSION || "2.5.0",
+        gitSha: getRealGitSha(),
         overallScore: sim.score,
         status: sim.allPassed ? "CERTIFIED" : "FAILED",
         baselineMetrics: sim.baselineMetrics,

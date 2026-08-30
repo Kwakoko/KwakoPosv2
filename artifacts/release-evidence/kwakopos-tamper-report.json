@@ -2,9 +2,15 @@
   "isTampered": true,
   "protectedFilesChecked": 7,
   "modifiedProtectedFiles": [
-    ".github/workflows/production-release-certification.yml"
+    ".github/workflows/production-certification.yml",
+    "package.json",
+    "scripts/certification/capacity-model-generator.js",
+    "scripts/certification/runPerformanceCertification.js",
+    "scripts/certification/runPerformanceCertification.ts",
+    "scripts/release/localVersionFolderSyncEngine.ts",
+    "scripts/release/prove-production-release.ts"
   ],
   "branchName": "main",
-  "gitSha": "50d9974c5fc4c90c941b4234884a5b1073772902",
-  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/production-release-certification.yml"
+  "gitSha": "be96d97be8a7c6963dd70e3436628fa223bee102",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/production-certification.yml, package.json, scripts/certification/capacity-model-generator.js, scripts/certification/runPerformanceCertification.js, scripts/certification/runPerformanceCertification.ts, scripts/release/localVersionFolderSyncEngine.ts, scripts/release/prove-production-release.ts"
 }

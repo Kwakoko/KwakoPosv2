@@ -125,9 +125,15 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
           const allPassed = checkData.check_runs.every((cr: any) => cr.conclusion === "success");
           ciCheckRunsState = allPassed ? "PASS" : "IN_PROGRESS";
         }
+      } else {
+        if (process.env.NODE_ENV === "production-certification") {
+          throw new Error(`RELEASE_BLOCKED: GitHub check-runs API returned HTTP ${checkRunsRes.status}`);
+        }
       }
-    } catch {
-      // API fallback
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "production-certification") {
+        throw new Error(`RELEASE_BLOCKED: Failed to fetch GitHub CI check-runs: ${err.message}`);
+      }
     }
   }
 

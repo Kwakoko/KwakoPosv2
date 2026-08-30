@@ -35,7 +35,7 @@ describe("Phase 6 — SaaS Monetization REST API Integration Suite", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   it("GET /api/v1/billing/plans returns list of active SaaS plans", async () => {
