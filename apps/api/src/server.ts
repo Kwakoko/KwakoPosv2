@@ -140,6 +140,34 @@ function isProductionEnv(cfg: ReturnType<typeof loadConfig>) {
   return cfg.NODE_ENV === "production" || cfg.NODE_ENV === "production-certification";
 }
 
+function requireTenantContext(req: FastifyRequest): TenantContext {
+  if (!req.tenantContext) {
+    throw new Error("UNAUTHORIZED: Authenticated tenant context is required");
+  }
+  return req.tenantContext;
+}
+
+function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): string {
+  const ctx = requireTenantContext(req);
+  const requested = requestedTenantId == null ? "" : String(requestedTenantId).trim();
+  if (requested && requested !== ctx.tenantId) {
+    throw new Error("INVARIANT_007_VIOLATION: Cross-tenant access denied");
+  }
+  return ctx.tenantId;
+}
+
+function requireAdminContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
+  const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((permission) => String(permission).toLowerCase()) : [];
+  const isAdmin = roles.some((role) => ["ADMIN", "SUPER_ADMIN", "SUPERADMIN", "OWNER"].includes(role));
+  const hasAdminPermission = permissions.includes("*") || permissions.some((permission) => permission === "admin:*" || permission.startsWith("admin:"));
+  if (!isAdmin && !hasAdminPermission) {
+    throw new Error("FORBIDDEN: Administrative privileges required");
+  }
+  return ctx;
+}
+
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
   /** Pre-loaded config — skips env re-read when provided. */
@@ -180,8 +208,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!status) {
       // Inspect message heuristics as fallback
       const message = (error && error.message) ? error.message.toString() : String(error);
-      if (message.includes("INVARIANT_007_VIOLATION") || message.includes("access denied")) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant access denied" } });
+      if (message.includes("INVARIANT_007_VIOLATION") || message.includes("access denied") || message.startsWith("FORBIDDEN")) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: message.includes("FORBIDDEN") ? message : "Cross-tenant access denied" } });
       }
       if (message.includes("UNAUTHORIZED") || message.includes("token")) {
         return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
@@ -221,6 +249,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       environment: config.NODE_ENV,
     });
 
+    if (req.url.startsWith("/api/v1/workforce/") && !req.url.startsWith("/api/v1/workforce-ops/")) {
+      req.raw.url = req.url.replace("/api/v1/workforce/", "/api/v1/workforce-ops/");
+    } else if (req.url === "/api/v1/commercial/portfolio") {
+      req.raw.url = "/api/v1/commercial/summary";
+    }
+
     const url = req.routeOptions?.url || req.url.split("?")[0];
     if (
       url === "/health" ||
@@ -229,10 +263,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url === "/api/system/version" ||
       url === "/auth/login" ||
       url === "/auth/refresh" ||
-      url.startsWith("/telemetry") ||
-      url.startsWith("/admin/observability") ||
-      url.startsWith("/admin/releases") ||
-      url.startsWith("/admin/operations")
+      url.startsWith("/telemetry")
     ) {
       return;
     }
@@ -251,6 +282,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
             req.traceContext.branchId = testBranchId;
             req.traceContext.userId = testUserId;
           }
+          const authenticatedPath = req.url.split("?")[0];
+          if (authenticatedPath.startsWith("/admin/")) {
+            requireAdminContext(req);
+          }
           return;
         }
       }
@@ -267,8 +302,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         req.traceContext.userId = payload.sub;
         req.traceContext.deviceId = payload.deviceId;
       }
+      const authenticatedPath = req.url.split("?")[0];
+      if (authenticatedPath.startsWith("/admin/")) {
+        requireAdminContext(req);
+      }
     } catch (err: any) {
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: err.message || "Invalid token" } });
+      const message = err?.message || "Invalid token";
+      if (message.startsWith("FORBIDDEN")) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message } });
+      }
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
     }
   });
 
@@ -286,7 +329,35 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // System endpoints
-  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString(), database: "connected" }));
+  server.get("/health", async (_req, reply) => {
+    let database: "connected" | "disconnected" | "not_configured" = "not_configured";
+    if (productionPersistence) {
+      try {
+        const { prisma } = await import("@kwakopos2/database");
+        await Promise.race([
+          prisma.$queryRaw`SELECT 1`,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 1500)),
+        ]);
+        database = "connected";
+      } catch {
+        database = "disconnected";
+      }
+    } else {
+      database = "connected";
+    }
+    if (database === "disconnected") {
+      return reply.status(503).send({
+        status: "degraded",
+        timestamp: new Date().toISOString(),
+        database,
+      });
+    }
+    return reply.status(200).send({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      database,
+    });
+  });
 
   server.get("/readiness", async () => {
     if (productionPersistence) {
@@ -2473,7 +2544,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/retail/settings", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({
       success: true,
       data: globalRetailService.getSettings(ctx),
@@ -2482,7 +2553,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const updated = globalRetailService.updateSettings(ctx, body);
     return reply.status(200).send({
@@ -2493,7 +2564,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
     return reply.status(201).send({
@@ -2504,7 +2575,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({
       success: true,
       data: globalRetailService.getReplenishmentSuggestions(ctx),
@@ -2513,7 +2584,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/retail/ai-insights", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({
       success: true,
       data: globalRetailService.getAiRecommendations(ctx),
@@ -2540,13 +2611,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/restaurant/menu", async (req, reply) => {
     const { globalRestaurantService } = await import("./services/restaurantService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalRestaurantService.getMenuItems(ctx) });
   });
 
   server.post("/api/v1/restaurant/kds/orders", async (req, reply) => {
     const { globalRestaurantService } = await import("./services/restaurantService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const order = globalRestaurantService.createKitchenOrder(ctx, body);
     return reply.status(201).send({ success: true, data: order });
@@ -2568,13 +2639,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/pharmacy/medicines", async (req, reply) => {
     const { globalPharmacyService } = await import("./services/pharmacyService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalPharmacyService.getMedicines(ctx) });
   });
 
   server.post("/api/v1/pharmacy/dispense", async (req, reply) => {
     const { globalPharmacyService } = await import("./services/pharmacyService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const result = globalPharmacyService.dispenseMedicineFEFO(ctx, body);
     return reply.status(200).send({ success: true, data: result });
@@ -2596,13 +2667,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/law-firm/matters", async (req, reply) => {
     const { globalLawFirmService } = await import("./services/lawFirmService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalLawFirmService.getMatters(ctx) });
   });
 
   server.post("/api/v1/law-firm/conflicts/search", async (req, reply) => {
     const { globalLawFirmService } = await import("./services/lawFirmService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const result = globalLawFirmService.runConflictCheck(ctx, body.targetName || "");
     return reply.status(200).send({ success: true, data: result });
@@ -2624,13 +2695,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/sacco-vicoba/members", async (req, reply) => {
     const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalSaccoVicobaService.getMembers(ctx) });
   });
 
   server.post("/api/v1/sacco-vicoba/loans/apply", async (req, reply) => {
     const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const result = globalSaccoVicobaService.applyLoan(ctx, body);
     return reply.status(200).send({ success: true, data: result });
@@ -2652,13 +2723,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/microfinance/borrowers", async (req, reply) => {
     const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalMicrofinanceService.getBorrowers(ctx) });
   });
 
   server.post("/api/v1/microfinance/loans/assess-and-disburse", async (req, reply) => {
     const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const result = globalMicrofinanceService.assessAndDisburseLoan(ctx, body);
     return reply.status(200).send({ success: true, data: result });
@@ -2680,13 +2751,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/poultry-livestock/flocks", async (req, reply) => {
     const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalPoultryLivestockService.getFlocks(ctx) });
   });
 
   server.post("/api/v1/poultry-livestock/egg-production/record", async (req, reply) => {
     const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const result = globalPoultryLivestockService.recordEggCollection(ctx, body);
     return reply.status(201).send({ success: true, data: result });
@@ -2708,13 +2779,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/vehicle-fleet/vehicles", async (req, reply) => {
     const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalVehicleFleetService.getVehicles(ctx) });
   });
 
   server.post("/api/v1/vehicle-fleet/trips/dispatch", async (req, reply) => {
     const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const trip = globalVehicleFleetService.dispatchTrip(ctx, body);
     return reply.status(201).send({ success: true, data: trip });
@@ -2736,13 +2807,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/hardware/products", async (req, reply) => {
     const { globalHardwareService } = await import("./services/hardwareService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalHardwareService.getProducts(ctx) });
   });
 
   server.post("/api/v1/hardware/products/create", async (req, reply) => {
     const { globalHardwareService } = await import("./services/hardwareService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const product = globalHardwareService.createProduct(ctx, body);
     return reply.status(201).send({ success: true, data: product });
@@ -2764,13 +2835,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/electronics/serialized-devices", async (req, reply) => {
     const { globalElectronicsService } = await import("./services/electronicsService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002" };
+    const ctx = requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalElectronicsService.getSerializedDevices(ctx) });
   });
 
   server.post("/api/v1/electronics/repairs/create", async (req, reply) => {
     const { globalElectronicsService } = await import("./services/electronicsService.js");
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001", branchId: "00000000-0000-0000-0000-000000000002", userId: "00000000-0000-0000-0000-000000000003" };
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
     const repairJob = globalElectronicsService.createRepairJob(ctx, body);
     return reply.status(201).send({ success: true, data: repairJob });
@@ -2851,7 +2922,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/pmf/feedback/submit", async (req, reply) => {
     const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
     const body = (req.body as any) || {};
-    const ctx = (req as any).tenantContext || { tenantId: "00000000-0000-0000-0000-000000000001" };
+    const ctx = requireTenantContext(req);
     const feedback = globalPmfValidationService.submitCustomerFeedback(
       ctx.tenantId,
       body.verticalId || "retail",
@@ -2906,7 +2977,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.get("/api/v1/construction/projects/:id/earned-value", async (req, reply) => {
     const { globalConstructionService } = await import("./services/constructionService.js");
     const params = (req.params as any) || {};
-    return reply.status(200).send({ success: true, data: globalConstructionService.getEarnedValue(params.id || "00000000-0000-0000-0000-000000000001") });
+    return reply.status(200).send({ success: true, data: globalConstructionService.getEarnedValue(params.id) });
   });
 
   server.get("/api/v1/construction/financial-summary", async (req, reply) => {
@@ -2948,7 +3019,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
     const body = (req.body as any) || {};
     const proj = globalEnterpriseOnboardingService.createProject({
-      tenantId: body.tenantId || "TENANT-ENT-001",
+      tenantId: resolveTenantId(req, body.tenantId),
       customerName: body.customerName || "Enterprise Customer Inc.",
       industryId: body.industryId || "retail",
     });
@@ -3097,7 +3168,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
     const body = (req.body as any) || {};
     const rec = globalAiNativeService.requestRecommendation({
-      tenantId: body.tenantId || "TENANT-AI-01",
+      tenantId: resolveTenantId(req, body.tenantId),
       branchId: body.branchId || "BRANCH-01",
       domain: body.domain || "INVENTORY",
       proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
@@ -3138,7 +3209,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const body = (req.body as any) || {};
     const res = globalAutonomousOperationsService.executeAutonomousRequest({
       requestId: `REQ-REM-${Date.now()}`,
-      tenantId: body.tenantId || "TENANT-AUTO-01",
+      tenantId: resolveTenantId(req, body.tenantId),
       agentId: body.targetService || "CloudRunWorkerPool",
       capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
       financialCostTzs: 0,
@@ -3150,7 +3221,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const body = (req.body as any) || {};
     const sim = {
       simulationId: `SIM-${Date.now()}`,
-      tenantId: body.tenantId || "TENANT-AUTO-01",
+      tenantId: resolveTenantId(req, body.tenantId),
       targetService: body.targetService || "SyncWorkerQueue",
       proposedRemediation: body.proposedRemediation || "Rebalance Sync Consumers",
       isAllowed: true,
@@ -3394,7 +3465,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const body = (req.body as any) || {};
     const res = globalSystemUiService.executeGlobalSearch(
       body.query || "Cement",
-      body.tenantId || "TNT-TZ-001",
+      resolveTenantId(req, body.tenantId),
       body.branchId || "BR-DSM-01"
     );
     return reply.status(200).send({ success: true, data: res });
@@ -3519,7 +3590,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
     const body = (req.body as any) || {};
     const adminId = body.adminId || "ADM-001";
-    const tenantId = body.tenantId || "TENANT-001";
+    const tenantId = resolveTenantId(req, body.tenantId);
     const reason = body.reason || "Audited customer support ticket investigation";
     const ctx = globalSuperAdminPlatformService.initiateContextSwitch(adminId, tenantId, reason, body.timeLimitMinutes);
     return reply.status(200).send({ success: true, data: ctx });
@@ -3767,7 +3838,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listBankAccounts(tenantId) });
   });
 
@@ -3796,7 +3867,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
     const query = (req.query as any) || {};
     const pos = globalFinanceTreasuryService.calculateCashPosition({
-      tenantId: query.tenantId || "default-tenant",
+      tenantId: resolveTenantId(req, query.tenantId),
       branchId: query.branchId,
       currency: query.currency || "TZS",
       pendingReceipts: Number(query.pendingReceipts || 0),
@@ -3811,7 +3882,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
     const query = (req.query as any) || {};
     const fcst = globalFinanceTreasuryService.generateLiquidityForecast({
-      tenantId: query.tenantId || "default-tenant",
+      tenantId: resolveTenantId(req, query.tenantId),
       scenario: query.scenario || "BASE",
       horizonDays: Number(query.horizonDays || 30),
       currency: query.currency || "TZS",
@@ -3827,7 +3898,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
     const query = (req.query as any) || {};
     const wc = globalFinanceTreasuryService.calculateWorkingCapital({
-      tenantId: query.tenantId || "default-tenant",
+      tenantId: resolveTenantId(req, query.tenantId),
       currency: query.currency || "TZS",
       totalReceivables: Number(query.totalReceivables || 0),
       totalPayables: Number(query.totalPayables || 0),
@@ -3894,7 +3965,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/treasury/exceptions", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listExceptions(tenantId) });
   });
 
@@ -3908,20 +3979,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/treasury/audit", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getAuditTrail(tenantId) });
   });
 
   server.get("/api/v1/treasury/dashboard/health", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
   });
 
   // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
   server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalSupplyChainService.listSuppliers(tenantId) });
   });
 
@@ -3988,7 +4059,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const query = (req.query as any) || {};
     const rec = globalSupplyChainService.generateReplenishmentRecommendation({
-      tenantId: query.tenantId || "default-tenant",
+      tenantId: resolveTenantId(req, query.tenantId),
       productId: query.productId || "PRD-DEFAULT",
       currentStock: Number(query.currentStock || 0),
       inboundStock: Number(query.inboundStock || 0),
@@ -4002,7 +4073,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const query = (req.query as any) || {};
     const fst = globalSupplyChainService.generateDemandForecast({
-      tenantId: query.tenantId || "default-tenant",
+      tenantId: resolveTenantId(req, query.tenantId),
       productId: query.productId || "PRD-DEFAULT",
       scenario: query.scenario || "BASE",
       horizonDays: Number(query.horizonDays || 30),
@@ -4016,14 +4087,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/supply-chain/control-tower", async (req, reply) => {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
   // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
   server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
   });
 
@@ -4060,7 +4131,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/workforce-ops/shifts", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.listShifts(tenantId) });
   });
 
@@ -4102,31 +4173,31 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/workforce-ops/analytics", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.getWorkforceAnalytics(tenantId) });
   });
 
   server.get("/api/v1/workforce-ops/health", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/crm/health", async (req, reply) => {
     const { globalCrmService } = await import("./services/crmService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalCrmService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/crm/customers", async (req, reply) => {
     const { globalCrmService } = await import("./services/crmService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalCrmService.listCustomers(tenantId) });
   });
 
   server.get("/api/v1/integration/health", async (req, reply) => {
     const { globalIntegrationService } = await import("./services/integrationService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalIntegrationService.getHealthSummary(tenantId) });
   });
 
@@ -4137,79 +4208,79 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/documents/health", async (req, reply) => {
     const { globalDocumentService } = await import("./services/documentService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalDocumentService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/security/health", async (req, reply) => {
     const { globalSecurityService } = await import("./services/securityService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalSecurityService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/notifications/health", async (req, reply) => {
     const { globalNotificationService } = await import("./services/notificationService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalNotificationService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/compliance/health", async (req, reply) => {
     const { globalComplianceService } = await import("./services/complianceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalComplianceService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/multisite/health", async (req, reply) => {
     const { globalMultiSiteService } = await import("./services/multiSiteService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalMultiSiteService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/licensing/health", async (req, reply) => {
     const { globalLicensingService } = await import("./services/licensingService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalLicensingService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/marketplace/health", async (req, reply) => {
     const { globalMarketplaceService } = await import("./services/marketplaceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalMarketplaceService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/global-platform/health", async (req, reply) => {
     const { globalGlobalPlatformService } = await import("./services/globalPlatformService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalGlobalPlatformService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/autonomous-business/health", async (req, reply) => {
     const { globalAutonomousBusinessService } = await import("./services/autonomousBusinessService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalAutonomousBusinessService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/platform-security/health", async (req, reply) => {
     const { globalPlatformSecurityService } = await import("./services/platformSecurityService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalPlatformSecurityService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/autonomous-operations/health", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/platform-intelligence/health", async (req, reply) => {
     const { globalPlatformIntelligenceService } = await import("./services/platformIntelligenceService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalPlatformIntelligenceService.getHealthSummary(tenantId) });
   });
 
   server.get("/api/v1/full-system-certification/health", async (req, reply) => {
     const { globalFullSystemCertificationService } = await import("./services/fullSystemCertificationService.js");
-    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalFullSystemCertificationService.getHealthSummary(tenantId) });
   });
 

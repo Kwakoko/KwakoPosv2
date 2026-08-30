@@ -166,4 +166,30 @@ describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
     expect(resB.statusCode).toBe(200);
     expect(resB.json().data).toHaveLength(0); // Tenant B sees 0 products
   });
+
+  describe("Security Regression & Admin RBAC Controls", () => {
+    it("GET /admin/releases/history without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/releases/history" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/observability/metrics without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/observability/metrics" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/operations/runbooks without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/operations/runbooks" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/releases/history with invalid token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({
+        method: "GET",
+        url: "/admin/releases/history",
+        headers: { authorization: "Bearer invalid-jwt-token" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+  });
 });

@@ -2,11 +2,12 @@
   "isTampered": true,
   "protectedFilesChecked": 7,
   "modifiedProtectedFiles": [
+    ".github/workflows/production-certification.yml",
+    ".github/workflows/production-release-certification.yml",
     "package-lock.json",
-    "package.json",
-    "scripts/certification/commercial-readiness-certification-engine.ts"
+    "scripts/certification/workforce-certification-engine.ts"
   ],
   "branchName": "main",
-  "gitSha": "b7e1571285a942912c3395c7657cc48c7e8fb485",
-  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: package-lock.json, package.json, scripts/certification/commercial-readiness-certification-engine.ts"
+  "gitSha": "469cb62204c4f021f50b92a5e32fe1fa80813f2c",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/production-certification.yml, .github/workflows/production-release-certification.yml, package-lock.json, scripts/certification/workforce-certification-engine.ts"
 }

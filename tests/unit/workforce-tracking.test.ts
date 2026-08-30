@@ -97,10 +97,10 @@ describe("Advanced Workforce Tracking & Time Management Test Suite", () => {
     expect(ts.approvalStatus).toBe("APPROVED");
   });
 
-  it("should pass 100% of the 58-Pillar Workforce certification campaign", () => {
+  it("should pass 100% of the 100-Pillar Workforce certification campaign", () => {
     const cert = runWorkforceCertification();
-    expect(cert.totalPillars).toBe(58);
-    expect(cert.passedPillars).toBe(58);
+    expect(cert.totalPillars).toBe(100);
+    expect(cert.passedPillars).toBe(100);
     expect(cert.failedPillars).toBe(0);
     expect(cert.successRatePct).toBe(100);
   });

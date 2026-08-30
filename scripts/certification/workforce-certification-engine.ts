@@ -392,3 +392,21 @@ export const WORKFORCE_CERTIFICATION_PILLARS: WorkforceCertificationPillar[] = [
     );
   }),
 ];
+
+export function runWorkforceCertification() {
+  const engine = new WorkforceEngine();
+  let passed = 0;
+  for (const pillar of WORKFORCE_CERTIFICATION_PILLARS) {
+    try {
+      const res = pillar.test(engine) as boolean;
+      if (res) passed++;
+    } catch {}
+  }
+  const total = WORKFORCE_CERTIFICATION_PILLARS.length;
+  return {
+    totalPillars: total,
+    passedPillars: passed,
+    failedPillars: total - passed,
+    successRatePct: Math.round((passed / total) * 100),
+  };
+}

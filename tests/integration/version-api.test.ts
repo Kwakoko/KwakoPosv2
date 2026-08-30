@@ -57,6 +57,11 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/releases/compatibility",
+      headers: {
+        "x-tenant-id": "test-tenant",
+        "x-branch-id": "test-branch",
+        "x-user-id": "test-admin",
+      },
     });
 
     expect(res.statusCode).toBe(200);
@@ -71,6 +76,11 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
     const res = await server.inject({
       method: "GET",
       url: "/admin/releases/history",
+      headers: {
+        "x-tenant-id": "test-tenant",
+        "x-branch-id": "test-branch",
+        "x-user-id": "test-admin",
+      },
     });
 
     expect(res.statusCode).toBe(200);
