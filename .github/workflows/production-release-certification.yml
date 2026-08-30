@@ -14,6 +14,8 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
+  checks: read
   id-token: write
 
 jobs:
@@ -138,10 +140,30 @@ jobs:
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
           if (!fs.existsSync(p)) { console.error('RELEASE_BLOCKED: Candidate deployment evidence file missing'); process.exit(1); }
           const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (!c.candidateUrl || !c.candidateRevision || !c.gitSha) { console.error('RELEASE_BLOCKED: Candidate identity incomplete'); process.exit(1); }
+          const expected = process.env.RELEASE_SHA;
+          if (!c.candidateUrl || !c.candidateRevision || !c.gitSha || !c.containerDigest) { console.error('RELEASE_BLOCKED: Candidate identity incomplete'); process.exit(1); }
           if (!/^[0-9a-f]{40}$/.test(c.gitSha)) { console.error('RELEASE_BLOCKED: Candidate gitSha is not an immutable 40-character SHA'); process.exit(1); }
+          if (c.gitSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate source SHA mismatch: expected=${expected} actual=${c.gitSha}`); process.exit(1); }
+          if (!/^sha256:[0-9a-f]{64}$/.test(c.containerDigest)) { console.error('RELEASE_BLOCKED: Candidate container digest is missing or invalid'); process.exit(1); }
           fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCONTAINER_SOURCE_SHA=${c.gitSha}\n`);
           NODE
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+
+      - name: Validate provenance certification prerequisites
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid RELEASE_SHA"; exit 1; }
+          [[ "$CONTAINER_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: missing/invalid CONTAINER_SOURCE_SHA"; exit 1; }
+          [[ "$RELEASE_SHA" == "$CONTAINER_SOURCE_SHA" ]] || { echo "RELEASE_BLOCKED: release/container provenance SHA mismatch"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence private signing key missing"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence public signing key missing"; exit 1; }
 
       - name: Run 15-Gate Version Sync Release Integrity Certification
         env:
