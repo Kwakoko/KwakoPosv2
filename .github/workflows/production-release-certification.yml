@@ -138,9 +138,21 @@ jobs:
           const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
           if (!fs.existsSync(p)) { console.error('RELEASE_BLOCKED: Candidate deployment evidence file missing'); process.exit(1); }
           const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (!c.candidateUrl || !c.candidateRevision) { console.error('RELEASE_BLOCKED: Candidate identity incomplete'); process.exit(1); }
-          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\n`);
+          if (!c.candidateUrl || !c.candidateRevision || !c.gitSha) { console.error('RELEASE_BLOCKED: Candidate identity incomplete'); process.exit(1); }
+          if (!/^[0-9a-f]{40}$/.test(c.gitSha)) { console.error('RELEASE_BLOCKED: Candidate gitSha is not an immutable 40-character SHA'); process.exit(1); }
+          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCONTAINER_SOURCE_SHA=${c.gitSha}\n`);
           NODE
+
+      - name: Run 15-Gate Version Sync Release Integrity Certification
+        env:
+          NODE_ENV: production-certification
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATION_SHA: ${{ inputs.release_sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+          KWAKOPOS_REQUIRED_CI_CHECKS: Build, Audit, and Test Suite
+        run: npm run certify:version-sync
 
       - name: Certify exact candidate over HTTPS
         env:
