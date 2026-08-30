@@ -1,8 +1,17 @@
 import jwt from "jsonwebtoken";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import type { TenantContext, UserRole } from "@kwakopos2/contracts";
 
-const JWT_SECRET = process.env.JWT_SECRET || "kwakopos-super-secret-jwt-key-change-in-production-min32chars";
+export function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("SECURITY_FATAL: JWT_SECRET environment variable is MANDATORY in production environments!");
+    }
+    return "kwakopos-super-secret-jwt-key-change-in-production-min32chars";
+  }
+  return secret;
+}
 
 export interface JwtPayload {
   sub: string; // userId
@@ -15,15 +24,24 @@ export interface JwtPayload {
 }
 
 export function hashPassword(password: string): string {
-  return createHash("sha256").update(password + JWT_SECRET).digest("hex");
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${derivedKey}`;
 }
 
 export function comparePassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash;
+  if (hash.startsWith("scrypt:")) {
+    const [, salt, originalKey] = hash.split(":");
+    const derivedKey = scryptSync(password, salt, 64).toString("hex");
+    return timingSafeEqual(Buffer.from(originalKey, "hex"), Buffer.from(derivedKey, "hex"));
+  }
+  // Legacy SHA-256 fallback comparison for backward compatibility
+  const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
+  return legacyHash === hash;
 }
 
 export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: "15m" });
 }
 
 export function generateRefreshToken(): string {
@@ -32,7 +50,7 @@ export function generateRefreshToken(): string {
 
 export function verifyAccessToken(token: string): JwtPayload {
   try {
-    return jwt.verify(token, JWT_SECRET) as JwtPayload;
+    return jwt.verify(token, getJwtSecret()) as JwtPayload;
   } catch (err) {
     throw new Error("UNAUTHORIZED: Invalid or expired access token.");
   }

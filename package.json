@@ -103,7 +103,7 @@
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "db:generate": "npm run db:generate --workspace=@kwakopos2/database",
-    "db:push": "npm run db:push --workspace=@kwakopos2/database",
+    "db:migrate": "npm run db:migrate --workspace=@kwakopos2/database",
     "release:deploy-candidate": "tsx scripts/release/deploy-candidate.ts",
     "release:promote": "tsx scripts/release/promote-revision.ts",
     "production:browser:install": "npx playwright install --with-deps chromium",
