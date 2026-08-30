@@ -70,6 +70,7 @@
     "certify:autonomous-business": "tsx scripts/certification/runAutonomousBusinessCertification.ts",
     "certify:platform-security": "tsx scripts/certification/runPlatformSecurityCertification.ts",
     "certify:autonomous-operations": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
+    "certify:platform-intelligence": "tsx scripts/certification/runPlatformIntelligenceCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 

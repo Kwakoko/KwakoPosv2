@@ -358,6 +358,7 @@ export * from "./globalPlatformEngine.js";
 export * from "./autonomousBusinessEngine.js";
 export * from "./platformSecurityEngine.js";
 export * from "./autonomousOperationsEngine.js";
+export * from "./platformIntelligenceEngine.js";
 
 
 
