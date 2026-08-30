@@ -4188,6 +4188,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalMarketplaceService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/global-platform/health", async (req, reply) => {
+    const { globalGlobalPlatformService } = await import("./services/globalPlatformService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalGlobalPlatformService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

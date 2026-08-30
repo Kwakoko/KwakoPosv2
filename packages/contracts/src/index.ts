@@ -2243,6 +2243,7 @@ export * from "./complianceContracts.js";
 export * from "./multiSiteContracts.js";
 export * from "./licensingContracts.js";
 export * from "./marketplaceContracts.js";
+export * from "./globalPlatformContracts.js";
 
 
 
