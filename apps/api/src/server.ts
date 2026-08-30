@@ -4200,6 +4200,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAutonomousBusinessService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/platform-security/health", async (req, reply) => {
+    const { globalPlatformSecurityService } = await import("./services/platformSecurityService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalPlatformSecurityService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

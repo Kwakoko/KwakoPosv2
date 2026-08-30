@@ -2245,6 +2245,7 @@ export * from "./licensingContracts.js";
 export * from "./marketplaceContracts.js";
 export * from "./globalPlatformContracts.js";
 export * from "./autonomousBusinessContracts.js";
+export * from "./platformSecurityContracts.js";
 
 
 
