@@ -12,6 +12,8 @@ import {
   writeSyncMetadata,
   performRollback,
   fetchLatestGitHubRelease,
+  isValid40CharGitSha,
+  verifyPostRenameGitIntegrity,
 } from "../release/localVersionFolderSyncEngine.js";
 
 export interface CertificationCheck {
@@ -59,24 +61,26 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const hasGitTag = Boolean(localRepo.gitTag || localRepo.packageVersion);
     addCheck("CERT-VS-02", "Git tag created correctly", hasGitTag, `Detected baseline version/tag: ${localRepo.gitTag || localRepo.packageVersion}`);
 
-    // Gate 3: Real Executable GitHub Release Identity Fetch & Contract Verification
+    // Gate 3: Real Executable GitHub Release Identity Fetch & Peeled 40-Char SHA Verification
     try {
       const rel = await fetchLatestGitHubRelease("Kwakoko/KwakoPosv2", { allowOfflineMock: true });
-      const isValidRel = Boolean(rel.tag && rel.version && rel.certified);
-      addCheck("CERT-VS-03", "GitHub Release exists", isValidRel, `Verified release contract for ${rel.repo}: tag=${rel.tag}`);
+      const isValidRel = Boolean(rel.tag && rel.version && rel.certified && isValid40CharGitSha(rel.commitSha));
+      addCheck("CERT-VS-03", "GitHub Release exists", isValidRel, `Verified release contract & peeled 40-char SHA for ${rel.repo}: tag=${rel.tag}, sha=${rel.commitSha.slice(0, 7)}...`);
     } catch (err: any) {
       addCheck("CERT-VS-03", "GitHub Release exists", false, `Release fetch error: ${err.message}`);
     }
 
-    // Gate 4: Real Immutable Commit SHA Matching Verification
+    // Gate 4: Real Tripartite SHA Verification (localHeadSha == githubReleaseSha == certifiedSha)
     const currentSha = localRepo.commitSha;
+    const isCurrentSha40Char = isValid40CharGitSha(currentSha);
+
     const shaMatchResult = await synchronizeLocalVersionFolder({
       cwd,
       mockRelease: {
         repo: "Kwakoko/KwakoPosv2",
         tag: "v2.5.0",
         version: "2.5.0",
-        commitSha: "0000000000000000000000000000000000000000",
+        commitSha: currentSha,
         publishedAt: new Date().toISOString(),
         draft: false,
         prerelease: false,
@@ -87,8 +91,8 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
       dryRun: true,
       force: true,
     });
-    const shaGatePassed = shaMatchResult.actionTaken === "SYNC_BLOCKED_SHA_MISMATCH" || currentSha.length >= 7;
-    addCheck("CERT-VS-04", "Release points to correct commit", shaGatePassed, `Verified SHA matching logic against target commit SHA: ${currentSha.slice(0, 7)}`);
+    const shaGatePassed = isCurrentSha40Char && shaMatchResult.actionTaken === "SYNC_BLOCKED_SHA_MISMATCH";
+    addCheck("CERT-VS-04", "Release points to correct commit", shaGatePassed, `Verified Tripartite SHA matching logic against target SHA: ${currentSha.slice(0, 7)}...`);
 
     // Gate 5: Local Version Detection Works
     const localVerDetected = isValidSemVer(localRepo.packageVersion);
@@ -106,7 +110,7 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
         repo: "Kwakoko/KwakoPosv2",
         tag: "v9.9.9",
         version: "9.9.9",
-        commitSha: localRepo.commitSha,
+        commitSha: currentSha,
         publishedAt: new Date().toISOString(),
         draft: false,
         prerelease: false,
@@ -126,13 +130,15 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     fs.mkdirSync(collisionDirTarget, { recursive: true });
     fs.writeFileSync(path.join(collisionDirCurrent, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
 
+    const collisionSha = inspectLocalRepository(collisionDirCurrent).commitSha;
+
     const realCollisionRes = await synchronizeLocalVersionFolder({
       cwd: collisionDirCurrent,
       mockRelease: {
         repo: "Kwakoko/KwakoPosv2",
         tag: "v2.8.0",
         version: "2.8.0",
-        commitSha: "12345",
+        commitSha: collisionSha,
         publishedAt: new Date().toISOString(),
         draft: false,
         prerelease: false,
@@ -145,11 +151,13 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const realCollisionPassed = !realCollisionRes.success && realCollisionRes.actionTaken === "SYNC_ABORTED_COLLISION";
     addCheck("CERT-VS-08", "Collision protection works", realCollisionPassed, "Tested real collision detection against existing directory.");
 
-    // Gate 9: Real Executable Atomic Rename in Temp Directory
+    // Gate 9: Real Executable Atomic Rename in Temp Directory & Post-Rename Git Verification
     const renameDirStart = path.join(tempTestDir, "KwakoPos-v2.9.0");
     fs.mkdirSync(renameDirStart, { recursive: true });
     fs.mkdirSync(path.join(renameDirStart, ".git"), { recursive: true });
     fs.writeFileSync(path.join(renameDirStart, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.9.0" }), "utf8");
+
+    const renameSha = inspectLocalRepository(renameDirStart).commitSha;
 
     const realRenameRes = await synchronizeLocalVersionFolder({
       cwd: renameDirStart,
@@ -157,7 +165,7 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
         repo: "Kwakoko/KwakoPosv2",
         tag: "v3.0.0",
         version: "3.0.0",
-        commitSha: "12345",
+        commitSha: renameSha,
         publishedAt: new Date().toISOString(),
         draft: false,
         prerelease: false,
@@ -170,9 +178,9 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const realRenamePassed = realRenameRes.success && fs.existsSync(path.join(tempTestDir, "KwakoPos-v3.0.0"));
     addCheck("CERT-VS-09", "Rename operation works", realRenamePassed, "Executed real physical directory rename in isolated temporary workspace.");
 
-    // Gate 10: Git Repository Integrity Check
-    const gitValid = fs.existsSync(path.join(cwd, ".git"));
-    addCheck("CERT-VS-10", "Git repository remains valid", gitValid, "Verified .git directory integrity.");
+    // Gate 10: Git Repository Integrity Check (Post-Rename Verification)
+    const gitCheck = verifyPostRenameGitIntegrity(cwd, currentSha);
+    addCheck("CERT-VS-10", "Git repository remains valid", gitCheck.valid, `Verified git database & HEAD SHA equality: ${gitCheck.reason}`);
 
     // Gate 11: Application Runnability Check
     const pkgValid = fs.existsSync(path.join(cwd, "package.json"));
@@ -188,13 +196,14 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
         project: "KwakoPos",
         repository: "Kwakoko/KwakoPosv2",
         release: "v3.0.0",
-        commit: "12345",
+        commit: currentSha,
         folder: "KwakoPos-v3.0.0",
         previous_folder: "KwakoPos-v2.9.0",
         synced_at: new Date().toISOString(),
         status: "SYNCHRONIZED",
         machine: os.hostname(),
         mode: "MODE_A",
+        transactionPhase: "COMPLETED",
       },
       rollbackTestDir
     );
@@ -208,7 +217,7 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
       repo: "Kwakoko/KwakoPosv2",
       tag: "v3.0.0",
       version: "3.0.0",
-      commitSha: localRepo.commitSha,
+      commitSha: currentSha,
       publishedAt: new Date().toISOString(),
       draft: false,
       prerelease: false,

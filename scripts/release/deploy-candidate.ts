@@ -96,7 +96,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     deploymentMode = serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP";
     console.log(`[SERVICE_DISCOVERY] Selected Mode: ${deploymentMode}`);
 
-    const databaseUrl = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+    const databaseUrl = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require";
     const jwtSecret = process.env.JWT_SECRET || "kwakopos-super-secret-jwt-key-change-in-production-min32chars";
     const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${gitSha},CONTAINER_DIGEST=${imageDigest},DATABASE_URL="${databaseUrl}",JWT_SECRET="${jwtSecret}"`;
 
