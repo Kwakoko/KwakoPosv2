@@ -11,6 +11,8 @@ import {
   performRollback,
   fetchLatestGitHubRelease,
   isValid40CharGitSha,
+  isValidSemVer,
+  parseSemVer,
   generateSyncEvidenceBundle,
 } from "../release/localVersionFolderSyncEngine.js";
 
@@ -30,18 +32,24 @@ export interface VersionSyncCertificationResult {
   timestamp: string;
 }
 
-function getRequiredCiChecks(): string[] {
-  const configured = (process.env.KWAKOPOS_REQUIRED_CI_CHECKS || "Build, Audit, and Test Suite")
+function getRequiredCiWorkflows(): string[] {
+  const configured = (process.env.KWAKOPOS_REQUIRED_CI_WORKFLOWS || "ci.yml,security-scan.yml")
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
-  return configured.length ? configured : ["Build, Audit, and Test Suite"];
+  return configured.length ? configured : ["ci.yml", "security-scan.yml"];
 }
 
 function canonicalJson(value: Record<string, unknown>): string {
   const sorted: Record<string, unknown> = {};
   for (const key of Object.keys(value).sort()) sorted[key] = value[key];
   return JSON.stringify(sorted);
+}
+
+function publicKeyFingerprint(publicKeyPem: string): string {
+  const key = crypto.createPublicKey(publicKeyPem);
+  const der = key.export({ type: "spki", format: "der" }) as Buffer;
+  return crypto.createHash("sha256").update(der).digest("hex");
 }
 
 function verifyEd25519Signature(payload: string, signatureB64: string, publicKeyPem: string): boolean {
@@ -80,6 +88,11 @@ function initializeGitFixture(dir: string, version: string): string {
 }
 
 async function fetchAuthoritativeGithubSha(tag: string, repo: string, token?: string): Promise<string> {
+  if (!isValidSemVer(tag)) throw new Error(`INVALID_RELEASE_TAG:${tag}`);
+  const parsedTag = parseSemVer(tag);
+  const expectedTag = `v${parsedTag.normalized}`;
+  if (tag !== expectedTag) throw new Error(`INVALID_RELEASE_TAG_FORMAT:${tag}`);
+
   const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "KwakoPos-Production-Certification" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const refRes = await fetch(`https://api.github.com/repos/${repo}/git/ref/tags/${encodeURIComponent(tag)}`, { headers });
@@ -97,31 +110,29 @@ async function fetchAuthoritativeGithubSha(tag: string, repo: string, token?: st
   return peeled;
 }
 
-async function fetchRequiredCiChecks(repo: string, sha: string, token: string): Promise<{ passed: boolean; details: string }> {
+async function fetchRequiredCiWorkflows(repo: string, sha: string, token: string): Promise<{ passed: boolean; details: string }> {
+  if (!token) throw new Error("CI_WORKFLOW_VERIFICATION_TOKEN_MISSING");
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "KwakoPos-Production-Certification" };
-  const response = await fetch(`https://api.github.com/repos/${repo}/commits/${sha}/check-runs?per_page=100`, { headers });
-  if (!response.ok) throw new Error(`CI_CHECKS_API_FAILED:${response.status}`);
-  const data: any = await response.json();
-  if (!Array.isArray(data.check_runs) || data.check_runs.length === 0) return { passed: false, details: "No check-runs were returned for the exact certification SHA." };
-  const byName = new Map<string, any>();
-  for (const run of data.check_runs) byName.set(String(run.name).toLowerCase(), run);
-  const requiredChecks = getRequiredCiChecks();
+  const required = getRequiredCiWorkflows();
   const missing: string[] = [];
   const failed: string[] = [];
-  for (const required of requiredChecks) {
-    const run = byName.get(required.toLowerCase());
-    if (!run) missing.push(required);
-    else if (run.status !== "completed" || run.conclusion !== "success") failed.push(`${required}:${run.status}/${run.conclusion}`);
+  for (const workflow of required) {
+    const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?head_sha=${sha}&status=completed&per_page=20`, { headers });
+    if (!response.ok) throw new Error(`CI_WORKFLOW_API_FAILED:${workflow}:${response.status}`);
+    const data: any = await response.json();
+    const runs = Array.isArray(data.workflow_runs) ? data.workflow_runs.filter((run: any) => run.head_sha === sha) : [];
+    if (runs.length === 0) {
+      missing.push(workflow);
+      continue;
+    }
+    const latest = runs.sort((a: any, b: any) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime())[0];
+    if (latest.status !== "completed" || latest.conclusion !== "success") failed.push(`${workflow}:${latest.status}/${latest.conclusion}`);
   }
-  if (missing.length || failed.length) return { passed: false, details: `Required=${requiredChecks.join(",")}; Missing=${missing.join(",") || "none"}; FailedOrIncomplete=${failed.join(",") || "none"}` };
-  return { passed: true, details: `All required CI checks passed for exact SHA ${sha}: ${requiredChecks.join(", ")}` };
+  if (missing.length || failed.length) return { passed: false, details: `RequiredWorkflows=${required.join(",")}; Missing=${missing.join(",") || "none"}; FailedOrIncomplete=${failed.join(",") || "none"}` };
+  return { passed: true, details: `All required upstream CI workflows passed for exact SHA ${sha}: ${required.join(", ")}` };
 }
 
 export async function runVersionSyncCertification(): Promise<VersionSyncCertificationResult> {
-  console.log("========================================================================");
-  console.log(" KWAKOPOS LOCAL VERSION FOLDER SYNCHRONIZATION CERTIFICATION           ");
-  console.log("========================================================================");
-
   const checks: CertificationCheck[] = [];
   const addCheck = (id: string, name: string, passed: boolean, details: string) => {
     checks.push({ id, name, passed, details });
@@ -136,23 +147,23 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
   const tempTestDir = fs.mkdtempSync(path.join(os.tmpdir(), "cert-sync-prod-"));
 
   try {
-    // GATE 1: real GitHub release only. Production certification never enables mocks.
     let relTag = "";
     let releaseVersion = "";
     try {
       const rel = await fetchLatestGitHubRelease(repo);
       relTag = rel.tag;
       releaseVersion = rel.version;
-      addCheck("GATE-01", "GitHub Release exists", Boolean(rel.tag && rel.version && rel.certified), `Verified real release: tag=${rel.tag}, version=${rel.version}`);
+      const validReleaseTag = isValidSemVer(rel.tag) && rel.tag === `v${parseSemVer(rel.tag).normalized}` && rel.version === parseSemVer(rel.tag).normalized;
+      addCheck("GATE-01", "GitHub Release exists", Boolean(rel.tag && rel.version && rel.certified && validReleaseTag), `Verified real release: tag=${rel.tag}, version=${rel.version}`);
     } catch (err: any) {
       addCheck("GATE-01", "GitHub Release exists", false, `Real GitHub release verification failed: ${err.message}`);
     }
 
-    const tagResolved = Boolean(relTag && /^v\d+\.\d+\.\d+/.test(relTag));
-    addCheck("GATE-02", "Release tag resolved", tagResolved, tagResolved ? `Authoritative tag=${relTag}` : "No valid authoritative release tag.");
-
     let peeledSha = "";
+    const tagResolved = Boolean(relTag && isValidSemVer(relTag) && relTag === `v${parseSemVer(relTag).normalized}`);
+    addCheck("GATE-02", "Release tag resolved", tagResolved, tagResolved ? `Authoritative tag=${relTag}` : "No valid strict SemVer release tag.");
     try {
+      if (!tagResolved) throw new Error("GITHUB_RELEASE_TAG_NOT_VERIFIABLE");
       peeledSha = await fetchAuthoritativeGithubSha(relTag, repo, token);
       addCheck("GATE-03", "Tag peeled to immutable 40-char SHA", isValid40CharGitSha(peeledSha), `GitHub tag ${relTag} resolves to ${peeledSha}`);
     } catch (err: any) {
@@ -173,7 +184,6 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
     const allShasMatch = isValid40CharGitSha(peeledSha) && isValid40CharGitSha(localHeadSha) && certShaPassed && containerShaPassed && peeledSha === localHeadSha && localHeadSha === certificationSha && certificationSha === containerSourceSha;
     addCheck("GATE-07", "ALL independent SHAs identical", allShasMatch, `GitHub=${peeledSha || "missing"}; Local=${localHeadSha}; Certification=${certificationSha || "missing"}; Container=${containerSourceSha || "missing"}`);
 
-    // Gates 8-12 are isolated synthetic safety tests. They cannot satisfy or replace gates 1-7, 13-15.
     process.env.NODE_ENV = "test";
     const raceLock = path.join(tempTestDir, ".kwakopos-two-process-race.lock");
     const race = runAtomicTwoProcessRace(raceLock);
@@ -230,25 +240,32 @@ export async function runVersionSyncCertification(): Promise<VersionSyncCertific
 
     const privateKey = process.env.RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY || "";
     const publicKey = process.env.RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY || "";
+    const expectedFingerprint = (process.env.RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT || "").replace(/^SHA256:/i, "").toLowerCase();
     let signaturePassed = false;
-    let signatureDetails = "Both Ed25519 signing and verification keys are required; a scheme label is never accepted as proof.";
-    if (privateKey && publicKey && evidenceObj && evidenceShaPassed) {
+    let signatureDetails = "Trusted Ed25519 public-key fingerprint and signing keys are mandatory; signature labels are not accepted as proof.";
+    if (privateKey && publicKey && expectedFingerprint && evidenceObj && evidenceShaPassed) {
       try {
+        const actualFingerprint = publicKeyFingerprint(publicKey);
         const payload = canonicalJson(evidenceObj.bundle as Record<string, unknown>);
         const signature = crypto.sign(null, Buffer.from(payload, "utf8"), privateKey).toString("base64");
-        signaturePassed = verifyEd25519Signature(payload, signature, publicKey);
-        signatureDetails = signaturePassed ? "Verified an actual Ed25519 signature over the canonical evidence payload." : "Ed25519 signature verification failed.";
+        const cryptographicallyValid = verifyEd25519Signature(payload, signature, publicKey);
+        signaturePassed = cryptographicallyValid && actualFingerprint === expectedFingerprint;
+        signatureDetails = signaturePassed ? `Verified Ed25519 signature and trusted public-key fingerprint SHA256:${actualFingerprint}.` : `Ed25519/fingerprint verification failed. Actual fingerprint SHA256:${actualFingerprint}; expected SHA256:${expectedFingerprint || "missing"}.`;
+        if (signaturePassed) {
+          const signedEvidencePath = path.join(cwd, "artifacts", "release-evidence", "kwakopos-folder-sync-evidence-signature.json");
+          fs.writeFileSync(signedEvidencePath, JSON.stringify({ signatureAlgorithm: "Ed25519", publicKeyFingerprint: `SHA256:${actualFingerprint}`, signature, evidenceSha256: evidenceObj.evidenceSha256, signedAt: new Date().toISOString() }, null, 2), "utf8");
+        }
       } catch (err: any) {
-        signatureDetails = `Ed25519 verification error: ${err.message}`;
+        signatureDetails = `Ed25519/fingerprint verification error: ${err.message}`;
       }
     }
     addCheck("GATE-14", "Evidence cryptographic signature", signaturePassed, signatureDetails);
 
     let ciPassed = false;
-    let ciDetails = "GITHUB_TOKEN/GH_TOKEN is required; CI cannot be certified offline.";
+    let ciDetails = "GITHUB_TOKEN/GH_TOKEN is required; upstream CI workflow certification cannot operate offline.";
     if (token && isValid40CharGitSha(localHeadSha)) {
       try {
-        const ci = await fetchRequiredCiChecks(repo, localHeadSha, token);
+        const ci = await fetchRequiredCiWorkflows(repo, localHeadSha, token);
         ciPassed = ci.passed;
         ciDetails = ci.details;
       } catch (err: any) {
