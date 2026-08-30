@@ -2,7 +2,12 @@ FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-# Prisma requires OpenSSL in the build/runtime images.
+ARG RELEASE_GIT_SHA
+ARG RELEASE_VERSION
+LABEL org.opencontainers.image.revision="$RELEASE_GIT_SHA"
+LABEL org.opencontainers.image.version="$RELEASE_VERSION"
+LABEL org.opencontainers.image.source="https://github.com/Kwakoko/KwakoPosv2"
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
@@ -15,12 +20,8 @@ COPY tests ./tests
 COPY src ./src
 COPY .env.example ./
 
-
-# Keep devDependencies in the builder so TypeScript, tsx and Prisma tooling are available.
 RUN npm install --include=dev
 
-# Make TypeScript available globally for workspace packages
-# Link tsc to a location in PATH so workspace scripts can find it
 RUN mkdir -p /usr/local/bin && \
     ln -sf /app/node_modules/.bin/tsc /usr/local/bin/tsc && \
     ln -sf /app/node_modules/.bin/tsx /usr/local/bin/tsx
@@ -31,6 +32,12 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runtime
 
 WORKDIR /app
+
+ARG RELEASE_GIT_SHA
+ARG RELEASE_VERSION
+LABEL org.opencontainers.image.revision="$RELEASE_GIT_SHA"
+LABEL org.opencontainers.image.version="$RELEASE_VERSION"
+LABEL org.opencontainers.image.source="https://github.com/Kwakoko/KwakoPosv2"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \

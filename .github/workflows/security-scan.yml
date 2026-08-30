@@ -6,6 +6,14 @@ on:
   schedule:
     - cron: '0 2 * * *'
 
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: read
+
 jobs:
   security-audit:
     name: Dependency Audit & Vulnerability Scan
@@ -17,6 +25,7 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run build
-      - run: npm audit --audit-level=high || true
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
       - run: npx tsx scripts/release/quality-gates.ts
       - run: npm run certify:security
