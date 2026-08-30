@@ -4194,6 +4194,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalGlobalPlatformService.getHealthSummary(tenantId) });
   });
 
+  server.get("/api/v1/autonomous-business/health", async (req, reply) => {
+    const { globalAutonomousBusinessService } = await import("./services/autonomousBusinessService.js");
+    const tenantId = (req.query as any)?.tenantId || "default-tenant";
+    return reply.status(200).send({ success: true, data: globalAutonomousBusinessService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
 
 

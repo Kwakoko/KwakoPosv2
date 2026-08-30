@@ -67,6 +67,7 @@
     "certify:licensing-tenant": "tsx scripts/certification/runLicensingCertification.ts",
     "certify:marketplace": "tsx scripts/certification/runMarketplaceCertification.ts",
     "certify:global-platform": "tsx scripts/certification/runGlobalPlatformCertification.ts",
+    "certify:autonomous-business": "tsx scripts/certification/runAutonomousBusinessCertification.ts",
     "certify:retail": "tsx scripts/certification/runRetailCertification.ts",
 
 
