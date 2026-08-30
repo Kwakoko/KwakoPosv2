@@ -6,7 +6,8 @@ import {
   synchronizeLocalVersionFolder,
   readSyncMetadata,
   detectActiveProcesses,
-  getCanonicalFolderName,
+  performRollback,
+  generateSyncEvidenceBundle,
 } from "../release/localVersionFolderSyncEngine.js";
 
 async function main() {
@@ -16,6 +17,7 @@ async function main() {
   const isForce = args.includes("--force");
   const isDryRun = args.includes("--dry-run");
   const isJson = args.includes("--json");
+  const isEvidence = args.includes("--evidence");
   const modeArgIndex = args.indexOf("--mode");
   const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B" : "MODE_A";
 
@@ -38,7 +40,7 @@ async function main() {
 
     case "status":
     case "check": {
-      const remoteRelease = await fetchLatestGitHubRelease();
+      const remoteRelease = await fetchLatestGitHubRelease("Kwakoko/KwakoPosv2", { allowOfflineMock: true });
       const drift = detectVersionDrift(localRepo, remoteRelease);
 
       if (isJson) {
@@ -73,7 +75,7 @@ async function main() {
     }
 
     case "verify": {
-      const remoteRelease = await fetchLatestGitHubRelease();
+      const remoteRelease = await fetchLatestGitHubRelease("Kwakoko/KwakoPosv2", { allowOfflineMock: true });
       const drift = detectVersionDrift(localRepo, remoteRelease);
       const processCheck = detectActiveProcesses(cwd);
 
@@ -102,13 +104,18 @@ async function main() {
     }
 
     case "rollback": {
-      const metadata = readSyncMetadata(cwd);
-      if (!metadata || !metadata.previous_folder) {
-        console.error("No previous synchronization metadata found to perform rollback.");
+      console.log("Executing atomic folder sync rollback...");
+      try {
+        const rollbackResult = await performRollback(cwd);
+        if (isJson) {
+          console.log(JSON.stringify(rollbackResult, null, 2));
+        } else {
+          console.log(`🎉 Rollback SUCCESS: Restored folder to "${rollbackResult.rolledBackTo}"`);
+        }
+      } catch (err: any) {
+        console.error(`[ERROR] Rollback failed: ${err.message}`);
         process.exit(1);
       }
-      console.log(`Previous Folder Metadata: ${metadata.previous_folder} (Synced at ${metadata.synced_at})`);
-      console.log("Rollback target verified.");
       break;
     }
 
@@ -119,7 +126,26 @@ async function main() {
         force: isForce,
         dryRun: isDryRun,
         mode,
+        allowOfflineMock: true,
       });
+
+      if (isEvidence && result.success) {
+        const metadata = readSyncMetadata(result.targetPath) || {
+          project: localRepo.projectName,
+          repository: "Kwakoko/KwakoPosv2",
+          release: result.targetVersion,
+          commit: localRepo.commitSha,
+          folder: localRepo.folderName,
+          previous_folder: localRepo.folderName,
+          synced_at: new Date().toISOString(),
+          status: "SYNCHRONIZED",
+          machine: "local",
+          mode,
+        };
+        const evidence = generateSyncEvidenceBundle(metadata, localRepo.commitSha, result.targetPath);
+        result.evidencePath = evidence.evidencePath;
+        result.evidenceSha256 = evidence.evidenceSha256;
+      }
 
       if (isJson) {
         console.log(JSON.stringify(result, null, 2));
@@ -127,6 +153,10 @@ async function main() {
         console.log(`\nSynchronization Result: ${result.success ? "SUCCESS" : "FAILED"}`);
         console.log(`Status:               ${result.status}`);
         console.log(`Action:               ${result.actionTaken}`);
+        if (result.evidencePath) {
+          console.log(`Evidence Bundle:      ${result.evidencePath}`);
+          console.log(`Evidence SHA-256:     ${result.evidenceSha256}`);
+        }
         if (result.error) {
           console.error(`Error:                ${result.error}`);
         }
@@ -139,7 +169,7 @@ async function main() {
     }
 
     default: {
-      console.log("Usage: kwakopos-version <status|check|sync|verify|current|rollback> [--force] [--dry-run] [--mode A|B] [--json]");
+      console.log("Usage: kwakopos-version <status|check|sync|verify|current|rollback> [--force] [--dry-run] [--mode A|B] [--evidence] [--json]");
       process.exit(1);
     }
   }
