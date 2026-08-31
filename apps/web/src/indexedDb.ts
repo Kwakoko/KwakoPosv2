@@ -13,10 +13,7 @@ export interface OutboxItem {
 
 type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "syncOutbox" | "syncMetadata";
 
-/**
- * Durable browser-local operational store with a synchronous Map facade for
- * current UI callers. IndexedDB persistence is best-effort and hydrated on startup.
- */
+/** Durable browser-local operational store with IndexedDB persistence. */
 export class LocalIndexedDbStore {
   schemaVersion = 1;
   products = new Map<string, Product>();
@@ -28,9 +25,7 @@ export class LocalIndexedDbStore {
   readonly ready: Promise<void>;
   private nativeDb: IDBDatabase | null = null;
 
-  constructor() {
-    this.ready = this.initializeNativePersistence();
-  }
+  constructor() { this.ready = this.initializeNativePersistence(); }
 
   private async initializeNativePersistence(): Promise<void> {
     if (typeof indexedDB === "undefined") return;
@@ -54,7 +49,6 @@ export class LocalIndexedDbStore {
       this.hydrateMap("syncOutbox", this.syncOutbox),
       this.hydrateMap("syncMetadata", this.syncMetadata),
     ]);
-
     const storedSchema = this.syncMetadata.get("schemaVersion");
     if (storedSchema) this.schemaVersion = Number(storedSchema) || this.schemaVersion;
   }
@@ -65,14 +59,16 @@ export class LocalIndexedDbStore {
       const request = this.nativeDb!.transaction(store, "readonly").objectStore(store).getAllKeys();
       request.onsuccess = () => {
         const keys = request.result as IDBValidKey[];
-        if (!keys.length) return resolve();
         const tx = this.nativeDb!.transaction(store, "readonly");
         const objectStore = tx.objectStore(store);
+        if (!keys.length) { resolve(); return; }
+        let remaining = keys.length;
         for (const key of keys) {
           const get = objectStore.get(key);
           get.onsuccess = () => target.set(String(key), get.result as T);
+          get.onerror = () => undefined;
+          get.onsuccess = () => { target.set(String(key), get.result as T); if (--remaining === 0) resolve(); };
         }
-        tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
       };
       request.onerror = () => resolve();
@@ -81,30 +77,13 @@ export class LocalIndexedDbStore {
 
   private persist<T>(store: NativeStore, key: string, value: T): void {
     if (!this.nativeDb) return;
-    try {
-      const tx = this.nativeDb.transaction(store, "readwrite");
-      tx.objectStore(store).put(value, key);
-    } catch {
-      // Local persistence must never make an already-successful UI mutation throw.
-    }
-  }
-
-  private removePersisted(store: NativeStore, key: string): void {
-    if (!this.nativeDb) return;
-    try { this.nativeDb.transaction(store, "readwrite").objectStore(store).delete(key); } catch { /* best effort */ }
+    try { this.nativeDb.transaction(store, "readwrite").objectStore(store).put(value, key); } catch { /* best effort persistence */ }
   }
 
   clear(): void {
-    this.products.clear();
-    this.productVariants.clear();
-    this.stockLedger.clear();
-    this.stockAdjustments.clear();
-    this.syncOutbox.clear();
-    this.syncMetadata.clear();
-    if (this.nativeDb) {
-      for (const store of ["products", "productVariants", "stockLedger", "stockAdjustments", "syncOutbox", "syncMetadata"] as NativeStore[]) {
-        try { this.nativeDb.transaction(store, "readwrite").objectStore(store).clear(); } catch { /* best effort */ }
-      }
+    this.products.clear(); this.productVariants.clear(); this.stockLedger.clear(); this.stockAdjustments.clear(); this.syncOutbox.clear(); this.syncMetadata.clear();
+    if (this.nativeDb) for (const store of ["products", "productVariants", "stockLedger", "stockAdjustments", "syncOutbox", "syncMetadata"] as NativeStore[]) {
+      try { this.nativeDb.transaction(store, "readwrite").objectStore(store).clear(); } catch { /* best effort */ }
     }
   }
 
@@ -119,6 +98,16 @@ export class LocalIndexedDbStore {
     this.persist("productVariants", variant.id, variant);
   }
 
+  saveStockLedgerLocal(entry: StockLedger): void {
+    this.stockLedger.set(entry.id, entry);
+    this.persist("stockLedger", entry.id, entry);
+  }
+
+  saveStockAdjustmentLocal(adjustment: StockAdjustment): void {
+    this.stockAdjustments.set(adjustment.id, adjustment);
+    this.persist("stockAdjustments", adjustment.id, adjustment);
+  }
+
   recordOutboxMutation(item: OutboxItem): void {
     this.syncOutbox.set(item.id, item);
     this.persist("syncOutbox", item.id, item);
@@ -127,38 +116,23 @@ export class LocalIndexedDbStore {
   enqueueOutbox(item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem {
     const opId = item.id || `OP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const entityType = (item.entityType || item.entity || "Product") as OutboxItem["entityType"];
-    const outboxItem: OutboxItem = {
-      id: opId,
-      entityType,
-      entityId: item.entityId || opId,
-      operationType: item.operationType || "CREATE",
-      payload: item.payload || item.data || {},
-      clientCreatedAt: item.clientCreatedAt || new Date().toISOString(),
-      idempotencyKey: item.idempotencyKey || opId,
-      status: "PENDING",
-    };
+    const outboxItem: OutboxItem = { id: opId, entityType, entityId: item.entityId || opId, operationType: item.operationType || "CREATE", payload: item.payload || item.data || {}, clientCreatedAt: item.clientCreatedAt || new Date().toISOString(), idempotencyKey: item.idempotencyKey || opId, status: "PENDING" };
     this.recordOutboxMutation(outboxItem);
     return outboxItem;
   }
 
-  getPendingOutbox(): OutboxItem[] {
-    return [...this.syncOutbox.values()].filter((item) => item.status === "PENDING");
-  }
+  getPendingOutbox(): OutboxItem[] { return [...this.syncOutbox.values()].filter((item) => item.status === "PENDING"); }
 
   markOutboxSynced(operationId: string): void {
-    const item = this.syncOutbox.get(operationId);
-    if (!item) return;
-    item.status = "SYNCED";
-    this.persist("syncOutbox", operationId, item);
+    const item = this.syncOutbox.get(operationId); if (!item) return;
+    item.status = "SYNCED"; this.persist("syncOutbox", operationId, item);
   }
 
   markOutboxFailed(operationId: string, errorReason: string): void {
-    const item = this.syncOutbox.get(operationId);
-    if (!item) return;
+    const item = this.syncOutbox.get(operationId); if (!item) return;
     item.status = "FAILED";
     this.syncMetadata.set(`error_${operationId}`, errorReason);
-    this.persist("syncOutbox", operationId, item);
-    this.persist("syncMetadata", `error_${operationId}`, errorReason);
+    this.persist("syncOutbox", operationId, item); this.persist("syncMetadata", `error_${operationId}`, errorReason);
   }
 
   setSyncMetadata(key: string, value: string): void {
