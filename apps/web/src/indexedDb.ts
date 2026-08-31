@@ -14,11 +14,11 @@ export interface OutboxItem {
 type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "syncOutbox" | "syncMetadata";
 const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "syncOutbox", "syncMetadata"];
 const DB_NAME = "kwakopos-v2";
-const CURRENT_SCHEMA_VERSION = 1;
+const DEFAULT_SCHEMA_VERSION = 1;
 
 /** Durable browser-local operational store with IndexedDB persistence. */
 export class LocalIndexedDbStore {
-  schemaVersion = CURRENT_SCHEMA_VERSION;
+  schemaVersion: number;
   products = new Map<string, Product>();
   productVariants = new Map<string, ProductVariant>();
   stockLedger = new Map<string, StockLedger>();
@@ -28,12 +28,15 @@ export class LocalIndexedDbStore {
   readonly ready: Promise<void>;
   private nativeDb: IDBDatabase | null = null;
 
-  constructor() { this.ready = this.initializeNativePersistence(); }
+  constructor(requestedSchemaVersion = DEFAULT_SCHEMA_VERSION) {
+    this.schemaVersion = Number.isInteger(requestedSchemaVersion) && requestedSchemaVersion > 0 ? requestedSchemaVersion : DEFAULT_SCHEMA_VERSION;
+    this.ready = this.initializeNativePersistence();
+  }
 
   private async initializeNativePersistence(): Promise<void> {
     if (typeof indexedDB === "undefined") return;
     this.nativeDb = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, CURRENT_SCHEMA_VERSION);
+      const request = indexedDB.open(DB_NAME, this.schemaVersion);
       request.onupgradeneeded = () => {
         const db = request.result;
         for (const store of STORE_NAMES) if (!db.objectStoreNames.contains(store)) db.createObjectStore(store);
@@ -43,7 +46,8 @@ export class LocalIndexedDbStore {
     });
     await Promise.all(STORE_NAMES.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
     const storedSchema = this.syncMetadata.get("schemaVersion");
-    if (storedSchema) this.schemaVersion = Number(storedSchema) || this.schemaVersion;
+    if (storedSchema) this.schemaVersion = Math.max(this.schemaVersion, Number(storedSchema) || this.schemaVersion);
+    this.setSyncMetadata("schemaVersion", String(this.schemaVersion));
   }
 
   private getTargetMap(store: NativeStore): Map<string, any> {
@@ -62,16 +66,15 @@ export class LocalIndexedDbStore {
     return new Promise((resolve) => {
       const tx = this.nativeDb!.transaction(store, "readonly");
       const request = tx.objectStore(store).getAll();
-      request.onsuccess = () => {
-        const values = request.result as T[];
-        // Object-store keys are not available from getAll(), so fetch keys once
-        // and pair them with values in their deterministic IndexedDB order.
-        const keyRequest = tx.objectStore(store).getAllKeys();
-        keyRequest.onsuccess = () => {
-          const keys = keyRequest.result as IDBValidKey[];
-          for (let index = 0; index < Math.min(keys.length, values.length); index++) target.set(String(keys[index]), values[index]);
-        };
+      const keyRequest = tx.objectStore(store).getAllKeys();
+      let values: T[] | null = null;
+      let keys: IDBValidKey[] | null = null;
+      const finish = () => {
+        if (!values || !keys) return;
+        for (let index = 0; index < Math.min(keys.length, values.length); index++) target.set(String(keys[index]), values[index]);
       };
+      request.onsuccess = () => { values = request.result as T[]; finish(); };
+      keyRequest.onsuccess = () => { keys = keyRequest.result as IDBValidKey[]; finish(); };
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
@@ -112,7 +115,10 @@ export class LocalIndexedDbStore {
   migrateToVersion(targetVersion: number): { previousVersion: number; newVersion: number; preservedOutboxCount: number } {
     const previousVersion = this.schemaVersion;
     const preservedOutboxCount = this.getPendingOutbox().length;
-    if (targetVersion > previousVersion) { this.schemaVersion = targetVersion; this.setSyncMetadata("schemaVersion", String(targetVersion)); this.setSyncMetadata("lastMigratedAt", new Date().toISOString()); }
-    return { previousVersion, newVersion: this.schemaVersion, preservedOutboxCount };
+    if (!Number.isInteger(targetVersion) || targetVersion <= previousVersion) return { previousVersion, newVersion: previousVersion, preservedOutboxCount };
+    this.schemaVersion = targetVersion;
+    this.setSyncMetadata("schemaVersion", String(targetVersion));
+    this.setSyncMetadata("lastMigratedAt", new Date().toISOString());
+    return { previousVersion, newVersion: targetVersion, preservedOutboxCount };
   }
 }
