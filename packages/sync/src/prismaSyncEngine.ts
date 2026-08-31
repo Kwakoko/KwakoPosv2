@@ -1,12 +1,16 @@
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository } from "@kwakopos2/database";
+import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService } from "@kwakopos2/database";
 import { prisma } from "@kwakopos2/database";
 
 export class PrismaSyncEngine {
+  private readonly atomicCommercialFinance: PrismaAtomicCommercialFinanceService;
+
   constructor(
     private readonly productRepo: PrismaProductRepository,
     private readonly stockRepo: PrismaStockRepository,
-  ) {}
+  ) {
+    this.atomicCommercialFinance = new PrismaAtomicCommercialFinanceService(prisma);
+  }
 
   async processPush(ctx: TenantContext, req: SyncPushRequest): Promise<SyncPushResponse> {
     const results: SyncPushResponse["results"] = [];
@@ -14,14 +18,7 @@ export class PrismaSyncEngine {
 
     for (const op of req.operations) {
       const existing = await prisma.syncOperation.findFirst({
-        where: {
-          tenantId: ctx.tenantId,
-          deviceId: req.deviceId,
-          OR: [
-            { idempotencyKey: op.idempotencyKey },
-            { operationId: op.operationId },
-          ],
-        },
+        where: { tenantId: ctx.tenantId, deviceId: req.deviceId, OR: [{ idempotencyKey: op.idempotencyKey }, { operationId: op.operationId }] },
       });
       if (existing) {
         results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
@@ -41,13 +38,14 @@ export class PrismaSyncEngine {
         } else if (op.entityType === "ProductVariant" && op.operationType === "DELETE") {
           await this.productRepo.deleteVariant(ctx, op.entityId);
         } else if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") {
-          await this.stockRepo.recordStockAdjustment(ctx, {
-            ...(op.payload as any),
-            id: op.entityId,
-            deviceId: req.deviceId,
-            operationId: op.operationId,
-            idempotencyKey: op.idempotencyKey,
-          });
+          await this.stockRepo.recordStockAdjustment(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+        } else if (op.entityType === "Sale" && op.operationType === "CREATE") {
+          // Production offline POS mutations must use the same atomic commercial +
+          // inventory + finance transaction as online checkout.
+          await this.atomicCommercialFinance.createSale(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+        } else if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
+          // Goods receipt sync must preserve inventory and finance atomicity.
+          await this.atomicCommercialFinance.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
         } else {
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
@@ -81,71 +79,18 @@ export class PrismaSyncEngine {
   async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
     const since = req.since ? new Date(req.since) : new Date(0);
     const products = (await this.productRepo.getProducts(ctx)).filter((p: any) => new Date(p.updatedAt) >= since);
-    const variants = await prisma.productVariant.findMany({
-      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
-      orderBy: { updatedAt: "asc" },
-    });
+    const variants = await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } }, orderBy: { updatedAt: "asc" } });
     const ledger = await this.stockRepo.getLedger(ctx);
-    const adjustments = await prisma.stockAdjustment.findMany({
-      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
-      orderBy: { updatedAt: "asc" },
-    });
+    const adjustments = await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } }, orderBy: { updatedAt: "asc" } });
 
     return {
       serverTimestamp: new Date().toISOString(),
       products,
-      variants: variants.map((v: any) => ({
-        id: v.id,
-        tenantId: v.tenantId,
-        branchId: v.branchId,
-        productId: v.productId,
-        name: v.name,
-        sku: v.sku,
-        barcode: v.barcode ?? null,
-        price: Number(v.price),
-        costPrice: Number(v.costPrice),
-        isActive: v.isActive,
-        createdAt: v.createdAt.toISOString(),
-        updatedAt: v.updatedAt.toISOString(),
-      })),
+      variants: variants.map((v: any) => ({ id: v.id, tenantId: v.tenantId, branchId: v.branchId, productId: v.productId, name: v.name, sku: v.sku, barcode: v.barcode ?? null, price: Number(v.price), costPrice: Number(v.costPrice), isActive: v.isActive, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })),
       stockLedger: ledger.filter((entry: any) => new Date(entry.createdAt) >= since),
-      adjustments: adjustments.map((a: any) => ({
-        id: a.id,
-        tenantId: a.tenantId,
-        branchId: a.branchId,
-        variantId: a.variantId,
-        adjustmentType: a.adjustmentType,
-        quantityChange: Number(a.quantityChange),
-        reason: a.reason,
-        referenceNote: a.referenceNote ?? null,
-        status: a.status,
-        createdByUserId: a.createdByUserId,
-        deviceId: a.deviceId,
-        operationId: a.operationId,
-        idempotencyKey: a.idempotencyKey,
-        createdAt: a.createdAt.toISOString(),
-        updatedAt: a.updatedAt.toISOString(),
-      })),
-      customers: (await prisma.customer.findMany({
-        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
-        orderBy: { updatedAt: "asc" },
-      })).map((c: any) => ({
-        ...c,
-        creditLimit: Number(c.creditLimit),
-        currentBalance: Number(c.currentBalance),
-        openingBalance: Number(c.openingBalance),
-        createdAt: c.createdAt.toISOString(),
-        updatedAt: c.updatedAt.toISOString(),
-      })),
-      suppliers: (await prisma.supplier.findMany({
-        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } },
-        orderBy: { updatedAt: "asc" },
-      })).map((s: any) => ({
-        ...s,
-        outstandingBalance: Number(s.outstandingBalance),
-        createdAt: s.createdAt.toISOString(),
-        updatedAt: s.updatedAt.toISOString(),
-      })),
+      adjustments: adjustments.map((a: any) => ({ id: a.id, tenantId: a.tenantId, branchId: a.branchId, variantId: a.variantId, adjustmentType: a.adjustmentType, quantityChange: Number(a.quantityChange), reason: a.reason, referenceNote: a.referenceNote ?? null, status: a.status, createdByUserId: a.createdByUserId, deviceId: a.deviceId, operationId: a.operationId, idempotencyKey: a.idempotencyKey, createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() })),
+      customers: (await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } }, orderBy: { updatedAt: "asc" } })).map((c: any) => ({ ...c, creditLimit: Number(c.creditLimit), currentBalance: Number(c.currentBalance), openingBalance: Number(c.openingBalance), createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
+      suppliers: (await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since } }, orderBy: { updatedAt: "asc" } })).map((s: any) => ({ ...s, outstandingBalance: Number(s.outstandingBalance), createdAt: s.createdAt.toISOString(), updatedAt: s.updatedAt.toISOString() })),
     };
   }
 }
