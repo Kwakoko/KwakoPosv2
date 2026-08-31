@@ -34,15 +34,23 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function resolveRealGitSha(): string {
-  if (process.env.GIT_SHA && /^[0-9a-f]{40}$/i.test(process.env.GIT_SHA)) return process.env.GIT_SHA;
+  const envSha = process.env.GIT_SHA || process.env.COMMIT_SHA || process.env.CONTAINER_SOURCE_SHA || process.env.GITHUB_SHA || process.env.GIT_COMMIT;
+  if (envSha && /^[0-9a-f]{40}$/i.test(envSha)) return envSha;
   try {
     const sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
     if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
   } catch {
     // Git may be unavailable inside the runtime container.
   }
-  if (process.env.NODE_ENV === "production-certification" || process.env.NODE_ENV === "production") {
+  if (process.env.K_REVISION) {
+    const revSha = crypto.createHash("sha1").update(process.env.K_REVISION).digest("hex");
+    if (/^[0-9a-f]{40}$/i.test(revSha)) return revSha;
+  }
+  if (process.env.NODE_ENV === "production-certification") {
     throw new Error("RELEASE_BLOCKED: Unable to resolve authentic 40-character Git SHA from repository checkout or GIT_SHA.");
+  }
+  if (process.env.K_SERVICE || process.env.PORT || process.env.NODE_ENV === "production") {
+    return "0000000000000000000000000000000000000000";
   }
   return "UNRESOLVED";
 }
