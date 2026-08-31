@@ -1,5 +1,5 @@
 import { globalReleaseRepository } from "@kwakopos2/database";
-import { RollbackController } from "../../packages/observability/src/index.js";
+import { RollbackController } from "@kwakopos2/observability";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";

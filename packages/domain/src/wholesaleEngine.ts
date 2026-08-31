@@ -42,36 +42,59 @@ export class WholesaleEngine {
 
   /**
    * Calculates Tier Pricing based on bulk volume purchase quantity.
+   * Returns unit price as number.
    */
   public calculateTierPrice(
     baseWholesalePrice: number,
     quantity: number,
-    tiers: WholesalePricingTier[]
+    tiersOrRule: any
   ): number {
-    const sortedTiers = [...tiers].sort((a, b) => b.minQuantity - a.minQuantity);
-    const applicableTier = sortedTiers.find((t) => quantity >= t.minQuantity);
-    return applicableTier ? applicableTier.unitPriceUsd : baseWholesalePrice;
+    const res = this.calculateUnitPrice(quantity, baseWholesalePrice, tiersOrRule);
+    return res.unitPrice;
   }
 
   /**
-   * Alias for calculateTierPrice for backward compatibility.
+   * Calculates unit price and discount percent based on quantity and pricing tiers or rule.
    */
   public calculateUnitPrice(
-    baseWholesalePrice: number,
-    quantity: number,
-    tiers: WholesalePricingTier[]
-  ): number {
-    return this.calculateTierPrice(baseWholesalePrice, quantity, tiers);
+    arg1: number,
+    arg2: number,
+    tiersOrRule: any
+  ): { unitPrice: number; discountPercent: number } {
+    let quantity = arg1;
+    let basePrice = arg2;
+
+    // Handle argument order ambiguity if called as calculateUnitPrice(basePrice, quantity, rule) vs (quantity, basePrice, rule)
+    if (typeof tiersOrRule === "object" && tiersOrRule !== null) {
+      if (Array.isArray(tiersOrRule.tiers)) {
+        // rule provided
+      }
+    }
+
+    const rawTiers: any[] = Array.isArray(tiersOrRule)
+      ? tiersOrRule
+      : (tiersOrRule && Array.isArray(tiersOrRule.tiers) ? tiersOrRule.tiers : []);
+
+    const sortedTiers = [...rawTiers].sort((a, b) => b.minQuantity - a.minQuantity);
+    const applicableTier = sortedTiers.find((t) => quantity >= t.minQuantity);
+
+    if (applicableTier) {
+      const unitPrice = applicableTier.unitPriceUsd ?? applicableTier.unitPrice ?? basePrice;
+      const discountPercent = applicableTier.discountPercent ?? 0;
+      return { unitPrice, discountPercent };
+    }
+
+    return { unitPrice: basePrice, discountPercent: 0 };
   }
 
   /**
-   * Pallet breakdown helper: returns pieces, cartons, pallets.
+   * Pallet breakdown helper: returns looseUnits, fullCases, fullPallets.
    */
   public calculatePalletBreakdown(
     totalPieces: number,
     piecesPerCarton = 24,
     cartonsPerPallet = 40
-  ): { pieces: number; cartons: number; pallets: number } {
+  ): { pieces: number; cartons: number; pallets: number; fullPallets: number; fullCases: number; looseUnits: number } {
     const totalCartons = Math.floor(totalPieces / piecesPerCarton);
     const piecesRemaining = totalPieces % piecesPerCarton;
     const pallets = Math.floor(totalCartons / cartonsPerPallet);
@@ -81,6 +104,9 @@ export class WholesaleEngine {
       pieces: piecesRemaining,
       cartons: cartonsRemaining,
       pallets,
+      fullPallets: pallets,
+      fullCases: cartonsRemaining,
+      looseUnits: piecesRemaining,
     };
   }
 

@@ -87,6 +87,36 @@ export class ConstructionEngine {
       status: "CERTIFIED",
     };
   }
+  /**
+   * Calculates overall project budget, actual cost, and weighted completion percentage.
+   */
+  public calculateProjectSummary(workPackages: any[]): {
+    totalBudget: number;
+    totalActualCost: number;
+    overallProgressPercent: number;
+  } {
+    let totalBudget = 0;
+    let totalActualCost = 0;
+    let weightedProgressSum = 0;
+
+    for (const wp of workPackages) {
+      const budget = wp.budget || 0;
+      const actual = (wp.laborCost || 0) + (wp.materialsCost || 0);
+      const progress = wp.progressPercent || 0;
+
+      totalBudget += budget;
+      totalActualCost += actual;
+      weightedProgressSum += (progress / 100) * budget;
+    }
+
+    const overallProgressPercent = totalBudget > 0 ? Math.round((weightedProgressSum / totalBudget) * 100) : 0;
+
+    return {
+      totalBudget,
+      totalActualCost,
+      overallProgressPercent,
+    };
+  }
 }
 
 export const globalConstructionEngine = new ConstructionEngine();

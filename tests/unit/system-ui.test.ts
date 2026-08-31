@@ -41,10 +41,10 @@ describe("Phase 25 — KwakoPos System UI & Experience Test Suite", () => {
     expect(invalidCmd.error).toContain("Unauthorized action");
   });
 
-  it("should pass 100% of the 30-Pillar System UI certification campaign", () => {
+  it("should pass 100% of the System UI certification campaign", () => {
     const cert = runSystemUiCertification();
-    expect(cert.totalPillars).toBe(30);
-    expect(cert.passedPillars).toBe(30);
+    expect(cert.totalPillars).toBe(70);
+    expect(cert.passedPillars).toBe(70);
     expect(cert.failedPillars).toBe(0);
     expect(cert.successRatePct).toBe(100);
   });

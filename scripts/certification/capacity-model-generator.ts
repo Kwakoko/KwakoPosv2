@@ -1,8 +1,8 @@
 import { KwakoPosCapacityModel } from "@kwakopos2/contracts";
-import { getRealGitSha } from "../release/releaseIdentity.js";
+import { resolveRealGitSha } from "@kwakopos2/config";
 
 export function generateKwakoPosCapacityModel(): KwakoPosCapacityModel {
-  const gitSha = process.env.GIT_SHA || getRealGitSha();
+  const gitSha = process.env.GIT_SHA || resolveRealGitSha();
   return {
     appVersion: "2.5.0",
     gitSha,

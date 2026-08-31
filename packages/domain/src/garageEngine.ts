@@ -72,15 +72,26 @@ export class GarageEngine {
   /**
    * Calculates total work order / job card cost.
    */
-  public calculateWorkOrderCost(partsTotalUsd: number, laborTotalUsd: number, taxUsd = 0, discountUsd = 0): number {
-    return Math.round((partsTotalUsd + laborTotalUsd + taxUsd - discountUsd) * 100) / 100;
+  public calculateWorkOrderCost(
+    partsCostTotal: number,
+    laborHoursOrTotal: number,
+    laborRate = 0,
+    discountUsd = 0
+  ): { partsCostTotal: number; laborCostTotal: number; grandTotal: number } {
+    const laborCostTotal = laborRate > 0 ? laborHoursOrTotal * laborRate : laborHoursOrTotal;
+    const grandTotal = Math.round((partsCostTotal + laborCostTotal - discountUsd) * 100) / 100;
+    return { partsCostTotal, laborCostTotal, grandTotal };
   }
 
   /**
    * Asserts whether Quality Control QA signoff is allowed before vehicle release.
    */
   public assertQaSignoffAllowed(jobCard: { status: string; isQualityPassed?: boolean }): boolean {
-    return jobCard.status === "REPAIR_COMPLETED" || jobCard.status === "TESTING";
+    const allowedStatuses = ["QA_REVIEW", "REPAIR_COMPLETED", "TESTING"];
+    if (!allowedStatuses.includes(jobCard.status)) {
+      throw new Error(`GARAGE_VIOLATION: Cannot QA signoff work order in status ${jobCard.status}`);
+    }
+    return true;
   }
 
   /**
