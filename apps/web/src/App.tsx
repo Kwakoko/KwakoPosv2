@@ -1,10 +1,6 @@
-/**
- * KwakoPos 2.0 Master Application Root Component
- * Hosts KwakoPosProvider pipeline, client router, and SystemAppShellLayout.
- */
-
-import React, { useState, useEffect } from "react";
-import { KwakoPosProvider } from "./context/KwakoPosContexts.js";
+import React, { useEffect, useState } from "react";
+import { KwakoPosProvider, useAuth } from "./context/KwakoPosContexts.js";
+import { LoginPage } from "./pages/LoginPage.js";
 import { SystemAppShellLayout } from "./layouts/SystemAppShellLayout.js";
 import {
   DashboardPage,
@@ -17,12 +13,13 @@ import {
   SettingsPage,
   UsersPage,
   SuperAdminPage,
-  DiagnosticsPage
+  DiagnosticsPage,
 } from "./pages/WorkspacePages.js";
 
-export const AppContent: React.FC = () => {
+const AuthenticatedApp: React.FC = () => {
+  const { user, isAuthenticated, isInitializing, error } = useAuth();
   const [currentPath, setCurrentPath] = useState(
-    typeof window !== "undefined" ? window.location.pathname : "/"
+    typeof window !== "undefined" ? window.location.pathname : "/",
   );
 
   useEffect(() => {
@@ -31,52 +28,56 @@ export const AppContent: React.FC = () => {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  if (isInitializing) {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1.5rem" }}>
+        <div className="workspace-card">Loading secure KwakoPos workspace…</div>
+      </main>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
+    return <LoginPage onAuthenticated={() => setCurrentPath("/")} />;
+  }
+
   const handleNavigate = (path: string) => {
     setCurrentPath(path);
-    if (typeof window !== "undefined" && window.location.pathname !== path) {
-      window.history.pushState({}, "", path);
-    }
+    if (window.location.pathname !== path) window.history.pushState({}, "", path);
   };
 
   const renderView = () => {
-    if (currentPath === "/" || currentPath === "/dashboard") {
-      return <DashboardPage onNavigate={handleNavigate} />;
+    switch (currentPath) {
+      case "/":
+      case "/dashboard":
+        return <DashboardPage onNavigate={handleNavigate} />;
+      case "/pos":
+        return <PosPage onNavigate={handleNavigate} />;
+      case "/inventory":
+        return <InventoryPage />;
+      case "/customers":
+        return <CustomersPage />;
+      case "/purchasing":
+        return <PurchasingPage />;
+      case "/finance":
+        return <FinancePage />;
+      case "/reports":
+        return <ReportsPage />;
+      case "/settings":
+        return <SettingsPage />;
+      case "/users":
+        return <UsersPage />;
+      case "/super-admin":
+        return <SuperAdminPage />;
+      case "/diagnostics":
+        return <DiagnosticsPage />;
+      default:
+        return <DashboardPage onNavigate={handleNavigate} />;
     }
-    if (currentPath === "/pos") {
-      return <PosPage onNavigate={handleNavigate} />;
-    }
-    if (currentPath === "/inventory") {
-      return <InventoryPage />;
-    }
-    if (currentPath === "/customers") {
-      return <CustomersPage />;
-    }
-    if (currentPath === "/purchasing") {
-      return <PurchasingPage />;
-    }
-    if (currentPath === "/finance") {
-      return <FinancePage />;
-    }
-    if (currentPath === "/reports") {
-      return <ReportsPage />;
-    }
-    if (currentPath === "/settings") {
-      return <SettingsPage />;
-    }
-    if (currentPath === "/users") {
-      return <UsersPage />;
-    }
-    if (currentPath === "/super-admin") {
-      return <SuperAdminPage />;
-    }
-    if (currentPath === "/diagnostics" || currentPath.startsWith("/modules")) {
-      return <DiagnosticsPage />;
-    }
-    return <DashboardPage onNavigate={handleNavigate} />;
   };
 
   return (
     <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
+      {error && <div className="workspace-card" style={{ borderColor: "var(--danger)" }}>{error}</div>}
       {renderView()}
     </SystemAppShellLayout>
   );
@@ -84,7 +85,7 @@ export const AppContent: React.FC = () => {
 
 export const App: React.FC = () => (
   <KwakoPosProvider>
-    <AppContent />
+    <AuthenticatedApp />
   </KwakoPosProvider>
 );
 
