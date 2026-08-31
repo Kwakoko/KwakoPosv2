@@ -3,7 +3,7 @@
   "version": "2.5.0",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsx buildWeb.ts && tsc -p tsconfig.json",
     "dev": "vite",
     "clean": "rm -rf dist"
   },

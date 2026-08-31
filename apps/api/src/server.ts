@@ -1,8 +1,24 @@
+import * as fs from "fs";
+import * as path from "path";
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+
+function resolveWebDistFile(relativePath: string): string | null {
+  const candidateDirs = [
+    path.resolve(process.cwd(), "apps/web/dist"),
+    path.resolve(process.cwd(), "dist/apps/web/dist"),
+    path.resolve(process.cwd(), "../web/dist"),
+    path.resolve(process.cwd(), "../../apps/web/dist"),
+  ];
+  for (const dir of candidateDirs) {
+    const full = path.join(dir, relativePath);
+    if (fs.existsSync(full)) return full;
+  }
+  return null;
+}
 import {
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
@@ -183,7 +199,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Fastify CORS setup - locked in production
   const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
+    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://kwakokov2--kwakoposv2.us-east4.hosted.app", "https://app.kwakopos.com", "https://admin.kwakopos.com"])
     : "*";
   server.register(cors, { origin: corsOrigin });
 
@@ -256,8 +272,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
 
     const url = req.routeOptions?.url || req.url.split("?")[0];
+
+    // Dedicated API System & Telemetry Routes (pass through to Fastify API handlers)
     if (
-      url === "/" ||
       url === "/health" ||
       url === "/readiness" ||
       url === "/version" ||
@@ -267,6 +284,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url.startsWith("/telemetry")
     ) {
       return;
+    }
+
+    // Static Assets & Manifests for PWA Web Shell
+    if (url === "/manifest.json") {
+      const manifestPath = resolveWebDistFile("manifest.json");
+      if (manifestPath && fs.existsSync(manifestPath)) {
+        reply.type("application/json").send(fs.readFileSync(manifestPath, "utf8"));
+        return;
+      }
+    }
+
+    if (url === "/sw.js") {
+      const swPath = resolveWebDistFile("sw.js");
+      if (swPath && fs.existsSync(swPath)) {
+        reply.type("application/javascript").send(fs.readFileSync(swPath, "utf8"));
+        return;
+      }
+    }
+
+    // Web PWA SPA Fallback Routing for browser navigation paths
+    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/");
+    const isWebUiPath =
+      url === "/" ||
+      url === "/login" ||
+      url === "/dashboard" ||
+      url === "/pos" ||
+      url === "/inventory" ||
+      url === "/customers" ||
+      url === "/reports" ||
+      url === "/settings" ||
+      url === "/super-admin" ||
+      url === "/diagnostics" ||
+      (req.headers.accept && req.headers.accept.includes("text/html") && !isExplicitApiPrefix);
+
+    if (!isExplicitApiPrefix && isWebUiPath) {
+      const indexPath = resolveWebDistFile("index.html");
+      if (indexPath && fs.existsSync(indexPath)) {
+        reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
+        return;
+      }
     }
 
     const authHeader = req.headers.authorization;

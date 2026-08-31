@@ -24,6 +24,7 @@
     "test:sync": "vitest run tests/sync",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
     "certify:version-sync": "tsx scripts/certification/runVersionSyncCertification.ts",
+    "certify:frontend": "tsx scripts/certification/runFrontendDeploymentCertification.ts",
     "test:browser": "playwright test",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
