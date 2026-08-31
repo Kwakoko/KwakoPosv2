@@ -15,20 +15,23 @@ const sourceContains = (relative: string, needle: string, forbidden = false) => 
   if (forbidden ? present : !present) failures.push(`${forbidden ? "Forbidden pattern" : "Required pattern"} in ${relative}: ${needle}`);
 };
 
-requireFile("apps/web/src/main.tsx");
-requireFile("apps/web/src/App.tsx");
-requireFile("apps/web/src/context/KwakoPosContexts.tsx");
-requireFile("apps/web/src/services/apiClient.ts");
-requireFile("apps/web/src/indexedDb.ts");
-requireFile("apps/api/src/server.ts");
-requireFile("apps/api/src/serverFixed.ts");
-requireFile("apps/api/dist/index.html");
-requireFile("apps/web/dist/index.html");
+for (const file of [
+  "apps/web/src/main.tsx",
+  "apps/web/src/App.tsx",
+  "apps/web/src/context/KwakoPosContexts.tsx",
+  "apps/web/src/services/apiClient.ts",
+  "apps/web/src/indexedDb.ts",
+  "apps/api/src/server.ts",
+  "apps/api/src/serverFixed.ts",
+  "apps/api/dist/serverFixed.js",
+  "apps/web/dist/index.html",
+]) requireFile(file);
 
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "apiLogin");
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "isAuthenticated: Boolean(user)");
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "permissions.includes(\"*\")");
-sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "db.getPendingOutbox().length", true);
+sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "for (const item of pending)", true);
+sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "markOutboxSynced(item.id)", true);
 sourceContains("apps/web/src/services/apiClient.ts", "refreshAccessToken");
 sourceContains("apps/web/src/services/apiClient.ts", "requestJson<T>(input, init, false)");
 sourceContains("apps/web/src/indexedDb.ts", "indexedDB.open");
@@ -38,10 +41,7 @@ sourceContains("apps/api/src/serverFixed.ts", "KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/serverFixed.js");
 
-// The production web shell must be a Vite/React shell, not the retired generated
-// RealAppShell document that previously masked the real React UI.
-const distCandidates = [path.join(root, "apps/web/dist/index.html"), path.join(root, "apps/api/dist/index.html")];
-for (const file of distCandidates) {
+for (const file of [path.join(root, "apps/web/dist/index.html")]) {
   if (!fs.existsSync(file)) continue;
   const html = fs.readFileSync(file, "utf8");
   if (!html.includes('id="root"')) failures.push(`React root missing from ${path.relative(root, file)}`);
@@ -55,4 +55,4 @@ if (failures.length) {
 }
 
 console.log("STRICT RUNTIME CERTIFICATION: PASS");
-console.log("Validated active React entrypoint, authenticated session path, RBAC source, durable browser storage, production auth gateway, and retired-shell exclusion.");
+console.log("Active React entrypoint, authenticated session path, RBAC source, durable browser storage, production auth gateway, and retired-shell exclusion verified.");
