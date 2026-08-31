@@ -16,7 +16,7 @@
     "apps/web"
   ],
   "scripts": {
-    "start": "node apps/api/dist/server.js",
+    "start": "node index.js",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test:unit && npm run test:integration && npm run test:sync",
     "test:unit": "vitest run tests/unit",
