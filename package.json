@@ -2,6 +2,7 @@
   "name": "kwakopos2-monorepo",
   "version": "2.2.0",
   "private": true,
+  "main": "index.js",
   "type": "module",
   "workspaces": [
     "packages/contracts",
@@ -15,6 +16,7 @@
     "apps/web"
   ],
   "scripts": {
+    "start": "node apps/api/dist/server.js",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test:unit && npm run test:integration && npm run test:sync",
     "test:unit": "vitest run tests/unit",

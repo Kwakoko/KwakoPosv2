@@ -10,7 +10,6 @@ env:
   - variable: DATABASE_URL
     secret: DATABASE_URL
     availability:
-      - BUILD
       - RUNTIME
   - variable: NODE_ENV
     value: "production"
