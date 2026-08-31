@@ -35,10 +35,10 @@ export class PwaVersionManager {
       if (!res.ok) throw new Error(`Version endpoint returned HTTP ${res.status}`);
       const body = await res.json();
       const serverInfo = (body?.data || body) as Partial<VersionInfo>;
-      const serverVersion = serverInfo.appVersion || serverInfo.version || null;
+      const serverVersion = serverInfo.appVersion || (serverInfo as any).version || null;
       return { isUpToDate: Boolean(serverVersion && this.localVersion === serverVersion), localVersion: this.localVersion, serverVersion, serverInfo };
     } catch (err: unknown) {
-      globalRumCollector.recordError(err);
+      globalRumCollector.recordError(err instanceof Error ? err : String(err));
       return { isUpToDate: false, localVersion: this.localVersion, serverVersion: null, serverInfo: {} };
     }
   }

@@ -98,4 +98,5 @@ class ClientSyncEngine {
 }
 exports.ClientSyncEngine = ClientSyncEngine;
 __exportStar(require("./rum/rumCollector"), exports);
+export { ClientSyncEngine };
 //# sourceMappingURL=clientSyncEngine.js.map

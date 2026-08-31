@@ -3,18 +3,18 @@ import fs from "fs";
 import { pathToFileURL } from "url";
 
 const candidatePaths = [
-  "apps/api/dist/serverFixed.js",
-  "apps/api/dist/server.js",
-  "apps/api/dist/src/serverFixed.js",
-  "apps/api/dist/src/server.js",
   "apps/api/dist/apps/api/src/serverFixed.js",
+  "apps/api/dist/src/serverFixed.js",
+  "apps/api/dist/serverFixed.js",
   "apps/api/dist/apps/api/src/server.js",
-  "./apps/api/dist/serverFixed.js",
-  "./apps/api/dist/server.js",
-  "./apps/api/dist/src/serverFixed.js",
-  "./apps/api/dist/src/server.js",
+  "apps/api/dist/src/server.js",
+  "apps/api/dist/server.js",
   "./apps/api/dist/apps/api/src/serverFixed.js",
+  "./apps/api/dist/src/serverFixed.js",
+  "./apps/api/dist/serverFixed.js",
   "./apps/api/dist/apps/api/src/server.js",
+  "./apps/api/dist/src/server.js",
+  "./apps/api/dist/server.js",
 ];
 
 const foundPath = candidatePaths.find((p) => fs.existsSync(p));

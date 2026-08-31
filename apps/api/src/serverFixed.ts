@@ -14,7 +14,9 @@ function configurePersistentSessions(): void {
   globalSessionManager.setStoreProvider({
     create: async (record) => { await prisma.deviceSession.create({ data: record as any }); },
     get: async (sessionId) => await prisma.deviceSession.findUnique({ where: { id: sessionId } }) as any,
-    update: async (record) => await prisma.deviceSession.update({ where: { id: record.id }, data: { refreshTokenHash: record.refreshTokenHash, expiresAt: record.expiresAt, revokedAt: record.revokedAt } }),
+    update: async (record) => {
+      await prisma.deviceSession.update({ where: { id: record.id }, data: { refreshTokenHash: record.refreshTokenHash, expiresAt: record.expiresAt, revokedAt: record.revokedAt } });
+    },
     revokeAllForUser: async (tenantId, userId) => (await prisma.deviceSession.updateMany({ where: { tenantId, userId, revokedAt: null }, data: { revokedAt: new Date() } })).count,
   });
 }
@@ -64,8 +66,9 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     const routePath = req.url.split("?")[0];
     if (routePath === "/auth/login" && req.method === "POST") { await handleProductionLogin(req, reply); return; }
     if (routePath === "/auth/refresh" && req.method === "POST") {
-      const sessionId = String(req.body?.sessionId || "");
-      const refreshToken = String(req.body?.refreshToken || "");
+      const body = (req.body || {}) as Record<string, any>;
+      const sessionId = String(body.sessionId || "");
+      const refreshToken = String(body.refreshToken || "");
       if (!sessionId || !refreshToken) { reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "sessionId and refreshToken are required" } }); return; }
       const session = await prisma.deviceSession.findUnique({ where: { id: sessionId }, include: { user: { include: { role: true } } } });
       if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== "ACTIVE") { reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired session" } }); return; }
@@ -75,7 +78,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
       return;
     }
     if (routePath === "/auth/logout" && req.method === "POST") {
-      const sessionId = String(req.body?.sessionId || "");
+      const sessionId = String((req.body as any)?.sessionId || "");
       if (sessionId) await globalSessionManager.revokeSession(sessionId);
       reply.send({ success: true, data: { loggedOut: true } });
     }
@@ -90,4 +93,6 @@ export async function startFixedServer(): Promise<FastifyInstance> {
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) void startFixedServer();
+if (typeof require !== 'undefined' && require.main === module) {
+  void startFixedServer();
+}

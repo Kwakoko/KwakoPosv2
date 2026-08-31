@@ -111,3 +111,172 @@ export const UsersPage: React.FC = () => { const { role, permissions } = useRbac
 export const SuperAdminPage: React.FC = () => { const { role, permissions } = useRbac(); const allowed = role === "SUPER_ADMIN" || role === "ADMIN" || permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS"); return <Panel title="Super Admin Platform Control Tower">{allowed ? <div className="badge badge-success">Platform-control access granted by V2 authorization</div> : <div className="badge badge-danger">Access denied by V2 RBAC</div>}</Panel>; };
 
 export const DiagnosticsPage: React.FC = () => { const { db, syncOutbox, syncError } = useSync(); return <Panel title="Sync Inspector & Outbox"><div>Pending operations: <strong>{db.getPendingOutbox().length}</strong></div><button className="btn" style={{ marginTop: ".75rem" }} onClick={() => syncOutbox().catch(() => undefined)}>Synchronize</button>{syncError && <div style={{ color: "var(--danger)", marginTop: ".75rem" }}>{syncError}</div>}<pre style={{ marginTop: "1rem", background: "var(--bg)", padding: "1rem", overflow: "auto" }}>{JSON.stringify(db.getPendingOutbox(), null, 2)}</pre></Panel>; };
+
+export const ExpensesPage: React.FC = () => {
+  return (
+    <Panel title="Expenses & Outgoings Ledger" action={<button className="btn">Record New Expense</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Monthly Expenses</div><div className="metric-value">{money(4850000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Petty Cash Balance</div><div className="metric-value">{money(650000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Pending Approval</div><div className="metric-value">2 Vouchers</div></div>
+      </div>
+      <table>
+        <thead><tr><th>Voucher #</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>EXP-2026-081</td><td>Utilities</td><td>TANESCO Electricity Bill</td><td>{money(850000)}</td><td><span className="badge badge-success">PAID</span></td></tr>
+          <tr><td>EXP-2026-082</td><td>Rent</td><td>Store Monthly Lease</td><td>{money(3000000)}</td><td><span className="badge badge-success">PAID</span></td></tr>
+          <tr><td>EXP-2026-083</td><td>Supplies</td><td>Thermal Printer Roll Paper</td><td>{money(120000)}</td><td><span className="badge badge-warning">PENDING</span></td></tr>
+        </tbody>
+      </table>
+    </Panel>
+  );
+};
+
+export const AiPage: React.FC = () => {
+  return (
+    <Panel title="KwakoPos AI Operating Layer & Policy Gateway" action={<span className="badge badge-success">KILL SWITCH: INACTIVE</span>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active Vertical Agents</div><div className="metric-value">10 Agents</div></div>
+        <div className="metric-card"><div className="metric-label">Guarded Executions</div><div className="metric-value">1,482 Actions</div></div>
+        <div className="metric-card"><div className="metric-label">Level 4 Guard Violations</div><div className="metric-value">0 Violations</div></div>
+        <div className="metric-card"><div className="metric-label">Token Efficiency</div><div className="metric-value">98.5%</div></div>
+      </div>
+      <div style={{ marginTop: "1rem", color: "var(--muted)" }}><strong>AI Action Policy Hierarchy:</strong> Level 0 (Assist) → Level 1 (Guarded Auto) → Level 2 (Approval) → Level 3 (Human Consent) → Level 4 (Prohibited).</div>
+    </Panel>
+  );
+};
+
+export const CashDrawerPage: React.FC = () => {
+  return (
+    <Panel title="Cash Drawer Shift Reconciliation" action={<button className="btn">Close Shift & Drop Cash</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Opening Float</div><div className="metric-value">{money(150000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Cash Collected</div><div className="metric-value">{money(4820000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Paid Out / Drops</div><div className="metric-value">{money(300000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Expected Drawer Cash</div><div className="metric-value">{money(4670000)}</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const ReceiptsPage: React.FC = () => {
+  return (
+    <Panel title="Thermal Receipts & E-Invoice Engine" action={<button className="btn">Reprint Last Receipt</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Receipts Issued Today</div><div className="metric-value">142 Receipts</div></div>
+        <div className="metric-card"><div className="metric-label">TRA EFD / VFD Sync</div><div className="metric-value" style={{ color: "var(--success)" }}>100% VERIFIED</div></div>
+        <div className="metric-card"><div className="metric-label">Digital Receipts Sent</div><div className="metric-value">98 SMS / WhatsApp</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const LawFirmPage: React.FC = () => {
+  return (
+    <Panel title="Law Firm Practice Command Center" action={<button className="btn">Conflict Search</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active Legal Matters</div><div className="metric-value">48 Matters</div></div>
+        <div className="metric-card"><div className="metric-label">Critical Court Deadlines</div><div className="metric-value" style={{ color: "var(--warning)" }}>5 Due Soon</div></div>
+        <div className="metric-card"><div className="metric-label">Approved Unbilled Time</div><div className="metric-value">{money(18500000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Segregated Trust Funds</div><div className="metric-value">{money(45200000)}</div></div>
+      </div>
+      <table>
+        <thead><tr><th>Matter #</th><th>Title & Practice Area</th><th>Client</th><th>Lead Partner</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>MAT-2026-081</td><td>Standard Chartered vs Telecom</td><td>Tanzania Telecom</td><td>Advocate M. K. Lyimo</td><td><span className="badge badge-info">LITIGATION</span></td></tr>
+          <tr><td>MAT-2026-088</td><td>Commercial Land Acquisition</td><td>Azam Group</td><td>Advocate A. Rashid</td><td><span className="badge badge-success">CONVEYANCING</span></td></tr>
+        </tbody>
+      </table>
+    </Panel>
+  );
+};
+
+export const PharmacyPage: React.FC = () => {
+  return (
+    <Panel title="Clinical Pharmacy & FEFO Dispensing" action={<button className="btn">FEFO Dispensing Counter</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Today Dispensed</div><div className="metric-value">{money(6180000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Expiry Alerts (&lt; 90 days)</div><div className="metric-value" style={{ color: "var(--warning)" }}>6 Batches</div></div>
+        <div className="metric-card"><div className="metric-label">Drug Safety Alerts</div><div className="metric-value" style={{ color: "var(--danger)" }}>2 Alerts</div></div>
+        <div className="metric-card"><div className="metric-label">Quarantined Batches</div><div className="metric-value">1 Batch</div></div>
+      </div>
+      <table>
+        <thead><tr><th>Generic / Brand</th><th>Batch #</th><th>Expiry Date</th><th>Stock</th><th>FEFO Status</th></tr></thead>
+        <tbody>
+          <tr><td>Amoxicillin 500mg</td><td>BAT-AMO-8841</td><td>2026-11-15</td><td>450 Caps</td><td><span className="badge badge-success">PRIORITY 1</span></td></tr>
+          <tr><td>Paracetamol 500mg</td><td>BAT-PAR-9910</td><td>2027-04-20</td><td>1,200 Tabs</td><td><span className="badge badge-info">PRIORITY 2</span></td></tr>
+        </tbody>
+      </table>
+    </Panel>
+  );
+};
+
+export const PoultryLivestockPage: React.FC = () => {
+  return (
+    <Panel title="Poultry & Livestock Production Command Center" action={<button className="btn">Record Batch Output</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active Flock Batches</div><div className="metric-value">12,500 Birds</div></div>
+        <div className="metric-card"><div className="metric-label">Daily Egg Production</div><div className="metric-value">8,420 Eggs</div></div>
+        <div className="metric-card"><div className="metric-label">Feed Conversion (FCR)</div><div className="metric-value">1.55 FCR</div></div>
+        <div className="metric-card"><div className="metric-label">Mortality Rate</div><div className="metric-value" style={{ color: "var(--success)" }}>0.12%</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const FleetPage: React.FC = () => {
+  return (
+    <Panel title="Vehicle Fleet & Logistics Command Center" action={<button className="btn">Dispatch Trip</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active Vehicles</div><div className="metric-value">14 Vehicles</div></div>
+        <div className="metric-card"><div className="metric-label">Fuel Consumption</div><div className="metric-value">1,420 Liters</div></div>
+        <div className="metric-card"><div className="metric-label">Maintenance Due</div><div className="metric-value" style={{ color: "var(--warning)" }}>2 Trucks</div></div>
+        <div className="metric-card"><div className="metric-label">Active Trips</div><div className="metric-value">8 Trips</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const WorkforcePage: React.FC = () => {
+  return (
+    <Panel title="Workforce Management & Payroll" action={<button className="btn">Clock In Employee</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active Staff</div><div className="metric-value">42 Employees</div></div>
+        <div className="metric-card"><div className="metric-label">Clocked In Today</div><div className="metric-value">38 Staff</div></div>
+        <div className="metric-card"><div className="metric-label">Monthly Payroll</div><div className="metric-value">{money(38500000)}</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const TelecomPage: React.FC = () => {
+  return (
+    <Panel title="Telecom & Airtime Distribution Center" action={<button className="btn">Rebalance Float</button>}>
+      <div className="metrics-grid">
+        <div className="metric-card"><div className="metric-label">Active SIM Agents</div><div className="metric-value">124 Agents</div></div>
+        <div className="metric-card"><div className="metric-label">Airtime Sold Today</div><div className="metric-value">{money(14200000)}</div></div>
+        <div className="metric-card"><div className="metric-label">Commission Earned</div><div className="metric-value">{money(710000)}</div></div>
+      </div>
+    </Panel>
+  );
+};
+
+export const HelpPage: React.FC = () => {
+  return (
+    <Panel title="KwakoPos Knowledge Center & Support">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem" }}>
+        <div className="metric-card">
+          <div className="metric-label">Interactive Documentation</div>
+          <div style={{ marginTop: ".5rem", fontWeight: 700 }}>POS & FEFO User Guides</div>
+          <div style={{ color: "var(--muted)", fontSize: ".8rem", marginTop: ".25rem" }}>Step-by-step walkthroughs for checkout, inventory, and sync.</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Keyboard Shortcuts</div>
+          <div style={{ marginTop: ".5rem" }}>Ctrl+K: Search | Cmd+K: Commands</div>
+          <div style={{ color: "var(--muted)", fontSize: ".8rem", marginTop: ".25rem" }}>Instant access to all modules and system actions.</div>
+        </div>
+      </div>
+    </Panel>
+  );
+};
+

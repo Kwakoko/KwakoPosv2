@@ -159,6 +159,8 @@ class FrontendRumCollector {
         return [...this.queue];
     }
 }
+const globalRumCollector = new FrontendRumCollector();
 exports.FrontendRumCollector = FrontendRumCollector;
-exports.globalRumCollector = new FrontendRumCollector();
+exports.globalRumCollector = globalRumCollector;
+export { globalRumCollector, FrontendRumCollector };
 //# sourceMappingURL=rumCollector.js.map

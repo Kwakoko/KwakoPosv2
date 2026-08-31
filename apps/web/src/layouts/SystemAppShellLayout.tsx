@@ -85,26 +85,142 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
         <aside>
           <div className="nav-section-title">Core Operations</div>
           <ul className="nav-list">
-            {[["/","📊 Dashboard"],["/pos","⚡ POS"],["/inventory","📦 Inventory"],["/customers","👥 Customers"],["/purchasing","🛒 Purchasing"]].map(([path,label]) => <li className="nav-item" key={path}><a href={path} className={currentPath===path ? "active" : ""} onClick={(e)=>{e.preventDefault();onNavigate(path)}}>{label}</a></li>)}
+            {[
+              ["/", "📊 Dashboard"],
+              ["/pos", "⚡ POS Checkout"],
+              ["/inventory", "📦 Inventory & FEFO"],
+              ["/customers", "👥 Customer CRM"],
+              ["/purchasing", "🛒 Purchasing"],
+              ["/cash-drawer", "💵 Cash Drawer"],
+              ["/receipts", "🧾 Receipts Engine"],
+            ].map(([path, label]) => (
+              <li className="nav-item" key={path}>
+                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+              </li>
+            ))}
           </ul>
+
           <div className="nav-section-title">Finance & Enterprise</div>
           <ul className="nav-list">
-            {[['/finance','💰 Finance'],['/reports','📈 Reports'],['/settings','⚙️ Settings'],['/users','🔐 Users & Roles'],['/super-admin','👑 Super Admin'],['/diagnostics','🩺 Diagnostics']].filter(([path]) => path !== '/super-admin' || canAdminister).map(([path,label]) => <li className="nav-item" key={path}><a href={path} className={currentPath===path?"active":""} onClick={(e)=>{e.preventDefault();onNavigate(path)}}>{label}</a></li>)}
+            {[
+              ["/finance", "💰 General Ledger"],
+              ["/expenses", "💳 Expenses"],
+              ["/reports", "📈 Reports & Analytics"],
+              ["/settings", "⚙️ Settings"],
+              ["/users", "🔐 Users & Roles"],
+              ["/super-admin", "👑 Super Admin"],
+              ["/diagnostics", "🩺 Diagnostics"],
+            ].filter(([path]) => path !== "/super-admin" || canAdminister).map(([path, label]) => (
+              <li className="nav-item" key={path}>
+                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+              </li>
+            ))}
           </ul>
-          <div className="nav-section-title" style={{ marginTop: "auto" }}>Session</div>
-          <div style={{ padding: "0 .6rem .8rem", fontSize: ".72rem", color: "var(--muted)" }}><div>{user.name}</div><div>{user.role}</div></div>
+
+          <div className="nav-section-title">Vertical Modules</div>
+          <ul className="nav-list">
+            {[
+              ["/law-firm", "⚖️ Law Firm Practice"],
+              ["/pharmacy", "💊 Clinical Pharmacy"],
+              ["/poultry-livestock", "🐔 Poultry & Livestock"],
+              ["/fleet", "🚚 Fleet & Logistics"],
+              ["/workforce", "👥 Workforce & Payroll"],
+              ["/telecom", "📱 Telecom & Airtime"],
+            ].map(([path, label]) => (
+              <li className="nav-item" key={path}>
+                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+              </li>
+            ))}
+          </ul>
+
+          <div className="nav-section-title">Intelligence & Support</div>
+          <ul className="nav-list">
+            {[
+              ["/ai", "🧠 AI Control Layer"],
+              ["/help", "❓ Knowledge & Help"],
+            ].map(([path, label]) => (
+              <li className="nav-item" key={path}>
+                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+              </li>
+            ))}
+          </ul>
+
+          <div className="nav-section-title" style={{ marginTop: "auto" }}>Session Context</div>
+          <div style={{ padding: "0 .6rem .8rem", fontSize: ".72rem", color: "var(--muted)" }}><div>{user?.name}</div><div>{user?.role}</div></div>
         </aside>
 
         <main id="app-root">{children}</main>
       </div>
 
       <nav className="mobile-bottom-nav" aria-label="Primary mobile navigation">
-        {[["/","Home"],["/pos","POS"],["/inventory","Stock"],["/customers","Customers"],["/reports","Reports"]].map(([path,label]) => <a key={path} href={path} className={currentPath===path?"active":""} onClick={(e)=>{e.preventDefault();onNavigate(path)}}>{label}</a>)}
+        {[
+          ["/", "Home"],
+          ["/pos", "POS"],
+          ["/inventory", "Stock"],
+          ["/customers", "CRM"],
+          ["/ai", "AI Layer"],
+          ["/help", "Help"],
+        ].map(([path, label]) => (
+          <a key={path} href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+        ))}
       </nav>
 
-      {isSearchOpen && <div className="modal-overlay open"><div className="modal-card"><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}><h3>Authorized Search</h3><button className="btn btn-secondary" onClick={() => setIsSearchOpen(false)}>Close</button></div><input className="search-input" autoFocus value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} placeholder="Search products or customers" />{!searchQuery.trim() ? <EmptySearch message="Search only uses records authorized for the current V2 session." /> : searchResults.length ? searchResults.map((result) => <button key={`${result.type}-${result.id}`} className="btn btn-secondary" style={{ width: "100%", justifyContent: "flex-start", marginTop: ".45rem" }} onClick={() => { setIsSearchOpen(false); onNavigate(result.target); }}>{result.type}: {result.label}</button>) : <EmptySearch message="No authorized matching records found." />}</div></div>}
+      {isSearchOpen && (
+        <div className="modal-overlay open">
+          <div className="modal-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3>Authorized Instant Search</h3>
+              <button className="btn btn-secondary" onClick={() => setIsSearchOpen(false)}>Close</button>
+            </div>
+            <input className="search-input" autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search products, customers or modules" />
+            {!searchQuery.trim() ? (
+              <EmptySearch message="Search only uses records authorized for the current V2 session." />
+            ) : searchResults.length ? (
+              searchResults.map((result) => (
+                <button key={`${result.type}-${result.id}`} className="btn btn-secondary" style={{ width: "100%", justifyContent: "flex-start", marginTop: ".45rem" }} onClick={() => { setIsSearchOpen(false); onNavigate(result.target); }}>
+                  {result.type}: {result.label}
+                </button>
+              ))
+            ) : (
+              <EmptySearch message="No authorized matching records found." />
+            )}
+          </div>
+        </div>
+      )}
 
-      {isCommandOpen && <div className="modal-overlay open"><div className="modal-card"><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}><h3>Command Palette</h3><button className="btn btn-secondary" onClick={() => setIsCommandOpen(false)}>Close</button></div><div style={{ display: "flex", flexDirection: "column", gap: ".5rem" }}>{[["/pos","Open POS"],["/inventory","Open Inventory"],["/customers","Open Customers"],["/reports","Open Reports"],["/diagnostics","Open Sync Diagnostics"]].map(([path,label]) => <button key={path} className="btn btn-secondary" style={{ justifyContent: "flex-start" }} onClick={() => { setIsCommandOpen(false); onNavigate(path); }}>{label}</button>)}</div></div></div>}
+      {isCommandOpen && (
+        <div className="modal-overlay open">
+          <div className="modal-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3>KwakoPos Action Dispatcher</h3>
+              <button className="btn btn-secondary" onClick={() => setIsCommandOpen(false)}>Close</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: ".5rem", maxHeight: "60vh", overflowY: "auto" }}>
+              {[
+                ["/pos", "⚡ Launch POS Checkout Terminal"],
+                ["/inventory", "📦 Open Inventory & FEFO Ledger"],
+                ["/customers", "👥 Manage Customers & CRM Accounts"],
+                ["/cash-drawer", "💵 Open Cash Drawer Shift Reconciliation"],
+                ["/receipts", "🧾 Manage Receipts & E-Invoicing Engine"],
+                ["/expenses", "💳 Record Business Expense Voucher"],
+                ["/ai", "🧠 Open AI Operating Layer & Policy Gateway"],
+                ["/law-firm", "⚖️ Law Firm Practice Command Center"],
+                ["/pharmacy", "💊 Clinical Pharmacy & FEFO Dispensing"],
+                ["/poultry-livestock", "🐔 Poultry & Livestock Production Ops"],
+                ["/fleet", "🚚 Vehicle Fleet & Logistics Operations"],
+                ["/workforce", "👥 Workforce Management & Payroll Roster"],
+                ["/telecom", "📱 Telecom & Airtime Distribution Center"],
+                ["/reports", "📈 Open Financial & Sales Reports"],
+                ["/diagnostics", "🩺 Open Sync Diagnostics & Outbox"],
+              ].map(([path, label]) => (
+                <button key={path} className="btn btn-secondary" style={{ justifyContent: "flex-start" }} onClick={() => { setIsCommandOpen(false); onNavigate(path); }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer>KwakoPos © 2026 · {release.appVersion || "V2"} · {release.gitSha ? release.gitSha.slice(0, 8) : "development"} · {isOnline ? "Connected" : "Offline"}</footer>
     </div>

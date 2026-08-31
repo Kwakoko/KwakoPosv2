@@ -68,4 +68,5 @@ class LocalIndexedDbStore {
     }
 }
 exports.LocalIndexedDbStore = LocalIndexedDbStore;
+export { LocalIndexedDbStore };
 //# sourceMappingURL=indexedDb.js.map

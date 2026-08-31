@@ -54,7 +54,7 @@ export class ClientSyncEngine {
       return { pushed: pushedCount, pulled: totalPulled };
     } catch (err: unknown) {
       globalRumCollector.recordSyncMetrics({ durationMs: Date.now() - startTime, pushedCount, deltaCount: 0, success: false, outboxDepth: this.localDb.getPendingOutbox().length });
-      globalRumCollector.recordError(err);
+      globalRumCollector.recordError(err instanceof Error ? err : String(err));
       throw err;
     }
   }

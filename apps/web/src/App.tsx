@@ -14,6 +14,17 @@ import {
   UsersPage,
   SuperAdminPage,
   DiagnosticsPage,
+  ExpensesPage,
+  AiPage,
+  CashDrawerPage,
+  ReceiptsPage,
+  LawFirmPage,
+  PharmacyPage,
+  PoultryLivestockPage,
+  FleetPage,
+  WorkforcePage,
+  TelecomPage,
+  HelpPage,
 } from "./pages/WorkspacePages.js";
 
 const AuthenticatedApp: React.FC = () => {
@@ -70,6 +81,28 @@ const AuthenticatedApp: React.FC = () => {
         return <SuperAdminPage />;
       case "/diagnostics":
         return <DiagnosticsPage />;
+      case "/expenses":
+        return <ExpensesPage />;
+      case "/ai":
+        return <AiPage />;
+      case "/cash-drawer":
+        return <CashDrawerPage />;
+      case "/receipts":
+        return <ReceiptsPage />;
+      case "/law-firm":
+        return <LawFirmPage />;
+      case "/pharmacy":
+        return <PharmacyPage />;
+      case "/poultry-livestock":
+        return <PoultryLivestockPage />;
+      case "/fleet":
+        return <FleetPage />;
+      case "/workforce":
+        return <WorkforcePage />;
+      case "/telecom":
+        return <TelecomPage />;
+      case "/help":
+        return <HelpPage />;
       default:
         return <DashboardPage onNavigate={handleNavigate} />;
     }
