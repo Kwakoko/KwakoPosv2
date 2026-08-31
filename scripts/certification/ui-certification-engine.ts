@@ -1,4 +1,7 @@
 import { UiCertificationEngine } from "@kwakopos2/domain";
+import { KWAKOPOS_UI_PARITY_MATRIX } from "../../apps/web/src/uiParityMatrix.js";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface PillarVerificationResult {
   pillarId: string;
@@ -21,7 +24,23 @@ export function runUiCertificationProgram(): {
     results.push({ pillarId: id, pillarName: name, passed, details });
   };
 
-  // 80 Control Objective Pillars verification for Phase 30 (UICERT-01 to UICERT-80)
+  // 1. Verify build dist existence and manifest evidence
+  const distDir = path.resolve(process.cwd(), "apps/web/dist");
+  const hasDist = fs.existsSync(distDir) && fs.existsSync(path.join(distDir, "index.html"));
+  const hasManifest = fs.existsSync(path.join(distDir, "manifest.json"));
+  const hasSw = fs.existsSync(path.join(distDir, "sw.js"));
+
+  // Verify all 40 UI Control Objectives (UI-R01 to UI-R40)
+  for (const control of KWAKOPOS_UI_PARITY_MATRIX) {
+    const isCertified = control.status === "PRODUCTION_CERTIFIED";
+    let evidencePass = isCertified && hasDist && hasManifest && hasSw;
+    addResult(
+      control.controlId,
+      control.name,
+      evidencePass,
+      `Verified control ${control.controlId} [${control.name}] with evidence reference: ${control.evidenceRef}`
+    );
+  }
   addResult("UICERT-01", "KwakoPos UI Certification Framework Architecture", true, "Formal KUCF framework certifying behavior under real platform runtime conditions");
 
   addResult("UICERT-02", "12 Master UI Certification Domains Matrix", true, "Covers Responsive/PWA, Accessibility, RBAC, Multi-Tenant, Offline, Sync, Error Recovery, Performance, Browser, Upgrade, Visual, Smoke");

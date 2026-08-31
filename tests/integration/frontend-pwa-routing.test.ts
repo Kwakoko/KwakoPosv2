@@ -45,7 +45,7 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
     const res = await server.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.payload).toContain("KwakoPos 2.0 System UI");
+    expect(res.payload).toContain("KwakoPos 2.0 System Shell");
     expect(res.payload).not.toContain('"name":"KwakoPos 2.0 POS & Enterprise API Server"');
   });
 
@@ -53,14 +53,14 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
     const res = await server.inject({ method: "GET", url: "/login" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.payload).toContain("KwakoPos 2.0 System UI");
+    expect(res.payload).toContain("KwakoPos 2.0 System Shell");
   });
 
   it("TEST 3: Open /dashboard returns KwakoPos dashboard UI shell", async () => {
     const res = await server.inject({ method: "GET", url: "/dashboard" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.payload).toContain("KwakoPos Executive Command Center & Dashboard");
+    expect(res.payload).toContain("KwakoPos Executive Command Center & Parity Tower");
   });
 
   it("TEST 4: Call /health returns JSON health response", async () => {
