@@ -1,8 +1,10 @@
 {
-  "isTampered": false,
+  "isTampered": true,
   "protectedFilesChecked": 7,
-  "modifiedProtectedFiles": [],
+  "modifiedProtectedFiles": [
+    "package-lock.json"
+  ],
   "branchName": "main",
-  "gitSha": "bac4f23510d37e67cb33984b72ac85b0aa03737e",
-  "auditMessage": "PASS: Release control file integrity verified for commit bac4f23 on branch main."
+  "gitSha": "8d7fafb66c505fa4208172ec609b8934042cc618",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: package-lock.json"
 }
