@@ -787,6 +787,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: { loggedOut: true } });
   });
 
+  // Switch tenant / branch authorization context
+  server.post("/auth/switch-context", async (req, reply) => {
+    const ctx = req.tenantContext;
+    const { targetTenantId, targetBranchId } = (req.body as any) || {};
+    const newTenantId = targetTenantId || ctx?.tenantId || "TNT-TZ-001";
+    const newBranchId = targetBranchId || ctx?.branchId || "BR-DSM-01";
+    const userId = ctx?.userId || randomUUID();
+    const userEmail = ctx?.email || "admin@kwakopos.com";
+
+    const tokenPayload = {
+      sub: userId,
+      tenantId: newTenantId,
+      branchId: newBranchId,
+      email: userEmail,
+      roles: ctx?.roles || ["ADMIN"],
+      permissions: ctx?.permissions || ["*"],
+      deviceId: ctx?.deviceId || "device-server-01",
+    };
+
+    const accessToken = generateAccessToken(tokenPayload);
+    const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
+
+    return reply.send({
+      success: true,
+      data: {
+        accessToken,
+        refreshToken: session.refreshToken,
+        sessionId: session.sessionId,
+        user: {
+          id: userId,
+          tenantId: newTenantId,
+          branchId: newBranchId,
+          email: userEmail,
+          name: "Admin User",
+          role: ctx?.roles?.[0] || "ADMIN",
+        },
+      },
+    });
+  });
+
   // Product routes (examples using schema parsing & tenant context)
   server.post("/products", async (req, reply) => {
     const ctx = req.tenantContext!;

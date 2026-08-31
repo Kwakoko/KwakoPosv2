@@ -120,6 +120,17 @@ export async function logout(): Promise<void> {
   }
 }
 
+export async function switchContext(targetTenantId?: string, targetBranchId?: string): Promise<LoginResponseUser> {
+  const result = await requestJson<LoginResponse>("/auth/switch-context", {
+    method: "POST",
+    body: JSON.stringify({ targetTenantId, targetBranchId }),
+  }, true);
+  if (!result.success || !result.data) throw new Error(result.error?.message || "Failed to switch context");
+  accessToken = result.data.accessToken;
+  setStoredSession({ sessionId: result.data.sessionId, refreshToken: result.data.refreshToken, user: result.data.user });
+  return result.data.user;
+}
+
 export async function apiFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> { return requestJson<T>(input, init, true); }
 
 export function safeUUID(): string {

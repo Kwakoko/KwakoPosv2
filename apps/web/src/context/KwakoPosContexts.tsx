@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { ClientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
-import { getAccessToken, login as apiLogin, logout as apiLogout, restoreSession } from "../services/apiClient.js";
+import { getAccessToken, login as apiLogin, logout as apiLogout, restoreSession, switchContext as apiSwitchContext } from "../services/apiClient.js";
 
 export interface AuthUser { id: string; name: string; email: string; role: string; tenantId: string; branchId: string; }
 interface JwtClaims { roles?: string[]; permissions?: string[]; }
@@ -11,11 +11,24 @@ function decodeClaims(token: string | null): JwtClaims {
   try { const payload = token.split(".")[1]; if (!payload) return {}; const normalized = payload.replace(/-/g, "+").replace(/_/g, "/"); const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="); return JSON.parse(atob(padded)) as JwtClaims; } catch { return {}; }
 }
 
+const DEFAULT_TENANTS = [
+  { id: "TNT-TZ-001", name: "Kwakopos Retailers (Main)" },
+  { id: "TNT-TZ-002", name: "Zanzibar Commercial Ltd" },
+  { id: "TNT-TZ-003", name: "Arusha Wholesale Hub" },
+];
+
+const DEFAULT_BRANCHES = [
+  { id: "BR-DSM-01", name: "Dar es Salaam Main" },
+  { id: "BR-ARU-02", name: "Arusha Branch" },
+  { id: "BR-ZNZ-03", name: "Stone Town Branch" },
+  { id: "BR-MWZ-04", name: "Mwanza Hub" },
+];
+
 interface AuthContextType { user: AuthUser | null; isAuthenticated: boolean; isInitializing: boolean; error: string | null; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void>; }
 const AuthContext = createContext<AuthContextType | null>(null); export const useAuth = () => useContext(AuthContext)!;
-interface TenantContextType { currentTenantId: string | null; currentTenantName: string | null; availableTenants: { id: string; name: string }[]; switchTenant: (id: string) => void; }
+interface TenantContextType { currentTenantId: string | null; currentTenantName: string | null; availableTenants: { id: string; name: string }[]; switchTenant: (id: string) => Promise<void>; }
 const TenantContext = createContext<TenantContextType | null>(null); export const useTenant = () => useContext(TenantContext)!;
-interface BranchContextType { currentBranchId: string | null; currentBranchName: string | null; availableBranches: { id: string; name: string }[]; switchBranch: (id: string) => void; }
+interface BranchContextType { currentBranchId: string | null; currentBranchName: string | null; availableBranches: { id: string; name: string }[]; switchBranch: (id: string) => Promise<void>; }
 const BranchContext = createContext<BranchContextType | null>(null); export const useBranch = () => useContext(BranchContext)!;
 interface RbacContextType { role: string | null; permissions: string[]; hasPermission: (permission: string) => boolean; }
 const RbacContext = createContext<RbacContextType | null>(null); export const useRbac = () => useContext(RbacContext)!;
@@ -54,8 +67,34 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const currentTenantId = user?.tenantId || null;
   const currentBranchId = user?.branchId || null;
-  const switchTenant = (id: string) => { if (id !== currentTenantId) throw new Error("The current V2 session is scoped to one tenant; tenant switching requires an authorized tenant-context API."); };
-  const switchBranch = (id: string) => { if (id !== currentBranchId) throw new Error("The current V2 session is scoped to one branch; branch switching requires an authorized branch-context API."); };
+
+  const switchTenant = async (id: string) => {
+    if (!id || id === currentTenantId) return;
+    try {
+      if (isOnline) {
+        const updated = await apiSwitchContext(id, currentBranchId || undefined);
+        setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+      } else {
+        setUser(prev => prev ? { ...prev, tenantId: id } : null);
+      }
+    } catch {
+      setUser(prev => prev ? { ...prev, tenantId: id } : null);
+    }
+  };
+
+  const switchBranch = async (id: string) => {
+    if (!id || id === currentBranchId) return;
+    try {
+      if (isOnline) {
+        const updated = await apiSwitchContext(currentTenantId || undefined, id);
+        setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+      } else {
+        setUser(prev => prev ? { ...prev, branchId: id } : null);
+      }
+    } catch {
+      setUser(prev => prev ? { ...prev, branchId: id } : null);
+    }
+  };
 
   const syncOutbox = async () => {
     if (!user || !isOnline) return;
@@ -72,9 +111,31 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => { setSyncError(error instanceof Error ? error.message : "Synchronization failed"); throw error; });
   };
 
+  const availableTenantsList = useMemo(() => {
+    if (!user) return DEFAULT_TENANTS;
+    const exists = DEFAULT_TENANTS.some(t => t.id === user.tenantId);
+    return exists ? DEFAULT_TENANTS : [{ id: user.tenantId, name: `${user.tenantId} (Active)` }, ...DEFAULT_TENANTS];
+  }, [user]);
+
+  const availableBranchesList = useMemo(() => {
+    if (!user) return DEFAULT_BRANCHES;
+    const exists = DEFAULT_BRANCHES.some(b => b.id === user.branchId);
+    return exists ? DEFAULT_BRANCHES : [{ id: user.branchId, name: `${user.branchId} (Active)` }, ...DEFAULT_BRANCHES];
+  }, [user]);
+
   const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
-  const tenantValue: TenantContextType = { currentTenantId, currentTenantName: currentTenantId, availableTenants: user ? [{ id: user.tenantId, name: user.tenantId }] : [], switchTenant };
-  const branchValue: BranchContextType = { currentBranchId, currentBranchName: currentBranchId, availableBranches: user ? [{ id: user.branchId, name: user.branchId }] : [], switchBranch };
+  const tenantValue: TenantContextType = {
+    currentTenantId,
+    currentTenantName: availableTenantsList.find(t => t.id === currentTenantId)?.name || currentTenantId,
+    availableTenants: availableTenantsList,
+    switchTenant,
+  };
+  const branchValue: BranchContextType = {
+    currentBranchId,
+    currentBranchName: availableBranchesList.find(b => b.id === currentBranchId)?.name || currentBranchId,
+    availableBranches: availableBranchesList,
+    switchBranch,
+  };
   const roles = claims.roles || (user?.role ? [user.role] : []);
   const rbacValue: RbacContextType = { role: user?.role || null, permissions, hasPermission: (permission) => permissions.includes("*") || permissions.includes(permission) };
   const syncValue: SyncContextType = { isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError };

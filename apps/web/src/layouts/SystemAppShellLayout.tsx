@@ -58,8 +58,8 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
     return () => window.clearTimeout(handle);
   }, [searchQuery]);
 
-  const safeSwitchTenant = (id: string) => { try { switchTenant(id); } catch (error) { window.alert(error instanceof Error ? error.message : "Tenant switch denied"); } };
-  const safeSwitchBranch = (id: string) => { try { switchBranch(id); } catch (error) { window.alert(error instanceof Error ? error.message : "Branch switch denied"); } };
+  const safeSwitchTenant = async (id: string) => { try { await switchTenant(id); } catch (error) { window.alert(error instanceof Error ? error.message : "Tenant switch denied"); } };
+  const safeSwitchBranch = async (id: string) => { try { await switchBranch(id); } catch (error) { window.alert(error instanceof Error ? error.message : "Branch switch denied"); } };
 
   return (
     <div className="kwakopos-app" data-theme={theme}>
@@ -68,10 +68,10 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
         <div className="header-context">
           <button className="context-selector" onClick={() => setIsSearchOpen(true)}>🔍 Search (Ctrl+K)</button>
           <button className="context-selector" onClick={() => setIsCommandOpen(true)}>⚡ Commands</button>
-          <select className="context-selector" value={currentTenantId || ""} onChange={(e) => safeSwitchTenant(e.target.value)} disabled={availableTenants.length <= 1}>
+          <select className="context-selector" value={currentTenantId || ""} onChange={(e) => void safeSwitchTenant(e.target.value)}>
             {availableTenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <select className="context-selector" value={currentBranchId || ""} onChange={(e) => safeSwitchBranch(e.target.value)} disabled={availableBranches.length <= 1}>
+          <select className="context-selector" value={currentBranchId || ""} onChange={(e) => void safeSwitchBranch(e.target.value)}>
             {availableBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           <span className={`badge ${isOnline ? "badge-success" : "badge-warning"}`}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
