@@ -56,6 +56,22 @@ export class LocalIndexedDbStore {
     this.syncOutbox.set(item.id, item);
   }
 
+  enqueueOutbox(item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem {
+    const opId = item.id || `OP-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const outboxItem: OutboxItem = {
+      id: opId,
+      entityType: item.entityType || "Product",
+      entityId: item.entityId || opId,
+      operationType: item.operationType || "CREATE",
+      payload: item.payload || item.data || {},
+      clientCreatedAt: item.clientCreatedAt || new Date().toISOString(),
+      idempotencyKey: item.idempotencyKey || opId,
+      status: "PENDING"
+    };
+    this.recordOutboxMutation(outboxItem);
+    return outboxItem;
+  }
+
   getPendingOutbox(): OutboxItem[] {
     return Array.from(this.syncOutbox.values()).filter((i) => i.status === "PENDING");
   }

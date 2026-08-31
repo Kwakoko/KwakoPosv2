@@ -370,7 +370,23 @@ export class RealAppShellController {
         console.log('[PWA] KwakoPos Service Worker active:', reg.scope);
       }).catch(err => console.warn('[PWA] Service Worker registration:', err));
     }
+
+    // Client-side SPA navigation interceptor
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest('aside a');
+      if (target) {
+        e.preventDefault();
+        const href = target.getAttribute('href');
+        if (href) {
+          window.history.pushState({}, '', href);
+          if (window.kwakoApp) {
+            window.kwakoApp.renderCurrentRoute();
+          }
+        }
+      }
+    });
   </script>
+  <script type="module" src="/clientAppRoot.js"></script>
 </body>
 </html>
     `;
