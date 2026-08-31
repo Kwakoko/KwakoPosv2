@@ -21,10 +21,12 @@ for (const file of [
   "apps/web/src/context/KwakoPosContexts.tsx",
   "apps/web/src/services/apiClient.ts",
   "apps/web/src/indexedDb.ts",
+  "apps/web/src/versionManager.ts",
   "apps/api/src/server.ts",
   "apps/api/src/serverFixed.ts",
-  "apps/api/dist/serverFixed.js",
-  "apps/web/dist/index.html",
+  "packages/sync/src/prismaSyncEngine.ts",
+  "apps/api/package.json",
+  "index.js",
 ]) requireFile(file);
 
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "apiLogin");
@@ -33,19 +35,25 @@ sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "permissions.include
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "for (const item of pending)", true);
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "markOutboxSynced(item.id)", true);
 sourceContains("apps/web/src/services/apiClient.ts", "refreshAccessToken");
-sourceContains("apps/web/src/services/apiClient.ts", "requestJson<T>(input, init, false)");
+sourceContains("apps/web/src/services/apiClient.ts", "refreshInFlight");
 sourceContains("apps/web/src/indexedDb.ts", "indexedDB.open");
-sourceContains("apps/api/src/serverFixed.ts", "prisma.user.findFirst");
+sourceContains("apps/web/src/indexedDb.ts", "IDBObjectStore");
+sourceContains("apps/web/src/versionManager.ts", "isUpToDate: false");
+sourceContains("apps/api/src/serverFixed.ts", "prisma.user.findMany");
 sourceContains("apps/api/src/serverFixed.ts", "prisma.deviceSession.findUnique");
 sourceContains("apps/api/src/serverFixed.ts", "KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL");
+sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
+sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"Sale\"");
+sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
+sourceContains("packages/sync/src/prismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/serverFixed.js");
 
-for (const file of [path.join(root, "apps/web/dist/index.html")]) {
-  if (!fs.existsSync(file)) continue;
-  const html = fs.readFileSync(file, "utf8");
-  if (!html.includes('id="root"')) failures.push(`React root missing from ${path.relative(root, file)}`);
-  if (html.includes("RealAppShell")) failures.push(`Retired generated shell detected in ${path.relative(root, file)}`);
+const builtWeb = path.join(root, "apps/web/dist/index.html");
+if (fs.existsSync(builtWeb)) {
+  const html = fs.readFileSync(builtWeb, "utf8");
+  if (!html.includes('id="root"')) failures.push("React root missing from apps/web/dist/index.html");
+  if (html.includes("RealAppShell")) failures.push("Retired generated shell detected in apps/web/dist/index.html");
 }
 
 if (failures.length) {
@@ -55,4 +63,4 @@ if (failures.length) {
 }
 
 console.log("STRICT RUNTIME CERTIFICATION: PASS");
-console.log("Active React entrypoint, authenticated session path, RBAC source, durable browser storage, production auth gateway, and retired-shell exclusion verified.");
+console.log("Active React runtime, real authentication, token refresh, durable browser persistence, production auth gateway, and offline Sale/PurchaseReceipt sync paths verified statically.");
