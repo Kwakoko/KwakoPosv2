@@ -26,6 +26,9 @@ for (const file of [
   "apps/api/src/serverFixed.ts",
   "packages/sync/src/prismaSyncEngine.ts",
   "apps/api/package.json",
+  "apps/web/package.json",
+  "package.json",
+  "release-manifest.json",
   "index.js",
 ]) requireFile(file);
 
@@ -49,6 +52,20 @@ sourceContains("packages/sync/src/prismaSyncEngine.ts", "PrismaAtomicCommercialF
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/serverFixed.js");
 
+const readJson = (relative: string): any => {
+  try { return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); }
+  catch { return null; }
+};
+const rootPkg = readJson("package.json");
+const apiPkg = readJson("apps/api/package.json");
+const webPkg = readJson("apps/web/package.json");
+const releaseManifest = readJson("release-manifest.json");
+if (rootPkg?.version && apiPkg?.version && webPkg?.version && releaseManifest?.version) {
+  const versions = [rootPkg.version, apiPkg.version, webPkg.version, releaseManifest.version];
+  if (versions.some((version) => version !== rootPkg.version)) failures.push(`Release version drift detected: ${JSON.stringify({ root: rootPkg.version, api: apiPkg.version, web: webPkg.version, manifest: releaseManifest.version })}`);
+  if (releaseManifest.tag !== `v${rootPkg.version}`) failures.push(`release-manifest tag drift: expected v${rootPkg.version}, got ${releaseManifest.tag}`);
+}
+
 const builtWeb = path.join(root, "apps/web/dist/index.html");
 if (fs.existsSync(builtWeb)) {
   const html = fs.readFileSync(builtWeb, "utf8");
@@ -63,4 +80,4 @@ if (failures.length) {
 }
 
 console.log("STRICT RUNTIME CERTIFICATION: PASS");
-console.log("Active React runtime, real authentication, token refresh, durable browser persistence, production auth gateway, and offline Sale/PurchaseReceipt sync paths verified statically.");
+console.log("Active React runtime, real authentication, token refresh, durable browser persistence, production auth gateway, offline commercial sync, and release-version consistency verified statically.");
