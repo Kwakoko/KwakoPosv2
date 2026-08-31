@@ -11,7 +11,8 @@ function decodeClaims(token: string | null): JwtClaims {
   try {
     const payload = token.split(".")[1]; if (!payload) return {};
     const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(normalized)) as JwtClaims;
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return JSON.parse(atob(padded)) as JwtClaims;
   } catch { return {}; }
 }
 
@@ -53,29 +54,32 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [db]);
 
   useEffect(() => { const updateOnline = () => setIsOnline(navigator.onLine); window.addEventListener("online", updateOnline); window.addEventListener("offline", updateOnline); return () => { window.removeEventListener("online", updateOnline); window.removeEventListener("offline", updateOnline); }; }, []);
-  useEffect(() => { void db.ready.finally(() => setPendingOutboxCount(db.getPendingOutbox().length)); }, [db]);
+  useEffect(() => { void db.ready.then(() => setPendingOutboxCount(db.getPendingOutbox().length)); }, [db]);
 
   const login = async (email: string, password: string) => { setAuthError(null); const loggedIn = await apiLogin(email, password); setUser({ id: loggedIn.id, name: loggedIn.name, email: loggedIn.email, role: loggedIn.role, tenantId: loggedIn.tenantId, branchId: loggedIn.branchId }); };
-  const logout = async () => { await apiLogout(); setUser(null); setActiveModule(null); };
+  const logout = async () => { await apiLogout(); setUser(null); setActiveModule(null); setAuthError(null); };
 
   const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const currentTenantId = user?.tenantId || null;
   const currentBranchId = user?.branchId || null;
-  const switchTenant = (id: string) => { if (id !== currentTenantId) throw new Error("The current V2 session is scoped to one tenant; tenant switching must use an authorized tenant-context API."); };
-  const switchBranch = (id: string) => { if (id !== currentBranchId) throw new Error("The current V2 session is scoped to one branch; branch switching must use an authorized branch-context API."); };
+  const switchTenant = (id: string) => { if (id !== currentTenantId) throw new Error("The current V2 session is scoped to one tenant; tenant switching requires an authorized tenant-context API."); };
+  const switchBranch = (id: string) => { if (id !== currentBranchId) throw new Error("The current V2 session is scoped to one branch; branch switching requires an authorized branch-context API."); };
 
   const syncOutbox = async () => {
     if (!user || !isOnline) return;
     setSyncError(null);
+    await db.ready;
     await syncEngine.syncWithServer(
       async (request) => {
         const response = await fetch("/sync/push", { method: "POST", headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include", body: JSON.stringify(request) });
+        if (response.status === 401) throw new Error("Sync authentication expired");
         if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
         const body = await response.json(); return body.data || body;
       },
       async (since) => {
         const response = await fetch(since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta", { headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include" });
+        if (response.status === 401) throw new Error("Sync authentication expired");
         if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
         const body = await response.json(); return body.data || body;
       },
