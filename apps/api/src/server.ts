@@ -257,6 +257,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
     const url = req.routeOptions?.url || req.url.split("?")[0];
     if (
+      url === "/" ||
       url === "/health" ||
       url === "/readiness" ||
       url === "/version" ||
@@ -329,6 +330,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // System endpoints
+  server.get("/", async () => {
+    return {
+      name: "KwakoPos 2.0 POS & Enterprise API Server",
+      status: "online",
+      version: config.APP_VERSION,
+      environment: config.NODE_ENV,
+      health: "/health",
+      versionInfo: "/version",
+      timestamp: new Date().toISOString(),
+    };
+  });
+
   server.get("/health", async (_req, reply) => {
     let database: "connected" | "disconnected" | "not_configured" = "not_configured";
     if (productionPersistence) {
