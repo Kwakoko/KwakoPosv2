@@ -8,12 +8,7 @@ export interface AuthUser { id: string; name: string; email: string; role: strin
 interface JwtClaims { roles?: string[]; permissions?: string[]; }
 function decodeClaims(token: string | null): JwtClaims {
   if (!token) return {};
-  try {
-    const payload = token.split(".")[1]; if (!payload) return {};
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return JSON.parse(atob(padded)) as JwtClaims;
-  } catch { return {}; }
+  try { const payload = token.split(".")[1]; if (!payload) return {}; const normalized = payload.replace(/-/g, "+").replace(/_/g, "/"); const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="); return JSON.parse(atob(padded)) as JwtClaims; } catch { return {}; }
 }
 
 interface AuthContextType { user: AuthUser | null; isAuthenticated: boolean; isInitializing: boolean; error: string | null; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void>; }
@@ -32,7 +27,7 @@ interface ThemeContextType { theme: "dark" | "light"; toggleTheme: () => void; }
 const ThemeContext = createContext<ThemeContextType | null>(null); export const useTheme = () => useContext(ThemeContext)!;
 
 export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [db] = useState(() => new LocalIndexedDbStore());
+  const [db] = useState(() => new LocalIndexedDbStore(3));
   const [syncEngine] = useState(() => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db));
   useState(() => new PwaVersionManager("2.5.0", 3, db));
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -46,13 +41,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     let mounted = true;
-    db.ready.then(() => restoreSession()).then((restored) => {
-      if (!mounted || !restored) return;
-      setUser({ id: restored.id, name: restored.name, email: restored.email, role: restored.role, tenantId: restored.tenantId, branchId: restored.branchId });
-    }).catch((error) => { if (mounted) setAuthError(error instanceof Error ? error.message : "Session restore failed"); }).finally(() => { if (mounted) setIsInitializing(false); });
+    db.ready.then(() => restoreSession()).then((restored) => { if (mounted && restored) setUser({ id: restored.id, name: restored.name, email: restored.email, role: restored.role, tenantId: restored.tenantId, branchId: restored.branchId }); }).catch((error) => { if (mounted) setAuthError(error instanceof Error ? error.message : "Session restore failed"); }).finally(() => { if (mounted) setIsInitializing(false); });
     return () => { mounted = false; };
   }, [db]);
-
   useEffect(() => { const updateOnline = () => setIsOnline(navigator.onLine); window.addEventListener("online", updateOnline); window.addEventListener("offline", updateOnline); return () => { window.removeEventListener("online", updateOnline); window.removeEventListener("offline", updateOnline); }; }, []);
   useEffect(() => { void db.ready.then(() => setPendingOutboxCount(db.getPendingOutbox().length)); }, [db]);
 
@@ -70,20 +61,15 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!user || !isOnline) return;
     setSyncError(null);
     await db.ready;
-    await syncEngine.syncWithServer(
-      async (request) => {
-        const response = await fetch("/sync/push", { method: "POST", headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include", body: JSON.stringify(request) });
-        if (response.status === 401) throw new Error("Sync authentication expired");
-        if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
-        const body = await response.json(); return body.data || body;
-      },
-      async (since) => {
-        const response = await fetch(since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta", { headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include" });
-        if (response.status === 401) throw new Error("Sync authentication expired");
-        if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
-        const body = await response.json(); return body.data || body;
-      },
-    ).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => { setSyncError(error instanceof Error ? error.message : "Synchronization failed"); throw error; });
+    await syncEngine.syncWithServer(async (request) => {
+      const response = await fetch("/sync/push", { method: "POST", headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include", body: JSON.stringify(request) });
+      if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
+      const body = await response.json(); return body.data || body;
+    }, async (since) => {
+      const response = await fetch(since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta", { headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include" });
+      if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
+      const body = await response.json(); return body.data || body;
+    }).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => { setSyncError(error instanceof Error ? error.message : "Synchronization failed"); throw error; });
   };
 
   const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
