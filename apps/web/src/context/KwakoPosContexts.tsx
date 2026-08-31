@@ -1,137 +1,138 @@
-/**
- * KwakoPos 2.0 V2 React Context Provider Suite
- * Authoritative system-of-record context providers for Auth, Session, Tenant, Branch, RBAC, Module, Sync, and Theme.
- */
-
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { ClientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
-import { KWAKOPOS_UI_PARITY_MATRIX } from "../uiParityMatrix.js";
+import { getAccessToken, login as apiLogin, logout as apiLogout, restoreSession } from "../services/apiClient.js";
 
-// --- 1. Auth Context ---
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
   role: string;
+  tenantId: string;
+  branchId: string;
 }
 
-export interface AuthContextType {
-  user: AuthUser;
+interface JwtClaims {
+  roles?: string[];
+  permissions?: string[];
+}
+
+function decodeClaims(token: string | null): JwtClaims {
+  if (!token) return {};
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return {};
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(normalized)) as JwtClaims;
+  } catch {
+    return {};
+  }
+}
+
+interface AuthContextType {
+  user: AuthUser | null;
   isAuthenticated: boolean;
-  login: (email: string) => void;
-  logout: () => void;
+  isInitializing: boolean;
+  error: string | null;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
-export const AuthContext = createContext<AuthContextType>({
-  user: { id: "USR-ADM-01", name: "Alexander M. (Platform Admin)", email: "alexander@kwakopos.com", role: "ADMIN" },
-  isAuthenticated: true,
-  login: () => {},
-  logout: () => {}
-});
+const AuthContext = createContext<AuthContextType | null>(null);
+export const useAuth = () => useContext(AuthContext)!;
 
-export const useAuth = () => useContext(AuthContext);
-
-// --- 2. Tenant Context ---
-export interface TenantContextType {
-  currentTenantId: string;
-  currentTenantName: string;
+interface TenantContextType {
+  currentTenantId: string | null;
+  currentTenantName: string | null;
   availableTenants: { id: string; name: string }[];
   switchTenant: (id: string) => void;
 }
 
-export const TenantContext = createContext<TenantContextType>({
-  currentTenantId: "TNT-TZ-001",
-  currentTenantName: "KwakoPos Enterprise Tanzania",
-  availableTenants: [
-    { id: "TNT-TZ-001", name: "KwakoPos Enterprise Tanzania" },
-    { id: "TNT-KE-002", name: "KwakoPos Kenya Ltd" }
-  ],
-  switchTenant: () => {}
-});
+const TenantContext = createContext<TenantContextType | null>(null);
+export const useTenant = () => useContext(TenantContext)!;
 
-export const useTenant = () => useContext(TenantContext);
-
-// --- 3. Branch Context ---
-export interface BranchContextType {
-  currentBranchId: string;
-  currentBranchName: string;
+interface BranchContextType {
+  currentBranchId: string | null;
+  currentBranchName: string | null;
   availableBranches: { id: string; name: string }[];
   switchBranch: (id: string) => void;
 }
 
-export const BranchContext = createContext<BranchContextType>({
-  currentBranchId: "BR-DSM-01",
-  currentBranchName: "Dar es Salaam Main Branch",
-  availableBranches: [
-    { id: "BR-DSM-01", name: "Dar es Salaam Main Branch" },
-    { id: "BR-ARU-02", name: "Arusha Branch" }
-  ],
-  switchBranch: () => {}
-});
+const BranchContext = createContext<BranchContextType | null>(null);
+export const useBranch = () => useContext(BranchContext)!;
 
-export const useBranch = () => useContext(BranchContext);
-
-// --- 4. RBAC Context ---
-export interface RbacContextType {
-  role: string;
+interface RbacContextType {
+  role: string | null;
   permissions: string[];
   hasPermission: (permission: string) => boolean;
 }
 
-export const RbacContext = createContext<RbacContextType>({
-  role: "ADMIN",
-  permissions: ["ALL"],
-  hasPermission: () => true
-});
+const RbacContext = createContext<RbacContextType | null>(null);
+export const useRbac = () => useContext(RbacContext)!;
 
-export const useRbac = () => useContext(RbacContext);
-
-// --- 5. Sync & Outbox Context ---
-export interface SyncContextType {
-  isOnline: boolean;
-  pendingOutboxCount: number;
-  syncOutbox: () => void;
-  db: LocalIndexedDbStore;
-  syncEngine: ClientSyncEngine;
+interface ModuleContextType {
+  activeModule: string | null;
+  setActiveModule: (module: string) => void;
 }
 
-export const SyncContext = createContext<SyncContextType | null>(null);
+const ModuleContext = createContext<ModuleContextType | null>(null);
+export const useModule = () => useContext(ModuleContext)!;
 
+interface SyncContextType {
+  isOnline: boolean;
+  pendingOutboxCount: number;
+  syncOutbox: () => Promise<void>;
+  db: LocalIndexedDbStore;
+  syncEngine: ClientSyncEngine;
+  syncError: string | null;
+}
+
+const SyncContext = createContext<SyncContextType | null>(null);
 export const useSync = () => useContext(SyncContext)!;
 
-// --- 6. Theme Context ---
-export interface ThemeContextType {
+interface ThemeContextType {
   theme: "dark" | "light";
   toggleTheme: () => void;
 }
 
-export const ThemeContext = createContext<ThemeContextType>({
-  theme: "dark",
-  toggleTheme: () => {}
-});
+const ThemeContext = createContext<ThemeContextType | null>(null);
+export const useTheme = () => useContext(ThemeContext)!;
 
-export const useTheme = () => useContext(ThemeContext);
-
-// --- Master KwakoPosProvider Component ---
 export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [db] = useState(() => new LocalIndexedDbStore());
-  const [syncEngine] = useState(() => new ClientSyncEngine("device-browser-client-1", db));
-  const [versionManager] = useState(() => new PwaVersionManager("2.2.0", 3, db));
-
-  const [user, setUser] = useState<AuthUser>({
-    id: "USR-ADM-01",
-    name: "Alexander M. (Platform Admin)",
-    email: "alexander@kwakopos.com",
-    role: "ADMIN"
-  });
-
-  const [currentTenantId, setCurrentTenantId] = useState("TNT-TZ-001");
-  const [currentBranchId, setCurrentBranchId] = useState("BR-DSM-01");
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [syncEngine] = useState(() => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db));
+  const [versionManager] = useState(() => new PwaVersionManager("2.5.0", 3, db));
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [currentTenantId, setCurrentTenantId] = useState<string | null>(null);
+  const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">((localStorage.getItem("kwakopos:v2:theme") as "dark" | "light") || "dark");
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [activeModule, setActiveModule] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    restoreSession().then((restored) => {
+      if (!mounted) return;
+      if (restored) {
+        setUser({
+          id: restored.id,
+          name: restored.name,
+          email: restored.email,
+          role: restored.role,
+          tenantId: restored.tenantId,
+          branchId: restored.branchId,
+        });
+        setCurrentTenantId(restored.tenantId);
+        setCurrentBranchId(restored.branchId);
+      }
+    }).catch(() => undefined).finally(() => mounted && setIsInitializing(false));
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     const updateOnline = () => setIsOnline(navigator.onLine);
@@ -143,82 +144,99 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
 
+  useEffect(() => {
+    setPendingOutboxCount(db.getPendingOutbox().length);
+  }, [db]);
+
+  const login = async (email: string, password: string) => {
+    setAuthError(null);
+    const loggedIn = await apiLogin(email, password);
+    setUser({
+      id: loggedIn.id,
+      name: loggedIn.name,
+      email: loggedIn.email,
+      role: loggedIn.role,
+      tenantId: loggedIn.tenantId,
+      branchId: loggedIn.branchId,
+    });
+    setCurrentTenantId(loggedIn.tenantId);
+    setCurrentBranchId(loggedIn.branchId);
+  };
+
+  const logout = async () => {
+    await apiLogout();
+    setUser(null);
+    setCurrentTenantId(null);
+    setCurrentBranchId(null);
+    setActiveModule(null);
+  };
+
+  const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
+  const permissions = useMemo(() => claims.permissions || [], [claims]);
+  const roles = useMemo(() => claims.roles || (user?.role ? [user.role] : []), [claims, user?.role]);
+
   const switchTenant = (id: string) => {
-    setCurrentTenantId(id);
+    if (!user || id !== user.tenantId) throw new Error("Tenant switching requires an authorized V2 tenant-context API");
   };
 
   const switchBranch = (id: string) => {
-    setCurrentBranchId(id);
+    if (!user || id !== user.branchId) throw new Error("Branch switching requires an authorized V2 branch-context API");
   };
 
-  const toggleTheme = () => {
-    setTheme(t => (t === "dark" ? "light" : "dark"));
-  };
-
-  const syncOutbox = () => {
-    const pending = db.getPendingOutbox();
-    for (const item of pending) {
-      db.markOutboxSynced(item.id);
+  const syncOutbox = async () => {
+    if (!user || !isOnline) return;
+    try {
+      setSyncError(null);
+      await syncEngine.syncWithServer(
+        async (request) => {
+          const response = await fetch("/api/v1/sync/push", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) },
+            credentials: "include",
+            body: JSON.stringify(request),
+          });
+          if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
+          return response.json();
+        },
+        async (since) => {
+          const url = since ? `/api/v1/sync/delta?since=${encodeURIComponent(since)}` : "/api/v1/sync/delta";
+          const response = await fetch(url, {
+            headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) },
+            credentials: "include",
+          });
+          if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
+          return response.json();
+        },
+      );
+      setPendingOutboxCount(db.getPendingOutbox().length);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Synchronization failed";
+      setSyncError(message);
+      throw error;
     }
-    setPendingCount(db.getPendingOutbox().length);
   };
 
-  const authValue: AuthContextType = {
-    user,
-    isAuthenticated: true,
-    login: () => {},
-    logout: () => {}
-  };
-
-  const tenantValue: TenantContextType = {
-    currentTenantId,
-    currentTenantName: currentTenantId === "TNT-TZ-001" ? "KwakoPos Enterprise Tanzania" : "KwakoPos Kenya Ltd",
-    availableTenants: [
-      { id: "TNT-TZ-001", name: "KwakoPos Enterprise Tanzania" },
-      { id: "TNT-KE-002", name: "KwakoPos Kenya Ltd" }
-    ],
-    switchTenant
-  };
-
-  const branchValue: BranchContextType = {
-    currentBranchId,
-    currentBranchName: currentBranchId === "BR-DSM-01" ? "Dar es Salaam Main Branch" : "Arusha Branch",
-    availableBranches: [
-      { id: "BR-DSM-01", name: "Dar es Salaam Main Branch" },
-      { id: "BR-ARU-02", name: "Arusha Branch" }
-    ],
-    switchBranch
-  };
-
-  const rbacValue: RbacContextType = {
-    role: user.role,
-    permissions: ["ALL"],
-    hasPermission: () => true
-  };
-
-  const syncValue: SyncContextType = {
-    isOnline,
-    pendingOutboxCount: db.getPendingOutbox().length,
-    syncOutbox,
-    db,
-    syncEngine
-  };
-
-  const themeValue: ThemeContextType = {
-    theme,
-    toggleTheme
-  };
+  const authValue = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
+  const tenantName = currentTenantId ? currentTenantId : null;
+  const branchName = currentBranchId ? currentBranchId : null;
+  const tenantValue = { currentTenantId, currentTenantName: tenantName, availableTenants: user ? [{ id: user.tenantId, name: tenantName || user.tenantId }] : [], switchTenant };
+  const branchValue = { currentBranchId, currentBranchName: branchName, availableBranches: user ? [{ id: user.branchId, name: branchName || user.branchId }] : [], switchBranch };
+  const rbacValue = { role: user?.role || null, permissions, hasPermission: (permission: string) => permissions.includes("*") || permissions.includes(permission) };
+  const syncValue = { isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError };
+  const themeValue = { theme, toggleTheme: () => setTheme((current) => { const next = current === "dark" ? "light" : "dark"; localStorage.setItem("kwakopos:v2:theme", next); return next; }) };
 
   return (
     <AuthContext.Provider value={authValue}>
       <TenantContext.Provider value={tenantValue}>
         <BranchContext.Provider value={branchValue}>
           <RbacContext.Provider value={rbacValue}>
-            <SyncContext.Provider value={syncValue}>
-              <ThemeContext.Provider value={themeValue}>
-                {children}
-              </ThemeContext.Provider>
-            </SyncContext.Provider>
+            <ModuleContext.Provider value={{ activeModule, setActiveModule }}>
+              <SyncContext.Provider value={syncValue}>
+                <ThemeContext.Provider value={themeValue}>
+                  {children}
+                </ThemeContext.Provider>
+              </SyncContext.Provider>
+            </ModuleContext.Provider>
           </RbacContext.Provider>
         </BranchContext.Provider>
       </TenantContext.Provider>
