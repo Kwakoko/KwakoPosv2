@@ -19,6 +19,28 @@ function resolveWebDistFile(relativePath: string): string | null {
   }
   return null;
 }
+
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".html": return "text/html; charset=utf-8";
+    case ".js":
+    case ".mjs": return "application/javascript; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".json": return "application/json; charset=utf-8";
+    case ".png": return "image/png";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".gif": return "image/gif";
+    case ".svg": return "image/svg+xml";
+    case ".ico": return "image/x-icon";
+    case ".woff2": return "font/woff2";
+    case ".woff": return "font/woff";
+    case ".ttf": return "font/ttf";
+    case ".map": return "application/json; charset=utf-8";
+    default: return "application/octet-stream";
+  }
+}
 import {
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
@@ -286,43 +308,33 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return;
     }
 
-    // Static Assets & Manifests for PWA Web Shell
-    if (url === "/manifest.json") {
-      const manifestPath = resolveWebDistFile("manifest.json");
-      if (manifestPath && fs.existsSync(manifestPath)) {
-        reply.type("application/json").send(fs.readFileSync(manifestPath, "utf8"));
-        return;
-      }
-    }
-
-    if (url === "/sw.js") {
-      const swPath = resolveWebDistFile("sw.js");
-      if (swPath && fs.existsSync(swPath)) {
-        reply.type("application/javascript").send(fs.readFileSync(swPath, "utf8"));
+    // Static Asset Resolution (serving /assets/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist)
+    if (url.startsWith("/assets/") || url === "/manifest.json" || url === "/sw.js" || url === "/favicon.ico" || url === "/robots.txt") {
+      const relativePath = url.startsWith("/") ? url.slice(1) : url;
+      const assetPath = resolveWebDistFile(relativePath);
+      if (assetPath && fs.existsSync(assetPath)) {
+        reply.type(getMimeType(assetPath)).send(fs.readFileSync(assetPath));
         return;
       }
     }
 
     // Web PWA SPA Fallback Routing for browser navigation paths
-    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/");
-    const isWebUiPath =
-      url === "/" ||
-      url === "/login" ||
-      url === "/dashboard" ||
-      url === "/pos" ||
-      url === "/inventory" ||
-      url === "/customers" ||
-      url === "/reports" ||
-      url === "/settings" ||
-      url === "/super-admin" ||
-      url === "/diagnostics" ||
-      (req.headers.accept && req.headers.accept.includes("text/html") && !isExplicitApiPrefix);
+    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/") || url.startsWith("/sync/");
+    if (!isExplicitApiPrefix && req.method === "GET") {
+      const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
+      const isWebRoute = [
+        "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
+        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
+        "/expenses", "/ai", "/cash-drawer", "/receipts", "/law-firm", "/pharmacy",
+        "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
+      ].includes(url) || isHtmlRequest;
 
-    if (!isExplicitApiPrefix && isWebUiPath) {
-      const indexPath = resolveWebDistFile("index.html");
-      if (indexPath && fs.existsSync(indexPath)) {
-        reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
-        return;
+      if (isWebRoute) {
+        const indexPath = resolveWebDistFile("index.html");
+        if (indexPath && fs.existsSync(indexPath)) {
+          reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
+          return;
+        }
       }
     }
 
