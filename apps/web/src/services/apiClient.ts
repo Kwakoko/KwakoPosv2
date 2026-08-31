@@ -122,12 +122,27 @@ export async function logout(): Promise<void> {
 
 export async function apiFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> { return requestJson<T>(input, init, true); }
 
+export function safeUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      /* fallback */
+    }
+  }
+  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function getDeviceId(): string {
   if (typeof window === "undefined") return "server-rendered-client";
   const key = "kwakopos:v2:device-id";
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const generated = `web-${crypto.randomUUID()}`;
-  window.localStorage.setItem(key, generated);
-  return generated;
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const generated = `web-${safeUUID()}`;
+    window.localStorage.setItem(key, generated);
+    return generated;
+  } catch {
+    return `web-${safeUUID()}`;
+  }
 }

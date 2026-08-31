@@ -59,14 +59,14 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     description: "Universal single-page application shell with header, sidebar, mobile drawer, breadcrumbs, search, command palette & diagnostics",
     legacyFeatureRef: "Legacy App Header & Sidebar",
     targetV2Route: "/",
-    targetV2Component: "RealAppShell",
+    targetV2Component: "SystemAppShellLayout",
     dataSource: "SystemUiEngine & LocalIndexedDbStore",
     requiredPermission: "public",
     offlineBehavior: "Full offline application shell rendering",
     syncBehavior: "Live status indicator sync",
     auditBehavior: "Shell lifecycle telemetry",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R04",
@@ -111,7 +111,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Background delta sync refresh",
     auditBehavior: "Dashboard view audit event",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R07",
@@ -141,7 +141,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Stock movement delta sync",
     auditBehavior: "AuditEvent: STOCK_ADJUSTMENT_CREATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R09",
@@ -156,7 +156,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Delta sync customer updates",
     auditBehavior: "AuditEvent: CUSTOMER_CREATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R10",
@@ -171,7 +171,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "PO & receipt queue sync",
     auditBehavior: "AuditEvent: PURCHASE_ORDER_CREATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R11",
@@ -186,7 +186,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Journal entry sync to cloud database",
     auditBehavior: "AuditEvent: JOURNAL_ENTRY_POSTED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R12",
@@ -201,7 +201,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "AuditEvent: REPORT_EXPORTED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R13",
@@ -216,7 +216,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Tenant settings delta sync",
     auditBehavior: "AuditEvent: SETTING_UPDATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R14",
@@ -231,7 +231,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Role permission sync",
     auditBehavior: "AuditEvent: USER_ROLE_UPDATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R15",
@@ -246,7 +246,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Platform telemetry sync",
     auditBehavior: "AuditEvent: TENANT_PROVISIONED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R16",
@@ -261,7 +261,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Search index re-indexed on sync",
     auditBehavior: "AuditEvent: SEARCH_PERFORMED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R17",
@@ -276,7 +276,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "AuditEvent: COMMAND_EXECUTED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R18",
@@ -291,7 +291,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Server alert sync",
     auditBehavior: "AuditEvent: NOTIFICATION_READ",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R19",
@@ -306,7 +306,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Live status updates during sync",
     auditBehavior: "Connectivity state transition telemetry",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R20",
@@ -321,7 +321,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Refreshes live during sync cycles",
     auditBehavior: "AuditEvent: SYNC_INSPECTED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R21",
@@ -336,7 +336,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "Error event logged to RUM",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R22",
@@ -381,7 +381,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Theme preference sync",
     auditBehavior: "N/A",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R25",
@@ -396,7 +396,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "N/A",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R26",
@@ -456,7 +456,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Token refresh on sync",
     auditBehavior: "AuditEvent: UNAUTHORIZED_ACCESS_ATTEMPT",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/api/src/server.ts & apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/api/src/server.ts & apps/web/src/App.tsx"
   },
   {
     controlId: "UI-R30",
@@ -486,7 +486,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Branch-isolated sync push/pull",
     auditBehavior: "AuditEvent: BRANCH_SWITCHED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R32",
@@ -501,7 +501,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Server-validated domain sync",
     auditBehavior: "AuditEvent: DATA_LINEAGE_VERIFIED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R33",
@@ -606,7 +606,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Pushes audit events to server on sync",
     auditBehavior: "AuditEvent: UI_ACTION_PERFORMED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts"
+    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
   },
   {
     controlId: "UI-R40",
