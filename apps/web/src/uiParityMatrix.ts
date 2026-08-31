@@ -126,7 +126,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Automatic background sync upon reconnection",
     auditBehavior: "AuditEvent: POS_SALE_CREATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/realAppShell.ts & tests/integration/frontend-pwa-routing.test.ts"
+    evidenceRef: "apps/web/src/App.tsx & tests/integration/frontend-pwa-routing.test.ts"
   },
   {
     controlId: "UI-R08",
@@ -366,7 +366,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "N/A",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/buildWeb.ts (CSS variable definitions)"
+    evidenceRef: "apps/web/src/styles.css (CSS variable definitions)"
   },
   {
     controlId: "UI-R24",
@@ -426,7 +426,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "N/A",
     auditBehavior: "N/A",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/buildWeb.ts"
+    evidenceRef: "apps/web/src/styles.css"
   },
   {
     controlId: "UI-R28",
