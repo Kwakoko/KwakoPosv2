@@ -1,13 +1,14 @@
 {
   "version": "2.5.0",
   "tag": "v2.5.0",
-  "gitSha": "2c35db3d9abaf859b4cd22bb994d40a3d96cb1e6",
+  "gitSha": null,
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
   "releaseChannel": "development",
-  "releasedAt": "2026-08-28T18:43:14.037Z",
-  "certification": "PASS",
+  "releasedAt": "2026-08-31T16:17:00+03:00",
+  "certification": "PENDING_REVALIDATION",
+  "certificationNote": "Historical v2.5.0 production evidence does not certify the current main commit. Fresh browser/CI evidence is required before this commit can be marked PASS.",
   "compatibility": {
     "databaseSchemaVersion": 2,
     "syncProtocolVersion": 2,
