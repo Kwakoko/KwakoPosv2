@@ -6,6 +6,10 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(dir, "public");
 fs.mkdirSync(publicDir, { recursive: true });
 
+const packageJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+const version = String(packageJson.version || "0.0.0");
+const cacheName = `kwakopos-runtime-v${version}`;
+
 fs.writeFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
   name: "KwakoPos 2.0 POS & Enterprise System",
   short_name: "KwakoPos",
@@ -20,7 +24,7 @@ fs.writeFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
   ]
 }, null, 2));
 
-fs.writeFileSync(path.join(publicDir, "sw.js"), `const CACHE_NAME = "kwakopos-runtime-v2";
+fs.writeFileSync(path.join(publicDir, "sw.js"), `const CACHE_NAME = ${JSON.stringify(cacheName)};
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(["/", "/manifest.json"])).then(() => self.skipWaiting()));
 });
@@ -49,4 +53,4 @@ self.addEventListener("fetch", event => {
 });
 `);
 
-console.log("KwakoPos V2 PWA assets prepared; Vite owns the React application build.");
+console.log(`KwakoPos V2 PWA assets prepared for version ${version}; cache=${cacheName}; Vite owns the React application build.`);
