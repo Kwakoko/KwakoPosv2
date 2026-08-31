@@ -6,7 +6,11 @@ const failures: string[] = [];
 const requireFile = (relative: string) => { const file = path.join(root, relative); if (!fs.existsSync(file)) failures.push(`Missing required file: ${relative}`); };
 const sourceContains = (relative: string, needle: string, forbidden = false) => { const file = path.join(root, relative); if (!fs.existsSync(file)) { failures.push(`Cannot inspect missing file: ${relative}`); return; } const text = fs.readFileSync(file, "utf8"); const present = text.includes(needle); if (forbidden ? present : !present) failures.push(`${forbidden ? "Forbidden pattern" : "Required pattern"} in ${relative}: ${needle}`); };
 
-for (const file of ["apps/web/src/main.tsx","apps/web/src/App.tsx","apps/web/src/context/KwakoPosContexts.tsx","apps/web/src/services/apiClient.ts","apps/web/src/indexedDb.ts","apps/web/src/versionManager.ts","apps/api/src/server.ts","apps/api/src/serverFixed.ts","packages/sync/src/prismaSyncEngine.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js"]) requireFile(file);
+for (const file of [
+  "apps/web/src/main.tsx","apps/web/src/App.tsx","apps/web/src/context/KwakoPosContexts.tsx","apps/web/src/services/apiClient.ts","apps/web/src/indexedDb.ts","apps/web/src/versionManager.ts",
+  "apps/api/src/server.ts","apps/api/src/serverFixed.ts","packages/sync/src/prismaSyncEngine.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
+  "apps/web/dist/index.html","apps/web/dist/manifest.json","apps/web/dist/sw.js","apps/api/dist/serverFixed.js",
+]) requireFile(file);
 
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "apiLogin");
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "isAuthenticated: Boolean(user)");
@@ -40,11 +44,15 @@ if (rootPkg?.version && apiPkg?.version && webPkg?.version && releaseManifest?.v
   if (releaseManifest.tag !== `v${rootPkg.version}`) failures.push(`release-manifest tag drift: expected v${rootPkg.version}, got ${releaseManifest.tag}`);
 }
 
-const builtWeb = path.join(root, "apps/web/dist/index.html");
-if (fs.existsSync(builtWeb)) {
-  const html = fs.readFileSync(builtWeb, "utf8");
-  if (!html.includes('id="root"')) failures.push("React root missing from apps/web/dist/index.html");
-  if (html.includes("RealAppShell")) failures.push("Retired generated shell detected in apps/web/dist/index.html");
+for (const relative of ["apps/web/dist/index.html","apps/web/dist/sw.js"]) {
+  const file = path.join(root, relative);
+  if (!fs.existsSync(file)) continue;
+  const content = fs.readFileSync(file, "utf8");
+  if (relative.endsWith("index.html")) {
+    if (!content.includes('id="root"')) failures.push("React root missing from apps/web/dist/index.html");
+    if (content.includes("RealAppShell")) failures.push("Retired generated shell detected in apps/web/dist/index.html");
+  }
+  if (relative.endsWith("sw.js") && !content.includes("kwakopos-runtime-v2.5.0")) failures.push("PWA service-worker cache is not bound to release version 2.5.0");
 }
 
 if (failures.length) {
@@ -53,4 +61,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("STRICT RUNTIME CERTIFICATION: PASS");
-console.log("React runtime, authentication, refresh, RBAC, durable IndexedDB, production auth gateway, offline commercial sync, PWA versioning, and release-version consistency verified statically.");
+console.log("Compiled React/PWA artifacts, authentication, refresh, RBAC, durable IndexedDB, production auth gateway, offline commercial sync, and release consistency verified statically.");
