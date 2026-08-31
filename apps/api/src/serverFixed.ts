@@ -25,7 +25,10 @@ async function handleProductionLogin(req: any, reply: any): Promise<void> {
   const deviceId = String(req.body?.deviceId || "").trim();
   if (!email || !password || !deviceId) { reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email, password and deviceId are required" } }); return; }
 
-  let user: any = await prisma.user.findFirst({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true } });
+  const users: any[] = await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true } });
+  if (users.length > 1) { reply.status(409).send({ success: false, error: { code: "AMBIGUOUS_ACCOUNT", message: "Multiple active accounts match this email; tenant selection is required." } }); return; }
+
+  let user: any = users[0] || null;
   if (!user) {
     const bootstrapEmail = String(process.env.KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL || "").trim().toLowerCase();
     const bootstrapPassword = String(process.env.KWAKOPOS_BOOTSTRAP_ADMIN_PASSWORD || "");
@@ -54,11 +57,13 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
   if (productionPersistence) configurePersistentSessions();
   const server = buildServer({ config, productionPersistence });
 
-  server.addHook("onRequest", async (req, reply) => {
+  // Fastify request bodies are available after request parsing; preValidation is
+  // therefore the correct interception point for login/refresh/logout payloads.
+  server.addHook("preValidation", async (req, reply) => {
     if (!productionPersistence) return;
-    const path = req.url.split("?")[0];
-    if (path === "/auth/login" && req.method === "POST") { await handleProductionLogin(req, reply); return; }
-    if (path === "/auth/refresh" && req.method === "POST") {
+    const routePath = req.url.split("?")[0];
+    if (routePath === "/auth/login" && req.method === "POST") { await handleProductionLogin(req, reply); return; }
+    if (routePath === "/auth/refresh" && req.method === "POST") {
       const sessionId = String(req.body?.sessionId || "");
       const refreshToken = String(req.body?.refreshToken || "");
       if (!sessionId || !refreshToken) { reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "sessionId and refreshToken are required" } }); return; }
@@ -69,7 +74,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
       reply.send({ success: true, data: { accessToken: rotated.accessToken, refreshToken: rotated.refreshToken } });
       return;
     }
-    if (path === "/auth/logout" && req.method === "POST") {
+    if (routePath === "/auth/logout" && req.method === "POST") {
       const sessionId = String(req.body?.sessionId || "");
       if (sessionId) await globalSessionManager.revokeSession(sessionId);
       reply.send({ success: true, data: { loggedOut: true } });
