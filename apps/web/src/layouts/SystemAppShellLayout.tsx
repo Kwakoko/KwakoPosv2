@@ -3,14 +3,164 @@ import { useAuth, useTenant, useBranch, useSync, useTheme, useRbac } from "../co
 import { apiFetch } from "../services/apiClient.js";
 
 export interface ShellLayoutProps { currentPath: string; onNavigate: (path: string) => void; children: React.ReactNode; }
-
 type SearchResult = { type: string; label: string; id: string; target: string };
+
+export const TopBar: React.FC<{
+  currentTenantId: string | null;
+  currentBranchId: string | null;
+  availableTenants: { id: string; name: string }[];
+  availableBranches: { id: string; name: string }[];
+  onSwitchTenant: (id: string) => void;
+  onSwitchBranch: (id: string) => void;
+  isOnline: boolean;
+  pendingOutboxCount: number;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
+  onNavigate: (path: string) => void;
+  onOpenSearch: () => void;
+  onOpenCommands: () => void;
+  onLogout: () => void;
+}> = ({
+  currentTenantId,
+  currentBranchId,
+  availableTenants,
+  availableBranches,
+  onSwitchTenant,
+  onSwitchBranch,
+  isOnline,
+  pendingOutboxCount,
+  theme,
+  onToggleTheme,
+  onNavigate,
+  onOpenSearch,
+  onOpenCommands,
+  onLogout,
+}) => (
+  <header>
+    <a href="/" className="header-brand" onClick={(e) => { e.preventDefault(); onNavigate("/"); }}>KwakoPos 2.0</a>
+    <div className="header-context">
+      <button className="context-selector" onClick={onOpenSearch}>🔍 Search (Ctrl+K)</button>
+      <button className="context-selector" onClick={onOpenCommands}>⚡ Commands</button>
+      <select className="context-selector" value={currentTenantId || ""} onChange={(e) => onSwitchTenant(e.target.value)}>
+        {availableTenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <select className="context-selector" value={currentBranchId || ""} onChange={(e) => onSwitchBranch(e.target.value)}>
+        {availableBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </select>
+      <span className={`badge ${isOnline ? "badge-success" : "badge-warning"}`}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
+      <span className="badge badge-info">{pendingOutboxCount} QUEUED</span>
+      <button className="context-selector" onClick={onToggleTheme}>{theme === "dark" ? "☀️" : "🌙"}</button>
+      <button className="context-selector" onClick={onLogout}>Sign out</button>
+    </div>
+  </header>
+);
+
+export const Sidebar: React.FC<{
+  currentPath: string;
+  onNavigate: (path: string) => void;
+  user: { name?: string; role?: string } | null;
+  canAdminister: boolean;
+}> = ({ currentPath, onNavigate, user, canAdminister }) => (
+  <aside>
+    <div className="nav-section-title">Core Operations</div>
+    <ul className="nav-list">
+      {[
+        ["/", "📊 Dashboard"],
+        ["/pos", "⚡ POS Checkout"],
+        ["/inventory", "📦 Inventory & FEFO"],
+        ["/customers", "👥 Customer CRM"],
+        ["/purchasing", "🛒 Purchasing"],
+        ["/cash-drawer", "💵 Cash Drawer"],
+        ["/receipts", "🧾 Receipts Engine"],
+      ].map(([path, label]) => (
+        <li className="nav-item" key={path}>
+          <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+        </li>
+      ))}
+    </ul>
+
+    <div className="nav-section-title">Finance & Enterprise</div>
+    <ul className="nav-list">
+      {[
+        ["/finance", "💰 General Ledger"],
+        ["/expenses", "💳 Expenses"],
+        ["/trash", "🗑️ Soft Delete Bin"],
+        ["/reports", "📈 Reports & Analytics"],
+        ["/settings", "⚙️ Settings"],
+        ["/users", "🔐 Users & Roles"],
+        ["/super-admin", "👑 Super Admin"],
+        ["/diagnostics", "🩺 Diagnostics"],
+      ].filter(([path]) => path !== "/super-admin" || canAdminister).map(([path, label]) => (
+        <li className="nav-item" key={path}>
+          <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+        </li>
+      ))}
+    </ul>
+
+    <div className="nav-section-title">Vertical Modules</div>
+    <ul className="nav-list">
+      {[
+        ["/law-firm", "⚖️ Law Firm Practice"],
+        ["/pharmacy", "💊 Clinical Pharmacy"],
+        ["/poultry-livestock", "🐔 Poultry & Livestock"],
+        ["/fleet", "🚚 Fleet & Logistics"],
+        ["/workforce", "👥 Workforce & Payroll"],
+        ["/telecom", "📱 Telecom & Airtime"],
+      ].map(([path, label]) => (
+        <li className="nav-item" key={path}>
+          <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+        </li>
+      ))}
+    </ul>
+
+    <div className="nav-section-title">Intelligence & Support</div>
+    <ul className="nav-list">
+      {[
+        ["/ai", "🧠 AI Control Layer"],
+        ["/help", "❓ Knowledge & Help"],
+      ].map(([path, label]) => (
+        <li className="nav-item" key={path}>
+          <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+        </li>
+      ))}
+    </ul>
+
+    <div className="nav-section-title" style={{ marginTop: "auto" }}>Session Context</div>
+    <div style={{ padding: "0 .6rem .8rem", fontSize: ".72rem", color: "var(--muted)" }}><div>{user?.name}</div><div>{user?.role}</div></div>
+  </aside>
+);
+
+export const BottomNav: React.FC<{
+  currentPath: string;
+  onNavigate: (path: string) => void;
+}> = ({ currentPath, onNavigate }) => (
+  <nav className="mobile-bottom-nav" aria-label="Primary mobile navigation">
+    {[
+      ["/", "Home"],
+      ["/pos", "POS"],
+      ["/inventory", "Stock"],
+      ["/customers", "CRM"],
+      ["/ai", "AI Layer"],
+      ["/help", "Help"],
+    ].map(([path, label]) => (
+      <a key={path} href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
+    ))}
+  </nav>
+);
+
+export const AppVersionFooter: React.FC<{
+  appVersion?: string;
+  gitSha?: string;
+  isOnline: boolean;
+}> = ({ appVersion, gitSha, isOnline }) => (
+  <footer>KwakoPos © 2026 · {appVersion || "V2"} · {gitSha ? gitSha.slice(0, 8) : "development"} · {isOnline ? "Connected" : "Offline"}</footer>
+);
 
 export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, onNavigate, children }) => {
   const { user, logout } = useAuth();
   const { currentTenantId, availableTenants, switchTenant } = useTenant();
   const { currentBranchId, availableBranches, switchBranch } = useBranch();
-  const { isOnline, pendingOutboxCount, syncOutbox } = useSync();
+  const { isOnline, pendingOutboxCount } = useSync();
   const { theme, toggleTheme } = useTheme();
   const { permissions } = useRbac();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -63,107 +213,35 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
 
   return (
     <div className="kwakopos-app" data-theme={theme}>
-      <header>
-        <a href="/" className="header-brand" onClick={(e) => { e.preventDefault(); onNavigate("/"); }}>KwakoPos 2.0</a>
-        <div className="header-context">
-          <button className="context-selector" onClick={() => setIsSearchOpen(true)}>🔍 Search (Ctrl+K)</button>
-          <button className="context-selector" onClick={() => setIsCommandOpen(true)}>⚡ Commands</button>
-          <select className="context-selector" value={currentTenantId || ""} onChange={(e) => void safeSwitchTenant(e.target.value)}>
-            {availableTenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <select className="context-selector" value={currentBranchId || ""} onChange={(e) => void safeSwitchBranch(e.target.value)}>
-            {availableBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <span className={`badge ${isOnline ? "badge-success" : "badge-warning"}`}>{isOnline ? "ONLINE" : "OFFLINE"}</span>
-          <span className="badge badge-info">{pendingOutboxCount} QUEUED</span>
-          <button className="context-selector" onClick={toggleTheme}>{theme === "dark" ? "☀️" : "🌙"}</button>
-          <button className="context-selector" onClick={() => void logout()}>Sign out</button>
-        </div>
-      </header>
+      <TopBar
+        currentTenantId={currentTenantId}
+        currentBranchId={currentBranchId}
+        availableTenants={availableTenants}
+        availableBranches={availableBranches}
+        onSwitchTenant={(id) => void safeSwitchTenant(id)}
+        onSwitchBranch={(id) => void safeSwitchBranch(id)}
+        isOnline={isOnline}
+        pendingOutboxCount={pendingOutboxCount}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onNavigate={onNavigate}
+        onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenCommands={() => setIsCommandOpen(true)}
+        onLogout={() => void logout()}
+      />
 
       <div className="app-layout">
-        <aside>
-          <div className="nav-section-title">Core Operations</div>
-          <ul className="nav-list">
-            {[
-              ["/", "📊 Dashboard"],
-              ["/pos", "⚡ POS Checkout"],
-              ["/inventory", "📦 Inventory & FEFO"],
-              ["/customers", "👥 Customer CRM"],
-              ["/purchasing", "🛒 Purchasing"],
-              ["/cash-drawer", "💵 Cash Drawer"],
-              ["/receipts", "🧾 Receipts Engine"],
-            ].map(([path, label]) => (
-              <li className="nav-item" key={path}>
-                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
-              </li>
-            ))}
-          </ul>
-
-          <div className="nav-section-title">Finance & Enterprise</div>
-          <ul className="nav-list">
-            {[
-              ["/finance", "💰 General Ledger"],
-              ["/expenses", "💳 Expenses"],
-              ["/reports", "📈 Reports & Analytics"],
-              ["/settings", "⚙️ Settings"],
-              ["/users", "🔐 Users & Roles"],
-              ["/super-admin", "👑 Super Admin"],
-              ["/diagnostics", "🩺 Diagnostics"],
-            ].filter(([path]) => path !== "/super-admin" || canAdminister).map(([path, label]) => (
-              <li className="nav-item" key={path}>
-                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
-              </li>
-            ))}
-          </ul>
-
-          <div className="nav-section-title">Vertical Modules</div>
-          <ul className="nav-list">
-            {[
-              ["/law-firm", "⚖️ Law Firm Practice"],
-              ["/pharmacy", "💊 Clinical Pharmacy"],
-              ["/poultry-livestock", "🐔 Poultry & Livestock"],
-              ["/fleet", "🚚 Fleet & Logistics"],
-              ["/workforce", "👥 Workforce & Payroll"],
-              ["/telecom", "📱 Telecom & Airtime"],
-            ].map(([path, label]) => (
-              <li className="nav-item" key={path}>
-                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
-              </li>
-            ))}
-          </ul>
-
-          <div className="nav-section-title">Intelligence & Support</div>
-          <ul className="nav-list">
-            {[
-              ["/ai", "🧠 AI Control Layer"],
-              ["/help", "❓ Knowledge & Help"],
-            ].map(([path, label]) => (
-              <li className="nav-item" key={path}>
-                <a href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
-              </li>
-            ))}
-          </ul>
-
-          <div className="nav-section-title" style={{ marginTop: "auto" }}>Session Context</div>
-          <div style={{ padding: "0 .6rem .8rem", fontSize: ".72rem", color: "var(--muted)" }}><div>{user?.name}</div><div>{user?.role}</div></div>
-        </aside>
+        <Sidebar
+          currentPath={currentPath}
+          onNavigate={onNavigate}
+          user={user}
+          canAdminister={canAdminister}
+        />
 
         <main id="app-root">{children}</main>
       </div>
 
-      <nav className="mobile-bottom-nav" aria-label="Primary mobile navigation">
-        {[
-          ["/", "Home"],
-          ["/pos", "POS"],
-          ["/inventory", "Stock"],
-          ["/customers", "CRM"],
-          ["/ai", "AI Layer"],
-          ["/help", "Help"],
-        ].map(([path, label]) => (
-          <a key={path} href={path} className={currentPath === path ? "active" : ""} onClick={(e) => { e.preventDefault(); onNavigate(path); }}>{label}</a>
-        ))}
-      </nav>
+      <BottomNav currentPath={currentPath} onNavigate={onNavigate} />
 
       {isSearchOpen && (
         <div className="modal-overlay open">
@@ -200,9 +278,11 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
                 ["/pos", "⚡ Launch POS Checkout Terminal"],
                 ["/inventory", "📦 Open Inventory & FEFO Ledger"],
                 ["/customers", "👥 Manage Customers & CRM Accounts"],
+                ["/purchasing", "🛒 Open Purchasing & Receiving"],
                 ["/cash-drawer", "💵 Open Cash Drawer Shift Reconciliation"],
                 ["/receipts", "🧾 Manage Receipts & E-Invoicing Engine"],
                 ["/expenses", "💳 Record Business Expense Voucher"],
+                ["/trash", "🗑️ Open Soft Delete Recycle Bin"],
                 ["/ai", "🧠 Open AI Operating Layer & Policy Gateway"],
                 ["/law-firm", "⚖️ Law Firm Practice Command Center"],
                 ["/pharmacy", "💊 Clinical Pharmacy & FEFO Dispensing"],
@@ -222,7 +302,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({ currentPath, 
         </div>
       )}
 
-      <footer>KwakoPos © 2026 · {release.appVersion || "V2"} · {release.gitSha ? release.gitSha.slice(0, 8) : "development"} · {isOnline ? "Connected" : "Offline"}</footer>
+      <AppVersionFooter appVersion={release.appVersion} gitSha={release.gitSha} isOnline={isOnline} />
     </div>
   );
 };

@@ -18,6 +18,7 @@ import {
   AiPage,
   CashDrawerPage,
   ReceiptsPage,
+  TrashPage,
   LawFirmPage,
   PharmacyPage,
   PoultryLivestockPage,
@@ -28,7 +29,7 @@ import {
 } from "./pages/WorkspacePages.js";
 
 const AuthenticatedApp: React.FC = () => {
-  const { user, isAuthenticated, isInitializing, error } = useAuth();
+  const { user, isAuthenticated, isInitializing } = useAuth();
   const [currentPath, setCurrentPath] = useState(
     typeof window !== "undefined" ? window.location.pathname : "/",
   );
@@ -89,6 +90,8 @@ const AuthenticatedApp: React.FC = () => {
         return <CashDrawerPage />;
       case "/receipts":
         return <ReceiptsPage />;
+      case "/trash":
+        return <TrashPage />;
       case "/law-firm":
         return <LawFirmPage />;
       case "/pharmacy":
@@ -110,7 +113,6 @@ const AuthenticatedApp: React.FC = () => {
 
   return (
     <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
-      {error && <div className="workspace-card" style={{ borderColor: "var(--danger)" }}>{error}</div>}
       {renderView()}
     </SystemAppShellLayout>
   );

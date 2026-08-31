@@ -325,7 +325,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const isWebRoute = [
         "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
         "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
-        "/expenses", "/ai", "/cash-drawer", "/receipts", "/law-firm", "/pharmacy",
+        "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
         "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
       ].includes(url) || isHtmlRequest;
 
