@@ -3,7 +3,7 @@
   "version": "2.5.0",
   "private": true,
   "scripts": {
-    "build": "tsx buildWeb.ts && tsc -p tsconfig.json",
+    "build": "tsx buildPwaAssets.ts && vite build && tsc -p tsconfig.json --noEmit",
     "dev": "vite",
     "clean": "rm -rf dist"
   },
