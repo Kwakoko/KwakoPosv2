@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useEffect, useMemo, useState } from "react";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { ClientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
@@ -10,20 +10,6 @@ function decodeClaims(token: string | null): JwtClaims {
   if (!token) return {};
   try { const payload = token.split(".")[1]; if (!payload) return {}; const normalized = payload.replace(/-/g, "+").replace(/_/g, "/"); const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="); return JSON.parse(atob(padded)) as JwtClaims; } catch { return {}; }
 }
-
-const DEFAULT_TENANTS = [
-  { id: "TNT-TZ-001", name: "Kwakopos Retailers (Main)" },
-  { id: "TNT-TZ-002", name: "Zanzibar Commercial Ltd" },
-  { id: "TNT-TZ-003", name: "Arusha Wholesale Hub" },
-];
-
-const DEFAULT_BRANCHES = [
-  { id: "BR-DSM-01", name: "Dar es Salaam Main" },
-  { id: "BR-ARU-02", name: "Arusha Branch" },
-  { id: "BR-ZNZ-03", name: "Stone Town Branch" },
-  { id: "BR-MWZ-04", name: "Mwanza Hub" },
-];
-
 interface AuthContextType { user: AuthUser | null; isAuthenticated: boolean; isInitializing: boolean; error: string | null; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void>; }
 const AuthContext = createContext<AuthContextType | null>(null); export const useAuth = () => useContext(AuthContext)!;
 interface TenantContextType { currentTenantId: string | null; currentTenantName: string | null; availableTenants: { id: string; name: string }[]; switchTenant: (id: string) => Promise<void>; }
@@ -70,29 +56,29 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const switchTenant = async (id: string) => {
     if (!id || id === currentTenantId) return;
+    if (!isOnline) throw new Error("Tenant switching requires an online authorized context change.");
     try {
-      if (isOnline) {
-        const updated = await apiSwitchContext(id, currentBranchId || undefined);
-        setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
-      } else {
-        setUser(prev => prev ? { ...prev, tenantId: id } : null);
-      }
-    } catch {
-      setUser(prev => prev ? { ...prev, tenantId: id } : null);
+      const updated = await apiSwitchContext(id, currentBranchId || undefined);
+      setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+      setAuthError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Tenant context switch failed";
+      setAuthError(message);
+      throw error;
     }
   };
 
   const switchBranch = async (id: string) => {
     if (!id || id === currentBranchId) return;
+    if (!isOnline) throw new Error("Branch switching requires an online authorized context change.");
     try {
-      if (isOnline) {
-        const updated = await apiSwitchContext(currentTenantId || undefined, id);
-        setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
-      } else {
-        setUser(prev => prev ? { ...prev, branchId: id } : null);
-      }
-    } catch {
-      setUser(prev => prev ? { ...prev, branchId: id } : null);
+      const updated = await apiSwitchContext(currentTenantId || undefined, id);
+      setUser(prev => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+      setAuthError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Branch context switch failed";
+      setAuthError(message);
+      throw error;
     }
   };
 
@@ -111,35 +97,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => { setSyncError(error instanceof Error ? error.message : "Synchronization failed"); throw error; });
   };
 
-  const availableTenantsList = useMemo(() => {
-    if (!user) return DEFAULT_TENANTS;
-    const exists = DEFAULT_TENANTS.some(t => t.id === user.tenantId);
-    return exists ? DEFAULT_TENANTS : [{ id: user.tenantId, name: `${user.tenantId} (Active)` }, ...DEFAULT_TENANTS];
-  }, [user]);
-
-  const availableBranchesList = useMemo(() => {
-    if (!user) return DEFAULT_BRANCHES;
-    const exists = DEFAULT_BRANCHES.some(b => b.id === user.branchId);
-    return exists ? DEFAULT_BRANCHES : [{ id: user.branchId, name: `${user.branchId} (Active)` }, ...DEFAULT_BRANCHES];
-  }, [user]);
-
-  const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
-  const tenantValue: TenantContextType = {
-    currentTenantId,
-    currentTenantName: availableTenantsList.find(t => t.id === currentTenantId)?.name || currentTenantId,
-    availableTenants: availableTenantsList,
-    switchTenant,
-  };
-  const branchValue: BranchContextType = {
-    currentBranchId,
-    currentBranchName: availableBranchesList.find(b => b.id === currentBranchId)?.name || currentBranchId,
-    availableBranches: availableBranchesList,
-    switchBranch,
-  };
-  const roles = claims.roles || (user?.role ? [user.role] : []);
+  const tenantValue: TenantContextType = { currentTenantId, currentTenantName: currentTenantId, availableTenants: currentTenantId ? [{ id: currentTenantId, name: currentTenantId }] : [], switchTenant };
+  const branchValue: BranchContextType = { currentBranchId, currentBranchName: currentBranchId, availableBranches: currentBranchId ? [{ id: currentBranchId, name: currentBranchId }] : [], switchBranch };
   const rbacValue: RbacContextType = { role: user?.role || null, permissions, hasPermission: (permission) => permissions.includes("*") || permissions.includes(permission) };
   const syncValue: SyncContextType = { isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError };
   const themeValue: ThemeContextType = { theme, toggleTheme: () => setTheme(current => { const next = current === "dark" ? "light" : "dark"; if (typeof localStorage !== "undefined") localStorage.setItem("kwakopos:v2:theme", next); return next; }) };
-  void roles;
+  const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
   return <AuthContext.Provider value={authValue}><TenantContext.Provider value={tenantValue}><BranchContext.Provider value={branchValue}><RbacContext.Provider value={rbacValue}><ModuleContext.Provider value={{ activeModule, setActiveModule }}><SyncContext.Provider value={syncValue}><ThemeContext.Provider value={themeValue}>{children}</ThemeContext.Provider></SyncContext.Provider></ModuleContext.Provider></RbacContext.Provider></BranchContext.Provider></TenantContext.Provider></AuthContext.Provider>;
 };
