@@ -295,6 +295,10 @@ export * from "./garageEngine.js";
 export * from "./constructionEngine.js";
 export * from "./telecomEngine.js";
 export * from "./wholesaleEngine.js";
+export * from "./hardwareEngine.js";
+export * from "./electronicsEngine.js";
+export * from "./industryExpansionCatalog.js";
+export * from "./industryCatalog.js";
 
 // Phase 5: Telecom & Technical Vertical
 export * from "./telecomInvariants.js";
@@ -304,80 +308,4 @@ export * from "./telecomCostingEngine.js";
 
 // Phase 6: SaaS Monetization & Revenue Management
 export * from "./monetizationEngine.js";
-
-// Retail Operating System Domain Engine
-export * from "./retailEngine.js";
-export * from "./restaurantEngine.js";
-export * from "./pharmacyEngine.js";
-export * from "./lawFirmEngine.js";
-export * from "./saccoVicobaEngine.js";
-export * from "./microfinanceEngine.js";
-export * from "./poultryLivestockEngine.js";
-export * from "./vehicleFleetEngine.js";
-export * from "./hardwareEngine.js";
-export * from "./electronicsEngine.js";
-export * from "./commercialGovernanceEngine.js";
-export * from "./pmfValidationEngine.js";
-export * from "./garageEngine.js";
-export * from "./wholesaleEngine.js";
-export * from "./constructionEngine.js";
-export * from "./realEstateEngine.js";
-export * from "./barLoungeEngine.js";
-export * from "./telecomEngine.js";
-export * from "./enterpriseOnboardingEngine.js";
-export * from "./partnerEcosystemEngine.js";
-export * from "./globalExpansionEngine.js";
-export * from "./aiNativeEngine.js";
-export * from "./autonomousOperationsEngine.js";
-export * from "./kwakoposCertificationEngine.js";
-export * from "./platformGovernanceEngine.js";
-export * from "./workforceTrackingEngine.js";
-export * from "./systemUiEngine.js";
-export * from "./kwakoposDesignSystemEngine.js";
-export * from "./coreOperatingUiEngine.js";
-export * from "./dynamicModuleUiEngine.js";
-export * from "./superAdminPlatformEngine.js";
-export * from "./uiCertificationEngine.js";
-export * from "./workflowAutomationEngine.js";
-export * from "./biAnalyticsEngine.js";
-export * from "./aiOperatingLayerEngine.js";
-export * from "./enterpriseApprovalsEngine.js";
-export * from "./financeTreasuryEngine.js";
-export * from "./supplyChainEngine.js";
-export * from "./workforceEngine.js";
-export * from "./crmEngine.js";
-export * from "./integrationEngine.js";
-export * from "./documentEngine.js";
-export * from "./securityEngine.js";
-export * from "./notificationEngine.js";
-export * from "./complianceEngine.js";
-export * from "./multiSiteEngine.js";
-export * from "./licensingEngine.js";
-export * from "./marketplaceEngine.js";
-export * from "./globalPlatformEngine.js";
-export * from "./autonomousBusinessEngine.js";
-export * from "./platformSecurityEngine.js";
-export * from "./autonomousOperationsEngine.js";
-export * from "./platformIntelligenceEngine.js";
-export * from "./fullSystemCertificationEngine.js";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

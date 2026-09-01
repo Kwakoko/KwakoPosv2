@@ -1,170 +1,109 @@
-import { randomUUID } from "crypto";
-import type {
-  TenantContext,
-  ElectronicsModuleManifest,
-  ElectronicsSettings,
-  SerializedDevice,
-  SerializedDeviceState,
-  ElectronicsRepairJob,
-  ElectronicsAiRecommendation,
-} from "@kwakopos2/contracts";
+export interface ElectronicsSerialRecord {
+  serialNumber: string;
+  imei?: string | null;
+  sku: string;
+}
 
-export class ElectronicsOperatingEngine {
-  getModuleManifest(): ElectronicsModuleManifest {
-    return {
-      moduleId: "electronics_operating_system",
-      name: "KwakoPos Enterprise Advanced Electronics & Device Lifecycle Operating System",
-      version: "2.2.0",
-      status: "ACTIVE",
-      supportedCategories: ["SMARTPHONES", "LAPTOPS", "TVS_AUDIO", "ROUTERS_NETWORKING", "ACCESSORIES", "SPARE_PARTS"],
-      permissions: [
-        "ELECTRONICS_PRODUCT_VIEW",
-        "ELECTRONICS_PRODUCT_MANAGE",
-        "ELECTRONICS_SERIAL_MANAGE",
-        "ELECTRONICS_IMEI_MANAGE",
-        "ELECTRONICS_POS_SELL",
-        "ELECTRONICS_WARRANTY_MANAGE",
-        "ELECTRONICS_REPAIR_INTAKE",
-        "ELECTRONICS_REPAIR_DIAGNOSE",
-        "ELECTRONICS_TRADE_IN_MANAGE",
-        "ELECTRONICS_AI_ANALYTICS_VIEW",
-      ],
-      navigationRoutes: [
-        "/electronics/products",
-        "/electronics/serialized-devices",
-        "/electronics/pos",
-        "/electronics/warranties",
-        "/electronics/repairs",
-        "/electronics/trade-ins",
-        "/electronics/refurbished",
-        "/electronics/ai-insights",
-      ],
-      dashboardWidgetIds: [
-        "widget_total_serialized_devices",
-        "widget_available_devices_value",
-        "widget_open_repair_tickets",
-        "widget_warranty_claims_month",
-        "widget_repair_revenue_month",
-      ],
-    };
+export interface ElectronicsWarrantyPolicy {
+  warrantyDays: number;
+  startMode: "SALE_DATE" | "ACTIVATION_DATE";
+}
+
+export interface ElectronicsWarrantyResult {
+  startDate: string;
+  expiryDate: string;
+  active: boolean;
+  daysRemaining: number;
+}
+
+export interface ElectronicsBundleComponent {
+  sku: string;
+  quantity: number;
+}
+
+/**
+ * Electronics-specific controls for serialised inventory, IMEI validation,
+ * warranty calculation and bundle quantity expansion.
+ */
+export class ElectronicsEngine {
+  validateSerialNumber(serialNumber: string): string {
+    const normalized = serialNumber.trim();
+    if (!normalized || normalized.length > 100) {
+      throw new Error("INVALID_ELECTRONICS_SERIAL: Serial number is required and must be <= 100 characters.");
+    }
+    return normalized;
   }
 
-  getDefaultSettings(tenantId: string, branchId: string): ElectronicsSettings {
-    return {
-      tenantId,
-      branchId,
-      currency: "TZS",
-      enforceUniqueImeiRegistration: true,
-      defaultWarrantyMonths: 12,
-      autoAlertOnAgingDeviceDays: 90,
-    };
+  validateImei(imei: string): string {
+    const normalized = imei.replace(/\s+/g, "");
+    if (!/^\d{15}$/.test(normalized) || !this.passesLuhn(normalized)) {
+      throw new Error("INVALID_ELECTRONICS_IMEI: IMEI must be a valid 15-digit Luhn number.");
+    }
+    return normalized;
   }
 
-  transitionDeviceState(
-    device: SerializedDevice,
-    targetState: SerializedDeviceState
-  ): SerializedDevice {
-    const currentState = device.state;
+  calculateWarranty(
+    saleDate: string,
+    policy: ElectronicsWarrantyPolicy,
+    activationDate?: string | null,
+    asOfDate = new Date().toISOString()
+  ): ElectronicsWarrantyResult {
+    const sale = this.parseDate(saleDate, "saleDate");
+    const start = policy.startMode === "ACTIVATION_DATE" && activationDate
+      ? this.parseDate(activationDate, "activationDate")
+      : sale;
 
-    // Allowed transition map
-    const allowedTransitions: Record<SerializedDeviceState, SerializedDeviceState[]> = {
-      ORDERED: ["RECEIVED", "RETIRED"],
-      RECEIVED: ["INSPECTION", "QUARANTINE"],
-      INSPECTION: ["AVAILABLE", "QUARANTINE"],
-      AVAILABLE: ["RESERVED", "SOLD", "QUARANTINE", "RETIRED"],
-      RESERVED: ["AVAILABLE", "SOLD"],
-      SOLD: ["CUSTOMER_OWNED"],
-      CUSTOMER_OWNED: ["WARRANTY_CLAIM", "REPAIR_INTAKE", "RETURNED"],
-      WARRANTY_CLAIM: ["REPAIR_INTAKE", "REFURBISHMENT", "RETIRED"],
-      REPAIR_INTAKE: ["RESERVED_PARTS", "CUSTOMER_OWNED", "REFURBISHMENT"],
-      RETURNED: ["QUARANTINE", "REFURBISHMENT", "AVAILABLE"],
-      QUARANTINE: ["AVAILABLE", "REFURBISHMENT", "RETIRED"],
-      REFURBISHMENT: ["AVAILABLE", "RETIRED"],
-      RESERVED_PARTS: ["CUSTOMER_OWNED", "REFURBISHMENT"],
-      RETIRED: [],
-    };
-
-    const validTargets = allowedTransitions[currentState] || [];
-    if (!validTargets.includes(targetState) && currentState !== targetState) {
-      throw new Error(
-        `Invalid Serialized Device State Transition! Cannot transition device '${device.serialNumber}' from '${currentState}' to '${targetState}'.`
-      );
+    if (!Number.isInteger(policy.warrantyDays) || policy.warrantyDays < 0) {
+      throw new Error("INVALID_ELECTRONICS_WARRANTY: warrantyDays must be a non-negative integer.");
     }
 
-    return {
-      ...device,
-      state: targetState,
-    };
-  }
-
-  verifyWarrantyValidity(
-    saleDateStr: string,
-    warrantyMonths: number,
-    claimDate: Date = new Date()
-  ): {
-    isValid: boolean;
-    expiryDate: Date;
-    daysRemaining: number;
-  } {
-    const saleDate = new Date(saleDateStr);
-    const expiryDate = new Date(saleDate);
-    expiryDate.setMonth(expiryDate.getMonth() + warrantyMonths);
-
-    const diffMs = expiryDate.getTime() - claimDate.getTime();
-    const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    const expiry = new Date(start.getTime());
+    expiry.setUTCDate(expiry.getUTCDate() + policy.warrantyDays);
+    const now = this.parseDate(asOfDate, "asOfDate");
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    const daysRemaining = Math.max(0, Math.ceil((expiry.getTime() - now.getTime()) / millisecondsPerDay));
 
     return {
-      isValid: daysRemaining >= 0,
-      expiryDate,
+      startDate: start.toISOString(),
+      expiryDate: expiry.toISOString(),
+      active: now < expiry,
       daysRemaining,
     };
   }
 
-  calculateRepairBill(
-    partsCostTzs: number,
-    laborChargeTzs: number
-  ): {
-    totalRepairCostTzs: number;
-    laborRatioPct: number;
-  } {
-    const totalRepairCostTzs = partsCostTzs + laborChargeTzs;
-    const laborRatioPct = totalRepairCostTzs > 0 ? (laborChargeTzs / totalRepairCostTzs) * 100 : 0;
-
-    return {
-      totalRepairCostTzs: Math.round(totalRepairCostTzs),
-      laborRatioPct: parseFloat(laborRatioPct.toFixed(2)),
-    };
-  }
-
-  generateExplainableAiRecommendations(
-    ctx: TenantContext,
-    devices: SerializedDevice[],
-    repairs: ElectronicsRepairJob[]
-  ): ElectronicsAiRecommendation[] {
-    const recs: ElectronicsAiRecommendation[] = [];
-    const now = new Date().toISOString();
-
-    // 1. Serial Anomaly Warning
-    const duplicateSerials = devices.filter((d, i, arr) => arr.findIndex((x) => x.serialNumber === d.serialNumber) !== i);
-    if (duplicateSerials.length > 0) {
-      recs.push({
-        id: `REC-ELEC-SERIAL-${randomUUID().slice(0, 6)}`,
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
-        category: "SERIAL_ANOMALY_WARNING",
-        observation: `Duplicate serial number detected in serialized device inventory.`,
-        evidence: `Serial number '${duplicateSerials[0].serialNumber}' is registered in multiple device records.`,
-        recommendation: "Conduct immediate warehouse audit & verify physical barcode tags.",
-        expectedImpact: "Prevents fraudulent warranty claims & inventory ledger corruption.",
-        confidenceScore: 98,
-        createdAt: now,
-      });
+  expandBundle(components: ElectronicsBundleComponent[], bundleQuantity: number): ElectronicsBundleComponent[] {
+    if (!Number.isInteger(bundleQuantity) || bundleQuantity < 0) {
+      throw new Error("INVALID_ELECTRONICS_BUNDLE: bundleQuantity must be a non-negative integer.");
     }
 
-    return recs;
+    return components.map((component) => {
+      if (!component.sku.trim() || !Number.isInteger(component.quantity) || component.quantity <= 0) {
+        throw new Error("INVALID_ELECTRONICS_BUNDLE: Each component requires a SKU and positive integer quantity.");
+      }
+      return { sku: component.sku.trim(), quantity: component.quantity * bundleQuantity };
+    });
+  }
+
+  private parseDate(value: string, name: string): Date {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new Error(`INVALID_ELECTRONICS_DATE: ${name} must be a valid ISO date.`);
+    }
+    return date;
+  }
+
+  private passesLuhn(value: string): boolean {
+    let sum = 0;
+    let doubleDigit = false;
+    for (let i = value.length - 1; i >= 0; i -= 1) {
+      let digit = Number(value[i]);
+      if (doubleDigit) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      doubleDigit = !doubleDigit;
+    }
+    return sum % 10 === 0;
   }
 }
-
-export const globalElectronicsOperatingEngine = new ElectronicsOperatingEngine();
-export const globalElectronicsEngine = globalElectronicsOperatingEngine;
-export { ElectronicsOperatingEngine as ElectronicsEngine };
