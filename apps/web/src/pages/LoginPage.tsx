@@ -11,6 +11,7 @@ import {
   Building2,
   AlertCircle,
 } from "lucide-react";
+import "../auth.css";
 import { login } from "../services/apiClient.js";
 
 interface LoginPageProps {
