@@ -29,6 +29,17 @@ import { useBranch, useModule, useRbac, useSync, useTenant } from "../context/Kw
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
 
+export interface ProductVariantData {
+  id: string;
+  name: string;
+  sku: string;
+  attributes: Record<string, string>;
+  buyingPrice: number;
+  sellingPrice: number;
+  stock: number;
+  reorderLevel: number;
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -41,6 +52,7 @@ export interface InventoryItem {
   reorderLevel: number;
   status: "Active" | "Low Stock" | "Out of Stock";
   hasVariants?: boolean;
+  variants?: ProductVariantData[];
 }
 
 export type InventoryTab =
@@ -58,6 +70,23 @@ export const InventoryPage: React.FC = () => {
   // Sample Products State
   const [items, setItems] = useState<InventoryItem[]>([
     { id: "inv-001", name: "Azam Wheat Flour 2kg", sku: "SKU-AZM-FLR-01", category: "Grains & Flour", brand: "Azam", buyingPrice: 6200, sellingPrice: 7900, stock: 45, reorderLevel: 10, status: "Active" },
+    {
+      id: "inv-006",
+      name: "Amoxicillin 500mg Capsules",
+      sku: "SKU-AMX-500-06",
+      category: "Pharmacy",
+      brand: "Zenith Labs",
+      buyingPrice: 8000,
+      sellingPrice: 12000,
+      stock: 85,
+      reorderLevel: 15,
+      status: "Active",
+      hasVariants: true,
+      variants: [
+        { id: "var-01", name: "Box of 21 Capsules", sku: "AMX-500-BOX21", attributes: { Pack: "Box", Count: "21" }, buyingPrice: 8000, sellingPrice: 12000, stock: 50, reorderLevel: 10 },
+        { id: "var-02", name: "Strip of 10 Capsules", sku: "AMX-500-STP10", attributes: { Pack: "Strip", Count: "10" }, buyingPrice: 3800, sellingPrice: 6000, stock: 35, reorderLevel: 5 },
+      ]
+    },
     { id: "inv-002", name: "Coca Cola 500ml Pet", sku: "SKU-COK-500-02", category: "Beverages", brand: "Coca Cola", buyingPrice: 1100, sellingPrice: 1500, stock: 120, reorderLevel: 20, status: "Active" },
     { id: "inv-003", name: "Unga wa Ngano 10kg", sku: "SKU-UNG-10K-03", category: "Grains & Flour", brand: "Azam", buyingPrice: 24000, sellingPrice: 28000, stock: 8, reorderLevel: 10, status: "Low Stock" },
     { id: "inv-004", name: "Fresh Cow Milk 1L", sku: "SKU-MLK-1L-04", category: "Dairy", brand: "ASAS", buyingPrice: 2200, sellingPrice: 3000, stock: 0, reorderLevel: 15, status: "Out of Stock" },
@@ -69,6 +98,13 @@ export const InventoryPage: React.FC = () => {
   const [csvImportModal, setCsvImportModal] = useState(false);
   const [barcodeModal, setBarcodeModal] = useState(false);
   const [selectedBarcodeItem, setSelectedBarcodeItem] = useState<InventoryItem | null>(null);
+
+  // Variant Builder Modal State
+  const [variantModalProduct, setVariantModalProduct] = useState<InventoryItem | null>(null);
+  const [newVarAttrKey, setNewVarAttrKey] = useState("Size");
+  const [newVarAttrVal, setNewVarAttrVal] = useState("");
+  const [newVarPrice, setNewVarPrice] = useState(0);
+  const [newVarStock, setNewVarStock] = useState(10);
 
   // New Product Form State
   const [newProd, setNewProd] = useState({
@@ -315,6 +351,14 @@ export const InventoryPage: React.FC = () => {
                     <div className="v2-flex v2-gap-1">
                       <button
                         className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                        onClick={() => setVariantModalProduct(item)}
+                        title="Manage Product Variants"
+                        type="button"
+                      >
+                        <Layers size={13} />
+                      </button>
+                      <button
+                        className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                         onClick={() => {
                           setSelectedBarcodeItem(item);
                           setBarcodeModal(true);
@@ -480,20 +524,109 @@ export const InventoryPage: React.FC = () => {
         </div>
       )}
 
-      {/* --- Barcode Label Modal --- */}
-      {barcodeModal && selectedBarcodeItem && (
+      {/* --- Product Variant Manager Modal --- */}
+      {variantModalProduct && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 400, padding: "1.5rem", background: "#fff", color: "#000", textAlign: "center" }}>
-            <h2 className="v2-text-base v2-font-black v2-mb-2">Barcode Label Generator</h2>
-            <div style={{ border: "2px dashed #000", padding: "1rem", borderRadius: "var(--radius-md)", marginBottom: "1rem" }}>
-              <div style={{ fontSize: ".75rem", fontWeight: 800 }}>{selectedBarcodeItem.name}</div>
-              <div style={{ fontSize: "1.1rem", fontWeight: 900, margin: ".3rem 0" }}>{money(selectedBarcodeItem.sellingPrice)}</div>
-              <div className="v2-flex v2-justify-center v2-my-2"><Barcode size={48} /></div>
-              <div style={{ fontSize: ".75rem", fontFamily: "var(--font-mono)", fontWeight: 800 }}>{selectedBarcodeItem.sku}</div>
+          <div className="v2-card" style={{ width: 560, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+              <div>
+                <h2 className="v2-text-base v2-font-black">Manage Variants — {variantModalProduct.name}</h2>
+                <div className="v2-text-xs v2-text-muted">Parent SKU: {variantModalProduct.sku}</div>
+              </div>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">✕</button>
             </div>
-            <div className="v2-flex v2-gap-2">
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" style={{ flex: 1 }} onClick={() => setBarcodeModal(false)} type="button">Close</button>
-              <button className="v2-btn v2-btn-primary v2-btn-sm" style={{ flex: 1 }} onClick={() => window.print()} type="button"><Printer size={13} /> Print Label</button>
+
+            {/* Existing Variants Table */}
+            <div className="v2-mb-4" style={{ maxHeight: 220, overflowY: "auto" }}>
+              {!variantModalProduct.variants || variantModalProduct.variants.length === 0 ? (
+                <div className="v2-text-xs v2-text-muted v2-text-center v2-py-4">No variant variations configured for this SKU yet.</div>
+              ) : (
+                <table className="v2-table v2-table-sm">
+                  <thead>
+                    <tr>
+                      <th>Variant Name</th>
+                      <th>SKU</th>
+                      <th>Selling Price</th>
+                      <th>Stock</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {variantModalProduct.variants.map((v) => (
+                      <tr key={v.id}>
+                        <td className="v2-font-bold">{v.name}</td>
+                        <td className="v2-mono v2-text-xs">{v.sku}</td>
+                        <td className="v2-mono">{money(v.sellingPrice)}</td>
+                        <td className="v2-mono v2-font-bold">{v.stock}</td>
+                        <td>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                            style={{ color: "var(--danger)" }}
+                            onClick={() => {
+                              const updatedVars = variantModalProduct.variants?.filter((x) => x.id !== v.id);
+                              setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updatedVars } : i));
+                              setVariantModalProduct({ ...variantModalProduct, variants: updatedVars });
+                            }}
+                            type="button"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Add New Variant Form */}
+            <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+              <div className="v2-font-bold v2-text-xs v2-mb-2">Add New Attribute Variant</div>
+              <div className="v2-grid v2-grid-2 v2-gap-2 v2-mb-2">
+                <select className="v2-input v2-input-sm" value={newVarAttrKey} onChange={(e) => setNewVarAttrKey(e.target.value)}>
+                  <option value="Size">Size (e.g. Small, 500ml, 10kg)</option>
+                  <option value="Pack">Pack (e.g. Box, Strip, Carton)</option>
+                  <option value="Color">Color / Flavor</option>
+                  <option value="Custom">Custom Attribute</option>
+                </select>
+                <input className="v2-input v2-input-sm" placeholder="Variant Value (e.g. Box of 24)" value={newVarAttrVal} onChange={(e) => setNewVarAttrVal(e.target.value)} />
+              </div>
+
+              <div className="v2-grid v2-grid-2 v2-gap-2 v2-mb-3">
+                <input className="v2-input v2-input-sm" type="number" placeholder="Selling Price Override (Tsh)" value={newVarPrice || ""} onChange={(e) => setNewVarPrice(Number(e.target.value))} />
+                <input className="v2-input v2-input-sm" type="number" placeholder="Initial Stock Qty" value={newVarStock || ""} onChange={(e) => setNewVarStock(Number(e.target.value))} />
+              </div>
+
+              <button
+                className="v2-btn v2-btn-primary v2-btn-sm"
+                style={{ width: "100%", justifyContent: "center" }}
+                disabled={!newVarAttrVal.trim()}
+                onClick={() => {
+                  if (!newVarAttrVal.trim()) return;
+                  const varSku = `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`;
+                  const newVar: ProductVariantData = {
+                    id: `var-${Date.now()}`,
+                    name: `${newVarAttrKey}: ${newVarAttrVal.trim()}`,
+                    sku: varSku,
+                    attributes: { [newVarAttrKey]: newVarAttrVal.trim() },
+                    buyingPrice: variantModalProduct.buyingPrice,
+                    sellingPrice: newVarPrice || variantModalProduct.sellingPrice,
+                    stock: newVarStock,
+                    reorderLevel: 5,
+                  };
+                  const updatedVars = [...(variantModalProduct.variants || []), newVar];
+                  setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updatedVars } : i));
+                  setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updatedVars });
+                  setNewVarAttrVal("");
+                }}
+                type="button"
+              >
+                <Plus size={13} /> Add Variant Option
+              </button>
+            </div>
+
+            <div className="v2-flex v2-justify-end v2-mt-4">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">Close</button>
             </div>
           </div>
         </div>

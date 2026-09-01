@@ -737,6 +737,52 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
           </div>
         </div>
       )}
+
+      {/* --- Variant Selection Popup Modal --- */}
+      {variantModalProduct && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+              <div>
+                <h2 className="v2-text-base v2-font-black">{variantModalProduct.name}</h2>
+                <div className="v2-text-xs v2-text-muted">Select Product Variant to Add to Cart</div>
+              </div>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">✕</button>
+            </div>
+
+            <div className="v2-space-y-2 v2-mb-4" style={{ maxHeight: 280, overflowY: "auto" }}>
+              {variantModalProduct.variants?.map((v) => (
+                <div
+                  key={v.id}
+                  className="v2-flex v2-items-center v2-justify-between v2-p-3"
+                  style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}
+                >
+                  <div>
+                    <div className="v2-font-bold v2-text-xs">{v.name}</div>
+                    <div className="v2-mono v2-text-xs v2-text-muted">SKU: {v.sku} · {v.stock} in stock</div>
+                  </div>
+                  <div className="v2-flex v2-items-center v2-gap-2">
+                    <span className="v2-mono v2-font-black v2-text-xs">{money(v.price)}</span>
+                    <button
+                      className="v2-btn v2-btn-primary v2-btn-sm"
+                      onClick={() => addToCart(variantModalProduct, v.id, v.name, v.price)}
+                      type="button"
+                    >
+                      <Plus size={11} /> Add
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="v2-flex v2-justify-end">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
