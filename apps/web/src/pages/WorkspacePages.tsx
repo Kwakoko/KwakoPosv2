@@ -37,6 +37,13 @@ import { apiFetch, safeUUID } from "../services/apiClient.js";
 // Dedicated full-module files — re-exported here for unified import in App.tsx
 export { LawFirmPage } from "./LawFirmPage.js";
 export { PharmacyPage } from "./PharmacyPage.js";
+export { ReportsPage } from "./ReportsPage.js";
+export { UsersRolesPage } from "./UsersRolesPage.js";
+export { SuperAdminPage } from "./SuperAdminPage.js";
+export { CashDrawerPage } from "./CashDrawerPage.js";
+export { ReceiptsPage } from "./ReceiptsPage.js";
+export { TrashPage } from "./TrashPage.js";
+export { HelpPage } from "./HelpPage.js";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -977,68 +984,7 @@ export const PurchasingPage: React.FC = () => {
   );
 };
 
-// ─── REPORTS PAGE ─────────────────────────────────────────────────────────────
-
-const REPORT_TABS = ["Sales Summary", "Profit & Loss", "Stock Movement", "Customer Ledger", "Tax Report", "Shift Report"] as const;
-type ReportTab = typeof REPORT_TABS[number];
-
-export const ReportsPage: React.FC = () => {
-  const { data: sales, error, loading } = useApiList<Sale>("/api/v1/pos/sales");
-  const [activeTab, setActiveTab] = useState<ReportTab>("Sales Summary");
-  const [dateRange, setDateRange] = useState("Today");
-  const total = sales.reduce((s, x) => s + Number(x.grandTotal || 0), 0);
-
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Financial & Commercial Reports</h1>
-        <div className="v2-flex v2-gap-2">
-          <select className="v2-select v2-btn-sm" value={dateRange} onChange={(e) => setDateRange(e.target.value)}>
-            {["Today", "This Week", "This Month", "This Quarter", "Custom"].map((d) => <option key={d}>{d}</option>)}
-          </select>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Download size={13} /> Export CSV</button>
-        </div>
-      </div>
-
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Total Revenue"   value={money(total || 42850000)} trend="up" trendLabel="+8.2% vs last period" icon={<DollarSign size={18} />} accent="#38bdf8" />
-        <KpiCard label="Gross Profit"    value={money((total || 42850000) * 0.38)} desc="38.2% margin"                 icon={<TrendingUp size={18} />}  accent="#4ade80" />
-        <KpiCard label="Transactions"    value={sales.length || 842} desc="Total completed sales"                       icon={<Receipt size={18} />}     accent="#818cf8" />
-        <KpiCard label="Avg Basket Size" value={money(42500)}           desc="Per transaction"                           icon={<ShoppingCart size={18} />} accent="#fbbf24" />
-      </div>
-
-      <div className="v2-card">
-        <div style={{ display: "flex", gap: ".3rem", padding: ".75rem 1.25rem", borderBottom: "1px solid var(--surface-border)", flexWrap: "wrap" }}>
-          {REPORT_TABS.map((t) => (
-            <button key={t} className={`sector-pill${activeTab === t ? " active" : ""}`} onClick={() => setActiveTab(t)} type="button">{t}</button>
-          ))}
-        </div>
-        {error ? <div className="badge v2-badge-danger" style={{ margin: "1rem" }}>{error}</div>
-        : loading ? <div style={{ padding: "1rem" }}><LoadingRows /></div>
-        : activeTab === "Sales Summary" && (
-          sales.length ? (
-            <table className="v2-table">
-              <thead><tr><th>Sale #</th><th>Date & Time</th><th>Grand Total</th><th>Payment Status</th></tr></thead>
-              <tbody>
-                {sales.slice(0, 100).map((s) => (
-                  <tr key={s.id}>
-                    <td className="v2-mono v2-text-xs">{s.saleNumber}</td>
-                    <td className="v2-text-xs v2-text-muted">{new Date(s.soldAt).toLocaleString()}</td>
-                    <td className="v2-font-black">{money(s.grandTotal)}</td>
-                    <td><span className={`badge ${s.paymentStatus === "PAID" ? "v2-badge-success" : "v2-badge-warning"}`}>{s.paymentStatus}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <Empty icon={<BarChart2 size={22} />} message="No sales records for this period." />
-        )}
-        {activeTab !== "Sales Summary" && (
-          <Empty icon={<FileText size={22} />} message={`${activeTab} report`} action={<span className="v2-text-xs v2-text-muted">Report engine generating…</span>} />
-        )}
-      </div>
-    </div>
-  );
-};
+// ReportsPage is exported from ./ReportsPage.js
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 
@@ -1199,55 +1145,7 @@ export const UsersPage: React.FC = () => {
   );
 };
 
-// ─── SUPER ADMIN PAGE ─────────────────────────────────────────────────────────
-
-export const SuperAdminPage: React.FC = () => {
-  const { role, permissions, isSuperAdmin } = useRbac();
-  const allowed = isSuperAdmin || role === "ADMIN" || permissions.includes("*");
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Super Admin Control Tower</h1>
-        <span className={`badge ${allowed ? "v2-badge-success" : "v2-badge-danger"}`}>
-          {allowed ? "Platform Admin Access Granted" : "Access Denied by RBAC"}
-        </span>
-      </div>
-      {!allowed ? (
-        <Empty icon={<Shield size={24} />} message="Access Denied by V2 RBAC Policy" action={<span className="v2-text-xs v2-text-muted">You need SUPER_ADMIN role or * permission grant.</span>} />
-      ) : (
-        <>
-          <div className="metrics-grid kpi-grid-4 v2-mb-4">
-            <KpiCard label="Active Tenants" value="42"    desc="Across all regions"   icon={<Building size={18} />}    accent="#38bdf8" />
-            <KpiCard label="System Uptime"  value="99.99%" desc="30-day SLA"          icon={<Activity size={18} />}   accent="#4ade80" />
-            <KpiCard label="Active Users"   value="1,284" desc="Authenticated sessions" icon={<Users size={18} />}   accent="#818cf8" />
-            <KpiCard label="Cloud Run Rev." value="Healthy" desc="All replicas green" icon={<Zap size={18} />}       accent="#fbbf24" />
-          </div>
-          <div className="v2-card">
-            <div className="v2-card-header">
-              <div className="v2-card-title">Tenant Registry</div>
-              <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Provision Tenant</button>
-            </div>
-            <table className="v2-table">
-              <thead><tr><th>Tenant ID</th><th>Name</th><th>Region</th><th>Subscription</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody>
-                {["TNT-TZ-001","TNT-TZ-002","TNT-TZ-003"].map((tid, i) => (
-                  <tr key={tid}>
-                    <td className="v2-mono v2-text-xs">{tid}</td>
-                    <td className="v2-font-bold">Tenant {i+1} Ltd</td>
-                    <td className="v2-text-muted">Dar es Salaam</td>
-                    <td><span className="badge v2-badge-success">PRO</span></td>
-                    <td><span className="badge v2-badge-success">ACTIVE</span></td>
-                    <td><button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
+// SuperAdminPage is exported from ./SuperAdminPage.js
 
 // ─── DIAGNOSTICS PAGE ─────────────────────────────────────────────────────────
 
@@ -1388,183 +1286,7 @@ export const AiPage: React.FC = () => {
   );
 };
 
-// ─── CASH DRAWER PAGE ─────────────────────────────────────────────────────────
-
-export const CashDrawerPage: React.FC = () => {
-  const opening   = 150000;
-  const collected = 4820000;
-  const drops     = 300000;
-  const expected  = opening + collected - drops;
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Cash Drawer & Shift Reconciliation</h1>
-        <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Shift Report</button>
-          <button className="v2-btn v2-btn-danger v2-btn-sm" type="button">Close Shift & Drop Cash</button>
-        </div>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Opening Float"         value={money(opening)}   desc="Start of shift"      icon={<PiggyBank size={18} />}  accent="#38bdf8" />
-        <KpiCard label="Cash Collected"        value={money(collected)} desc="From sales"          icon={<DollarSign size={18} />} accent="#4ade80" />
-        <KpiCard label="Safe Drops & Paid Outs" value={money(drops)}   desc="Removed from drawer" icon={<Coins size={18} />}     accent="#f87171" />
-        <KpiCard label="Expected in Drawer"    value={money(expected)}  desc="Calculated balance"  icon={<CheckCircle size={18} />} accent="#fbbf24" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">Shift Ledger</div></div>
-        <table className="v2-table">
-          <thead><tr><th>Time</th><th>Type</th><th>Reference</th><th>Amount</th><th>Cashier</th></tr></thead>
-          <tbody>
-            {[
-              { time: "08:00", type: "OPENING FLOAT", ref: "SHIFT-2026-001", amount: money(opening),  cashier: "Cashier One" },
-              { time: "10:30", type: "SAFE DROP",     ref: "DROP-001",       amount: `-${money(200000)}`, cashier: "Manager" },
-              { time: "12:15", type: "CASH SALE",     ref: "SALE-4281",      amount: money(85000),   cashier: "Cashier One" },
-              { time: "15:45", type: "PAID OUT",      ref: "PO-006",         amount: `-${money(100000)}`, cashier: "Manager" },
-            ].map((row, i) => (
-              <tr key={i}>
-                <td className="v2-mono v2-text-xs">{row.time}</td>
-                <td><span className="badge v2-badge-muted">{row.type}</span></td>
-                <td className="v2-mono v2-text-xs">{row.ref}</td>
-                <td className="v2-font-black">{row.amount}</td>
-                <td className="v2-text-muted">{row.cashier}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-// ─── RECEIPTS PAGE ────────────────────────────────────────────────────────────
-
-export const ReceiptsPage: React.FC = () => {
-  const { data: sales, loading } = useApiList<Sale>("/api/v1/pos/sales");
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Thermal Receipts & E-Invoice</h1>
-        <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button">Reprint Last Receipt</button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> New Invoice</button>
-        </div>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Receipts Today"   value={sales.length || 142}  desc="Issued"          icon={<Receipt size={18} />}      accent="#38bdf8" />
-        <KpiCard label="TRA EFD / VFD"    value="100% Verified"         desc="All synced"       icon={<CheckCircle size={18} />}  accent="#4ade80" />
-        <KpiCard label="Email Delivered"  value="38 Receipts"           desc="Digital delivery" icon={<Bell size={18} />}         accent="#818cf8" />
-        <KpiCard label="Print Queue"      value="0 Pending"             desc="Thermal printer"  icon={<FileText size={18} />}     accent="#fbbf24" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">Receipt History</div></div>
-        {loading ? <div style={{ padding: "1rem" }}><LoadingRows /></div> : (
-          <table className="v2-table">
-            <thead><tr><th>Sale #</th><th>Date & Time</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {(sales.length ? sales : []).slice(0, 50).map((s) => (
-                <tr key={s.id}>
-                  <td className="v2-mono v2-text-xs">{s.saleNumber}</td>
-                  <td className="v2-text-xs v2-text-muted">{new Date(s.soldAt).toLocaleString()}</td>
-                  <td className="v2-font-black">{money(s.grandTotal)}</td>
-                  <td><span className="badge v2-badge-success">PRINTED</span></td>
-                  <td>
-                    <div className="v2-flex v2-gap-1">
-                      <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title="View"><Eye size={13} /></button>
-                      <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title="Reprint"><Receipt size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!sales.length && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: "2rem" }}>No receipts found for this period.</td></tr>}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ─── TRASH PAGE ───────────────────────────────────────────────────────────────
-
-export const TrashPage: React.FC = () => {
-  const TRASH = [
-    { id: "DEL-PROD-091", type: "Product",  name: "Discontinued Soda SKU-009", deletedAt: new Date().toLocaleDateString(), expiry: "29 days" },
-    { id: "DEL-CUST-042", type: "Customer", name: "Inactive Client Account",   deletedAt: new Date().toLocaleDateString(), expiry: "29 days" },
-    { id: "DEL-SALE-118", type: "Sale",     name: "Voided Transaction SALE-118", deletedAt: new Date().toLocaleDateString(), expiry: "89 days" },
-  ];
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Trash & Soft-Delete Bin</h1>
-        <button className="v2-btn v2-btn-danger v2-btn-sm" type="button"><Trash2 size={13} /> Purge All</button>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Soft-Deleted Items" value={TRASH.length} desc="Recoverable"         icon={<Trash2 size={18} />}     accent="#f87171" />
-        <KpiCard label="Auto-Purge"         value="30 Days"      desc="Default retention"   icon={<Clock size={18} />}      accent="#fbbf24" />
-        <KpiCard label="Storage Used"       value="1.2 MB"       desc="By deleted records"  icon={<Layers size={18} />}     accent="#38bdf8" />
-        <KpiCard label="Audit Log"          value="Full Trail"   desc="GDPR compliant"      icon={<FileText size={18} />}   accent="#4ade80" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">Deleted Records</div></div>
-        <table className="v2-table">
-          <thead><tr><th>Record ID</th><th>Entity</th><th>Name</th><th>Deleted At</th><th>Auto-Purge In</th><th>Actions</th></tr></thead>
-          <tbody>
-            {TRASH.map((r) => (
-              <tr key={r.id}>
-                <td className="v2-mono v2-text-xs">{r.id}</td>
-                <td><span className="badge v2-badge-muted">{r.type}</span></td>
-                <td>{r.name}</td>
-                <td className="v2-text-xs v2-text-muted">{r.deletedAt}</td>
-                <td className="v2-text-xs" style={{ color: "var(--warning)" }}>{r.expiry}</td>
-                <td>
-                  <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-success v2-btn-sm" type="button">Restore</button>
-                    <button className="v2-btn v2-btn-danger v2-btn-sm" type="button">Purge</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
-// ─── HELP PAGE ────────────────────────────────────────────────────────────────
-
-export const HelpPage: React.FC = () => (
-  <div className="v2-animate-page-enter">
-    <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-      <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>KwakoPos Knowledge Center</h1>
-    </div>
-    <div className="v2-grid-2" style={{ gap: ".75rem" }}>
-      {[
-        { title: "POS User Guide",             desc: "Step-by-step checkout, scanning, and payment processing.",       icon: <ShoppingCart size={20} />, accent: "#38bdf8" },
-        { title: "Inventory & FEFO Guide",     desc: "Manage products, variants, expiry batches, and stock adjustments.", icon: <Package size={20} />,     accent: "#4ade80" },
-        { title: "Sync & Offline Mode",        desc: "Understand IndexedDB outbox, conflict resolution, and reconnection.", icon: <Wifi size={20} />,       accent: "#818cf8" },
-        { title: "RBAC & Roles Setup",         desc: "Create roles, assign granular permissions, and audit access logs.", icon: <Shield size={20} />,      accent: "#f87171" },
-        { title: "Keyboard Shortcuts",         desc: "Ctrl+K: Search | Ctrl+S: Quick Save | F2: Open POS Terminal",     icon: <Hash size={20} />,        accent: "#fbbf24" },
-        { title: "Vertical Module Guides",     desc: "Law Firm, Pharmacy, Fleet, Poultry, Workforce module specifics.",   icon: <Layers size={20} />,      accent: "#f97316" },
-        { title: "TRA EFD/VFD Integration",   desc: "Tanzania Revenue Authority fiscal device setup and compliance.",    icon: <FileText size={20} />,    accent: "#10b981" },
-        { title: "Troubleshooting & Support", desc: "Common errors, diagnostics, and how to contact support.",           icon: <Activity size={20} />,    accent: "#6366f1" },
-      ].map((item) => (
-        <div key={item.title} className="v2-card" style={{ padding: "1.1rem 1.25rem", cursor: "pointer", transition: "box-shadow var(--transition-base)" }}>
-          <div className="v2-flex v2-items-center v2-gap-3">
-            <div style={{ width: 40, height: 40, borderRadius: "var(--radius-lg)", background: `${item.accent}18`, color: item.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              {item.icon}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div className="v2-text-sm v2-font-black">{item.title}</div>
-              <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".15rem", lineHeight: 1.4 }}>{item.desc}</div>
-            </div>
-            <ChevronRight size={14} style={{ color: "var(--muted)", flexShrink: 0 }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+// CashDrawerPage, ReceiptsPage, TrashPage, HelpPage are exported from dedicated module files
 
 // ─── FINANCE PAGE ─────────────────────────────────────────────────────────────
 
