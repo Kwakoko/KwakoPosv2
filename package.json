@@ -28,7 +28,7 @@
     "test:browser": "playwright test",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
-    "certify:security": "tsx scripts/security/runSecurityCertification.ts",
+    "certify:security": "tsx scripts/certification/strict-security-runtime-gate.ts",
     "certify:resilience": "tsx scripts/certification/runResilienceCertification.ts",
     "certify:performance": "tsx scripts/certification/runPerformanceCertification.ts",
     "certify:reliability": "tsx scripts/certification/runReliabilityCertification.ts",
