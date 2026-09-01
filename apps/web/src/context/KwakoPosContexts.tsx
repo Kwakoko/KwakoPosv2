@@ -607,3 +607,13 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     </AuthContext.Provider>
   );
 };
+
+// ─── Individual Provider Aliases for Modular / Legacy Backward Compatibility ─
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const SessionProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const ModuleProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const SyncProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const TenantProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const BranchProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const RbacProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+export const ThemeProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
