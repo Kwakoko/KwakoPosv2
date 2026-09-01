@@ -1,24 +1,10 @@
-/**
- * KwakoPosv2 — Customers, Patients, Clients & SACCO Registry
- * ─────────────────────────────────────────────────────────────────────────────
- * Complete customer directory and credit ledger workspace matching mature legacy UX:
- *   1. Sector-adaptive terminology (Customer, Patient, Client, Member, Tenant, Student, Guest)
- *   2. KPI metrics: Total Registered, Total Debt Due, Total Prepaid Wallet, Loyalty Points
- *   3. Loyalty Tier Badges (Platinum VIP, Gold Member, Silver Tier, Bronze Partner)
- *   4. Repay Store Debt Modal (with Pay from Wallet option)
- *   5. Prepaid Wallet Deposit Modal
- *   6. Add/Edit Customer Profile Drawer Modal
- *   7. Outstanding Debt Guard for Deletion
- *
- * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
- * ─────────────────────────────────────────────────────────────────────────────
- */
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Users, User, Phone, Mail, Award, DollarSign, Search, Coins, Edit2, Trash2,
-  UserPlus, Sparkles, Plus, AlertCircle, CheckCircle, Wallet, Shield
+  UserPlus, Sparkles, Plus, AlertCircle, CheckCircle, Wallet, Shield, RefreshCw
 } from "lucide-react";
-import { useModule } from "../context/KwakoPosContexts.js";
+import { useModule, useSync } from "../context/KwakoPosContexts.js";
+import { apiFetch } from "../services/apiClient.js";
 
 export interface CustomerRecord {
   id: string;
@@ -36,6 +22,10 @@ const fmtCcy = (n: number) => `Tsh ${Math.round(n).toLocaleString()}`;
 
 export const CustomersPage: React.FC = () => {
   const { activeModule } = useModule();
+  const { isOnline, pendingOutboxCount, db } = useSync();
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
 
   // Sector-adaptive terminology mapping
   const targetType = useMemo(() => {
@@ -60,13 +50,58 @@ export const CustomersPage: React.FC = () => {
     }
   }, [activeModule]);
 
-  // Initial customer records state
-  const [customers, setCustomers] = useState<CustomerRecord[]>([
-    { id: "cust-001", name: "Amani Mwakalundwa", phone: "+255 754 112 233", email: "amani@example.com", type: targetType, loyaltyPoints: 2450, outstandingBalance: 45000, creditLimit: 200000, walletBalance: 15000 },
-    { id: "cust-002", name: "Baraka Juma Msimbe", phone: "+255 713 445 566", email: "baraka@example.com", type: targetType, loyaltyPoints: 920, outstandingBalance: 0, creditLimit: 500000, walletBalance: 85000 },
-    { id: "cust-003", name: "Christina John Kimaro", phone: "+255 788 990 112", email: "christina@example.com", type: targetType, loyaltyPoints: 310, outstandingBalance: 120000, creditLimit: 150000, walletBalance: 0 },
-    { id: "cust-004", name: "Daudi Paul Ndege", phone: "+255 762 334 455", email: "daudi@example.com", type: targetType, loyaltyPoints: 80, outstandingBalance: 0, creditLimit: 100000, walletBalance: 42000 },
-  ]);
+  // ─── Fetch Real Operational Customers ─────────────────────────────────────
+  const loadCustomers = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let loaded: CustomerRecord[] = [];
+      try {
+        const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/customers");
+        if (res.success && Array.isArray(res.data)) {
+          loaded = res.data.map((c) => ({
+            id: c.id || `cust-${Date.now()}`,
+            name: c.name || "Unnamed Customer",
+            phone: c.phone || "",
+            email: c.email || "",
+            type: c.type || targetType,
+            loyaltyPoints: Number(c.loyaltyPoints || c.points || 0),
+            outstandingBalance: Number(c.outstandingBalance || c.debt || 0),
+            creditLimit: Number(c.creditLimit || 0),
+            walletBalance: Number(c.walletBalance || 0),
+          }));
+        }
+      } catch {
+        // Fallback to local outbox mutations or empty
+        await db.ready;
+        const outboxCusts = [...db.syncOutbox.values()]
+          .filter((item) => item.entityType === "Customer" && item.status !== "FAILED")
+          .map((item) => {
+            const p = item.payload || {};
+            return {
+              id: item.entityId || `cust-${Date.now()}`,
+              name: String(p.name || ""),
+              phone: String(p.phone || ""),
+              email: String(p.email || ""),
+              type: String(p.type || targetType),
+              loyaltyPoints: Number(p.loyaltyPoints || 0),
+              outstandingBalance: Number(p.outstandingBalance || 0),
+              creditLimit: Number(p.creditLimit || 0),
+              walletBalance: Number(p.walletBalance || 0),
+            };
+          });
+        loaded = outboxCusts;
+      }
+      setCustomers(loaded);
+    } catch {
+      setCustomers([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [db, targetType]);
+
+  useEffect(() => {
+    void loadCustomers();
+  }, [loadCustomers]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCust, setSelectedCust] = useState<CustomerRecord | null>(null);
@@ -115,7 +150,7 @@ export const CustomersPage: React.FC = () => {
     return { label: "Bronze Partner", badgeClass: "v2-badge-secondary" };
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formPhone.trim()) return;
 
@@ -131,23 +166,22 @@ export const CustomersPage: React.FC = () => {
         creditLimit: formCreditLimit || 0,
         walletBalance: formWalletBalance || 0,
       };
+      await apiFetch("/api/v1/customers", { method: "POST", body: JSON.stringify(newCust) }).catch(() => {});
+      db.enqueueOutbox({ entityType: "Customer", operationType: "CREATE", payload: { ...newCust } as Record<string, unknown> });
       setCustomers((prev) => [newCust, ...prev]);
     } else if (selectedCust) {
-      setCustomers((prev) =>
-        prev.map((c) =>
-          c.id === selectedCust.id
-            ? {
-                ...c,
-                name: formName.trim(),
-                phone: formPhone.trim(),
-                email: formEmail.trim(),
-                loyaltyPoints: formLoyaltyPoints,
-                creditLimit: formCreditLimit,
-                walletBalance: formWalletBalance,
-              }
-            : c
-        )
-      );
+      const updatedCust: CustomerRecord = {
+        ...selectedCust,
+        name: formName.trim(),
+        phone: formPhone.trim(),
+        email: formEmail.trim(),
+        loyaltyPoints: formLoyaltyPoints,
+        creditLimit: formCreditLimit,
+        walletBalance: formWalletBalance,
+      };
+      await apiFetch(`/api/v1/customers/${selectedCust.id}`, { method: "PUT", body: JSON.stringify(updatedCust) }).catch(() => {});
+      db.enqueueOutbox({ entityType: "Customer", operationType: "UPDATE", payload: { ...updatedCust } as Record<string, unknown> });
+      setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
     }
     setIsFormOpen(false);
     resetForm();
@@ -181,17 +215,19 @@ export const CustomersPage: React.FC = () => {
     setFormWalletBalance(0);
   };
 
-  const handleDelete = (c: CustomerRecord) => {
+  const handleDelete = async (c: CustomerRecord) => {
     if (c.outstandingBalance > 0) {
       alert(`Cannot delete profile. ${c.name} has an outstanding debt of ${fmtCcy(c.outstandingBalance)}.`);
       return;
     }
     if (confirm(`Permanently delete profile for ${c.name}?`)) {
+      await apiFetch(`/api/v1/customers/${c.id}`, { method: "DELETE" }).catch(() => {});
+      db.enqueueOutbox({ entityType: "Customer", operationType: "DELETE", payload: { id: c.id } });
       setCustomers((prev) => prev.filter((item) => item.id !== c.id));
     }
   };
 
-  const handlePaymentSubmit = (e: React.FormEvent) => {
+  const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCust || paymentVal <= 0) return;
 
@@ -205,13 +241,12 @@ export const CustomersPage: React.FC = () => {
     }
 
     const newDebt = Math.max(0, selectedCust.outstandingBalance - paymentVal);
-    setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === selectedCust.id
-          ? { ...c, outstandingBalance: newDebt, walletBalance: updatedWallet }
-          : c
-      )
-    );
+    const updatedCust = { ...selectedCust, outstandingBalance: newDebt, walletBalance: updatedWallet };
+
+    await apiFetch(`/api/v1/customers/${selectedCust.id}/payment`, { method: "POST", body: JSON.stringify({ amount: paymentVal, payUsingWallet }) }).catch(() => {});
+    db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, amount: paymentVal, payUsingWallet } });
+
+    setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
 
     setIsPayOpen(false);
     setSelectedCust(null);
@@ -219,17 +254,16 @@ export const CustomersPage: React.FC = () => {
     setPayUsingWallet(false);
   };
 
-  const handleWalletDeposit = (e: React.FormEvent) => {
+  const handleWalletDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCust || walletVal <= 0) return;
 
-    setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === selectedCust.id
-          ? { ...c, walletBalance: c.walletBalance + walletVal }
-          : c
-      )
-    );
+    const updatedCust = { ...selectedCust, walletBalance: selectedCust.walletBalance + walletVal };
+
+    await apiFetch(`/api/v1/customers/${selectedCust.id}/wallet`, { method: "POST", body: JSON.stringify({ amount: walletVal }) }).catch(() => {});
+    db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, walletDepositAmount: walletVal } });
+
+    setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
 
     setIsWalletOpen(false);
     setSelectedCust(null);
@@ -248,9 +282,14 @@ export const CustomersPage: React.FC = () => {
             Configure {targetType.toLowerCase()} profiles, loyalty rewards, prepaid wallets, and store credit debt balances.
           </p>
         </div>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openCreateForm} type="button">
-          <UserPlus size={13} /> Add {targetType}
-        </button>
+        <div className="v2-flex v2-items-center v2-gap-2">
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadCustomers()} disabled={isLoading} type="button">
+            <RefreshCw size={13} className={isLoading ? "v2-spin" : ""} /> Refresh
+          </button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openCreateForm} type="button">
+            <UserPlus size={13} /> Add {targetType}
+          </button>
+        </div>
       </div>
 
       {/* KPI Stats Row */}
