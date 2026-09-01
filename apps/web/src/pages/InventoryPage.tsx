@@ -111,12 +111,31 @@ export const InventoryPage: React.FC = () => {
     name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10
   });
 
-  // Stock Movement Ledger State
-  const [ledger] = useState([
-    { id: "led-101", date: "2026-09-01 10:15", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 2kg", type: "SALE_OUTBOUND", qty: -2, balance: 45, ref: "SALE-2026-9912" },
-    { id: "led-102", date: "2026-09-01 09:30", sku: "SKU-COK-500-02", name: "Coca Cola 500ml Pet", type: "GRN_INBOUND", qty: +50, balance: 120, ref: "PO-2026-004" },
-    { id: "led-103", date: "2026-08-31 16:45", sku: "SKU-UNG-10K-03", name: "Unga wa Ngano 10kg", type: "TRANSFER_OUT", qty: -5, balance: 8, ref: "TR-2026-08" },
+  // Stock Movement Ledger Filter & Entry State
+  const [ledgerMovementFilter, setLedgerMovementFilter] = useState("ALL");
+  const [ledgerSearchQuery, setLedgerSearchQuery] = useState("");
+  const [stockAdjModal, setStockAdjModal] = useState(false);
+  const [adjSku, setAdjSku] = useState("SKU-AZM-FLR-01");
+  const [adjType, setAdjType] = useState<"ADJUSTMENT_GAIN" | "ADJUSTMENT_LOSS" | "OPENING_STOCK" | "WASTAGE_SPILL">("ADJUSTMENT_GAIN");
+  const [adjQty, setAdjQty] = useState(1);
+  const [adjNotes, setAdjNotes] = useState("");
+
+  const [ledger, setLedger] = useState([
+    { id: "led-101", date: "2026-09-01 10:15", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 2kg", type: "SALE_OUTBOUND", qty: -2, qtyBefore: 47, balance: 45, unitCost: 6200, totalCost: 12400, ref: "SALE-2026-9912", user: "Cashier 01" },
+    { id: "led-102", date: "2026-09-01 09:30", sku: "SKU-COK-500-02", name: "Coca Cola 500ml Pet", type: "GRN_INBOUND", qty: +50, qtyBefore: 70, balance: 120, unitCost: 1100, totalCost: 55000, ref: "PO-2026-004", user: "Inventory Officer" },
+    { id: "led-103", date: "2026-08-31 16:45", sku: "SKU-UNG-10K-03", name: "Unga wa Ngano 10kg", type: "TRANSFER_OUT", qty: -5, qtyBefore: 13, balance: 8, unitCost: 24000, totalCost: 120000, ref: "TR-2026-08", user: "Store Manager" },
+    { id: "led-104", date: "2026-08-31 14:10", sku: "SKU-AMX-500-06", name: "Amoxicillin 500mg Capsules", type: "OPENING_STOCK", qty: +85, qtyBefore: 0, balance: 85, unitCost: 8000, totalCost: 680000, ref: "INIT-2026-01", user: "System Bootstrap" },
+    { id: "led-105", date: "2026-08-31 11:20", sku: "SKU-MLK-1L-04", name: "Fresh Cow Milk 1L", type: "WASTAGE_SPILL", qty: -2, qtyBefore: 2, balance: 0, unitCost: 2200, totalCost: 4400, ref: "WST-2026-01", user: "Shift Supervisor" },
   ]);
+
+  const filteredLedger = useMemo(() => {
+    return ledger.filter((l) => {
+      const matchType = ledgerMovementFilter === "ALL" || l.type === ledgerMovementFilter;
+      const q = ledgerSearchQuery.toLowerCase().trim();
+      const matchQ = !q || l.name.toLowerCase().includes(q) || l.sku.toLowerCase().includes(q) || l.ref.toLowerCase().includes(q);
+      return matchType && matchQ;
+    });
+  }, [ledger, ledgerMovementFilter, ledgerSearchQuery]);
 
   // Branch Stock Transfer State
   const [transfers, setTransfers] = useState([
@@ -383,7 +402,41 @@ export const InventoryPage: React.FC = () => {
       {/* ─── TAB 3: STOCK LEDGER ─────────────────────────────────────────────── */}
       {activeTab === "ledger" && (
         <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">Stock Movement Audit Trail</div></div>
+          <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+            <div className="v2-flex v2-items-center v2-gap-3" style={{ flex: 1 }}>
+              <div className="v2-card-title">Stock Movement Audit Trail</div>
+              <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1, maxWidth: 300 }}>
+                <Search size={13} style={{ color: "var(--muted)" }} />
+                <input
+                  className="v2-input v2-input-sm"
+                  placeholder="Filter by SKU, name, or ref..."
+                  value={ledgerSearchQuery}
+                  onChange={(e) => setLedgerSearchQuery(e.target.value)}
+                />
+              </div>
+              <select
+                className="v2-input v2-input-sm"
+                style={{ width: 160 }}
+                value={ledgerMovementFilter}
+                onChange={(e) => setLedgerMovementFilter(e.target.value)}
+              >
+                <option value="ALL">All Movement Types</option>
+                <option value="SALE_OUTBOUND">POS Sales (Outbound)</option>
+                <option value="GRN_INBOUND">PO Intake (GRN Inbound)</option>
+                <option value="TRANSFER_IN">Branch Transfer (In)</option>
+                <option value="TRANSFER_OUT">Branch Transfer (Out)</option>
+                <option value="ADJUSTMENT_GAIN">Stock Audit Gain</option>
+                <option value="ADJUSTMENT_LOSS">Stock Audit Loss</option>
+                <option value="WASTAGE_SPILL">Wastage / Spillage</option>
+                <option value="CUSTOMER_RETURN">Customer Return</option>
+                <option value="OPENING_STOCK">Opening Stock</option>
+              </select>
+            </div>
+            <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setStockAdjModal(true)} type="button">
+              <Plus size={13} /> Record Stock Adjustment
+            </button>
+          </div>
+
           <table className="v2-table">
             <thead>
               <tr>
@@ -391,25 +444,45 @@ export const InventoryPage: React.FC = () => {
                 <th>SKU Code</th>
                 <th>Product Name</th>
                 <th>Movement Type</th>
-                <th>Quantity</th>
-                <th>Balance After</th>
+                <th>Qty Change</th>
+                <th>Stock Lineage</th>
+                <th>Unit Cost</th>
+                <th>Valuation Impact</th>
                 <th>Reference</th>
+                <th>Operator</th>
               </tr>
             </thead>
             <tbody>
-              {ledger.map((l) => (
-                <tr key={l.id}>
-                  <td className="v2-text-xs v2-text-muted">{l.date}</td>
-                  <td className="v2-mono v2-text-xs">{l.sku}</td>
-                  <td className="v2-font-bold">{l.name}</td>
-                  <td><span className="badge v2-badge-muted">{l.type}</span></td>
-                  <td className={`v2-mono v2-font-bold ${l.qty > 0 ? "v2-text-success" : "v2-text-danger"}`}>
-                    {l.qty > 0 ? `+${l.qty}` : l.qty}
+              {filteredLedger.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="v2-text-center v2-text-muted v2-py-4">
+                    No stock movement audit records found matching active filter.
                   </td>
-                  <td className="v2-mono">{l.balance}</td>
-                  <td className="v2-mono v2-text-xs">{l.ref}</td>
                 </tr>
-              ))}
+              ) : (
+                filteredLedger.map((l) => (
+                  <tr key={l.id}>
+                    <td className="v2-text-xs v2-text-muted">{l.date}</td>
+                    <td className="v2-mono v2-text-xs">{l.sku}</td>
+                    <td className="v2-font-bold">{l.name}</td>
+                    <td>
+                      <span className={`badge ${l.qty > 0 ? "v2-badge-success" : "v2-badge-muted"}`}>
+                        {l.type}
+                      </span>
+                    </td>
+                    <td className={`v2-mono v2-font-bold ${l.qty > 0 ? "v2-text-success" : "v2-text-danger"}`}>
+                      {l.qty > 0 ? `+${l.qty}` : l.qty}
+                    </td>
+                    <td className="v2-mono v2-text-xs">
+                      {l.qtyBefore} → <span className="v2-font-bold">{l.balance}</span>
+                    </td>
+                    <td className="v2-mono">{money(l.unitCost || 0)}</td>
+                    <td className="v2-mono v2-font-bold">{money(l.totalCost || 0)}</td>
+                    <td className="v2-mono v2-text-xs">{l.ref}</td>
+                    <td className="v2-text-xs v2-text-muted">{l.user || "System"}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -628,6 +701,101 @@ export const InventoryPage: React.FC = () => {
             <div className="v2-flex v2-justify-end v2-mt-4">
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">Close</button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* --- Record Stock Adjustment Modal --- */}
+      {stockAdjModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 480, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+              <div>
+                <h2 className="v2-text-base v2-font-black">Record Stock Adjustment</h2>
+                <div className="v2-text-xs v2-text-muted">Post a canonical inventory movement entry to the stock audit ledger</div>
+              </div>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">✕</button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const targetItem = items.find((i) => i.sku === adjSku) || items[0];
+                if (!targetItem) return;
+
+                const isGain = adjType === "ADJUSTMENT_GAIN" || adjType === "OPENING_STOCK";
+                const qtyChange = isGain ? Math.abs(adjQty) : -Math.abs(adjQty);
+                const prevStock = targetItem.stock;
+                const newStock = Math.max(0, prevStock + qtyChange);
+
+                const nowStr = new Date().toISOString().replace("T", " ").slice(0, 16);
+                const refCode = `ADJ-${Date.now().toString().slice(-6)}`;
+
+                const newEntry = {
+                  id: `led-${Date.now()}`,
+                  date: nowStr,
+                  sku: targetItem.sku,
+                  name: targetItem.name,
+                  type: adjType,
+                  qty: qtyChange,
+                  qtyBefore: prevStock,
+                  balance: newStock,
+                  unitCost: targetItem.buyingPrice,
+                  totalCost: Math.abs(qtyChange) * targetItem.buyingPrice,
+                  ref: refCode,
+                  user: "Current Operator",
+                };
+
+                setLedger((prev) => [newEntry, ...prev]);
+                setItems((prev) =>
+                  prev.map((i) =>
+                    i.sku === targetItem.sku
+                      ? { ...i, stock: newStock, status: newStock === 0 ? "Out of Stock" : newStock <= i.reorderLevel ? "Low Stock" : "Active" }
+                      : i
+                  )
+                );
+
+                setStockAdjModal(false);
+                setAdjNotes("");
+              }}
+              className="v2-space-y-3"
+            >
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">SELECT TARGET SKU *</label>
+                <select className="v2-input" value={adjSku} onChange={(e) => setAdjSku(e.target.value)}>
+                  {items.map((i) => (
+                    <option key={i.id} value={i.sku}>
+                      {i.name} ({i.sku}) — Stock: {i.stock}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="v2-grid v2-grid-2 v2-gap-2">
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">MOVEMENT TYPE</label>
+                  <select className="v2-input" value={adjType} onChange={(e) => setAdjType(e.target.value as any)}>
+                    <option value="ADJUSTMENT_GAIN">ADJUSTMENT GAIN (+)</option>
+                    <option value="ADJUSTMENT_LOSS">ADJUSTMENT LOSS (-)</option>
+                    <option value="WASTAGE_SPILL">WASTAGE / SPILLAGE (-)</option>
+                    <option value="OPENING_STOCK">OPENING STOCK (+)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">QUANTITY DELTA</label>
+                  <input className="v2-input" type="number" min="1" value={adjQty} onChange={(e) => setAdjQty(Number(e.target.value))} required />
+                </div>
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">REASON & AUDIT NOTES</label>
+                <input className="v2-input" placeholder="e.g. Physical inventory count discrepancy" value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
+              </div>
+
+              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
+                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">Cancel</button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Post Stock Adjustment</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
