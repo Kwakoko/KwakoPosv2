@@ -25,7 +25,7 @@ export class ClientSyncEngine {
           deviceId: this.deviceId,
           operations: pendingOps.map((op) => ({
             operationId: op.id,
-            entityType: op.entityType,
+            entityType: op.entityType as any,
             entityId: op.entityId,
             operationType: op.operationType,
             payload: op.payload,

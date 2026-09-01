@@ -2,7 +2,7 @@ import type { Product, ProductVariant, StockLedger, StockAdjustment, SyncOperati
 
 export interface OutboxItem {
   id: string;
-  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment";
+  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment" | "User";
   entityId: string;
   operationType: SyncOperationType;
   payload: Record<string, unknown>;
