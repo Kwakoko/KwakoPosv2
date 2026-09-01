@@ -42,8 +42,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 function setRefreshCookie(reply: any, token: string, secure: boolean): void {
-  const value = encodeURIComponent(token);
-  const cookie = `${REFRESH_COOKIE}=${value}; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE_SECONDS}${secure ? "; Secure" : ""}`;
+  const cookie = `${REFRESH_COOKIE}=${encodeURIComponent(token)}; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE_SECONDS}${secure ? "; Secure" : ""}`;
   reply.header("Set-Cookie", cookie);
 }
 
@@ -66,7 +65,6 @@ async function handleProductionLogin(req: any, reply: any): Promise<void> {
     include: { tenant: true, branch: true, role: true },
   });
 
-  // Do not disclose account existence or provide a runtime bootstrap backdoor.
   if (!user || !comparePassword(password, user.passwordHash)) {
     reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
     return;
@@ -173,6 +171,6 @@ export async function startFixedServer(): Promise<FastifyInstance> {
   return server;
 }
 
-if (typeof require !== "undefined' && require.main === module) {
+if (typeof require !== "undefined" && require.main === module) {
   void startFixedServer();
 }
