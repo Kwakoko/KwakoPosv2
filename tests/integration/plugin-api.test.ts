@@ -25,7 +25,7 @@ describe("Industry Plugin Fastify REST API Integration", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   it("GET /api/v1/plugins returns plugin catalog and tenant activations", async () => {

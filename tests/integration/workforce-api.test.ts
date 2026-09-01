@@ -37,7 +37,7 @@ describe("Workforce Fastify REST API Integration", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   it("POST /api/v1/workforce/departments creates a department", async () => {

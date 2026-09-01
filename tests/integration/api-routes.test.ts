@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { buildServer } from "../../apps/api/src/server";
 import { globalInMemoryStore } from "@kwakopos2/database";
 import type { TenantContext } from "@kwakopos2/contracts";
@@ -8,13 +8,17 @@ import { randomUUID } from "crypto";
 describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
   let server: FastifyInstance;
 
-  beforeEach(() => {
-    globalInMemoryStore.clear();
+  beforeAll(async () => {
     server = buildServer();
+    await server.ready();
   });
 
-  afterEach(async () => {
-    await server.close();
+  afterAll(async () => {
+    if (server) await server.close();
+  });
+
+  beforeEach(() => {
+    globalInMemoryStore.clear();
   });
 
   it("GET /health returns 200 OK with system status", async () => {
@@ -161,5 +165,31 @@ describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
 
     expect(resB.statusCode).toBe(200);
     expect(resB.json().data).toHaveLength(0); // Tenant B sees 0 products
+  });
+
+  describe("Security Regression & Admin RBAC Controls", () => {
+    it("GET /admin/releases/history without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/releases/history" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/observability/metrics without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/observability/metrics" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/operations/runbooks without token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({ method: "GET", url: "/admin/operations/runbooks" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("GET /admin/releases/history with invalid token returns 401 UNAUTHORIZED", async () => {
+      const res = await server.inject({
+        method: "GET",
+        url: "/admin/releases/history",
+        headers: { authorization: "Bearer invalid-jwt-token" },
+      });
+      expect(res.statusCode).toBe(401);
+    });
   });
 });

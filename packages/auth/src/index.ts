@@ -1,11 +1,22 @@
 import jwt from "jsonwebtoken";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import type { TenantContext, UserRole } from "@kwakopos2/contracts";
 
-const JWT_SECRET = process.env.JWT_SECRET || "kwakopos-super-secret-jwt-key-change-in-production-min32chars";
+const developmentJwtSecret = randomBytes(48).toString("hex");
+
+export function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") {
+      throw new Error("SECURITY_FATAL: JWT_SECRET environment variable is MANDATORY in production environments!");
+    }
+    return developmentJwtSecret;
+  }
+  return secret;
+}
 
 export interface JwtPayload {
-  sub: string; // userId
+  sub: string;
   tenantId: string;
   branchId: string;
   email: string;
@@ -15,15 +26,30 @@ export interface JwtPayload {
 }
 
 export function hashPassword(password: string): string {
-  return createHash("sha256").update(password + JWT_SECRET).digest("hex");
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${derivedKey}`;
 }
 
 export function comparePassword(password: string, hash: string): boolean {
-  return hashPassword(password) === hash;
+  if (hash.startsWith("scrypt:")) {
+    const [, salt, originalKey] = hash.split(":");
+    if (!salt || !originalKey) return false;
+    try {
+      const derivedKey = scryptSync(password, salt, 64).toString("hex");
+      const expected = Buffer.from(originalKey, "hex");
+      const actual = Buffer.from(derivedKey, "hex");
+      return expected.length === actual.length && timingSafeEqual(expected, actual);
+    } catch {
+      return false;
+    }
+  }
+  const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
+  return legacyHash === hash;
 }
 
 export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: "15m" });
 }
 
 export function generateRefreshToken(): string {
@@ -32,20 +58,14 @@ export function generateRefreshToken(): string {
 
 export function verifyAccessToken(token: string): JwtPayload {
   try {
-    return jwt.verify(token, JWT_SECRET) as JwtPayload;
-  } catch (err) {
+    return jwt.verify(token, getJwtSecret()) as JwtPayload;
+  } catch {
     throw new Error("UNAUTHORIZED: Invalid or expired access token.");
   }
 }
 
 export function extractTenantContext(payload: JwtPayload): TenantContext {
-  return {
-    tenantId: payload.tenantId,
-    branchId: payload.branchId,
-    userId: payload.sub,
-    roles: payload.roles,
-    permissions: payload.permissions,
-  };
+  return { tenantId: payload.tenantId, branchId: payload.branchId, userId: payload.sub, roles: payload.roles, permissions: payload.permissions };
 }
 
 export interface SessionRecord {
@@ -59,77 +79,70 @@ export interface SessionRecord {
   createdAt: Date;
 }
 
+export interface SessionStoreProvider {
+  create(record: SessionRecord): Promise<void>;
+  get(sessionId: string): Promise<SessionRecord | null>;
+  update(record: SessionRecord): Promise<void>;
+  revokeAllForUser(tenantId: string, userId: string): Promise<number>;
+}
+
 export class SessionManager {
   private inMemorySessions = new Map<string, SessionRecord>();
+  private storeProvider: SessionStoreProvider | null = null;
+
+  public setStoreProvider(provider: SessionStoreProvider): void {
+    this.storeProvider = provider;
+  }
+
+  private requireProductionStore(): void {
+    if ((process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") && !this.storeProvider) {
+      throw new Error("SECURITY_FATAL: Persistent PostgreSQL session store provider is MANDATORY in production environments!");
+    }
+  }
 
   hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
   }
 
-  async createSession(
-    tenantId: string,
-    userId: string,
-    deviceId: string,
-    expiresInDays = 30
-  ): Promise<{ sessionId: string; refreshToken: string; expiresAt: Date }> {
+  async createSession(tenantId: string, userId: string, deviceId: string, expiresInDays = 30): Promise<{ sessionId: string; refreshToken: string; expiresAt: Date }> {
+    this.requireProductionStore();
     const sessionId = randomBytes(16).toString("hex");
     const refreshToken = generateRefreshToken();
-    const refreshTokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
-
-    const record: SessionRecord = {
-      id: sessionId,
-      tenantId,
-      userId,
-      deviceId,
-      refreshTokenHash,
-      expiresAt,
-      revokedAt: null,
-      createdAt: new Date(),
-    };
-
-    this.inMemorySessions.set(sessionId, record);
+    const record: SessionRecord = { id: sessionId, tenantId, userId, deviceId, refreshTokenHash: this.hashToken(refreshToken), expiresAt, revokedAt: null, createdAt: new Date() };
+    if (this.storeProvider) await this.storeProvider.create(record);
+    else this.inMemorySessions.set(sessionId, record);
     return { sessionId, refreshToken, expiresAt };
   }
 
-  async rotateRefreshToken(
-    sessionId: string,
-    providedRefreshToken: string,
-    userPayload: Omit<JwtPayload, "deviceId">
-  ): Promise<{ accessToken: string; refreshToken: string } | null> {
-    const session = this.inMemorySessions.get(sessionId);
-    if (!session || session.revokedAt || session.expiresAt < new Date()) {
-      return null;
-    }
-
+  async rotateRefreshToken(sessionId: string, providedRefreshToken: string, userPayload: Omit<JwtPayload, "deviceId">): Promise<{ accessToken: string; refreshToken: string } | null> {
+    this.requireProductionStore();
+    const session = this.storeProvider ? await this.storeProvider.get(sessionId) : this.inMemorySessions.get(sessionId);
+    if (!session || session.revokedAt || session.expiresAt < new Date()) return null;
     const providedHash = this.hashToken(providedRefreshToken);
     if (session.refreshTokenHash !== providedHash) {
       session.revokedAt = new Date();
+      if (this.storeProvider) await this.storeProvider.update(session);
       return null;
     }
-
     const newRefreshToken = generateRefreshToken();
     session.refreshTokenHash = this.hashToken(newRefreshToken);
-
-    const payload: JwtPayload = {
-      ...userPayload,
-      deviceId: session.deviceId,
-    };
-
-    const accessToken = generateAccessToken(payload);
-    return { accessToken, refreshToken: newRefreshToken };
+    if (this.storeProvider) await this.storeProvider.update(session);
+    return { accessToken: generateAccessToken({ ...userPayload, deviceId: session.deviceId }), refreshToken: newRefreshToken };
   }
 
   async revokeSession(sessionId: string): Promise<boolean> {
-    const session = this.inMemorySessions.get(sessionId);
-    if (session) {
-      session.revokedAt = new Date();
-      return true;
-    }
-    return false;
+    this.requireProductionStore();
+    const session = this.storeProvider ? await this.storeProvider.get(sessionId) : this.inMemorySessions.get(sessionId);
+    if (!session) return false;
+    session.revokedAt = new Date();
+    if (this.storeProvider) await this.storeProvider.update(session);
+    return true;
   }
 
   async revokeAllUserSessions(tenantId: string, userId: string): Promise<number> {
+    this.requireProductionStore();
+    if (this.storeProvider) return this.storeProvider.revokeAllForUser(tenantId, userId);
     let count = 0;
     for (const session of this.inMemorySessions.values()) {
       if (session.tenantId === tenantId && session.userId === userId && !session.revokedAt) {
@@ -142,5 +155,3 @@ export class SessionManager {
 }
 
 export const globalSessionManager = new SessionManager();
-
-

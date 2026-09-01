@@ -30,11 +30,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced `prepare-release.ts` to automatically sync workspace versions before generating release manifest.
 - Improved `version-consistency-gate.ts` to validate workspace package versions in addition to root version.
 - Updated npm scripts for explicit release lifecycle control: `release:sync-versions`, `release:prepare`, `release:validate-version`.
+# KwakoPos SaaS — Official Changelog
+
+All notable changes to KwakoPos will be documented in this file.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [2.5.0] - 2026-08-29
+
+### Added
+- **Major Enterprise Industry Vertical Operating Systems Platform (435 Pillars Certified)**:
+  - **Retail Operating System (30 Pillars)**: Deep multi-tenant, offline-first retail operating system with product variants, inventory replenishment, margin protection, POS, StockLedger integration, and retail analytics.
+  - **Restaurant Operating System (36 Pillars)**: Kitchen Display System (KDS), Table Management, Recipe BOM & Real-Time Food Costing, QR Ordering, Waste Ledger, and AI Menu Engineering.
+  - **Pharmacy Management Operating System (28 Pillars)**: FEFO (First Expiry, First Out) dispensing, Batch Expiry Tracking, Prescription Lifecycle Management, Patient Profiles, and AI Drug Interaction Safety Engine.
+  - **Law Firm Management Operating System (41 Pillars)**: Client & Matter Management, Court Hearing Schedules, Legal Document Vault, Billable Hours Tracking, Retainers, Trust Accounting, Conflict Checks, and Legal AI Copilot.
+  - **SACCO / VICOBA Operating System (46 Pillars)**: Member Registration (KYC), Voluntary/Compulsory Savings Accounts, Share Capital Ledger, Group Meeting Cycles, Repayment Schedules, PAR 30/60/90+ tracking, Dividends, and SACCO Accounting.
+  - **Microfinance & Lending Operating System (48 Pillars)**: Borrower 360, Individual & Solidarity Group Lending, Loan Formulas (Reducing Balance vs Flat Rate), Collateral Registration, Credit Scoring, Field Agent Mobile Receipts, and IFRS 9 ECL Provisioning.
+  - **Poultry & Livestock Operating System (52 Pillars)**: Flock & Herd Lifecycle Engine, Egg Production Ledger, Feed Conversion Ratio (FCR), Animal Health & Vaccination Schedules, Daily Milk Yield, Cull Sales, and AI Outbreak Warnings.
+  - **Vehicle & Fleet Management Operating System (50 Pillars)**: Digital Fleet OS managing vehicles, drivers, trip dispatching, GPS telematics, fuel fraud detection, preventive maintenance, tyres, and cost per kilometer calculation.
+  - **Hardware Business Operating System (55 Pillars)**: Multi-Tier Unit Conversion Engine (Box → Piece, Bag → Kg, Sheet → Sqm), Contractor Project Billing, Multi-Tier Pricing (Retail, Wholesale, Contractor, Dealer), Delivery Dispatch, and Margin Controls.
+  - **Advanced Electronics & Device Lifecycle OS (49 Pillars)**: Device Hierarchy (Category → Brand → Family → Model → Variant → Serial/IMEI), State Machine, Warranty Registration & Claims, Technical Repair Jobs, Spare Parts, Refurbishment Grading, and AI Diagnostic Assistant.
+
+- **Monorepo Version Synchronization & Production Certification**:
+  - Synchronized all 10 workspace packages (`apps/api`, `apps/web`, `@kwakopos2/config`, `@kwakopos2/domain`, `@kwakopos2/database`, `@kwakopos2/auth`, `@kwakopos2/sync`, `@kwakopos2/observability`, `@kwakopos2/contracts`) to `2.5.0`.
+  - 100% 435-Pillar Industry Certification PASSED across all CLI certification campaigns (`certify:retail`, `certify:restaurant`, `certify:pharmacy`, `certify:lawfirm`, `certify:saccovicoba`, `certify:microfinance`, `certify:poultrylivestock`, `certify:vehiclefleet`, `certify:hardware`, `certify:electronics`).
+
+---
+
+## [2.2.0] - 2026-08-27
+
+### Added
+- **Enhanced Release Pipeline & Lifecycle Management**:
+  - Workspace version synchronization tool (`scripts/release/sync-workspace-versions.ts`) ensuring monorepo consistency.
+  - Automated SemVer calculation from conventional commits with zero manual version bumping.
+  - Canonical `ReleaseIdentity` with Git SHA, container digest, and Cloud Run revision binding.
+  - Version Consistency Enforcement Gate blocking releases with version drift across `package.json`, `release-manifest.json`, and runtime config.
+  - Automated GitHub Release publishing with changelog extraction and production acceptance evidence.
+  - Safe runtime version endpoints: `GET /api/system/version` and `GET /admin/releases/history`.
+  - PWA version tracker displaying `KwakoPos © 2026 • Version 2.2.0` with durable offline outbox upgrade protection.
+  - Workspace package alignment: all `@kwakopos2/*` packages synchronized to `2.2.0`.
+
+- **Monorepo Architecture & Workspace Governance**:
+  - Unified version numbering across root, apps (`@kwakopos2/api`, `@kwakopos2/web`), and packages (`@kwakopos2/config`, `@kwakopos2/domain`, `@kwakopos2/database`, `@kwakopos2/auth`, `@kwakopos2/sync`, `@kwakopos2/observability`, `@kwakopos2/contracts`).
+  - Dependency version pinning enforced at build time.
+  - Release scripts refactored for explicit workspace package management.
+
+### Changed
+- Promoted workspace versions from `2.0.0` → `2.2.0` for alignment with root package version.
+- Updated all `@kwakopos2/*` internal dependencies to point to `2.2.0`.
+- Enhanced `prepare-release.ts` to automatically sync workspace versions before generating release manifest.
+- Improved `version-consistency-gate.ts` to validate workspace package versions in addition to root version.
+- Updated npm scripts for explicit release lifecycle control: `release:sync-versions`, `release:prepare`, `release:validate-version`.
 
 ### Fixed
 - Resolved version drift between monorepo root (`2.2.0`) and internal workspace packages (`2.0.0`).
 - Corrected `package-lock.json` synchronization to include all workspace package versions.
 - Added glob-based workspace discovery preventing hard-coded package list maintenance.
+---
 
 ---
 
@@ -164,3 +218,82 @@ Credit to: Kwakoko, github-actions[bot], nkala91186
 - **Container Digest**: `sha256:c1ba0a02098b1dbe46121c2822e2897ab69816b501009380e0cce38532cd3924`
 - **Active Cloud Run Revision**: `kwakopos-production-service-00028-kuf`
 - **Production Status**: `CERTIFIED_AND_ACCEPTED`
+
+
+## [2.3.0] - 2026-08-28
+
+### ✨ New Features
+- **security**: implement Phase 12 Security & Compliance Certification Platform
+- **certification**: implement 11.1 Full-System Certification & Continuous Assurance Platform
+- **cert**: implement Section 11.1 Full-System Certification Campaign runner
+- **cert**: incorporate Phases 7-10 into production certification runner
+- **release**: implement KwakoPos Release Engineering Platform v2
+
+### ⚡ Improvements & Enhancements
+- **release**: v2.4.0
+- **pillars**: lock mandatory rule - refine, verify, test, certify after every feature implementation
+- **cert**: update production certification evidence record for v2.2.0
+- **release**: synchronize workspace package versions to 2.2.0
+
+### 🐛 Bug Fixes
+- **workflows**: split multi-line run step into separate single-line steps in auto-semver.yml
+- **ci**: update check-github-runs.ts logging helper
+- **tsc**: resolve all TypeScript type errors and ESM import extensions across scripts
+- **release**: replace external glob dependency with zero-dependency workspace scanner in sync-workspace-versions.ts
+- **ci**: run npm run build before tsc --noEmit in ci.yml
+- **workflows**: ensure db:generate and build run before quality gates and type checks across all GitHub Action workflows
+- **ci**: handle GCP auth gracefully when secrets are unconfigured and fix test import paths
+- **package**: add missing root db:generate, db:push, and production release script commands
+- **ci**: update package-lock.json and add Phase 1-12 full-system & security certification gates to GitHub Workflows
+
+### 👥 Contributors
+Credit to: Kwakoko, github-actions[bot]
+
+## [2.4.0] - 2026-08-28
+
+### ✨ New Features
+- **security**: implement Phase 12 Security & Compliance Certification Platform
+- **certification**: implement 11.1 Full-System Certification & Continuous Assurance Platform
+- **cert**: implement Section 11.1 Full-System Certification Campaign runner
+- **cert**: incorporate Phases 7-10 into production certification runner
+- **release**: implement KwakoPos Release Engineering Platform v2
+- **release**: implement SLSA Level 3 supply chain, SBOM generator, Risk Score engine, DORA metrics, and Progressive Delivery platform
+- **release**: implement enterprise automated release management, versioning, quality gates, and CI/CD pipeline
+- **saas**: Implement Phase 6 SaaS Monetization & Revenue Management with central plans, entitlements, billing, payments, and invariants M001-M015
+- **telecom**: Implement Phase 5 Telecom & Technical Services Vertical with KML/KMZ, microwave engineering, RAN, and Invariants T001-T015
+
+### ⚡ Improvements & Enhancements
+- **release**: v2.3.0
+- **release**: v2.4.0
+- **pillars**: lock mandatory rule - refine, verify, test, certify after every feature implementation
+- **cert**: update production certification evidence record for v2.2.0
+- **release**: synchronize workspace package versions to 2.2.0
+- **cert**: Issue fresh 10-criteria production release certificate for v1.5.1 covering Phases 1-10
+- **release**: Production release evidence for Phase 6 SaaS Monetization on SHA 5355563 (Cloud Run revision 00122-hov)
+- **release**: Authoritative multi-device convergence production evidence for SHA dc1709c on Cloud Run revision 00120-wiz
+- **browser**: Add complete catalog brand persistence lifecycle test and multi-device state convergence
+- **release**: Production release evidence for SHA 2ee2745 on Cloud Run revision 00118-mis
+- **release**: Release certification evidence for Catalog Brand Persistence on Cloud Run revision 00116-zek (SHA 212b860)
+- **release**: Integrated Phase 1-4 production certification evidence for SHA 20ad38d on Cloud Run (00114-hup)
+- **certification**: Add dedicated Phase 1-4 acceptance suites P1-001..P1-010, P2-001..P2-015, P3-001..P3-010, P4-001..P4-012
+- **release**: Authoritative production certificate evidence for Phase 5 Telecom HEAD afd6d5e on Cloud Run (00112-jid)
+- **release**: v2.4.0
+- **release**: v2.3.1
+- **release**: Authoritative production certificate evidence for HEAD d82c288 on Cloud Run (00107-yod)
+
+### 🐛 Bug Fixes
+- **workflows**: split multi-line run step into separate single-line steps in auto-semver.yml
+- **ci**: update check-github-runs.ts logging helper
+- **tsc**: resolve all TypeScript type errors and ESM import extensions across scripts
+- **release**: replace external glob dependency with zero-dependency workspace scanner in sync-workspace-versions.ts
+- **ci**: run npm run build before tsc --noEmit in ci.yml
+- **workflows**: ensure db:generate and build run before quality gates and type checks across all GitHub Action workflows
+- **ci**: handle GCP auth gracefully when secrets are unconfigured and fix test import paths
+- **package**: add missing root db:generate, db:push, and production release script commands
+- **ci**: update package-lock.json and add Phase 1-12 full-system & security certification gates to GitHub Workflows
+- **schema**: Map brandId to brand_id in Prisma Product model
+- **build**: Add src to Dockerfile and standalone productService implementation in apps/api
+- **catalog**: Implement Catalog Brand Persistence with brandId and brand_id path in src/services/productService.ts
+
+### 👥 Contributors
+Credit to: Kwakoko, github-actions[bot]

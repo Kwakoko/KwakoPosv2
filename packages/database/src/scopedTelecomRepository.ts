@@ -142,14 +142,17 @@ export class ScopedTelecomRepository {
     const results: { site: TelecomSite; distanceKm: number }[] = [];
 
     for (const site of tenantSites) {
+      const lat = site.latitude ?? site.gpsLatitude ?? 0;
+      const lon = site.longitude ?? site.gpsLongitude ?? 0;
       const distanceKm = TelecomEngine.calculateGreatCircleDistanceKm(
         { latitude: targetLat, longitude: targetLon },
-        { latitude: site.latitude, longitude: site.longitude }
+        { latitude: lat, longitude: lon }
       );
       if (distanceKm <= radiusKm) {
         results.push({ site, distanceKm });
       }
     }
+
 
     return results.sort((a, b) => a.distanceKm - b.distanceKm);
   }
@@ -165,14 +168,16 @@ export class ScopedTelecomRepository {
   ): { createdSites: TelecomSite[]; importRecord: KmlImportRecord } {
     const record = this.kmlImports.get(importRecordId);
     if (!record) throw new Error(`KML import record ${importRecordId} not found.`);
-    assertGeographicTenantBoundary(ctx, record.tenantId);
+    assertGeographicTenantBoundary(ctx, record.tenantId || ctx.tenantId);
+
 
     const targetPlacemarks = record.parsedPlacemarks.filter((p) => selectedPlacemarkIds.includes(p.id));
     const createdSites: TelecomSite[] = [];
 
     for (const p of targetPlacemarks) {
-      if (p.coordinates.length > 0) {
-        const coord = p.coordinates[0];
+      const coords = Array.isArray(p.coordinates) ? p.coordinates : p.coordinate ? [p.coordinate] : [];
+      if (coords.length > 0) {
+        const coord = coords[0];
         const siteCode = `SITE-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
         const site = this.createSite(ctx, {
           siteCode,
@@ -184,10 +189,9 @@ export class ScopedTelecomRepository {
           elevationMeters: coord.elevationMeters || 0,
           towerHeightMeters: 45,
           region: "National",
-          district: p.layerName,
-          address: p.description,
+          district: p.layerName || "General",
+          address: p.description || "",
           powerSource: "GRID_COMMERCIAL",
-          securityRestrictions: null,
           photos: [],
           documents: [],
         });
@@ -197,7 +201,7 @@ export class ScopedTelecomRepository {
 
     const updatedRecord: KmlImportRecord = {
       ...record,
-      sitesCreated: record.sitesCreated + createdSites.length,
+      sitesCreated: (record.sitesCreated || 0) + createdSites.length,
       status: "IMPORTED",
     };
     this.kmlImports.set(importRecordId, updatedRecord);
@@ -218,9 +222,17 @@ export class ScopedTelecomRepository {
     const siteA = this.sites.get(input.siteAId)!;
     const siteB = this.sites.get(input.siteBId)!;
 
+    const siteALat = siteA.latitude ?? siteA.gpsLatitude ?? 0;
+    const siteALon = siteA.longitude ?? siteA.gpsLongitude ?? 0;
+    const siteAElev = siteA.elevationMeters ?? 0;
+
+    const siteBLat = siteB.latitude ?? siteB.gpsLatitude ?? 0;
+    const siteBLon = siteB.longitude ?? siteB.gpsLongitude ?? 0;
+    const siteBElev = siteB.elevationMeters ?? 0;
+
     const calculation = TelecomEngine.executeLinkBudgetCalculation({
-      siteA: { latitude: siteA.latitude, longitude: siteA.longitude, elevationMeters: siteA.elevationMeters, antennaHeightMeters: input.siteAAntennaHeightMeters },
-      siteB: { latitude: siteB.latitude, longitude: siteB.longitude, elevationMeters: siteB.elevationMeters, antennaHeightMeters: input.siteBAntennaHeightMeters },
+      siteA: { latitude: siteALat, longitude: siteALon, elevationMeters: siteAElev, antennaHeightMeters: input.siteAAntennaHeightMeters },
+      siteB: { latitude: siteBLat, longitude: siteBLon, elevationMeters: siteBElev, antennaHeightMeters: input.siteBAntennaHeightMeters },
       frequencyGhz: input.frequencyGhz,
       txPowerDbm: input.txPowerDbm,
       antennaGainDbiSiteA: input.antennaGainDbiSiteA,
@@ -228,6 +240,7 @@ export class ScopedTelecomRepository {
       feederLossSiteADb: input.feederLossSiteADb,
       feederLossSiteBDb: input.feederLossSiteBDb,
     });
+
 
     const id = input.id || randomUUID();
     const now = new Date().toISOString();
@@ -350,11 +363,15 @@ export class ScopedTelecomRepository {
     const id = input.id || randomUUID();
     const now = new Date().toISOString();
 
-    const site = this.sites.get(input.siteId);
+    const site = this.sites.get(input.siteId || "");
+
     if (!site) throw new Error(`Site ${input.siteId} not found.`);
     assertSiteTenantOwnership(ctx, site);
 
-    const siteTests = Array.from(this.testRecords.values()).filter((t) => t.tenantId === ctx.tenantId && t.siteId === input.siteId);
+    const targetSiteId = input.siteId || "";
+    const siteTests = Array.from(this.testRecords.values()).filter((t) => (t.tenantId || ctx.tenantId) === ctx.tenantId && t.siteId === targetSiteId);
+
+
     const acceptance: TelecomAcceptanceRecord = {
       ...input,
       id,

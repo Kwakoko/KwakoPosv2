@@ -57,9 +57,23 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
   console.log(`[INFO] Commits Since Baseline: ${commitMessages.length}`);
   console.log(`[INFO] Detected Bump Type: ${bump}`);
 
+  if (currentVersion !== baselineVersion && !options?.dryRun) {
+    rootPkg.version = baselineVersion;
+    fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + "\n", "utf8");
+    const lockPath = path.resolve(process.cwd(), "package-lock.json");
+    if (fs.existsSync(lockPath)) {
+      const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      lock.version = baselineVersion;
+      if (lock.packages?.[""]) lock.packages[""].version = baselineVersion;
+      fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+    }
+    syncWorkspaceVersions(baselineVersion);
+    console.log(`✓ Synchronized root and workspace package versions to baseline ${baselineVersion}`);
+  }
+
   if (bump === "NONE" && !options?.forceBump) {
     console.log("[INFO] No releasable Conventional Commit detected; version remains unchanged.");
-    return { changed: false, currentVersion, nextVersion: currentVersion, baselineTag, bump };
+    return { changed: false, currentVersion: baselineVersion, nextVersion: baselineVersion, baselineTag, bump };
   }
 
   const nextVersion = calculateNextVersion(baselineVersion, commitMessages, { forceBump: bump });
@@ -85,7 +99,7 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
     updateChangelog(nextVersion);
   }
 
-  const manifest = generateReleaseManifest({ certification: "PASS" });
+  const manifest = generateReleaseManifest({ version: nextVersion, certification: "PASS" });
   console.log(`✓ Release Manifest synchronized for version ${manifest.version} (Tag: ${manifest.tag})`);
 
   if (!options?.dryRun) {

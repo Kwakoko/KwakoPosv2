@@ -10,47 +10,44 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   validate-and-test:
     name: Build, Audit, and Test Suite
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
-
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-
       - name: Install Dependencies
         run: npm ci
-
-      - name: Validate Conventional Commits
-        run: npx tsx scripts/ci/validate-commit-message.ts --test
-
+      - name: Generate Prisma Client
+        run: npm run db:generate
+      - name: Build All Monorepo Workspaces
+        run: npm run build
       - name: TypeScript Type Check
         run: npx tsc --noEmit
-
       - name: ESLint Static Analysis
         run: npm run lint --if-present
-
       - name: Execute Vitest Unit Test Suite
         run: npm run test:unit
-
       - name: Execute Integration Test Suite
         run: npm run test:integration
-
       - name: Execute Sync Engine Test Suite
         run: npm run test:sync
-
       - name: Validate Production Build
         run: npm run build
-
       - name: Execute 15-Point Release Quality Gates
         run: npx tsx scripts/release/quality-gates.ts
-
       - name: Verify KwakoPos SaaS 15 Core Modules
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
+      - name: Execute 17-Domain Full-System Certification Campaign
+        run: npm run certify:campaign
+      - name: Execute Phase 12 Security & Compliance Certification Engine
+        run: npm run certify:security

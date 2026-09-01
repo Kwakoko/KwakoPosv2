@@ -4,7 +4,7 @@ import path from "path";
 import http from "http";
 import https from "https";
 import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion } from "@kwakopos2/domain";
-import { CandidateDeploymentEvidence } from "./deploy-candidate";
+import { CandidateDeploymentEvidence } from "./deploy-candidate.js";
 
 export interface PromotionEvidence {
   status: "PASS" | "FAIL";

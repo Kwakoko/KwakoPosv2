@@ -23,15 +23,18 @@ export interface ReleaseManifest {
 }
 
 export function generateReleaseManifest(options?: {
+  version?: string;
   certification?: "PASS" | "FAIL";
   evidencePath?: string;
 }): ReleaseManifest {
   const config = loadConfig();
   const identity = getReleaseIdentity(config);
+  const targetVersion = options?.version || identity.appVersion;
+  const targetTag = `v${targetVersion}`;
 
   const manifest: ReleaseManifest = {
-    version: identity.appVersion,
-    tag: identity.gitTag,
+    version: targetVersion,
+    tag: targetTag,
     gitSha: identity.gitSha,
     containerDigest: identity.containerDigest,
     cloudRunRevision: identity.cloudRunRevision,

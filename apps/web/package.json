@@ -1,15 +1,21 @@
 {
   "name": "@kwakopos2/web",
-  "version": "2.1.0",
+  "version": "2.5.0",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsx buildPwaAssets.ts && vite build && tsc -p tsconfig.json --noEmit",
     "dev": "vite",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@kwakopos2/contracts": "*",
     "@kwakopos2/domain": "*",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "lucide-react": "^0.363.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^3.10.1",
     "typescript": "^5.3.3"
   }
 }

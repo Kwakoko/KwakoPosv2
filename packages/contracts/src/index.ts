@@ -1924,30 +1924,6 @@ export const CreateLeaveRequestSchema = z.object({
 });
 export type CreateLeaveRequest = z.infer<typeof CreateLeaveRequestSchema>;
 
-export const WorkforceTaskSchema = z.object({
-  id: z.string().uuid(),
-  tenantId: z.string().uuid(),
-  branchId: z.string().uuid(),
-  title: z.string().min(1),
-  description: z.string().nullable().optional(),
-  taskType: z.enum(["GENERAL", "STOCK_COUNT", "MAINTENANCE", "CLEANING", "SERVICE", "INSPECTION"]).default("GENERAL"),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
-  status: z.enum(["BACKLOG", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "COMPLETED", "VERIFIED", "CANCELLED"]).default("BACKLOG"),
-  assignedEmployeeId: z.string().uuid().nullable().optional(),
-  assignedTeam: z.string().nullable().optional(),
-  dueDate: z.string().or(z.date()).nullable().optional(),
-  checklist: z.array(z.object({ item: z.string(), done: z.boolean() })).optional(),
-  attachments: z.array(z.string()).default([]),
-  relatedEntityType: z.string().nullable().optional(),
-  relatedEntityId: z.string().nullable().optional(),
-  completedAt: z.string().or(z.date()).nullable().optional(),
-  verifiedById: z.string().uuid().nullable().optional(),
-  verifiedAt: z.string().or(z.date()).nullable().optional(),
-  createdAt: z.string().or(z.date()),
-  updatedAt: z.string().or(z.date()),
-});
-export type WorkforceTask = z.infer<typeof WorkforceTaskSchema>;
-
 export const CreateWorkforceTaskRequestSchema = z.object({
   id: z.string().uuid().optional(),
   title: z.string().min(1),
@@ -2213,5 +2189,85 @@ export type WorkforceAnalyticsReport = z.infer<typeof WorkforceAnalyticsReportSc
 export * from "./pluginContracts.js";
 export * from "./telecomContracts.js";
 export * from "./monetizationContracts.js";
+export * from "./certification.js";
+export * from "./resilience.js";
+export * from "./performance.js";
+export * from "./reliability.js";
+export * from "./commercial-portfolio.js";
+export * from "./pmf-validation.js";
+export * from "./retailContracts.js";
+export * from "./restaurantContracts.js";
+export * from "./pharmacyContracts.js";
+export * from "./lawFirmContracts.js";
+export * from "./saccoVicobaContracts.js";
+export * from "./microfinanceContracts.js";
+export * from "./poultryLivestockContracts.js";
+export * from "./vehicleFleetContracts.js";
+export * from "./hardwareContracts.js";
+export * from "./electronicsContracts.js";
+export * from "./commercialReadinessContracts.js";
+export * from "./pmfValidationContracts.js";
+export * from "./garageContracts.js";
+export * from "./wholesaleContracts.js";
+export * from "./constructionContracts.js";
+export * from "./realEstateContracts.js";
+export * from "./barLoungeContracts.js";
+export * from "./telecomContracts.js";
+export * from "./enterpriseOnboardingContracts.js";
+export * from "./partnerEcosystemContracts.js";
+export * from "./globalExpansionContracts.js";
+export * from "./aiNativeContracts.js";
+export * from "./autonomousOperationsContracts.js";
+export * from "./kwakoposCertificationContracts.js";
+export * from "./platformGovernanceContracts.js";
+export * from "./workforceTrackingContracts.js";
+export * from "./systemUiContracts.js";
+export * from "./kwakoposDesignSystemContracts.js";
+export * from "./coreOperatingUiContracts.js";
+export * from "./dynamicModuleUiContracts.js";
+export * from "./superAdminPlatformContracts.js";
+export * from "./uiCertificationContracts.js";
+export * from "./workflowAutomationContracts.js";
+export * from "./biAnalyticsContracts.js";
+export * from "./aiOperatingLayerContracts.js";
+export * from "./enterpriseApprovalsContracts.js";
+export * from "./financeTreasuryContracts.js";
+export * from "./supplyChainContracts.js";
+export * from "./workforceContracts.js";
+export * from "./crmContracts.js";
+export * from "./integrationContracts.js";
+export * from "./documentContracts.js";
+export * from "./securityContracts.js";
+export * from "./notificationContracts.js";
+export * from "./complianceContracts.js";
+export * from "./multiSiteContracts.js";
+export * from "./licensingContracts.js";
+export * from "./marketplaceContracts.js";
+export * from "./globalPlatformContracts.js";
+export * from "./autonomousBusinessContracts.js";
+export * from "./platformSecurityContracts.js";
+export * from "./autonomousOperationsContracts.js";
+export * from "./platformIntelligenceContracts.js";
+export * from "./fullSystemCertificationContracts.js";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

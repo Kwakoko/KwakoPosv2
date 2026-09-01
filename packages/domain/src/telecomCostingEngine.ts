@@ -85,6 +85,7 @@ export class TelecomCostingEngine {
       overheadCost: Math.round(overheadCost * 100) / 100,
       contingencyCost: Math.round(contingencyCost * 100) / 100,
       totalProjectCost,
+      marginPct: targetMarginPct,
       targetMarginPct,
       customerPrice,
       status: "DRAFT",
@@ -92,6 +93,7 @@ export class TelecomCostingEngine {
       createdAt: now,
       updatedAt: now,
     };
+
   }
 
   /**
@@ -107,7 +109,8 @@ export class TelecomCostingEngine {
     variancePct: number;
     isOverBudget: boolean;
   } {
-    const budget = Number(project.budgetAmount) || 0;
+    const budget = Number(project.totalBudgetUsd) || Number(project.budgetAmount) || 0;
+
     const actual = Number(actualCost) || 0;
     const varianceAmount = Math.round((budget - actual) * 100) / 100; // Positive = under budget (favorable)
     const variancePct = budget > 0 ? Math.round(((actual - budget) / budget) * 10000) / 100 : 0;

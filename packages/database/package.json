@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/database",
-  "version": "2.1.0",
+  "version": "2.5.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -15,7 +15,7 @@
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
     "clean": "rm -rf dist"
   },
   "dependencies": {

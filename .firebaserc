@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "kwakoposv2",
+    "production": "kwakoposv2"
+  }
+}

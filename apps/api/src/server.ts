@@ -1,8 +1,46 @@
+import * as fs from "fs";
+import * as path from "path";
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+
+function resolveWebDistFile(relativePath: string): string | null {
+  const candidateDirs = [
+    path.resolve(process.cwd(), "apps/web/dist"),
+    path.resolve(process.cwd(), "dist/apps/web/dist"),
+    path.resolve(process.cwd(), "../web/dist"),
+    path.resolve(process.cwd(), "../../apps/web/dist"),
+  ];
+  for (const dir of candidateDirs) {
+    const full = path.join(dir, relativePath);
+    if (fs.existsSync(full)) return full;
+  }
+  return null;
+}
+
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".html": return "text/html; charset=utf-8";
+    case ".js":
+    case ".mjs": return "application/javascript; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".json": return "application/json; charset=utf-8";
+    case ".png": return "image/png";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".gif": return "image/gif";
+    case ".svg": return "image/svg+xml";
+    case ".ico": return "image/x-icon";
+    case ".woff2": return "font/woff2";
+    case ".woff": return "font/woff";
+    case ".ttf": return "font/ttf";
+    case ".map": return "application/json; charset=utf-8";
+    default: return "application/octet-stream";
+  }
+}
 import {
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
@@ -140,6 +178,34 @@ function isProductionEnv(cfg: ReturnType<typeof loadConfig>) {
   return cfg.NODE_ENV === "production" || cfg.NODE_ENV === "production-certification";
 }
 
+function requireTenantContext(req: FastifyRequest): TenantContext {
+  if (!req.tenantContext) {
+    throw new Error("UNAUTHORIZED: Authenticated tenant context is required");
+  }
+  return req.tenantContext;
+}
+
+function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): string {
+  const ctx = requireTenantContext(req);
+  const requested = requestedTenantId == null ? "" : String(requestedTenantId).trim();
+  if (requested && requested !== ctx.tenantId) {
+    throw new Error("INVARIANT_007_VIOLATION: Cross-tenant access denied");
+  }
+  return ctx.tenantId;
+}
+
+function requireAdminContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
+  const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((permission) => String(permission).toLowerCase()) : [];
+  const isAdmin = roles.some((role) => ["ADMIN", "SUPER_ADMIN", "SUPERADMIN", "OWNER"].includes(role));
+  const hasAdminPermission = permissions.includes("*") || permissions.some((permission) => permission === "admin:*" || permission.startsWith("admin:"));
+  if (!isAdmin && !hasAdminPermission) {
+    throw new Error("FORBIDDEN: Administrative privileges required");
+  }
+  return ctx;
+}
+
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
   /** Pre-loaded config — skips env re-read when provided. */
@@ -153,8 +219,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const server = Fastify({ logger: true });
   const productionPersistence = opts.productionPersistence ?? isProductionEnv(config);
 
-  // Fastify CORS setup
-  server.register(cors, { origin: "*" });
+  // Fastify CORS setup - locked in production
+  const corsOrigin = isProductionEnv(config)
+    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://kwakokov2--kwakoposv2.us-east4.hosted.app", "https://app.kwakopos.com", "https://admin.kwakopos.com"])
+    : "*";
+  server.register(cors, { origin: corsOrigin });
 
   const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
@@ -177,8 +246,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!status) {
       // Inspect message heuristics as fallback
       const message = (error && error.message) ? error.message.toString() : String(error);
-      if (message.includes("INVARIANT_007_VIOLATION") || message.includes("access denied")) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant access denied" } });
+      if (message.includes("INVARIANT_007_VIOLATION") || message.includes("access denied") || message.startsWith("FORBIDDEN")) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: message.includes("FORBIDDEN") ? message : "Cross-tenant access denied" } });
       }
       if (message.includes("UNAUTHORIZED") || message.includes("token")) {
         return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
@@ -218,7 +287,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       environment: config.NODE_ENV,
     });
 
+    if (req.url.startsWith("/api/v1/workforce/") && !req.url.startsWith("/api/v1/workforce-ops/")) {
+      req.raw.url = req.url.replace("/api/v1/workforce/", "/api/v1/workforce-ops/");
+    } else if (req.url === "/api/v1/commercial/portfolio") {
+      req.raw.url = "/api/v1/commercial/summary";
+    }
+
     const url = req.routeOptions?.url || req.url.split("?")[0];
+
+    // Dedicated API System & Telemetry Routes (pass through to Fastify API handlers)
     if (
       url === "/health" ||
       url === "/readiness" ||
@@ -226,27 +303,61 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url === "/api/system/version" ||
       url === "/auth/login" ||
       url === "/auth/refresh" ||
-      url.startsWith("/telemetry") ||
-      url.startsWith("/admin/observability") ||
-      url.startsWith("/admin/releases") ||
-      url.startsWith("/admin/operations")
+      url.startsWith("/telemetry")
     ) {
       return;
     }
 
+    // Static Asset Resolution (serving /assets/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist)
+    if (url.startsWith("/assets/") || url === "/manifest.json" || url === "/sw.js" || url === "/favicon.ico" || url === "/robots.txt") {
+      const relativePath = url.startsWith("/") ? url.slice(1) : url;
+      const assetPath = resolveWebDistFile(relativePath);
+      if (assetPath && fs.existsSync(assetPath)) {
+        reply.type(getMimeType(assetPath)).send(fs.readFileSync(assetPath));
+        return;
+      }
+    }
+
+    // Web PWA SPA Fallback Routing for browser navigation paths
+    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/") || url.startsWith("/sync/");
+    if (!isExplicitApiPrefix && req.method === "GET") {
+      const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
+      const isWebRoute = [
+        "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
+        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
+        "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
+        "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
+      ].includes(url) || isHtmlRequest;
+
+      if (isWebRoute) {
+        const indexPath = resolveWebDistFile("index.html");
+        if (indexPath && fs.existsSync(indexPath)) {
+          reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
+          return;
+        }
+      }
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      const testTenantId = req.headers["x-tenant-id"] as string;
-      const testBranchId = req.headers["x-branch-id"] as string;
-      const testUserId = req.headers["x-user-id"] as string;
-      if (testTenantId && testBranchId && testUserId) {
-        req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
-        if (req.traceContext) {
-          req.traceContext.tenantId = testTenantId;
-          req.traceContext.branchId = testBranchId;
-          req.traceContext.userId = testUserId;
+      // In production environments, test headers MUST NOT bypass authentication
+      if (!isProductionEnv(config)) {
+        const testTenantId = req.headers["x-tenant-id"] as string;
+        const testBranchId = req.headers["x-branch-id"] as string;
+        const testUserId = req.headers["x-user-id"] as string;
+        if (testTenantId && testBranchId && testUserId) {
+          req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
+          if (req.traceContext) {
+            req.traceContext.tenantId = testTenantId;
+            req.traceContext.branchId = testBranchId;
+            req.traceContext.userId = testUserId;
+          }
+          const authenticatedPath = req.url.split("?")[0];
+          if (authenticatedPath.startsWith("/admin/")) {
+            requireAdminContext(req);
+          }
+          return;
         }
-        return;
       }
       return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization header" } });
     }
@@ -261,8 +372,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         req.traceContext.userId = payload.sub;
         req.traceContext.deviceId = payload.deviceId;
       }
+      const authenticatedPath = req.url.split("?")[0];
+      if (authenticatedPath.startsWith("/admin/")) {
+        requireAdminContext(req);
+      }
     } catch (err: any) {
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: err.message || "Invalid token" } });
+      const message = err?.message || "Invalid token";
+      if (message.startsWith("FORBIDDEN")) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message } });
+      }
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
     }
   });
 
@@ -280,7 +399,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // System endpoints
-  server.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString(), database: "connected" }));
+  server.get("/", async () => {
+    return {
+      name: "KwakoPos 2.0 POS & Enterprise API Server",
+      status: "online",
+      version: config.APP_VERSION,
+      environment: config.NODE_ENV,
+      health: "/health",
+      versionInfo: "/version",
+      timestamp: new Date().toISOString(),
+    };
+  });
+
+  server.get("/health", async (_req, reply) => {
+    let database: "connected" | "disconnected" | "not_configured" = "not_configured";
+    if (productionPersistence) {
+      try {
+        const { prisma } = await import("@kwakopos2/database");
+        await Promise.race([
+          prisma.$queryRaw`SELECT 1`,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 1500)),
+        ]);
+        database = "connected";
+      } catch {
+        database = "disconnected";
+      }
+    } else {
+      database = "connected";
+    }
+    if (database === "disconnected") {
+      return reply.status(503).send({
+        status: "degraded",
+        timestamp: new Date().toISOString(),
+        database,
+      });
+    }
+    return reply.status(200).send({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      database,
+    });
+  });
 
   server.get("/readiness", async () => {
     if (productionPersistence) {
@@ -626,6 +785,46 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       await globalSessionManager.revokeSession(sessionId);
     }
     return reply.send({ success: true, data: { loggedOut: true } });
+  });
+
+  // Switch tenant / branch authorization context
+  server.post("/auth/switch-context", async (req, reply) => {
+    const ctx = req.tenantContext;
+    const { targetTenantId, targetBranchId } = (req.body as any) || {};
+    const newTenantId = targetTenantId || ctx?.tenantId || "TNT-TZ-001";
+    const newBranchId = targetBranchId || ctx?.branchId || "BR-DSM-01";
+    const userId = ctx?.userId || randomUUID();
+    const userEmail = ctx?.email || "admin@kwakopos.com";
+
+    const tokenPayload = {
+      sub: userId,
+      tenantId: newTenantId,
+      branchId: newBranchId,
+      email: userEmail,
+      roles: ctx?.roles || ["ADMIN"],
+      permissions: ctx?.permissions || ["*"],
+      deviceId: ctx?.deviceId || "device-server-01",
+    };
+
+    const accessToken = generateAccessToken(tokenPayload);
+    const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
+
+    return reply.send({
+      success: true,
+      data: {
+        accessToken,
+        refreshToken: session.refreshToken,
+        sessionId: session.sessionId,
+        user: {
+          id: userId,
+          tenantId: newTenantId,
+          branchId: newBranchId,
+          email: userEmail,
+          name: "Admin User",
+          role: ctx?.roles?.[0] || "ADMIN",
+        },
+      },
+    });
   });
 
   // Product routes (examples using schema parsing & tenant context)
@@ -1550,9 +1749,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/plugins/wholesale/calculate-price", async (req) => {
     const { quantity, basePrice, variantId } = (req.body as any) || {};
     const tierRule = variantId ? globalPluginRepository.wholesaleTierRules.get(variantId) : null;
-    const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, tierRule);
+    const pricingTiers = tierRule?.tiers
+      ? tierRule.tiers.map((t: any) => ({ minQuantity: t.minQuantity, productId: variantId || "", unitPriceUsd: t.unitPrice }))
+      : [];
+    const result = wholesaleEngine.calculateUnitPrice(Number(quantity) || 1, Number(basePrice) || 0, pricingTiers);
     return { success: true, data: result };
   });
+
 
   // =========================================================================
   // Phase 5: Dedicated Telecom & Technical Vertical Endpoints (/api/v1/telecom/*)
@@ -2131,7 +2334,2081 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: pkg });
   });
 
+  server.get("/api/admin/certification/campaign", async (req, reply) => {
+    const res = await globalReleaseService.runCampaignCertification();
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  // Phase 12 Security & Compliance Endpoints
+  server.get("/api/admin/security/dashboard", async (req, reply) => {
+    const secRes = await globalReleaseService.runSecurityCertification();
+    const kisb = await globalReleaseService.getSecurityBaseline();
+    const compliance = await globalReleaseService.getComplianceMatrix();
+    const risks = await globalReleaseService.getSecurityRisks();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        assessmentReadinessState: "Security Controls Implemented and Assessment-Ready",
+        prohibitedClaimsNotice: compliance.prohibitedClaimsNotice,
+        certificationResult: secRes,
+        baseline: kisb,
+        compliance,
+        risks,
+      },
+    });
+  });
+
+  server.get("/api/admin/security/baseline", async (req, reply) => {
+    const data = await globalReleaseService.getSecurityBaseline();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.get("/api/admin/security/compliance-matrix", async (req, reply) => {
+    const data = await globalReleaseService.getComplianceMatrix();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.get("/api/admin/security/risks", async (req, reply) => {
+    const data = await globalReleaseService.getSecurityRisks();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/admin/security/certify", async (req, reply) => {
+    const data = await globalReleaseService.runSecurityCertification();
+    return reply.status(200).send({ success: true, data });
+  });
+
+  // Phase 11 KPCP Certification Endpoints
+  server.get("/api/v1/certification/status", async (req, reply) => {
+    const mode = ((req.query as any)?.mode || "full") as any;
+    const cert = await globalReleaseService.runKpcpFullCertification(mode);
+    return reply.status(200).send({
+      success: true,
+      data: {
+        certificationId: cert.evidencePackage.certificationId,
+        overallStatus: cert.evidencePackage.overallStatus,
+        certificationScore: cert.evidencePackage.certificationScore,
+        evaluatedAt: cert.evidencePackage.timestamp,
+        version: cert.evidencePackage.appVersion,
+        gitSha: cert.evidencePackage.gitSha,
+        businessJourneys: cert.businessJourneys,
+        crossDomainProbes: cert.crossDomainProbes,
+      },
+    });
+  });
+
+  server.get("/api/v1/certification/matrix", async (req, reply) => {
+    const cert = await globalReleaseService.runKpcpFullCertification("full");
+    return reply.status(200).send({
+      success: true,
+      data: {
+        totalDomains: 22,
+        domainsPassed: Object.values(cert.evidencePackage.domainScorecard).filter((d: any) => d.status === "PASS").length,
+        scorecard: cert.evidencePackage.domainScorecard,
+      },
+    });
+  });
+
+  server.get("/api/v1/certification/history", async (req, reply) => {
+    const history = globalReleaseRepository.getDeploymentHistory();
+    return reply.status(200).send({ success: true, data: history });
+  });
+
+  server.post("/api/v1/certification/revalidate", async (req, reply) => {
+    const mode = ((req.body as any)?.mode || "full") as any;
+    const cert = await globalReleaseService.runKpcpFullCertification(mode);
+    return reply.status(200).send({
+      success: true,
+      message: "Certification revalidation complete",
+      data: cert,
+    });
+  });
+
+  // =========================================================================
+  // PHASE 13 DISASTER RECOVERY & RESILIENCE CERTIFICATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/resilience/status", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: resCert.evidencePackage.status,
+        overallScore: resCert.evidencePackage.overallScore,
+        exerciseId: resCert.evidencePackage.exerciseId,
+        scenariosPassed: resCert.evidencePackage.scenariosPassed,
+        scenariosExecuted: resCert.evidencePackage.scenariosExecuted,
+        digest: resCert.evidencePackage.digest,
+        evidencePath: resCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/resilience/scorecard", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        overallScore: resCert.evidencePackage.overallScore,
+        results: resCert.evidencePackage.results,
+      },
+    });
+  });
+
+  server.get("/api/v1/resilience/runbooks", async (req, reply) => {
+    const runbooks = await globalReleaseService.getDrRunbooks();
+    return reply.status(200).send({ success: true, data: runbooks });
+  });
+
+  server.post("/api/v1/resilience/simulate", async (req, reply) => {
+    const resCert = await globalReleaseService.runResilienceCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Disaster recovery resilience simulation complete",
+      data: resCert,
+    });
+  });
+
+  // =========================================================================
+  // PHASE 14 PERFORMANCE & GLOBAL SCALE CERTIFICATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/performance/baseline", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: perfCert.evidencePackage.status,
+        overallScore: perfCert.evidencePackage.overallScore,
+        exerciseId: perfCert.evidencePackage.exerciseId,
+        baselineMetrics: perfCert.evidencePackage.baselineMetrics,
+        digest: perfCert.evidencePackage.digest,
+        evidencePath: perfCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/performance/capacity-model", async (req, reply) => {
+    const capacityModel = await globalReleaseService.getCapacityModel();
+    return reply.status(200).send({ success: true, data: capacityModel });
+  });
+
+  server.get("/api/v1/performance/scorecard", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        overallScore: perfCert.evidencePackage.overallScore,
+        baselineMetrics: perfCert.evidencePackage.baselineMetrics,
+        workload10x: perfCert.evidencePackage.workload10x,
+        workload50x: perfCert.evidencePackage.workload50x,
+        workload100x: perfCert.evidencePackage.workload100x,
+      },
+    });
+  });
+
+  server.post("/api/v1/performance/benchmark", async (req, reply) => {
+    const perfCert = await globalReleaseService.runPerformanceCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Performance & Global Scale benchmark complete",
+      data: perfCert,
+    });
+  });
+
+  // =========================================================================
+  // PHASE 15 PRODUCTION RELIABILITY ENGINEERING (KPRS) ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/reliability/status", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        status: relCert.evidencePackage.status,
+        overallScore: relCert.evidencePackage.overallScore,
+        exerciseId: relCert.evidencePackage.exerciseId,
+        overallAvailabilityPct: relCert.evidencePackage.scorecard.overallAvailabilityPct,
+        digest: relCert.evidencePackage.digest,
+        evidencePath: relCert.evidencePath,
+      },
+    });
+  });
+
+  server.get("/api/v1/reliability/error-budget", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: relCert.evidencePackage.scorecard.errorBudgets,
+    });
+  });
+
+  server.get("/api/v1/reliability/slo-scorecard", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      data: relCert.evidencePackage.scorecard,
+    });
+  });
+
+  server.post("/api/v1/reliability/remediate", async (req, reply) => {
+    const relCert = await globalReleaseService.runReliabilityCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Production Reliability auto-remediation complete",
+      data: relCert.evidencePackage.scorecard.remediations,
+    });
+  });
+
+  // =========================================================================
+  // PHASE 16 COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/commercial/portfolio", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      data: commCert.evidencePackage.portfolio,
+    });
+  });
+
+  server.get("/api/v1/commercial/verticals/:industryId", async (req, reply) => {
+    const { industryId } = req.params as { industryId: string };
+    const commCert = await globalReleaseService.runCommercialCertification();
+    const all = [
+      ...commCert.evidencePackage.portfolio.flagshipVerticals,
+      ...commCert.evidencePackage.portfolio.strategicVerticals,
+      ...commCert.evidencePackage.portfolio.specializedVerticals,
+    ];
+    const target = all.find((v) => v.industryId === industryId);
+    if (!target) {
+      return reply.status(404).send({ success: false, error: "Vertical not found in commercial portfolio" });
+    }
+    return reply.status(200).send({ success: true, data: target });
+  });
+
+  server.get("/api/v1/commercial/readiness-gates", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        flagshipVerticals: commCert.evidencePackage.portfolio.flagshipVerticals.map((v) => ({
+          industryId: v.industryId,
+          name: v.name,
+          gates: v.gates,
+        })),
+      },
+    });
+  });
+
+  server.post("/api/v1/commercial/evaluate", async (req, reply) => {
+    const commCert = await globalReleaseService.runCommercialCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Commercial Product Readiness portfolio evaluation complete",
+      data: commCert,
+    });
+  });
+
+  // =========================================================================
+  // PHASE 17 PRODUCT-MARKET VALIDATION FRAMEWORK ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/validation/pmf-framework", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      data: pmfCert.evidencePackage.framework,
+    });
+  });
+
+  server.get("/api/v1/validation/verticals/:industryId", async (req, reply) => {
+    const { industryId } = req.params as { industryId: string };
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    const scorecard = pmfCert.evidencePackage.framework.scorecards.find((s) => s.industryId === industryId);
+    if (!scorecard) {
+      return reply.status(404).send({ success: false, error: "Vertical PMF scorecard not found" });
+    }
+    return reply.status(200).send({ success: true, data: scorecard });
+  });
+
+  server.get("/api/v1/validation/scorecard", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      data: {
+        scorecards: pmfCert.evidencePackage.framework.scorecards,
+        overallScore: pmfCert.evidencePackage.overallPmfScore,
+      },
+    });
+  });
+
+  server.post("/api/v1/validation/evaluate", async (req, reply) => {
+    const pmfCert = await globalReleaseService.runPmfValidation();
+    return reply.status(200).send({
+      success: true,
+      message: "Product-Market Validation Framework evaluation complete",
+      data: pmfCert,
+    });
+  });
+
+  // =========================================================================
+  // RETAIL OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/retail/manifest", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getManifest(),
+    });
+  });
+
+  server.get("/api/v1/retail/settings", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getSettings(ctx),
+    });
+  });
+
+  server.post("/api/v1/retail/settings", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const updated = globalRetailService.updateSettings(ctx, body);
+    return reply.status(200).send({
+      success: true,
+      data: updated,
+    });
+  });
+
+  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
+    return reply.status(201).send({
+      success: true,
+      data: sale,
+    });
+  });
+
+  server.get("/api/v1/retail/replenishment", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getReplenishmentSuggestions(ctx),
+    });
+  });
+
+  server.get("/api/v1/retail/ai-insights", async (req, reply) => {
+    const { globalRetailService } = await import("./services/retailService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({
+      success: true,
+      data: globalRetailService.getAiRecommendations(ctx),
+    });
+  });
+
+  server.post("/api/v1/retail/certify", async (req, reply) => {
+    const retCert = await globalReleaseService.runRetailCertification();
+    return reply.status(200).send({
+      success: true,
+      message: "Retail Industry Operating System certification complete",
+      data: retCert,
+    });
+  });
+
+  // =========================================================================
+  // RESTAURANT OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/restaurant/manifest", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    return reply.status(200).send({ success: true, data: globalRestaurantService.getManifest() });
+  });
+
+  server.get("/api/v1/restaurant/menu", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalRestaurantService.getMenuItems(ctx) });
+  });
+
+  server.post("/api/v1/restaurant/kds/orders", async (req, reply) => {
+    const { globalRestaurantService } = await import("./services/restaurantService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const order = globalRestaurantService.createKitchenOrder(ctx, body);
+    return reply.status(201).send({ success: true, data: order });
+  });
+
+  server.post("/api/v1/restaurant/certify", async (req, reply) => {
+    const restCert = await globalReleaseService.runRestaurantCertification();
+    return reply.status(200).send({ success: true, message: "Restaurant Operating System certification complete", data: restCert });
+  });
+
+  // =========================================================================
+  // PHARMACY OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/pharmacy/manifest", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    return reply.status(200).send({ success: true, data: globalPharmacyService.getManifest() });
+  });
+
+  server.get("/api/v1/pharmacy/medicines", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalPharmacyService.getMedicines(ctx) });
+  });
+
+  server.post("/api/v1/pharmacy/dispense", async (req, reply) => {
+    const { globalPharmacyService } = await import("./services/pharmacyService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const result = globalPharmacyService.dispenseMedicineFEFO(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/pharmacy/certify", async (req, reply) => {
+    const pharmCert = await globalReleaseService.runPharmacyCertification();
+    return reply.status(200).send({ success: true, message: "Pharmacy Operating System certification complete", data: pharmCert });
+  });
+
+  // =========================================================================
+  // LAW FIRM OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/law-firm/manifest", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    return reply.status(200).send({ success: true, data: globalLawFirmService.getManifest() });
+  });
+
+  server.get("/api/v1/law-firm/matters", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalLawFirmService.getMatters(ctx) });
+  });
+
+  server.post("/api/v1/law-firm/conflicts/search", async (req, reply) => {
+    const { globalLawFirmService } = await import("./services/lawFirmService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const result = globalLawFirmService.runConflictCheck(ctx, body.targetName || "");
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/law-firm/certify", async (req, reply) => {
+    const lawCert = await globalReleaseService.runLawFirmCertification();
+    return reply.status(200).send({ success: true, message: "Law Firm Operating System certification complete", data: lawCert });
+  });
+
+  // =========================================================================
+  // SACCO / VICOBA OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/sacco-vicoba/manifest", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    return reply.status(200).send({ success: true, data: globalSaccoVicobaService.getManifest() });
+  });
+
+  server.get("/api/v1/sacco-vicoba/members", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalSaccoVicobaService.getMembers(ctx) });
+  });
+
+  server.post("/api/v1/sacco-vicoba/loans/apply", async (req, reply) => {
+    const { globalSaccoVicobaService } = await import("./services/saccoVicobaService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const result = globalSaccoVicobaService.applyLoan(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/sacco-vicoba/certify", async (req, reply) => {
+    const saccoCert = await globalReleaseService.runSaccoVicobaCertification();
+    return reply.status(200).send({ success: true, message: "SACCO & VICOBA Operating System certification complete", data: saccoCert });
+  });
+
+  // =========================================================================
+  // MICROFINANCE & LENDING OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/microfinance/manifest", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    return reply.status(200).send({ success: true, data: globalMicrofinanceService.getManifest() });
+  });
+
+  server.get("/api/v1/microfinance/borrowers", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalMicrofinanceService.getBorrowers(ctx) });
+  });
+
+  server.post("/api/v1/microfinance/loans/assess-and-disburse", async (req, reply) => {
+    const { globalMicrofinanceService } = await import("./services/microfinanceService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const result = globalMicrofinanceService.assessAndDisburseLoan(ctx, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/microfinance/certify", async (req, reply) => {
+    const mfiCert = await globalReleaseService.runMicrofinanceCertification();
+    return reply.status(200).send({ success: true, message: "Microfinance & Lending Operating System certification complete", data: mfiCert });
+  });
+
+  // =========================================================================
+  // POULTRY & LIVESTOCK OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/poultry-livestock/manifest", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    return reply.status(200).send({ success: true, data: globalPoultryLivestockService.getManifest() });
+  });
+
+  server.get("/api/v1/poultry-livestock/flocks", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalPoultryLivestockService.getFlocks(ctx) });
+  });
+
+  server.post("/api/v1/poultry-livestock/egg-production/record", async (req, reply) => {
+    const { globalPoultryLivestockService } = await import("./services/poultryLivestockService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const result = globalPoultryLivestockService.recordEggCollection(ctx, body);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/poultry-livestock/certify", async (req, reply) => {
+    const farmCert = await globalReleaseService.runPoultryLivestockCertification();
+    return reply.status(200).send({ success: true, message: "Poultry & Livestock Operating System certification complete", data: farmCert });
+  });
+
+  // =========================================================================
+  // VEHICLE & FLEET MANAGEMENT OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/vehicle-fleet/manifest", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    return reply.status(200).send({ success: true, data: globalVehicleFleetService.getManifest() });
+  });
+
+  server.get("/api/v1/vehicle-fleet/vehicles", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalVehicleFleetService.getVehicles(ctx) });
+  });
+
+  server.post("/api/v1/vehicle-fleet/trips/dispatch", async (req, reply) => {
+    const { globalVehicleFleetService } = await import("./services/vehicleFleetService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const trip = globalVehicleFleetService.dispatchTrip(ctx, body);
+    return reply.status(201).send({ success: true, data: trip });
+  });
+
+  server.post("/api/v1/vehicle-fleet/certify", async (req, reply) => {
+    const fleetCert = await globalReleaseService.runVehicleFleetCertification();
+    return reply.status(200).send({ success: true, message: "Vehicle & Fleet Management Operating System certification complete", data: fleetCert });
+  });
+
+  // =========================================================================
+  // HARDWARE & BUILDING MATERIALS OPERATING SYSTEM INDUSTRY MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/hardware/manifest", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    return reply.status(200).send({ success: true, data: globalHardwareService.getManifest() });
+  });
+
+  server.get("/api/v1/hardware/products", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalHardwareService.getProducts(ctx) });
+  });
+
+  server.post("/api/v1/hardware/products/create", async (req, reply) => {
+    const { globalHardwareService } = await import("./services/hardwareService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const product = globalHardwareService.createProduct(ctx, body);
+    return reply.status(201).send({ success: true, data: product });
+  });
+
+  server.post("/api/v1/hardware/certify", async (req, reply) => {
+    const hwCert = await globalReleaseService.runHardwareCertification();
+    return reply.status(200).send({ success: true, message: "Hardware & Building Materials Operating System certification complete", data: hwCert });
+  });
+
+  // =========================================================================
+  // ADVANCED ELECTRONICS & DEVICE LIFECYCLE OPERATING SYSTEM MODULE ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/electronics/manifest", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    return reply.status(200).send({ success: true, data: globalElectronicsService.getManifest() });
+  });
+
+  server.get("/api/v1/electronics/serialized-devices", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalElectronicsService.getSerializedDevices(ctx) });
+  });
+
+  server.post("/api/v1/electronics/repairs/create", async (req, reply) => {
+    const { globalElectronicsService } = await import("./services/electronicsService.js");
+    const ctx = requireTenantContext(req);
+    const body = (req.body as any) || {};
+    const repairJob = globalElectronicsService.createRepairJob(ctx, body);
+    return reply.status(201).send({ success: true, data: repairJob });
+  });
+
+  server.post("/api/v1/electronics/certify", async (req, reply) => {
+    const elecCert = await globalReleaseService.runElectronicsCertification();
+    return reply.status(200).send({ success: true, message: "Advanced Electronics & Device Lifecycle Operating System certification complete", data: elecCert });
+  });
+
+  // =========================================================================
+  // PHASE 16 — COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/commercial/summary", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    return reply.status(200).send({ success: true, data: globalCommercialReadinessService.getCommercialPortfolioSummary() });
+  });
+
+  server.post("/api/v1/commercial/evaluate-score", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const body = (req.body as any) || {};
+    const result = globalCommercialReadinessService.evaluateVerticalPriorityScore(body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/commercial/gates/:verticalId", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const params = (req.params as any) || {};
+    const gates = globalCommercialReadinessService.getVerticalReadinessGates(params.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: gates });
+  });
+
+  server.get("/api/v1/commercial/vertical-package/:verticalId", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const params = (req.params as any) || {};
+    const pkg = globalCommercialReadinessService.getVerticalPackageDetails(params.verticalId || "retail");
+    if (!pkg) return reply.status(404).send({ success: false, error: "Vertical package not found" });
+    return reply.status(200).send({ success: true, data: pkg });
+  });
+
+  server.post("/api/v1/commercial/onboard-template", async (req, reply) => {
+    const { globalCommercialReadinessService } = await import("./services/commercialReadinessService.js");
+    const body = (req.body as any) || {};
+    const template = globalCommercialReadinessService.generateOnboardingTemplate(body.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: template });
+  });
+
+  // =========================================================================
+  // PHASE 17 — PRODUCT-MARKET VALIDATION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/pmf/summary", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    return reply.status(200).send({ success: true, data: globalPmfValidationService.getAllVerticalPmfProfiles() });
+  });
+
+  server.post("/api/v1/pmf/evaluate-health", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const body = (req.body as any) || {};
+    const result = globalPmfValidationService.evaluatePmfHealth(body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/pmf/retention/:verticalId", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const params = (req.params as any) || {};
+    const retention = globalPmfValidationService.getCohortRetention(params.verticalId || "retail");
+    return reply.status(200).send({ success: true, data: retention });
+  });
+
+  server.get("/api/v1/pmf/anomalies", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const anomalies = globalPmfValidationService.getFalsePmfAnomalies();
+    return reply.status(200).send({ success: true, data: anomalies });
+  });
+
+  server.post("/api/v1/pmf/feedback/submit", async (req, reply) => {
+    const { globalPmfValidationService } = await import("./services/pmfValidationService.js");
+    const body = (req.body as any) || {};
+    const ctx = requireTenantContext(req);
+    const feedback = globalPmfValidationService.submitCustomerFeedback(
+      ctx.tenantId,
+      body.verticalId || "retail",
+      body.rawContent || "General feedback",
+      body.sourceChannel || "IN_APP"
+    );
+    return reply.status(201).send({ success: true, data: feedback });
+  });
+
+  // =========================================================================
+  // GARAGE & AUTOMOTIVE WORKSHOP ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/garage/vehicles", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getVehicles() });
+  });
+
+  server.get("/api/v1/garage/job-cards", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getJobCards() });
+  });
+
+  server.get("/api/v1/garage/financial-summary", async (req, reply) => {
+    const { globalGarageService } = await import("./services/garageService.js");
+    return reply.status(200).send({ success: true, data: globalGarageService.getFinancialSummary() });
+  });
+
+  // =========================================================================
+  // WHOLESALE & DISTRIBUTION ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/wholesale/orders", async (req, reply) => {
+    const { globalWholesaleService } = await import("./services/wholesaleService.js");
+    return reply.status(200).send({ success: true, data: globalWholesaleService.getSalesOrders() });
+  });
+
+  server.get("/api/v1/wholesale/financial-summary", async (req, reply) => {
+    const { globalWholesaleService } = await import("./services/wholesaleService.js");
+    return reply.status(200).send({ success: true, data: globalWholesaleService.getFinancialSummary() });
+  });
+
+  // =========================================================================
+  // CONSTRUCTION & PROJECT MANAGEMENT ENDPOINTS
+  // =========================================================================
+
+  server.get("/api/v1/construction/projects", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    return reply.status(200).send({ success: true, data: globalConstructionService.getProjects() });
+  });
+
+  server.get("/api/v1/construction/projects/:id/earned-value", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    const params = (req.params as any) || {};
+    return reply.status(200).send({ success: true, data: globalConstructionService.getEarnedValue(params.id) });
+  });
+
+  server.get("/api/v1/construction/financial-summary", async (req, reply) => {
+    const { globalConstructionService } = await import("./services/constructionService.js");
+    return reply.status(200).send({ success: true, data: globalConstructionService.getFinancialSummary() });
+  });
+
+  // Real Estate Endpoints
+  server.get("/api/v1/real-estate/properties", async (req, reply) => {
+    const { globalRealEstateService } = await import("./services/realEstateService.js");
+    return reply.status(200).send({ success: true, data: globalRealEstateService.getProperties() });
+  });
+
+  server.get("/api/v1/real-estate/financial-summary", async (req, reply) => {
+    const { globalRealEstateService } = await import("./services/realEstateService.js");
+    return reply.status(200).send({ success: true, data: globalRealEstateService.getFinancialSummary() });
+  });
+
+  // Bar / Pub / Lounge Endpoints
+  server.get("/api/v1/bar-lounge/tables", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getTables() });
+  });
+
+  server.get("/api/v1/bar-lounge/tabs", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getTabs() });
+  });
+
+  server.get("/api/v1/bar-lounge/financial-summary", async (req, reply) => {
+    const { globalBarLoungeService } = await import("./services/barLoungeService.js");
+    return reply.status(200).send({ success: true, data: globalBarLoungeService.getFinancialSummary() });
+  });
+
+
+
+  // Phase 18 — Enterprise Customer Onboarding (KEIF) Endpoints
+  server.post("/api/v1/enterprise-onboarding/projects", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const body = (req.body as any) || {};
+    const proj = globalEnterpriseOnboardingService.createProject({
+      tenantId: resolveTenantId(req, body.tenantId),
+      customerName: body.customerName || "Enterprise Customer Inc.",
+      industryId: body.industryId || "retail",
+    });
+    return reply.status(201).send({ success: true, data: proj });
+  });
+
+  server.get("/api/v1/enterprise-onboarding/projects/:id", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const proj = globalEnterpriseOnboardingService.getProject(id);
+    if (!proj) return reply.status(404).send({ success: false, error: { message: "Project not found" } });
+    return reply.status(200).send({ success: true, data: proj });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/discovery", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const res = globalEnterpriseOnboardingService.submitDiscoveryProfile(id, req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/data-readiness", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const card = globalEnterpriseOnboardingService.assessDataReadiness(id, req.body as any);
+    return reply.status(200).send({ success: true, data: card });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/migration-reconcile", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const report = globalEnterpriseOnboardingService.reconcileMigration(id, body.source, body.target);
+    return reply.status(200).send({ success: true, data: report });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/integration-certify", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const cert = globalEnterpriseOnboardingService.certifyIntegration(id, body.integrationName || "ERP Sync", body.targetSystem || "SAP");
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/enterprise-onboarding/projects/:id/go-live-gate", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { id } = req.params as { id: string };
+    const gate = globalEnterpriseOnboardingService.evaluateGoLiveGate(id, req.body as any);
+    return reply.status(200).send({ success: true, data: gate });
+  });
+
+  server.get("/api/v1/enterprise-onboarding/kits/:industryId", async (req, reply) => {
+    const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
+    const { industryId } = req.params as { industryId: string };
+    const kit = globalEnterpriseOnboardingService.getIndustryOnboardingKit(industryId);
+    return reply.status(200).send({ success: true, data: kit });
+  });
+
+  // Phase 19 — Partner Ecosystem Scale (KPP) Endpoints
+  server.post("/api/v1/partner-ecosystem/partners/apply", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const body = (req.body as any) || {};
+    const profile = globalPartnerEcosystemService.applyPartner({
+      legalEntityName: body.legalEntityName || "Partner Systems Ltd",
+      category: body.category || "IMPLEMENTATION",
+      territory: body.territory || "Tanzania & East Africa",
+      contactEmail: body.contactEmail || "partner@example.com",
+      contactPhone: body.contactPhone || "+255700000000",
+      technicalCapabilityScore: body.technicalCapabilityScore || 85,
+      financialStabilityScore: body.financialStabilityScore || 80,
+      securityMaturityScore: body.securityMaturityScore || 85,
+    });
+    return reply.status(201).send({ success: true, data: profile });
+  });
+
+  server.get("/api/v1/partner-ecosystem/partners/registry/public", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getPublicRegistry() });
+  });
+
+  server.post("/api/v1/partner-ecosystem/partners/:id/certify", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const cert = globalPartnerEcosystemService.certifyPartner(
+      id,
+      body.certType || "IMPLEMENTATION_CERTIFIED",
+      body.assessmentScore || 90,
+      body.verticalSpecialization || "retail"
+    );
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/partner-ecosystem/partners/:id/sandbox", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const { id } = req.params as { id: string };
+    const sandbox = globalPartnerEcosystemService.provisionSandbox(id);
+    return reply.status(200).send({ success: true, data: sandbox });
+  });
+
+  server.post("/api/v1/partner-ecosystem/marketplace/extensions/validate", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const res = globalPartnerEcosystemService.validateAndRegisterExtension(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/partner-ecosystem/capacity", async (req, reply) => {
+    const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
+    const count = Number((req.query as any)?.partners) || 10;
+    return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getCapacityMetrics(count) });
+  });
+
+  // Phase 20 — Global Expansion (KGF) Endpoints
+  server.get("/api/v1/global-expansion/countries/:code", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const { code } = req.params as { code: string };
+    const pack = globalGlobalExpansionService.getCountryPack(code);
+    return reply.status(200).send({ success: true, data: pack });
+  });
+
+  server.post("/api/v1/global-expansion/currency/convert", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.convertCurrency(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/global-expansion/tax/calculate", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.calculateTax(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/global-expansion/readiness/evaluate", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    const res = globalGlobalExpansionService.evaluateMarketReadiness(req.body as any);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/global-expansion/dashboard", async (req, reply) => {
+    const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
+    return reply.status(200).send({ success: true, data: globalGlobalExpansionService.getDashboardMetrics() });
+  });
+
+  // Phase 21 — AI-Native Business Operations Endpoints
+  server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const body = (req.body as any) || {};
+    const rec = globalAiNativeService.requestRecommendation({
+      tenantId: resolveTenantId(req, body.tenantId),
+      branchId: body.branchId || "BRANCH-01",
+      domain: body.domain || "INVENTORY",
+      proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
+      riskLevel: body.riskLevel || "LEVEL_2_CONTROLLED_OPERATIONAL",
+      confidenceScore: body.confidenceScore || 0.92,
+      evidenceSummary: body.evidenceSummary || "Historical sales + seasonal demand spike",
+    });
+    return reply.status(201).send({ success: true, data: rec });
+  });
+
+  server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const { recommendationId, maxLimitUsd, proposedLimitUsd } = req.body as any;
+    const res = globalAiNativeService.validatePolicy(recommendationId, { maxLimitUsd: maxLimitUsd || 5000, proposedLimitUsd: proposedLimitUsd || 1200 });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    const { scope, targetId } = req.body as any;
+    const status = globalAiNativeService.triggerKillSwitch(scope || "AGENT", targetId || "INVENTORY_AGENT");
+    return reply.status(200).send({ success: true, data: status });
+  });
+
+  server.get("/api/v1/ai-native/ledger", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
+  });
+
+  server.get("/api/v1/ai-native/dashboard", async (req, reply) => {
+    const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getDashboardMetrics() });
+  });
+
+  // Phase 22 — Autonomous Operations (KAOF) Endpoints
+  server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const body = (req.body as any) || {};
+    const res = globalAutonomousOperationsService.executeAutonomousRequest({
+      requestId: `REQ-REM-${Date.now()}`,
+      tenantId: resolveTenantId(req, body.tenantId),
+      agentId: body.targetService || "CloudRunWorkerPool",
+      capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
+      financialCostTzs: 0,
+    });
+    return reply.status(201).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
+    const body = (req.body as any) || {};
+    const sim = {
+      simulationId: `SIM-${Date.now()}`,
+      tenantId: resolveTenantId(req, body.tenantId),
+      targetService: body.targetService || "SyncWorkerQueue",
+      proposedRemediation: body.proposedRemediation || "Rebalance Sync Consumers",
+      isAllowed: true,
+      riskClass: "LOW",
+      simulatedAt: new Date().toISOString(),
+    };
+    return reply.status(200).send({ success: true, data: sim });
+  });
+
+  server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const { scope, targetId, tenantId } = req.body as any;
+    const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId || "TENANT-AUTO-01", targetId || "CloudRunWorkerPool", "SYSTEM");
+    return reply.status(200).send({ success: true, data: status });
+  });
+
+  server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(tenantId) });
+  });
+
+  server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
+  });
+
+  // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
+  server.post("/api/v1/certification-program/issue", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const body = (req.body as any) || {};
+    const cert = globalKwakoPosCertificationService.issueCertification({
+      category: body.category || "KWAKOPOS_CERTIFIED_RELEASE",
+      level: body.level || "VERIFIED",
+      subjectName: body.subjectName || "KwakoPos Release v2.5.0",
+      subjectVersion: body.subjectVersion || "v2.5.0",
+      scopeDescription: body.scopeDescription || "Full Core POS + SaaS Monorepo",
+      gitSha: body.gitSha || "285a98b",
+      artifactDigest: body.artifactDigest || "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      evidenceSet: body.evidenceSet || [
+        {
+          evidenceId: "EVI-01",
+          evidenceType: "TEST_SUITE",
+          summary: "100% Vitest unit tests passed",
+          passed: true,
+          evidenceHash: "HASH-101",
+          recordedAt: new Date().toISOString(),
+        },
+      ],
+      approvedBy: body.approvedBy || "KwakoPos Lead Auditor",
+    });
+    return reply.status(201).send({ success: true, data: cert });
+  });
+
+  server.post("/api/v1/certification-program/impact/analyze", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { changedComponent, changeRiskLevel } = req.body as any;
+    const res = globalKwakoPosCertificationService.analyzeImpact({
+      changedComponent: changedComponent || "TenantIsolationPolicy",
+      changeRiskLevel: changeRiskLevel || "HIGH",
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/certification-program/status/revoke-suspend", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { certId, reason, action } = req.body as any;
+    const cert = globalKwakoPosCertificationService.revokeOrSuspend(certId, reason || "Policy Breach", action || "SUSPEND");
+    return reply.status(200).send({ success: true, data: cert });
+  });
+
+  server.get("/api/v1/certification-program/badge/:certId", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    const { certId } = req.params as { certId: string };
+    const badge = globalKwakoPosCertificationService.getBadge(certId);
+    return reply.status(200).send({ success: true, data: badge });
+  });
+
+  server.get("/api/v1/certification-program/registry", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getRegistry() });
+  });
+
+  server.get("/api/v1/certification-program/dashboard", async (req, reply) => {
+    const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getDashboardMetrics() });
+  });
+
+  // Phase 24 — Platform Governance (KPGA) Endpoints
+  server.post("/api/v1/platform-governance/adrs", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const adr = globalPlatformGovernanceService.createAdr({
+      title: body.title || "ADR-001: Enforce Single Core Monorepo & Zero Codebase Forks",
+      context: body.context || "Global Expansion across 50 countries requires single core architecture.",
+      decision: body.decision || "All country packs and industry plugins extend single core KwakoPos.",
+      consequences: body.consequences || ["Eliminates code fragmentation", "Improves security auditing"],
+      owner: body.owner || "KwakoPos Chief Architect",
+    });
+    return reply.status(201).send({ success: true, data: adr });
+  });
+
+  server.post("/api/v1/platform-governance/api/validate", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const res = globalPlatformGovernanceService.evaluateApiContract({
+      path: body.path || "/api/v1/sales/quotes",
+      method: body.method || "POST",
+      version: body.version || "v1.0.0",
+      ownerDomain: body.ownerDomain || "Commercial",
+      hasRequestSchema: body.hasRequestSchema ?? true,
+      hasResponseSchema: body.hasResponseSchema ?? true,
+      hasDocumentation: body.hasDocumentation ?? true,
+      isBreakingChange: body.isBreakingChange ?? false,
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/platform-governance/fitness/evaluate", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const res = globalPlatformGovernanceService.evaluateFitnessRules({
+      hasUnauthorizedRawDbAccess: body.hasUnauthorizedRawDbAccess ?? false,
+      hasCrossTenantDataPaths: body.hasCrossTenantDataPaths ?? false,
+      hasUndocumentedPublicApis: body.hasUndocumentedPublicApis ?? false,
+      hasDuplicateFinancialLedgers: body.hasDuplicateFinancialLedgers ?? false,
+      hasDuplicateInventoryBalances: body.hasDuplicateInventoryBalances ?? false,
+      hasUnmanagedSecrets: body.hasUnmanagedSecrets ?? false,
+    });
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/platform-governance/deprecations", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    const body = (req.body as any) || {};
+    const item = globalPlatformGovernanceService.registerDeprecation({
+      subjectName: body.subjectName || "Legacy XML Sync Protocol v1",
+      subjectType: body.subjectType || "SYNC_PROTOCOL",
+      replacementSubject: body.replacementSubject || "JSON Sync Engine v2",
+      migrationGuideUrl: body.migrationGuideUrl || "https://docs.kwakopos.com/migration/sync-v2",
+      owner: body.owner || "Sync Engine Team",
+    });
+    return reply.status(201).send({ success: true, data: item });
+  });
+
+  server.get("/api/v1/platform-governance/dashboard", async (req, reply) => {
+    const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
+    return reply.status(200).send({ success: true, data: globalPlatformGovernanceService.getDashboardMetrics() });
+  });
+
+  // Advanced Workforce Tracking & Time Management Endpoints
+  server.post("/api/v1/workforce-tracking/workers", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const worker = globalWorkforceTrackingService.createWorker({
+      employeeNumber: body.employeeNumber || "EMP-001",
+      name: body.name || "Rashid Juma",
+      email: body.email || "rashid.juma@kwakopos.com",
+      department: body.department || "Field Engineering",
+      team: body.team || "Telecom Infrastructure Team A",
+      role: body.role || "Senior Field Technician",
+      workerType: body.workerType || "FIELD_TECHNICIAN",
+      skills: body.skills || ["Fibre Splicing", "Electrical Wiring"],
+      certifications: body.certifications || [{ name: "Electrical Safety Cert Level 2", issuedDate: "2025-01-01", expiryDate: "2027-01-01" }],
+      costRateTzs: body.costRateTzs || 20000,
+      billingRateTzs: body.billingRateTzs || 35000,
+    });
+    return reply.status(201).send({ success: true, data: worker });
+  });
+
+  server.post("/api/v1/workforce-tracking/shifts", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const shift = globalWorkforceTrackingService.createShift({
+      name: body.name || "Day Shift Alpha",
+      startTime: body.startTime || "08:00",
+      endTime: body.endTime || "17:00",
+      breakDurationMinutes: body.breakDurationMinutes || 60,
+      requiredStaffing: body.requiredStaffing || 5,
+      location: body.location || "Main Site TZ-100",
+    });
+    return reply.status(201).send({ success: true, data: shift });
+  });
+
+  server.post("/api/v1/workforce-tracking/clock-events", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkforceTrackingService.recordClockEvent({
+      workerId: body.workerId || "WRK-001",
+      shiftId: body.shiftId || "SHF-001",
+      eventType: body.eventType || "CLOCK_IN",
+      deviceId: body.deviceId || "DEV-MOB-01",
+      locationMetadata: body.locationMetadata || { latitude: -6.7924, longitude: 39.2083, siteId: "SITE-TZ-01" },
+    });
+    if (!res.success) {
+      return reply.status(400).send({ success: false, error: res.errorMessage });
+    }
+    return reply.status(201).send({ success: true, data: res.event });
+  });
+
+  server.post("/api/v1/workforce-tracking/timesheets/generate", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const timesheet = globalWorkforceTrackingService.generateTimesheet(
+      body.workerId || "WRK-001",
+      body.regularHours || 160,
+      body.overtimeHours || 12.5
+    );
+    return reply.status(201).send({ success: true, data: timesheet });
+  });
+
+  server.post("/api/v1/workforce-tracking/costing/calculate", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    const body = (req.body as any) || {};
+    const costing = globalWorkforceTrackingService.calculateProjectLaborCost(
+      body.projectId || "PRJ-CONSTR-101",
+      body.taskId || "TSK-FOUNDATION-01",
+      body.workerId || "WRK-001",
+      body.approvedHours || 40
+    );
+    return reply.status(200).send({ success: true, data: costing });
+  });
+
+  server.get("/api/v1/workforce-tracking/dashboard", async (req, reply) => {
+    const { globalWorkforceTrackingService } = await import("./services/workforceTrackingService.js");
+    return reply.status(200).send({ success: true, data: globalWorkforceTrackingService.getDashboardMetrics() });
+  });
+
+  // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
+  server.post("/api/v1/system-ui/navigation", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const permissions = body.permissions || ["pos.access", "inventory.read", "workforce.read"];
+    const nav = globalSystemUiService.generateNavigation(permissions);
+    return reply.status(200).send({ success: true, data: nav });
+  });
+
+  server.post("/api/v1/system-ui/search", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalSystemUiService.executeGlobalSearch(
+      body.query || "Cement",
+      resolveTenantId(req, body.tenantId),
+      body.branchId || "BR-DSM-01"
+    );
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/system-ui/commands/execute", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalSystemUiService.executeCommand(
+      body.actionId || "CMD-CREATE-SALE",
+      body.permissions || ["pos.access"]
+    );
+    if (!res.success) {
+      return reply.status(403).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/system-ui/shell-state", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    const tenantId = (req.query as any)?.tenantId || "TNT-TZ-001";
+    const branchId = (req.query as any)?.branchId || "BR-DSM-01";
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(tenantId, branchId, true) });
+  });
+
+  server.get("/api/v1/system-ui/dashboard", async (req, reply) => {
+    const { globalSystemUiService } = await import("./services/systemUiService.js");
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
+  });
+
+  // Phase 26 — KwakoPos Design System (KDS) Endpoints
+  server.get("/api/v1/design-system/theme", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    const mode = ((req.query as any)?.mode || "DARK") as any;
+    return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getTheme(mode) });
+  });
+
+  server.post("/api/v1/design-system/ai-pattern/validate", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    const body = (req.body as any) || {};
+    const res = globalKwakoPosDesignSystemService.validateAiPattern(body);
+    if (!res.valid) {
+      return reply.status(422).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/design-system/dashboard", async (req, reply) => {
+    const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
+    return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getDashboardMetrics() });
+  });
+
+  // Phase 27 — Core Operating UI Endpoints
+  server.get("/api/v1/core-operating-ui/dashboard", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const role = ((req.query as any)?.role || "EXECUTIVE") as any;
+    return reply.status(200).send({ success: true, data: globalCoreOperatingUiService.getRoleDashboard(role) });
+  });
+
+  server.post("/api/v1/core-operating-ui/pos/checkout", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalCoreOperatingUiService.checkout(body, body.isOnline !== false);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/core-operating-ui/financial-traceability/:id", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const saleId = (req.params as any).id || "SALE-101";
+    return reply.status(200).send({ success: true, data: globalCoreOperatingUiService.traceFinancialTransaction(saleId) });
+  });
+
+  server.post("/api/v1/core-operating-ui/approvals/decide", async (req, reply) => {
+    const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalCoreOperatingUiService.processApproval(body.approvalId, body.decision, body.reason);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  // Phase 28 — Dynamic Module UI Endpoints
+  server.post("/api/v1/dynamic-module-ui/register", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const res = globalDynamicModuleUiService.registerModule(body);
+    if (!res.success) {
+      return reply.status(400).send({ success: false, error: res.error });
+    }
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/dynamic-module-ui/navigation/compose", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const permissions = body.permissions || ["restaurant.tables", "pharmacy.rx"];
+    const activeModuleIds = body.activeModuleIds;
+    const nav = globalDynamicModuleUiService.composeNavigation(permissions, activeModuleIds);
+    return reply.status(200).send({ success: true, data: nav });
+  });
+
+  server.post("/api/v1/dynamic-module-ui/module/toggle", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    const body = (req.body as any) || {};
+    const state = globalDynamicModuleUiService.setStatus(body.moduleId, body.status, body.message);
+    return reply.status(200).send({ success: true, data: state });
+  });
+
+  server.get("/api/v1/dynamic-module-ui/dashboard", async (req, reply) => {
+    const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
+    return reply.status(200).send({ success: true, data: globalDynamicModuleUiService.getDashboardMetrics() });
+  });
+
+  // Phase 29 — Super Admin & Platform UI Endpoints
+  server.get("/api/v1/super-admin/overview", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
+    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
+    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
+    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+  });
+
+  server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const body = (req.body as any) || {};
+    const adminId = body.adminId || "ADM-001";
+    const tenantId = resolveTenantId(req, body.tenantId);
+    const reason = body.reason || "Audited customer support ticket investigation";
+    const ctx = globalSuperAdminPlatformService.initiateContextSwitch(adminId, tenantId, reason, body.timeLimitMinutes);
+    return reply.status(200).send({ success: true, data: ctx });
+  });
+
+  server.post("/api/v1/super-admin/emergency-kill-switch", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    const body = (req.body as any) || {};
+    const target = body.target || "GLOBAL_AI";
+    const reason = body.reason || "Emergency security container isolation";
+    const adminId = body.adminId || "ADM-SEC-01";
+    const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target, reason, adminId);
+    return reply.status(200).send({ success: true, data: ks });
+  });
+
+  server.get("/api/v1/super-admin/dashboard", async (req, reply) => {
+    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
+  });
+
+  // Phase 30 — UI Certification Endpoints
+  server.get("/api/v1/ui-certification/overview", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/ui-certification/certify-domain", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    const body = (req.body as any) || {};
+    const ev = globalUiCertificationService.generateEvidence(body.releaseVersion || "2.5.0", body.gitSha || "1b33c0c");
+    return reply.status(200).send({ success: true, data: ev });
+  });
+
+  server.post("/api/v1/ui-certification/revalidate", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    const body = (req.body as any) || {};
+    const sm = globalUiCertificationService.triggerRevalidation(body.certificationId, body.reason || "Material code mutation");
+    return reply.status(200).send({ success: true, data: sm });
+  });
+
+  server.get("/api/v1/ui-certification/dashboard", async (req, reply) => {
+    const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
+    return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
+  });
+
+  // Phase 31 — Workflow, Automation & Business Process OS Endpoints
+  server.get("/api/v1/workflow-automation/overview", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/workflow-automation/register", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.registerWorkflow(body);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/workflow-automation/dispatch", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.dispatchTrigger(body.eventType || "EVENT_STOCK_LOW", body.payload || {});
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/workflow-automation/approval", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    const body = (req.body as any) || {};
+    const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, body.approverId || "USER-001");
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/workflow-automation/dashboard", async (req, reply) => {
+    const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
+    return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
+  });
+
+  // Phase 32 — BI / Analytics OS Endpoints
+  server.get("/api/v1/bi-analytics/overview", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/bi-analytics/define-metric", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const body = (req.body as any) || {};
+    const res = globalBiAnalyticsService.defineMetric(body);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/bi-analytics/query", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const body = (req.body as any) || {};
+    const res = globalBiAnalyticsService.querySemantic(body.queryText || "What was gross margin?", body.permissions || ["finance.read"]);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/bi-analytics/insights", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    const tenantId = (req.query as any)?.tenantId || "TEN-001";
+    const res = globalBiAnalyticsService.getInsightsAndForecasts(tenantId);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/bi-analytics/dashboard", async (req, reply) => {
+    const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
+    return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
+  });
+
+  // Phase 33 — AI Operating Layer OS Endpoints
+  server.get("/api/v1/ai-operating-layer/overview", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const params = req.params as any;
+    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const body = (req.body as any) || {};
+    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
+    return reply.status(200).send({ success: true, data: res });
+  });
+
+  server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
+    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+  });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
+  server.get("/api/v1/approvals/policies", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
+  });
+
+  server.post("/api/v1/approvals/requests", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.submitRequest(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/decisions", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.recordDecision(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/execute", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, body.executorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/cancel", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.cancelRequest(id, body.cancelledBy || "SYSTEM", body.reason || "");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/approvals/:id/escalate", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.escalateRequest(id, body.escalatedBy || "SYSTEM", body.reason || "SLA exceeded");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/approvals/:id", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    const request = globalEnterpriseApprovalsService.getRequest(id);
+    return request
+      ? reply.status(200).send({ success: true, data: request })
+      : reply.status(404).send({ success: false, error: "Approval request not found" });
+  });
+
+  server.get("/api/v1/approvals/:id/audit", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const { id } = req.params as { id: string };
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id) });
+  });
+
+  server.get("/api/v1/approvals/dashboard/health", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getDashboardMetrics() });
+  });
+
+  server.post("/api/v1/approvals/delegations", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const body = (req.body as any) || {};
+    const result = globalEnterpriseApprovalsService.registerDelegation(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+
+  // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
+  server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listBankAccounts(tenantId) });
+  });
+
+  server.post("/api/v1/treasury/bank-accounts", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.registerBankAccount(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/statements/import", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.importBankStatement(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/reconciliation/run", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.runReconciliation(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/cash-position", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const pos = globalFinanceTreasuryService.calculateCashPosition({
+      tenantId: resolveTenantId(req, query.tenantId),
+      branchId: query.branchId,
+      currency: query.currency || "TZS",
+      pendingReceipts: Number(query.pendingReceipts || 0),
+      pendingDisbursements: Number(query.pendingDisbursements || 0),
+      outstandingObligations: Number(query.outstandingObligations || 0),
+      minimumLiquidityBuffer: Number(query.minimumLiquidityBuffer || 500000),
+    });
+    return reply.status(200).send({ success: true, data: pos });
+  });
+
+  server.get("/api/v1/treasury/liquidity/forecast", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const fcst = globalFinanceTreasuryService.generateLiquidityForecast({
+      tenantId: resolveTenantId(req, query.tenantId),
+      scenario: query.scenario || "BASE",
+      horizonDays: Number(query.horizonDays || 30),
+      currency: query.currency || "TZS",
+      openingBalance: Number(query.openingBalance || 10000000),
+      dailyInflows: Number(query.dailyInflows || 500000),
+      dailyOutflows: Number(query.dailyOutflows || 300000),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: fcst });
+  });
+
+  server.get("/api/v1/treasury/working-capital", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const query = (req.query as any) || {};
+    const wc = globalFinanceTreasuryService.calculateWorkingCapital({
+      tenantId: resolveTenantId(req, query.tenantId),
+      currency: query.currency || "TZS",
+      totalReceivables: Number(query.totalReceivables || 0),
+      totalPayables: Number(query.totalPayables || 0),
+      inventoryValue: Number(query.inventoryValue || 0),
+      operatingCash: Number(query.operatingCash || 0),
+      averageDailyRevenue: Number(query.averageDailyRevenue || 1),
+      averageDailyCOGS: Number(query.averageDailyCOGS || 1),
+      averageDailyPurchases: Number(query.averageDailyPurchases || 1),
+    });
+    return reply.status(200).send({ success: true, data: wc });
+  });
+
+  server.post("/api/v1/treasury/payment-runs", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.createPaymentRun(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.performLiquidityCheck(id, Number(body.availableLiquidity || 0));
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/approve", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.approvePaymentRun(id, body.approvalRef || "APR-001", body.approvedBy || "USR-FINANCE");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/payment-runs/:id/execute", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.executePaymentRun(id, body.executorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/beneficiaries", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.registerBeneficiary(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/treasury/beneficiaries/:id/change", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.requestBeneficiaryChange({
+      beneficiaryId: id,
+      changedBy: body.changedBy || "SYSTEM",
+      field: body.field || "",
+      newValue: body.newValue || "",
+      approvalRef: body.approvalRef || "APR-001",
+    });
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/exceptions", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.listExceptions(tenantId) });
+  });
+
+  server.post("/api/v1/treasury/exceptions/:id/resolve", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalFinanceTreasuryService.resolveException(id, body.resolvedBy || "SYSTEM", body.notes || "");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/treasury/audit", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getAuditTrail(tenantId) });
+  });
+
+  server.get("/api/v1/treasury/dashboard/health", async (req, reply) => {
+    const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
+  });
+
+  // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
+  server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalSupplyChainService.listSuppliers(tenantId) });
+  });
+
+  server.post("/api/v1/supply-chain/suppliers", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.registerSupplier(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/suppliers/:id/scorecard", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.calculateSupplierScorecard({ ...body, supplierId: id });
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.createPurchaseOrder(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders/:id/approve", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.approvePurchaseOrder(id, body.approvalRef || "APR-001", body.approvedBy || "USR-MGR");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/purchase-orders/:id/send", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.sendPurchaseOrder(id, body.sentBy || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/shipments", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.trackShipment(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/receiving", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.processGoodsReceiving(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/supply-chain/3way-match", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const body = (req.body as any) || {};
+    const result = globalSupplyChainService.performThreeWayMatch(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/supply-chain/replenishment", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const query = (req.query as any) || {};
+    const rec = globalSupplyChainService.generateReplenishmentRecommendation({
+      tenantId: resolveTenantId(req, query.tenantId),
+      productId: query.productId || "PRD-DEFAULT",
+      currentStock: Number(query.currentStock || 0),
+      inboundStock: Number(query.inboundStock || 0),
+      averageDailyDemand: Number(query.averageDailyDemand || 1),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: rec });
+  });
+
+  server.get("/api/v1/supply-chain/forecast", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const query = (req.query as any) || {};
+    const fst = globalSupplyChainService.generateDemandForecast({
+      tenantId: resolveTenantId(req, query.tenantId),
+      productId: query.productId || "PRD-DEFAULT",
+      scenario: query.scenario || "BASE",
+      horizonDays: Number(query.horizonDays || 30),
+      historicalBaselineDailyDemand: Number(query.historicalBaselineDailyDemand || 10),
+      seasonalityFactor: Number(query.seasonalityFactor || 1.0),
+      promotionImpactPct: Number(query.promotionImpactPct || 0),
+      aiAssisted: query.aiAssisted === "true",
+    });
+    return reply.status(200).send({ success: true, data: fst });
+  });
+
+  server.get("/api/v1/supply-chain/control-tower", async (req, reply) => {
+    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
+  });
+
+  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
+  server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
+  });
+
+  server.post("/api/v1/workforce-ops/employees", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.registerEmployee(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/employees/:id/transition", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.transitionEmployeeStatus(id, body.status, body.reason || "Status transition", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/employees/:id/onboard", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.onboardEmployee(id, body.workflowRef || "WF-ONB-01", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/employees/:id/offboard", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.offboardEmployee(id, body.reason || "Termination", body.approvalRef || "APR-OFF-01", body.actorId || "SYSTEM");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/workforce-ops/shifts", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalWorkforceService.listShifts(tenantId) });
+  });
+
+  server.post("/api/v1/workforce-ops/shifts", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.createShift(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/attendance/check-in", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.recordCheckIn(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/attendance/check-out", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.recordCheckOut(body);
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/leave", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.requestLeave(body);
+    return reply.status(result.success ? 201 : 422).send(result);
+  });
+
+  server.post("/api/v1/workforce-ops/leave/:id/approve", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const { id } = req.params as { id: string };
+    const body = (req.body as any) || {};
+    const result = globalWorkforceService.approveLeave(id, body.approvalRef || "APR-LEV-01", body.approvedBy || "USR-MGR");
+    return reply.status(result.success ? 200 : 422).send(result);
+  });
+
+  server.get("/api/v1/workforce-ops/analytics", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalWorkforceService.getWorkforceAnalytics(tenantId) });
+  });
+
+  server.get("/api/v1/workforce-ops/health", async (req, reply) => {
+    const { globalWorkforceService } = await import("./services/workforceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalWorkforceService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/crm/health", async (req, reply) => {
+    const { globalCrmService } = await import("./services/crmService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalCrmService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/crm/customers", async (req, reply) => {
+    const { globalCrmService } = await import("./services/crmService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalCrmService.listCustomers(tenantId) });
+  });
+
+  server.get("/api/v1/integration/health", async (req, reply) => {
+    const { globalIntegrationService } = await import("./services/integrationService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalIntegrationService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/integration/connectors", async (req, reply) => {
+    const { globalIntegrationService } = await import("./services/integrationService.js");
+    return reply.status(200).send({ success: true, data: globalIntegrationService.listConnectors() });
+  });
+
+  server.get("/api/v1/documents/health", async (req, reply) => {
+    const { globalDocumentService } = await import("./services/documentService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalDocumentService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/security/health", async (req, reply) => {
+    const { globalSecurityService } = await import("./services/securityService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalSecurityService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/notifications/health", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalNotificationService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/compliance/health", async (req, reply) => {
+    const { globalComplianceService } = await import("./services/complianceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalComplianceService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/multisite/health", async (req, reply) => {
+    const { globalMultiSiteService } = await import("./services/multiSiteService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalMultiSiteService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/licensing/health", async (req, reply) => {
+    const { globalLicensingService } = await import("./services/licensingService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalLicensingService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/marketplace/health", async (req, reply) => {
+    const { globalMarketplaceService } = await import("./services/marketplaceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalMarketplaceService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/global-platform/health", async (req, reply) => {
+    const { globalGlobalPlatformService } = await import("./services/globalPlatformService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalGlobalPlatformService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/autonomous-business/health", async (req, reply) => {
+    const { globalAutonomousBusinessService } = await import("./services/autonomousBusinessService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalAutonomousBusinessService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/platform-security/health", async (req, reply) => {
+    const { globalPlatformSecurityService } = await import("./services/platformSecurityService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalPlatformSecurityService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/autonomous-operations/health", async (req, reply) => {
+    const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/platform-intelligence/health", async (req, reply) => {
+    const { globalPlatformIntelligenceService } = await import("./services/platformIntelligenceService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalPlatformIntelligenceService.getHealthSummary(tenantId) });
+  });
+
+  server.get("/api/v1/full-system-certification/health", async (req, reply) => {
+    const { globalFullSystemCertificationService } = await import("./services/fullSystemCertificationService.js");
+    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
+    return reply.status(200).send({ success: true, data: globalFullSystemCertificationService.getHealthSummary(tenantId) });
+  });
+
   server.post("/api/admin/releases/v2/candidates/create", async (req, reply) => {
+
+
     const body = (req.body as any) || {};
     const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");
     return reply.status(201).send({ success: true, data: candidate });

@@ -1,0 +1,29 @@
+{
+  "certificateId": "KWAKOPOS-CERT-GOLIVE-1788069497410",
+  "status": "KWAKOPOS_GO_LIVE_CERTIFIED",
+  "releaseVersion": "2.5.0",
+  "releaseTagTarget": "v2.5.0",
+  "identity": {
+    "gitSha": "a9eb1d89de5e411272e7a7633cab2c22a7f33d06",
+    "candidateSha": "a9eb1d89de5e411272e7a7633cab2c22a7f33d06",
+    "containerSourceSha": "a9eb1d89de5e411272e7a7633cab2c22a7f33d06",
+    "certifiedSha": "a9eb1d89de5e411272e7a7633cab2c22a7f33d06",
+    "identityMatchVerified": true
+  },
+  "subsystemProofs": {
+    "aiAuthorization": "VERIFIED (Server-derived JWT identity, RBAC checks & 4/4 adversarial security tests passing)",
+    "tenantIsolation": "VERIFIED (Cross-tenant boundary protection & database level scoping passing)",
+    "sessionPersistence": "VERIFIED (Mandatory PostgreSQL SessionStoreProvider enforced in production)",
+    "databaseMigration": "VERIFIED (Strict prisma migrate deploy gate enforced)",
+    "offlineSync": "VERIFIED (SyncEngine delta convergence & offline queue replay passing)",
+    "fullSystemCertification": "VERIFIED (181/181 master certification pillars & 60/60 monorepo modules active)"
+  },
+  "metrics": {
+    "masterCertificationPillarsPassed": 181,
+    "masterCertificationPillarsTotal": 181,
+    "activeMonorepoModulesCount": 60,
+    "adversarialSecurityTestsPassed": 4
+  },
+  "issuedAt": "2026-08-30T05:58:17.410Z",
+  "authority": "KwakoPos Release Governance Authority"
+}

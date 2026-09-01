@@ -8,9 +8,8 @@ runConfig:
 
 env:
   - variable: DATABASE_URL
-    value: "postgresql://neondb_owner:npg_mwvsp0AXBaF6@ep-divine-math-aydho7qc-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    secret: DATABASE_URL
     availability:
-      - BUILD
       - RUNTIME
   - variable: NODE_ENV
     value: "production"
@@ -21,6 +20,6 @@ env:
     availability:
       - RUNTIME
   - variable: JWT_SECRET
-    value: "kwakopos-super-secret-jwt-key-change-in-production-min32chars"
+    secret: JWT_SECRET
     availability:
       - RUNTIME

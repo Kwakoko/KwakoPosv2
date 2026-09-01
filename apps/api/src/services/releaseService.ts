@@ -1,27 +1,31 @@
 import { globalReleaseRepository } from "@kwakopos2/database";
-import { runReleaseQualityGates } from "../../../../scripts/release/quality-gates.js";
-import { executeAutomatedRollback } from "../../../../scripts/release/rollback-engine.js";
-import { generateAIReleaseSummary } from "../../../../scripts/release/ai-release-notes-generator.js";
-import { generateReleaseManifest } from "../../../../scripts/release/release-manifest-generator.js";
-import { generateSBOM } from "../../../../scripts/release/sbom-generator.js";
-import { generateArtifactAttestation } from "../../../../scripts/release/artifact-attestor.js";
-import { evaluateReleaseRisk } from "../../../../scripts/release/release-risk-engine.js";
-import { ReleaseStateMachineEngine } from "../../../../scripts/release/release-state-machine.js";
-import { ProgressiveDeliveryController } from "../../../../scripts/release/progressive-delivery-controller.js";
-import { computeDORAMetrics } from "../../../../scripts/release/dora-metrics-engine.js";
-import { runDisasterRecoveryVerification } from "../../../../scripts/release/disaster-recovery-verifier.js";
 import { globalReleaseNotificationService } from "./releaseNotificationService.js";
 import * as fs from "fs";
 import * as path from "path";
 
-const globalProgressiveController = new ProgressiveDeliveryController("2.2.0");
-
 export class ReleaseService {
+  private progressiveController: any = null;
+
+  private async getProgressiveController() {
+    if (!this.progressiveController) {
+      const { ProgressiveDeliveryController } = await import("../../../../scripts/release/progressive-delivery-controller.js");
+      this.progressiveController = new ProgressiveDeliveryController("2.5.0");
+    }
+    return this.progressiveController;
+  }
   async getDashboardData() {
     const rootPkg = JSON.parse(
       fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
     );
-    const currentVersion = rootPkg.version || "2.2.0";
+    const currentVersion = rootPkg.version || "2.5.0";
+
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const { generateSBOM } = await import("../../../../scripts/release/sbom-generator.js");
+    const { generateArtifactAttestation } = await import("../../../../scripts/release/artifact-attestor.js");
+    const { evaluateReleaseRisk } = await import("../../../../scripts/release/release-risk-engine.js");
+    const { computeDORAMetrics } = await import("../../../../scripts/release/dora-metrics-engine.js");
+    const { runDisasterRecoveryVerification } = await import("../../../../scripts/release/disaster-recovery-verifier.js");
+    const { generateAIReleaseSummary } = await import("../../../../scripts/release/ai-release-notes-generator.js");
 
     const manifest = generateReleaseManifest({ version: currentVersion });
     const sbom = generateSBOM(currentVersion);
@@ -29,7 +33,8 @@ export class ReleaseService {
     const risk = evaluateReleaseRisk();
     const dora = computeDORAMetrics();
     const dr = runDisasterRecoveryVerification();
-    const progressive = globalProgressiveController.getStatus();
+    const progController = await this.getProgressiveController();
+    const progressive = progController.getStatus();
 
     const versions = globalReleaseRepository.getAllVersions();
     const deployments = globalReleaseRepository.getDeploymentHistory();
@@ -68,18 +73,18 @@ export class ReleaseService {
       },
       releaseTimeline: versions.length > 0 ? versions : [
         {
-          id: "VER-2.2.0",
-          version: "2.2.0",
+          id: `VER-${currentVersion}`,
+          version: currentVersion,
           major: 2,
-          minor: 2,
+          minor: 5,
           patch: 0,
           releaseType: "MINOR",
-          gitTag: "v2.2.0",
+          gitTag: `v${currentVersion}`,
           commitHash: manifest.gitSha,
           artifactDigest: attestation.digest,
           releaseState: "RELEASED",
           releaseRisk: risk.riskLevel,
-          releaseNotes: generateAIReleaseSummary("2.2.0"),
+          releaseNotes: generateAIReleaseSummary(currentVersion),
           releaseDate: new Date().toISOString(),
           deploymentStatus: "DEPLOYED",
           buildNumber: 15,
@@ -89,7 +94,7 @@ export class ReleaseService {
       deploymentHistory: deployments.length > 0 ? deployments : [
         {
           id: "DEP-001",
-          appVersionId: "VER-2.2.0",
+          appVersionId: `VER-${currentVersion}`,
           environment: "production",
           revision: "kwakopos-prod-001",
           artifactDigest: attestation.digest,
@@ -108,6 +113,14 @@ export class ReleaseService {
   }
 
   async triggerReleasePipeline(options?: { dryRun?: boolean }) {
+    const { ReleaseStateMachineEngine } = await import("../../../../scripts/release/release-state-machine.js");
+    const { runReleaseQualityGates } = await import("../../../../scripts/release/quality-gates.js");
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const { generateSBOM } = await import("../../../../scripts/release/sbom-generator.js");
+    const { generateArtifactAttestation } = await import("../../../../scripts/release/artifact-attestor.js");
+    const { evaluateReleaseRisk } = await import("../../../../scripts/release/release-risk-engine.js");
+    const { generateAIReleaseSummary } = await import("../../../../scripts/release/ai-release-notes-generator.js");
+
     const sm = new ReleaseStateMachineEngine("DRAFT");
     sm.transitionTo("VALIDATING", "Release trigger initiated");
 
@@ -120,7 +133,7 @@ export class ReleaseService {
     sm.transitionTo("SECURITY_PASSED", "Zero high/critical vulnerabilities");
 
     const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8"));
-    const version = pkg.version || "2.2.0";
+    const version = pkg.version || "2.5.0";
 
     const manifest = generateReleaseManifest({ version });
     const sbom = generateSBOM(version);
@@ -190,14 +203,17 @@ export class ReleaseService {
   }
 
   async promoteProgressiveDelivery() {
-    return globalProgressiveController.promoteStage();
+    const prog = await this.getProgressiveController();
+    return prog.promoteStage();
   }
 
   async haltProgressiveDelivery(reason: string) {
-    return globalProgressiveController.haltRollout(reason);
+    const prog = await this.getProgressiveController();
+    return prog.haltRollout(reason);
   }
 
   async triggerRollback(req: { failedVersion: string; targetStableVersion: string; reason: string }) {
+    const { executeAutomatedRollback } = await import("../../../../scripts/release/rollback-engine.js");
     const rollbackRes = await executeAutomatedRollback(req);
     await globalReleaseNotificationService.notifyReleaseEvent({
       version: req.targetStableVersion,
@@ -227,12 +243,14 @@ export class ReleaseService {
 
   async detectDrift(runningState: any = {}) {
     const { detectReleaseDrift } = await import("../../../../scripts/release/release-reconciliation-engine.js");
-    const manifest = generateReleaseManifest({ version: "2.2.0" });
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
+    const manifest = generateReleaseManifest({ version: "2.5.0" });
     return detectReleaseDrift(manifest, runningState);
   }
 
-  async getEvidencePackage(version: string = "2.2.0") {
+  async getEvidencePackage(version: string = "2.5.0") {
     const { buildReleaseEvidencePackage } = await import("../../../../scripts/release/release-evidence-package-builder.js");
+    const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
     const manifest = generateReleaseManifest({ version });
     return buildReleaseEvidencePackage(`rel_${version}`, version, manifest.gitSha, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   }
@@ -251,6 +269,123 @@ export class ReleaseService {
       modifiedModules: ["CORE", "DATABASE", "API", "WEB", "SYNC", "OBSERVABILITY"],
     };
   }
+
+  async runCampaignCertification() {
+    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
+    return runFullSystemCertificationEngine();
+  }
+
+  async runSecurityCertification() {
+    const { runSecurityCertificationEngine } = await import("../../../../scripts/security/security-certification-engine.js");
+    return runSecurityCertificationEngine();
+  }
+
+  async getSecurityBaseline() {
+    const { getKwakoPosSecurityBaseline } = await import("../../../../scripts/security/kisb-security-baseline.js");
+    return getKwakoPosSecurityBaseline();
+  }
+
+  async getComplianceMatrix() {
+    const { getComplianceControlMatrix } = await import("../../../../scripts/security/compliance-control-matrix.js");
+    return getComplianceControlMatrix();
+  }
+
+  async getSecurityRisks() {
+    const { getEnterpriseSecurityRiskRegister } = await import("../../../../scripts/security/enterprise-risk-register.js");
+    return getEnterpriseSecurityRiskRegister();
+  }
+
+  async runKpcpFullCertification(mode: "source" | "build" | "staging" | "deployed" | "full" = "full") {
+    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
+    return runFullSystemCertificationEngine(mode);
+  }
+
+  async runResilienceCertification() {
+    const { runResilienceCertification } = await import("../../../../scripts/certification/runResilienceCertification.js");
+    return runResilienceCertification();
+  }
+
+  async getDrRunbooks() {
+    const { KWAKOPOS_DR_RUNBOOKS } = await import("../../../../scripts/certification/dr-runbooks.js");
+    return KWAKOPOS_DR_RUNBOOKS;
+  }
+
+  async runPerformanceCertification() {
+    const { runPerformanceCertification } = await import("../../../../scripts/certification/runPerformanceCertification.js");
+    return runPerformanceCertification();
+  }
+
+  async getCapacityModel() {
+    const { generateKwakoPosCapacityModel } = await import("../../../../scripts/certification/capacity-model-generator.js");
+    return generateKwakoPosCapacityModel();
+  }
+
+  async runReliabilityCertification() {
+    const { runReliabilityCertification } = await import("../../../../scripts/certification/runReliabilityCertification.js");
+    return runReliabilityCertification();
+  }
+
+  async runCommercialCertification() {
+    const { runCommercialCertification } = await import("../../../../scripts/certification/runCommercialCertification.js");
+    return runCommercialCertification();
+  }
+
+  async runPmfValidation() {
+    const { runPmfValidation } = await import("../../../../scripts/certification/runPmfValidation.js");
+    return runPmfValidation();
+  }
+
+  async runRetailCertification() {
+    const { runRetailCertification } = await import("../../../../scripts/certification/runRetailCertification.js");
+    return runRetailCertification();
+  }
+
+  async runRestaurantCertification() {
+    const { runRestaurantCertification } = await import("../../../../scripts/certification/runRestaurantCertification.js");
+    return runRestaurantCertification();
+  }
+
+  async runPharmacyCertification() {
+    const { runPharmacyCertification } = await import("../../../../scripts/certification/runPharmacyCertification.js");
+    return runPharmacyCertification();
+  }
+
+  async runLawFirmCertification() {
+    const { runLawFirmCertification } = await import("../../../../scripts/certification/runLawFirmCertification.js");
+    return runLawFirmCertification();
+  }
+
+  async runSaccoVicobaCertification() {
+    const { runSaccoVicobaCertification } = await import("../../../../scripts/certification/runSaccoVicobaCertification.js");
+    return runSaccoVicobaCertification();
+  }
+
+  async runMicrofinanceCertification() {
+    const { runMicrofinanceCertification } = await import("../../../../scripts/certification/runMicrofinanceCertification.js");
+    return runMicrofinanceCertification();
+  }
+
+  async runPoultryLivestockCertification() {
+    const { runPoultryLivestockCertification } = await import("../../../../scripts/certification/runPoultryLivestockCertification.js");
+    return runPoultryLivestockCertification();
+  }
+
+  async runVehicleFleetCertification() {
+    const { runVehicleFleetCertification } = await import("../../../../scripts/certification/runVehicleFleetCertification.js");
+    return runVehicleFleetCertification();
+  }
+
+  async runHardwareCertification() {
+    const { runHardwareCertification } = await import("../../../../scripts/certification/runHardwareCertification.js");
+    return runHardwareCertification();
+  }
+
+  async runElectronicsCertification() {
+    const { runElectronicsCertification } = await import("../../../../scripts/certification/runElectronicsCertification.js");
+    return runElectronicsCertification();
+  }
 }
 
 export const globalReleaseService = new ReleaseService();
+
+
