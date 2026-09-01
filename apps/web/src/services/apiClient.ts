@@ -9,12 +9,18 @@ export interface LoginResponseUser {
 
 export interface LoginResponse {
   success: boolean;
-  data?: { accessToken: string; refreshToken: string; sessionId: string; user: LoginResponseUser };
+  data?: { accessToken: string; sessionId: string; user: LoginResponseUser };
   error?: { code?: string; message?: string };
 }
 
-interface StoredSession { sessionId: string; refreshToken: string; user: LoginResponseUser; }
-interface ApiErrorPayload { error?: { message?: string; code?: string } }
+interface StoredSession {
+  sessionId: string;
+  user: LoginResponseUser;
+}
+
+interface ApiErrorPayload {
+  error?: { message?: string; code?: string };
+}
 
 let accessToken: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
@@ -27,8 +33,17 @@ function getStoredSession(): StoredSession | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as StoredSession) : null;
-  } catch { return null; }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredSession> & { refreshToken?: unknown };
+    if (!parsed.sessionId || !parsed.user) return null;
+    // Migrate legacy browser-stored refresh tokens by overwriting the record.
+    if (Object.prototype.hasOwnProperty.call(parsed, "refreshToken")) {
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sessionId: parsed.sessionId, user: parsed.user }));
+    }
+    return { sessionId: parsed.sessionId, user: parsed.user };
+  } catch {
+    return null;
+  }
 }
 
 function setStoredSession(session: StoredSession | null): void {
@@ -64,21 +79,17 @@ async function refreshAccessToken(): Promise<string | null> {
     const stored = getStoredSession();
     if (!stored) return null;
     try {
-      const result = await requestJson<{ success: boolean; data?: { accessToken: string; refreshToken: string } }>(
+      const result = await requestJson<{ success: boolean; data?: { accessToken: string } }>(
         "/auth/refresh",
-        { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId, refreshToken: stored.refreshToken }) },
+        { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId }) },
         false,
       );
-      if (!result.success || !result.data) return null;
+      if (!result.success || !result.data?.accessToken) return null;
       accessToken = result.data.accessToken;
-      setStoredSession({ ...stored, refreshToken: result.data.refreshToken });
       return accessToken;
-    } catch (error: any) {
-      const message = String(error?.message || "");
-      if (message.includes("Invalid") || message.includes("expired") || message.includes("revoked") || message.includes("401")) {
-        accessToken = null;
-        setStoredSession(null);
-      }
+    } catch {
+      accessToken = null;
+      setStoredSession(null);
       return null;
     } finally {
       refreshInFlight = null;
@@ -94,20 +105,16 @@ export async function login(email: string, password: string): Promise<LoginRespo
   }, false);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Authentication failed");
   accessToken = result.data.accessToken;
-  setStoredSession({ sessionId: result.data.sessionId, refreshToken: result.data.refreshToken, user: result.data.user });
+  setStoredSession({ sessionId: result.data.sessionId, user: result.data.user });
   return result.data.user;
 }
 
 export async function restoreSession(): Promise<LoginResponseUser | null> {
   const stored = getStoredSession();
   if (!stored) return null;
-  try {
-    const refreshed = await refreshAccessToken();
-    if (!refreshed) return null;
-    return getStoredSession()?.user || stored.user;
-  } catch (error: any) {
-    throw new Error(error?.message || "Unable to restore session");
-  }
+  const refreshed = await refreshAccessToken();
+  if (!refreshed) return null;
+  return getStoredSession()?.user || null;
 }
 
 export async function logout(): Promise<void> {
@@ -127,19 +134,17 @@ export async function switchContext(targetTenantId?: string, targetBranchId?: st
   }, true);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Failed to switch context");
   accessToken = result.data.accessToken;
-  setStoredSession({ sessionId: result.data.sessionId, refreshToken: result.data.refreshToken, user: result.data.user });
+  setStoredSession({ sessionId: result.data.sessionId, user: result.data.user });
   return result.data.user;
 }
 
-export async function apiFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> { return requestJson<T>(input, init, true); }
+export async function apiFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+  return requestJson<T>(input, init, true);
+}
 
 export function safeUUID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    try {
-      return crypto.randomUUID();
-    } catch {
-      /* fallback */
-    }
+    try { return crypto.randomUUID(); } catch { /* fallback */ }
   }
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
