@@ -67,20 +67,9 @@ function decodeClaims(token: string | null): JwtClaims {
   }
 }
 
-// ─── Default Tenant / Branch Lists (dev fallbacks) ───────────────────────────
-
-const DEFAULT_TENANTS = [
-  { id: "TNT-TZ-001", name: "Kwakopos Retailers (Main)" },
-  { id: "TNT-TZ-002", name: "Zanzibar Commercial Ltd" },
-  { id: "TNT-TZ-003", name: "Arusha Wholesale Hub" },
-];
-
-const DEFAULT_BRANCHES = [
-  { id: "BR-DSM-01", name: "Dar es Salaam Main" },
-  { id: "BR-ARU-02", name: "Arusha Branch" },
-  { id: "BR-ZNZ-03", name: "Stone Town Branch" },
-  { id: "BR-MWZ-04", name: "Mwanza Hub" },
-];
+// ─── Authoritative Tenant / Branch Scope Construction ───────────────────────
+// Production policy: No synthetic default tenant or branch fallbacks are permitted.
+// Unauthenticated or unprovisioned states evaluate to empty lists.
 
 // ─── Context Types ────────────────────────────────────────────────────────────
 
@@ -513,20 +502,15 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   // ── Tenant / branch list construction ─────────────────────────────────────
+  // Production Rule: Strictly load authoritative context from session. No synthetic fallbacks.
   const availableTenantsList = useMemo(() => {
-    if (!user) return DEFAULT_TENANTS;
-    const exists = DEFAULT_TENANTS.some((t) => t.id === user.tenantId);
-    return exists
-      ? DEFAULT_TENANTS
-      : [{ id: user.tenantId, name: `${user.tenantId} (Active)` }, ...DEFAULT_TENANTS];
+    if (!user || !user.tenantId) return [];
+    return [{ id: user.tenantId, name: `${user.tenantId} (Active)` }];
   }, [user]);
 
   const availableBranchesList = useMemo(() => {
-    if (!user) return DEFAULT_BRANCHES;
-    const exists = DEFAULT_BRANCHES.some((b) => b.id === user.branchId);
-    return exists
-      ? DEFAULT_BRANCHES
-      : [{ id: user.branchId, name: `${user.branchId} (Active)` }, ...DEFAULT_BRANCHES];
+    if (!user || !user.branchId) return [];
+    return [{ id: user.branchId, name: `${user.branchId} (Active)` }];
   }, [user]);
 
   // ── Context values ─────────────────────────────────────────────────────────
