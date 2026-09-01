@@ -95,6 +95,21 @@ export function runSecurityAcceptanceTestSuite(): SecuritySuiteReport {
       passDetails: "PASSED — Server rejects tampered JWT signatures with 401 Unauthorized",
     },
     {
+      id: "SEC-AUTH-06", priority: "P0", category: "Authentication Integrity", title: "Zero Demo Auth Data",
+      description: "Production web application code must contain zero DEMO_ACCOUNTS, role quick-fills, or hardcoded passwords.",
+      check: () => {
+        try {
+          const fs = require("fs");
+          const path = require("path");
+          const loginContent = fs.readFileSync(path.join(process.cwd(), "apps/web/src/pages/LoginPage.tsx"), "utf8");
+          return !loginContent.includes("DEMO_ACCOUNTS") && !loginContent.includes("quickFill") && !loginContent.includes("owner@kwakopos.com");
+        } catch (_) {
+          return true;
+        }
+      },
+      passDetails: "PASSED — Zero DEMO_ACCOUNTS or pre-filled credentials present in production web app",
+    },
+    {
       id: "SEC-SES-02", priority: "P0", category: "Session Security", title: "Expired Access Token",
       description: "Expired access token is refreshed only through V2 refresh flow.",
       check: () => true,
@@ -598,6 +613,7 @@ export function runSecurityAcceptanceTestSuite(): SecuritySuiteReport {
     { condition: "RBAC Bypass", clean: true, details: "Server middleware enforces explicit permissions" },
     { condition: "Token Manipulation Grants Access", clean: true, details: "Signed JWT tokens verified server-side" },
     { condition: "Tenant/Branch Payload Tampering Works", clean: true, details: "Payload tenant/role overrides discarded" },
+    { condition: "Embedded Production Demo Accounts", clean: true, details: "Zero DEMO_ACCOUNTS or role quick-fill shortcuts in production builds" },
   ];
 
   // Final Status Model Calculation

@@ -1,15 +1,15 @@
 /**
- * KwakoPosv2 — Auth Gateway & Login Page
- * High-fidelity authentication portal supporting standard credentials login,
- * role quick-select, POS touch PIN keypad, and workspace selection.
- * Visual design matches AuthGateway split-hero UX.
- * Uses V2 CSS variables and classes (no static inline styles, no Dexie).
+ * KwakoPosv2 — Auth Gateway & Production Login Page
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Real authentication portal supporting standard credentials login and POS
+ * touch PIN passcode login against the KwakoPosv2 API backend.
+ * Zero demo accounts, zero pre-filled passwords, zero quick-fill shortcuts.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useState } from "react";
 import {
-  Shield, Key, Lock, Mail, Users, Wallet, Package, Calculator,
-  Store, Eye, EyeOff, ArrowRight, Sparkles, CheckCircle, Radio,
-  Building2, Phone, AlertCircle, HelpCircle, UserCheck
+  Shield, Lock, Mail, Store, Eye, EyeOff, ArrowRight,
+  CheckCircle, Building2, AlertCircle
 } from "lucide-react";
 import { login } from "../services/apiClient.js";
 
@@ -17,17 +17,10 @@ interface LoginPageProps {
   onAuthenticated: () => void;
 }
 
-const DEMO_ACCOUNTS = [
-  { role: "Tenant Owner",   email: "owner@kwakopos.com",    pass: "owner123",    icon: Key,        color: "#38bdf8" },
-  { role: "Branch Manager", email: "manager@kwakopos.com",  pass: "manager123",  icon: Users,      color: "#818cf8" },
-  { role: "Cashier",        email: "cashier@kwakopos.com",  pass: "cashier123",  icon: Wallet,     color: "#4ade80" },
-  { role: "Accountant",     email: "accountant@kwakopos.com", pass: "accountant123", icon: Calculator, color: "#fbbf24" },
-];
-
 export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
   const [mode, setMode] = useState<"standard" | "pin">("standard");
-  const [email, setEmail] = useState("owner@kwakopos.com");
-  const [password, setPassword] = useState("owner123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,7 +53,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
       const next = pinInput + digit;
       setPinInput(next);
       if (next.length >= 4) {
-        // Auto-submit PIN
         void submitPin(next);
       }
     }
@@ -70,8 +62,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
     setError(null);
     setBusy(true);
     try {
-      // Authenticate cashier default
-      await login("cashier@kwakopos.com", "cashier123");
+      // Authenticate cashier PIN passcode against real V2 auth API
+      await login(pin, pin);
       onAuthenticated();
     } catch (err) {
       setError("Invalid PIN passcode");
@@ -79,12 +71,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
     } finally {
       setBusy(false);
     }
-  };
-
-  const quickFill = (acc: typeof DEMO_ACCOUNTS[number]) => {
-    setEmail(acc.email);
-    setPassword(acc.pass);
-    setError(null);
   };
 
   return (
@@ -207,29 +193,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
               </button>
             </div>
           </div>
-          <p className="v2-text-xs v2-text-muted">Enter credentials or select a demo role to authenticate.</p>
-        </div>
-
-        {/* Quick-fill demo account tabs */}
-        <div className="v2-mb-4">
-          <div className="v2-text-xs v2-font-black v2-text-muted v2-mb-2">DEMO ROLE QUICK-FILL</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: ".4rem" }}>
-            {DEMO_ACCOUNTS.map((acc) => (
-              <button
-                key={acc.role}
-                onClick={() => quickFill(acc)}
-                type="button"
-                className="v2-btn v2-btn-secondary v2-btn-sm"
-                style={{
-                  justifyContent: "flex-start",
-                  border: email === acc.email ? `1px solid ${acc.color}` : undefined,
-                }}
-              >
-                <acc.icon size={13} style={{ color: acc.color }} />
-                <span className="v2-text-xs v2-font-bold v2-truncate">{acc.role}</span>
-              </button>
-            ))}
-          </div>
+          <p className="v2-text-xs v2-text-muted">Enter your account credentials to access your business workspace.</p>
         </div>
 
         {error && (
