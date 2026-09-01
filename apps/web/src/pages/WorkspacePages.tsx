@@ -212,67 +212,8 @@ const DEMO_TOP_PRODUCTS = [
 
 // ReportsPage is exported from ./ReportsPage.js
 
-// SettingsPage is exported from ./SettingsPage.js
-
-// ─── USERS & ROLES PAGE ───────────────────────────────────────────────────────
-
-const DEMO_USERS = [
-  { name: "Admin User",     email: "admin@kwakoko.co.tz",   role: "SUPER_ADMIN", status: "ACTIVE",   perms: "Full Access" },
-  { name: "Branch Manager", email: "manager@kwakoko.co.tz", role: "MANAGER",     status: "ACTIVE",   perms: "Branch Ops" },
-  { name: "Cashier One",    email: "cashier1@kwakoko.co.tz",role: "CASHIER",     status: "ACTIVE",   perms: "POS + Customers" },
-  { name: "Stock Keeper",   email: "stock@kwakoko.co.tz",   role: "INVENTORY",   status: "ACTIVE",   perms: "Inventory + Purchasing" },
-  { name: "Supervisor",     email: "super@kwakoko.co.tz",   role: "SUPERVISOR",  status: "INACTIVE", perms: "Reporting" },
-];
-
-export const UsersPage: React.FC = () => {
-  const { role, permissions } = useRbac();
-  const { user } = useAuth();
-  const [search, setSearch] = useState("");
-  const filtered = DEMO_USERS.filter((u) => !search || `${u.name} ${u.email} ${u.role}`.toLowerCase().includes(search.toLowerCase()));
-
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Users Directory & RBAC Matrix</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Invite User</button>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Logged-in User"    value={user?.name || "Admin"}             desc={user?.email}      icon={<Users size={18} />}  accent="#38bdf8" />
-        <KpiCard label="Assigned Role"     value={role || "ADMIN"}                   desc="RBAC Role"        icon={<Shield size={18} />} accent="#818cf8" />
-        <KpiCard label="Permissions"       value={`${permissions.length || 1} Grants`} desc="Granted to role" icon={<CheckSquare size={18} />} accent="#4ade80" />
-        <KpiCard label="Total Users"       value={DEMO_USERS.length}                 desc="In this tenant"   icon={<Building size={18} />} accent="#fbbf24" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header">
-          <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
-            <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users…" />
-          </div>
-        </div>
-        <table className="v2-table">
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>
-            {filtered.map((u) => (
-              <tr key={u.email}>
-                <td className="v2-font-bold">{u.name}</td>
-                <td className="v2-mono v2-text-xs v2-text-muted">{u.email}</td>
-                <td><span className="badge v2-badge-accent">{u.role}</span></td>
-                <td className="v2-text-xs v2-text-muted">{u.perms}</td>
-                <td><span className={`badge ${u.status === "ACTIVE" ? "v2-badge-success" : "v2-badge-muted"}`}>{u.status}</span></td>
-                <td>
-                  <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Trash2 size={13} style={{ color: "var(--danger)" }} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+import { UsersRolesPage as UsersPage } from "./UsersRolesPage.js";
+export { UsersPage };
 
 // SuperAdminPage is exported from ./SuperAdminPage.js
 

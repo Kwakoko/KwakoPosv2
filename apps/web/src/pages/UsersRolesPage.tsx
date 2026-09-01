@@ -195,19 +195,20 @@ export const UsersRolesPage: React.FC = () => {
           }));
         }
       } catch {
-        const activeUser: UserRecord = {
-          id: currentUser?.id || "usr-current",
-          firstName: currentUser?.name ? currentUser.name.split(" ")[0] : "Authenticated",
-          lastName: currentUser?.name ? currentUser.name.split(" ").slice(1).join(" ") : "Operator",
-          email: currentUser?.email || "owner@kwakopos.tz",
-          phone: "+255 754 000 111",
-          username: "owner_admin",
-          role: currentUser?.role || "Tenant Owner",
-          branch: currentBranchName || "Main Branch",
+        const activeUser: UserRecord | null = currentUser ? {
+          id: currentUser.id,
+          firstName: currentUser.name ? currentUser.name.split(" ")[0] : "Authenticated",
+          lastName: currentUser.name ? currentUser.name.split(" ").slice(1).join(" ") : "Operator",
+          email: currentUser.email,
+          phone: "−",
+          username: currentUser.email.split("@")[0],
+          role: currentUser.role || "Tenant Owner",
+          branch: currentBranchName || "Active Branch",
           status: "Active",
-          lastLogin: "Active Now",
+          lastLogin: "Active Session",
           pinSet: true,
-        };
+        } : null;
+
         await db.ready;
         const outboxUsers = [...db.syncOutbox.values()]
           .filter((item) => item.entityType === "User" && item.status !== "FAILED")
@@ -223,13 +224,13 @@ export const UsersRolesPage: React.FC = () => {
               phone: String(p.phone || "−"),
               username: String(p.username || p.email || ""),
               role: String(p.role || "Cashier"),
-              branch: String(p.branch || currentBranchName || "Main Branch"),
+              branch: String(p.branch || currentBranchName || "Active Branch"),
               status: "Active" as const,
               lastLogin: "Just Created",
               pinSet: Boolean(p.pin),
             };
           });
-        users = [activeUser, ...outboxUsers];
+        users = activeUser ? [activeUser, ...outboxUsers] : outboxUsers;
       }
       let sessions: SessionRecord[] = [];
       try {
@@ -247,18 +248,18 @@ export const UsersRolesPage: React.FC = () => {
           }));
         }
       } catch {
-        sessions = [
+        sessions = currentUser ? [
           {
-            sessionId: "SESS-CURRENT-01",
-            user: `${currentUser?.name || "Active User"} (${currentUser?.role || "Tenant Owner"})`,
-            role: currentUser?.role || "Tenant Owner",
+            sessionId: "SESS-ACTIVE-01",
+            user: `${currentUser.name} (${currentUser.role})`,
+            role: currentUser.role,
             device: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 45) : "Standard POS Browser",
-            ip: "Current Session (Localhost)",
+            ip: "Active Session (Localhost)",
             loginTime: new Date().toLocaleTimeString(),
             lastActive: "Active Now",
             isCurrent: true,
           },
-        ];
+        ] : [];
       }
       let logs: AuditLogRecord[] = [];
       try {
@@ -274,10 +275,10 @@ export const UsersRolesPage: React.FC = () => {
           }));
         }
       } catch {
-        logs = [
-          { id: "AUD-001", action: "USER_LOGIN_SUCCESS", user: currentUser?.email || "owner@kwakopos.tz", details: "Successful JWT bearer session initialization", timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
-          { id: "AUD-002", action: "TENANT_CONTEXT_SWITCH", user: currentUser?.email || "owner@kwakopos.tz", details: `Switched operational context to ${currentTenantName || "Main Tenant"}`, timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
-        ];
+        logs = currentUser ? [
+          { id: "AUD-001", action: "USER_LOGIN_SUCCESS", user: currentUser.email, details: "Successful JWT bearer session initialization", timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
+          { id: "AUD-002", action: "TENANT_CONTEXT_SWITCH", user: currentUser.email, details: `Switched operational context to ${currentTenantName || "Active Tenant"}`, timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
+        ] : [];
       }
       setUsersList(users);
       setSessionsList(sessions);

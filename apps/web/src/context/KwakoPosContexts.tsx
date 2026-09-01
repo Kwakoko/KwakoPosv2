@@ -200,9 +200,9 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | null>(null);
 export const useTheme = () => useContext(ThemeContext)!;
 
-// ─── Dev Superuser emails ─────────────────────────────────────────────────────
-// These accounts bypass module entitlement checks for testing all modules.
-const DEV_SUPERUSER_EMAILS = new Set(["admin@kwakoko.co.tz", "yannick@kwakoko.co.tz"]);
+// ─── Production Security Configuration ───────────────────────────────────────
+// Dev superuser emails are strictly prohibited in production. Superuser privileges
+// must originate solely from verified JWT claims (permissions includes "*").
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -318,39 +318,36 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const currentTenantId = user?.tenantId || null;
   const currentBranchId = user?.branchId || null;
 
-  // ── Dev superuser ──────────────────────────────────────────────────────────
-  const isDevSuperuser = user
-    ? DEV_SUPERUSER_EMAILS.has(user.email) || permissions.includes("*")
-    : false;
+  // ── Superuser Status ───────────────────────────────────────────────────────
+  // Superuser privileges must strictly derive from validated JWT permissions wildcard (*).
+  const isDevSuperuser = Boolean(user && permissions.includes("*"));
   const isSuperAdmin = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 
-  // ── Module resolution (fail-closed) ────────────────────────────────────────
+  // ── Module resolution (Strict Fail-Closed) ───────────────────────────────
   /**
-   * A module is available when ALL of:
-   *  1. It exists in the Module Registry.
-   *  2. The tenant has the module entitlement (from JWT claims) OR user is dev superuser.
-   *  3. The user has RBAC permission to access it (or wildcard *).
-   *  4. If requiresSubscription=true, moduleEntitlements must include the key.
+   * Strict Production Entitlement Policy (Fail-Closed):
+   *  1. Unauthenticated users are denied.
+   *  2. Wildcard permissions (*) grant full access.
+   *  3. When a module requires subscription entitlement, moduleEntitlements MUST
+   *     explicitly include the module key. Absence of entitlement claim = DENY.
    */
   const canAccessModule = useCallback(
     (module: IndustryModule): boolean => {
       if (!user) return false;                         // must be authenticated
-      if (isDevSuperuser) return true;                  // dev bypass
+      if (isDevSuperuser) return true;                  // JWT wildcard bypass
       const manifest = MODULE_MANIFESTS[module];
       if (!manifest) return false;                     // unknown → deny
 
-      // RBAC wildcard
+      // RBAC wildcard check
       if (permissions.includes("*")) return true;
 
-      // Subscription check
+      // Subscription check — STRICT FAIL-CLOSED (absence of entitlement claim = DENY)
       if (manifest.requiresSubscription) {
-        const entitled =
-          moduleEntitlements.length === 0 || // no entitlements in JWT → allow all (pre-subscription tenant)
-          moduleEntitlements.includes(module);
+        const entitled = moduleEntitlements.includes(module);
         if (!entitled) return false;
       }
 
-      // Module-level RBAC permission (optional — if requiredPermission is set)
+      // Module-level RBAC permission check
       if (manifest.requiredPermission && !permissions.includes(manifest.requiredPermission)) {
         return false;
       }
@@ -370,7 +367,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (isDevSuperuser) return true;
       const manifest = MODULE_MANIFESTS[module];
       if (!manifest?.requiresSubscription) return true;
-      return moduleEntitlements.length === 0 || moduleEntitlements.includes(module);
+      return moduleEntitlements.includes(module);
     },
     [isDevSuperuser, moduleEntitlements],
   );
