@@ -1,10 +1,14 @@
-export type ParityStatus = 
+export type ParityStatus =
   | "NOT_STARTED"
-  | "ARCHITECTURE_ONLY"
-  | "PARTIAL"
+  | "IMPLEMENTED"
   | "FUNCTIONAL"
+  | "BROWSER_VERIFIED"
   | "PARITY_VERIFIED"
-  | "PRODUCTION_CERTIFIED";
+  | "PRODUCTION_CERTIFIED"
+  | "PASS_WITH_P3_HARDENING"
+  | "CERTIFICATION_FAILED"
+  | "REVALIDATION_REQUIRED"
+  | "BLOCKED_EXTERNAL";
 
 export interface UiControlObjective {
   controlId: string;
