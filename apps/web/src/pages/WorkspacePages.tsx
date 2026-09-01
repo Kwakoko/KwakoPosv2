@@ -48,6 +48,7 @@ export { CustomersPage } from "./CustomersPage.js";
 export { PurchasingPage } from "./PurchasingPage.js";
 export { SettingsPage } from "./SettingsPage.js";
 export { PosPage } from "./PosPage.js";
+export { InventoryPage } from "./InventoryPage.js";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -445,146 +446,7 @@ export const DashboardPage: React.FC<WorkspaceProps> = ({ onNavigate }) => {
 
 // PosPage is exported from ./PosPage.js
 
-// ─── INVENTORY PAGE ───────────────────────────────────────────────────────────
-
-const INV_TABS = ["Catalog", "FEFO Batches", "Stock Ledger", "Adjustments"] as const;
-type InvTab = typeof INV_TABS[number];
-
-const DEMO_FEFO = [
-  { batch: "BAT-2026-081", name: "Coca Cola 500ml",      expiry: "2026-12-31", qty: "1,200 Units", priority: 1, status: "success" },
-  { batch: "BAT-2026-094", name: "Azam Flour 2kg",       expiry: "2027-02-15", qty: "450 Bags",    priority: 2, status: "info" },
-  { batch: "BAT-2026-102", name: "Panadol 500mg × 100",  expiry: "2026-10-01", qty: "84 Boxes",    priority: 1, status: "danger" },
-  { batch: "BAT-2026-114", name: "Maziwa 1L UHT",        expiry: "2026-11-20", qty: "630 Cartons", priority: 2, status: "warning" },
-];
-
-export const InventoryPage: React.FC = () => {
-  const { data: products, error, loading } = useApiList<Product>("/products");
-  const { db } = useSync();
-  const [activeTab, setActiveTab] = useState<InvTab>("Catalog");
-  const [search, setSearch] = useState("");
-
-  const filtered = products.filter((p) =>
-    !search || `${p.name} ${p.sku}`.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Inventory & Stock Ledger</h1>
-        <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Export</button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Add Product</button>
-        </div>
-      </div>
-
-      {/* KPI row */}
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Total SKUs"         value={products.length || 284} desc="Active products" icon={<Package size={18} />} accent="#38bdf8" />
-        <KpiCard label="Low Stock Alerts"   value="14" trend="down" trendLabel="Below reorder" desc="Needs replenishment" icon={<AlertTriangle size={18} />} accent="#fbbf24" />
-        <KpiCard label="Out of Stock"       value="3" trend="down" trendLabel="Critical" desc="Zero inventory" icon={<X size={18} />} accent="#f87171" />
-        <KpiCard label="Near Expiry (90d)"  value="6 Batches" desc="FEFO priority" icon={<Clock size={18} />} accent="#818cf8" />
-      </div>
-
-      {/* Tab nav */}
-      <div className="v2-card">
-        <div style={{ display: "flex", gap: ".3rem", padding: ".75rem 1.25rem", borderBottom: "1px solid var(--surface-border)" }}>
-          {INV_TABS.map((t) => (
-            <button
-              key={t}
-              className={`sector-pill${activeTab === t ? " active" : ""}`}
-              onClick={() => setActiveTab(t)}
-              type="button"
-            >
-              {t}
-            </button>
-          ))}
-          {activeTab === "Catalog" && (
-            <div className="v2-flex v2-items-center v2-gap-1" style={{ marginLeft: "auto" }}>
-              <Search size={13} style={{ color: "var(--muted)" }} />
-              <input
-                className="v2-input"
-                style={{ border: "none", padding: ".25rem .4rem", width: 180 }}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search catalog…"
-              />
-            </div>
-          )}
-        </div>
-        <div className="v2-card-body" style={{ padding: 0 }}>
-          {activeTab === "Catalog" && (
-            error ? <div className="badge v2-badge-danger" style={{ margin: "1rem" }}>{error}</div>
-            : loading ? <div style={{ padding: "1rem" }}><LoadingRows /></div>
-            : !filtered.length ? <Empty message="No synchronized products." />
-            : (
-              <table className="v2-table">
-                <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Variants</th><th>Local Ledger</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {filtered.map((p) => (
-                    <tr key={p.id}>
-                      <td className="v2-font-bold">{p.name}</td>
-                      <td><span className="v2-mono v2-text-xs">{p.sku}</span></td>
-                      <td><span className="badge v2-badge-muted">{p.category || "General"}</span></td>
-                      <td>{p.variants?.length || 0}</td>
-                      <td>{p.variants?.filter((v) => db.stockLedger.has(v.id)).length || 0}</td>
-                      <td>
-                        <div className="v2-flex v2-gap-1">
-                          <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title="View"><Eye size={13} /></button>
-                          <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title="Edit"><Edit2 size={13} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
-          )}
-          {activeTab === "FEFO Batches" && (
-            <table className="v2-table">
-              <thead><tr><th>Batch #</th><th>Product</th><th>Expiry Date</th><th>Qty Available</th><th>Priority</th></tr></thead>
-              <tbody>
-                {DEMO_FEFO.map((b) => (
-                  <tr key={b.batch}>
-                    <td className="v2-mono v2-text-xs">{b.batch}</td>
-                    <td className="v2-font-bold">{b.name}</td>
-                    <td>{b.expiry}</td>
-                    <td>{b.qty}</td>
-                    <td><span className={`badge v2-badge-${b.status}`}>PRIORITY {b.priority}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {activeTab === "Stock Ledger" && (
-            <table className="v2-table">
-              <thead><tr><th>Movement ID</th><th>Variant ID</th><th>Type</th><th>Qty</th><th>Timestamp</th></tr></thead>
-              <tbody>
-                {Array.from(db.stockLedger.values()).map((entry: any, i: number) => (
-                  <tr key={i}>
-                    <td className="v2-mono v2-text-xs">{entry.id || `MVT-${i}`}</td>
-                    <td className="v2-mono v2-text-xs">{entry.variantId}</td>
-                    <td><span className="badge v2-badge-info">{entry.type || "SALE"}</span></td>
-                    <td>{entry.qty}</td>
-                    <td className="v2-text-xs v2-text-muted">{new Date().toLocaleString()}</td>
-                  </tr>
-                ))}
-                {!db.stockLedger.size && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: "2rem" }}>No local stock ledger entries.</td></tr>}
-              </tbody>
-            </table>
-          )}
-          {activeTab === "Adjustments" && (
-            <div className="v2-empty">
-              <div className="v2-empty-icon"><CheckSquare size={22} /></div>
-              <p className="v2-empty-title">Stock Adjustments</p>
-              <p className="v2-empty-desc">Record manual count corrections, damage write-offs, and audit adjustments.</p>
-              <button className="v2-btn v2-btn-primary" style={{ marginTop: ".75rem" }} type="button"><Plus size={14} /> New Adjustment</button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
+// InventoryPage is exported from ./InventoryPage.js
 
 // CustomersPage, PurchasingPage, and SettingsPage are exported from dedicated module files
 
