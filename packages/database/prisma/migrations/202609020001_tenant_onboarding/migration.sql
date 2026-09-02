@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS tenant_onboardings (
   tenant_id UUID,
   business_name TEXT NOT NULL,
   slug TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  branch_code TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'DRAFT',
   current_step TEXT NOT NULL DEFAULT 'BUSINESS_PROFILE',
   industry TEXT NOT NULL,
