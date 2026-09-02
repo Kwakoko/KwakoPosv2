@@ -4,6 +4,47 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.8.0] - 2026-09-02
+
+### ✨ New Features
+- **certification**: add tenant onboarding executable certification runner
+- **onboarding**: enforce server catalog and idempotent request fingerprints
+- **onboarding**: complete provisioning through owner authentication
+- **contracts**: expose tenant onboarding subpath
+- **onboarding**: add transactional tenant provisioning service
+- **contracts**: add production tenant onboarding contracts
+
+### ⚡ Improvements & Enhancements
+- **browser**: harden tenant onboarding staging authentication
+- **browser**: add tenant onboarding end-to-end certification flow
+- **onboarding**: add transactional provisioning coverage
+
+### 🐛 Bug Fixes
+- **browser**: align tenant onboarding certification with login accessibility labels
+- **onboarding**: finalize catalog validation and lifecycle audit
+- **api**: attribute onboarding completion to authenticated actor
+- **db**: add onboarding request fingerprint integrity
+- **onboarding**: update authenticated V2 context after owner provisioning
+- **onboarding**: harden lifecycle persistence and completion
+- **db**: persist onboarding branch configuration
+- **onboarding**: use transactional raw onboarding persistence and secured provisioning
+
+### 🗄️ Database Changes
+- **db**: add durable tenant onboarding and provisioning tables
+
+### 🔌 API Changes
+- **api**: register production tenant onboarding routes
+- **api**: add secured tenant onboarding endpoints
+
+### 🎨 UI/UX Changes
+- **web**: expose real tenant onboarding from Super Admin
+- **web**: route real tenant onboarding into V2 application shell
+- **web**: add real tenant onboarding wizard
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.7.1] - 2026-09-02
 
 ### 🛡️ Security Updates
