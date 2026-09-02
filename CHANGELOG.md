@@ -4,6 +4,29 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.10.0] - 2026-09-02
+
+### ✨ New Features
+- **support**: add tenant Support Operations UI
+- **support**: add Phase 46 support API routes
+- **support**: add Phase 46 scoped support operations service
+- **support**: add Phase 46 support operations persistence
+
+### ⚡ Improvements & Enhancements
+- **core**: revert accidental Phase 46 certification file from main
+- **core**: revert accidental Phase 46 UI from main
+- **core**: revert accidental Phase 46 routes from main
+- **core**: revert accidental Phase 46 service from main
+- **core**: revert accidental Phase 46 migration from main
+- **core**: revert accidental Phase 46 certification script registration from main
+- **core**: revert accidental Phase 46 web mount from main
+- **core**: revert accidental Phase 46 server mount from main
+- **support**: add Phase 46 certification gate
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.9.0] - 2026-09-02
 
 ### ✨ New Features
