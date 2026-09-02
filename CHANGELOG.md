@@ -4,6 +4,18 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.7.1] - 2026-09-02
+
+### 🛡️ Security Updates
+- **cert**: require executable security suite and fail on missing live evidence
+- **test**: replace declarative security passes with executable penetration checks
+- **ui**: harden module context and tab authorization fail-closed
+- **auth**: remove legacy browser refresh-token migration path
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.7.0] - 2026-09-02
 
 ### ✨ New Features
