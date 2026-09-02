@@ -11,8 +11,8 @@
   "dependencies": {
     "fastify": "^4.26.0",
     "@fastify/cors": "^9.0.1",
-    "@kwakopos2/config": "*",
-    "@kwakopos2/contracts": "*",
+    "@kwakopos2/config": "2.5.0",
+    "@kwakopos2/contracts": "2.5.0",
     "@kwakopos2/domain": "*",
     "@kwakopos2/database": "*",
     "@kwakopos2/auth": "*",
