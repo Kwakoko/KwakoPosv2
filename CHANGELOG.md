@@ -4,6 +4,19 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.11.1] - 2026-09-02
+
+### ⚡ Improvements & Enhancements
+- **browser**: verify login-to-tenant-onboarding navigation flow
+
+### 🐛 Bug Fixes
+- **onboarding**: preserve provisioning route through authentication
+- **auth**: make tenant provisioning entry responsive before authentication
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.11.0] - 2026-09-02
 
 ### ✨ New Features
