@@ -101,6 +101,11 @@
     "lint": "eslint . --ext .ts,.tsx",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web"
+"release:sync-versions": "tsx scripts/release/sync-workspace-versions.ts",
+"release:validate-commits": "tsx scripts/release/validate-semver.ts",
+"release:certify-sync": "tsx scripts/release/certify-version-sync.ts",
+"release:generate-notes": "tsx scripts/release/generate-release-notes.ts",
+"release:prepare": "npm run build && npm run test:unit && npm run release:sync-versions"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
