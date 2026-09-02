@@ -17,9 +17,10 @@ import { login } from "../services/apiClient.js";
 
 interface LoginPageProps {
   onAuthenticated: () => void;
+  provisioningRequested?: boolean;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provisioningRequested = false }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -88,9 +89,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
 
       <section className="v2-auth-panel" aria-label="Sign in">
         <div className="v2-mb-6">
-          <h2 className="v2-text-xl v2-font-black v2-mb-2">Sign in to Workspace</h2>
-          <p className="v2-text-xs v2-text-muted">Enter your account credentials to access your business workspace.</p>
+          <h2 className="v2-text-xl v2-font-black v2-mb-2">{provisioningRequested ? "Authorized Tenant Provisioning" : "Sign in to Workspace"}</h2>
+          <p className="v2-text-xs v2-text-muted">
+            {provisioningRequested
+              ? "Sign in with an authorized platform provisioning account to continue."
+              : "Enter your account credentials to access your business workspace."}
+          </p>
         </div>
+
+        {provisioningRequested && (
+          <div className="v2-card v2-mb-4" role="status" style={{ border: "1px solid var(--accent)", padding: "0.8rem" }}>
+            <div className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-font-bold">
+              <Shield size={14} /> Authentication is required before tenant provisioning can begin.
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="v2-card v2-auth-error v2-mb-4" role="alert">
@@ -121,22 +134,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
           </div>
 
           <button className="v2-btn v2-btn-primary v2-auth-submit" type="submit" disabled={busy}>
-            <span>{busy ? "Signing in…" : "Sign in to Workspace"}</span>
+            <span>{busy ? "Signing in…" : provisioningRequested ? "Sign in to Continue Provisioning" : "Sign in to Workspace"}</span>
             {!busy && <ArrowRight size={15} />}
           </button>
         </form>
 
-        <div className="v2-flex v2-items-center v2-gap-3" style={{ margin: "1.25rem 0", color: "var(--text-muted)" }} aria-hidden="true">
-          <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
-          <span className="v2-text-xs">AUTHORIZED PROVISIONING</span>
-          <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
-        </div>
-        <button className="v2-btn v2-btn-secondary" type="button" onClick={openTenantOnboarding} style={{ width: "100%" }}>
-          <PlusCircle size={15} /> Provision a New Business
-        </button>
-        <p className="v2-text-xs v2-text-muted" style={{ marginTop: 8, textAlign: "center" }}>
-          Requires authorized platform provisioning privileges. This does not create anonymous public accounts.
-        </p>
+        {!provisioningRequested && <>
+          <div className="v2-flex v2-items-center v2-gap-3" style={{ margin: "1.25rem 0", color: "var(--text-muted)" }} aria-hidden="true">
+            <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
+            <span className="v2-text-xs">AUTHORIZED PROVISIONING</span>
+            <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
+          </div>
+          <button className="v2-btn v2-btn-secondary" type="button" onClick={openTenantOnboarding} style={{ width: "100%" }}>
+            <PlusCircle size={15} /> Provision a New Business
+          </button>
+          <p className="v2-text-xs v2-text-muted" style={{ marginTop: 8, textAlign: "center" }}>
+            Requires authorized platform provisioning privileges. This does not create anonymous public accounts.
+          </p>
+        </>}
       </section>
     </main>
   );
