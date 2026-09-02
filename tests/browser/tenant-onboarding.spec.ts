@@ -12,9 +12,9 @@ test.describe("Production Tenant Onboarding", () => {
     test.skip(/production/i.test(baseUrl), "Tenant onboarding E2E must not run against production");
 
     await page.goto(`${baseUrl}/login`);
-    await page.getByPlaceholder(/email/i).fill(adminEmail);
-    await page.getByPlaceholder(/password/i).fill(adminPassword);
-    await page.getByRole("button", { name: /sign in|login/i }).click();
+    await page.getByLabel("EMAIL / USERNAME").fill(adminEmail);
+    await page.getByLabel("PASSWORD").fill(adminPassword);
+    await page.getByRole("button", { name: "Sign in to Workspace" }).click();
     await page.goto(`${baseUrl}/tenant-onboarding`);
     await expect(page.getByRole("heading", { name: /Tenant Onboarding & Provisioning/i })).toBeVisible();
 
