@@ -10,6 +10,7 @@ import {
   CheckCircle,
   Building2,
   AlertCircle,
+  PlusCircle,
 } from "lucide-react";
 import "../auth.css";
 import { login } from "../services/apiClient.js";
@@ -37,6 +38,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const openTenantOnboarding = () => {
+    window.history.pushState({}, "", "/tenant-onboarding");
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
 
   return (
@@ -99,16 +105,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
             <label htmlFor="email" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">EMAIL / USERNAME</label>
             <div className="v2-auth-input-wrap">
               <Mail size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input
-                id="email"
-                className="v2-input v2-auth-input"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="name@business.co.tz"
-                required
-                autoComplete="username"
-              />
+              <input id="email" className="v2-input v2-auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@business.co.tz" required autoComplete="username" />
             </div>
           </div>
 
@@ -116,21 +113,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
             <label htmlFor="password" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">PASSWORD</label>
             <div className="v2-auth-input-wrap">
               <Lock size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input
-                id="password"
-                className="v2-input v2-auth-input v2-auth-password"
-                type={showPass ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                className="v2-auth-password-toggle"
-                onClick={() => setShowPass((current) => !current)}
-                aria-label={showPass ? "Hide password" : "Show password"}
-              >
+              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" />
+              <button type="button" className="v2-auth-password-toggle" onClick={() => setShowPass((current) => !current)} aria-label={showPass ? "Hide password" : "Show password"}>
                 {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
@@ -141,6 +125,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
             {!busy && <ArrowRight size={15} />}
           </button>
         </form>
+
+        <div className="v2-flex v2-items-center v2-gap-3" style={{ margin: "1.25rem 0", color: "var(--text-muted)" }} aria-hidden="true">
+          <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
+          <span className="v2-text-xs">AUTHORIZED PROVISIONING</span>
+          <div style={{ flex: 1, height: 1, background: "var(--surface-border)" }} />
+        </div>
+        <button className="v2-btn v2-btn-secondary" type="button" onClick={openTenantOnboarding} style={{ width: "100%" }}>
+          <PlusCircle size={15} /> Provision a New Business
+        </button>
+        <p className="v2-text-xs v2-text-muted" style={{ marginTop: 8, textAlign: "center" }}>
+          Requires authorized platform provisioning privileges. This does not create anonymous public accounts.
+        </p>
       </section>
     </main>
   );

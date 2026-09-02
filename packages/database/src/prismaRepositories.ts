@@ -13,34 +13,95 @@ import type {
 import { calculateAvailableStock, assertTenantIsolation } from "@kwakopos2/domain";
 import { prisma } from "./index.js";
 
-const productShape = (row: any): Product => ({
-  id: row.id,
-  tenantId: row.tenantId,
-  branchId: row.branchId,
-  name: row.name,
-  description: row.description ?? null,
-  sku: row.sku,
-  category: row.category,
-  isActive: row.isActive,
-  variants: (row.variants || []).map(variantShape),
-  createdAt: row.createdAt.toISOString(),
-  updatedAt: row.updatedAt.toISOString(),
-});
+const productShape = (row: any): Product => {
+  const buyingPrice = Number(row.buyingPrice ?? 0);
+  const sellingPrice = Number(row.sellingPrice ?? 0);
+  const marginAmount = Number(row.currentMarginAmount ?? (sellingPrice - buyingPrice));
+  const marginPercentage = Number(row.currentMarginPercentage ?? (sellingPrice > 0 ? ((sellingPrice - buyingPrice) / sellingPrice) * 100 : 0));
+  const variants = (row.variants || []).map((v: any) => variantShape(v, buyingPrice, sellingPrice));
 
-const variantShape = (row: any): ProductVariant => ({
-  id: row.id,
-  tenantId: row.tenantId,
-  branchId: row.branchId,
-  productId: row.productId,
-  name: row.name,
-  sku: row.sku,
-  barcode: row.barcode ?? null,
-  price: Number(row.price),
-  costPrice: Number(row.costPrice),
-  isActive: row.isActive,
-  createdAt: row.createdAt.toISOString(),
-  updatedAt: row.updatedAt.toISOString(),
-});
+  let totalStock = Number(row.totalStock ?? 0);
+  let reservedStock = Number(row.reservedStock ?? 0);
+  let availableStock = Number(row.availableStock ?? 0);
+  let lowStockVariantsCount = Number(row.lowStockVariantsCount ?? 0);
+
+  if (variants.length > 0) {
+    totalStock = variants.reduce((acc: number, v: any) => acc + (v.stock || 0), 0);
+    reservedStock = variants.reduce((acc: number, v: any) => acc + (v.reservedQuantity || 0), 0);
+    availableStock = Math.max(0, totalStock - reservedStock);
+    lowStockVariantsCount = variants.filter((v: any) => v.stock <= v.reorderLevel).length;
+  }
+
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    branchId: row.branchId,
+    categoryId: row.categoryId ?? null,
+    brandId: row.brandId ?? row.brand_id ?? null,
+    brand_id: row.brandId ?? row.brand_id ?? null,
+    supplierId: row.supplierId ?? null,
+    taxId: row.taxId ?? null,
+    name: row.name,
+    description: row.description ?? null,
+    sku: row.sku,
+    category: row.category,
+    buyingPrice,
+    sellingPrice,
+    currentMarginAmount: marginAmount,
+    currentMarginPercentage: marginPercentage,
+    images: Array.isArray(row.images) ? row.images : [],
+    hasVariants: variants.length > 0 || (row.hasVariants ?? false),
+    totalStock,
+    reservedStock,
+    availableStock,
+    lowStockVariantsCount,
+    isActive: row.isActive,
+    variants,
+    createdAt: row.createdAt ? (typeof row.createdAt === "string" ? row.createdAt : row.createdAt.toISOString()) : new Date().toISOString(),
+    updatedAt: row.updatedAt ? (typeof row.updatedAt === "string" ? row.updatedAt : row.updatedAt.toISOString()) : new Date().toISOString(),
+  };
+};
+
+const variantShape = (row: any, parentBuyingPrice: number = 0, parentSellingPrice: number = 0): ProductVariant => {
+  const inheritBuying = row.inheritBuyingPrice ?? true;
+  const inheritSelling = row.inheritSellingPrice ?? true;
+  const costPrice = Number(row.costPrice ?? parentBuyingPrice);
+  const price = Number(row.price ?? parentSellingPrice);
+  const stock = Number(row.inventoryQuantity ?? row.stock ?? 0);
+  const reserved = Number(row.reservedQuantity ?? 0);
+  const effectiveBuyingPrice = inheritBuying ? parentBuyingPrice : costPrice;
+  const effectiveSellingPrice = inheritSelling ? parentSellingPrice : price;
+  const marginAmount = Number(row.currentMarginAmount ?? (effectiveSellingPrice - effectiveBuyingPrice));
+  const marginPercentage = Number(row.currentMarginPercentage ?? (effectiveSellingPrice > 0 ? ((effectiveSellingPrice - effectiveBuyingPrice) / effectiveSellingPrice) * 100 : 0));
+
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    branchId: row.branchId,
+    productId: row.productId,
+    name: row.name,
+    sku: row.sku,
+    barcode: row.barcode ?? null,
+    inheritBuyingPrice: inheritBuying,
+    inheritSellingPrice: inheritSelling,
+    costPrice,
+    price,
+    effectiveBuyingPrice,
+    effectiveSellingPrice,
+    currentMarginAmount: marginAmount,
+    currentMarginPercentage: marginPercentage,
+    inventoryQuantity: stock,
+    stock,
+    reservedQuantity: reserved,
+    availableStock: Math.max(0, stock - reserved),
+    reorderLevel: Number(row.reorderLevel ?? 0),
+    imageUrl: row.imageUrl ?? null,
+    attributes: typeof row.attributes === "object" && row.attributes !== null ? row.attributes : {},
+    isActive: row.isActive,
+    createdAt: row.createdAt ? (typeof row.createdAt === "string" ? row.createdAt : row.createdAt.toISOString()) : new Date().toISOString(),
+    updatedAt: row.updatedAt ? (typeof row.updatedAt === "string" ? row.updatedAt : row.updatedAt.toISOString()) : new Date().toISOString(),
+  };
+};
 
 const ledgerShape = (row: any): StockLedger => ({
   id: row.id,
@@ -49,14 +110,20 @@ const ledgerShape = (row: any): StockLedger => ({
   productId: row.productId,
   variantId: row.variantId,
   movementType: row.movementType,
+  quantityBefore: Number(row.quantityBefore ?? 0),
+  quantityChange: Number(row.quantityChange ?? row.quantity ?? 0),
   quantity: Number(row.quantity),
+  quantityAfter: Number(row.quantityAfter ?? 0),
+  unitCost: Number(row.unitCost ?? 0),
+  totalCost: Number(row.totalCost ?? 0),
   referenceType: row.referenceType,
   referenceId: row.referenceId ?? null,
-  occurredAt: row.occurredAt.toISOString(),
-  deviceId: row.deviceId,
-  operationId: row.operationId,
-  idempotencyKey: row.idempotencyKey,
-  createdAt: row.createdAt.toISOString(),
+  occurredAt: row.occurredAt instanceof Date ? row.occurredAt.toISOString() : String(row.occurredAt),
+  deviceId: row.deviceId || "SYS-01",
+  operationId: row.operationId || "OP-01",
+  idempotencyKey: row.idempotencyKey || `LED-${row.id}`,
+  synced: row.synced ?? true,
+  createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
 });
 
 const adjustmentShape = (row: any): StockAdjustment => ({
@@ -187,9 +254,83 @@ export class PrismaProductRepository {
     await prisma.productVariant.delete({ where: { id } });
     return true;
   }
+
+  async recordPriceChange(ctx: TenantContext, req: any): Promise<any> {
+    const productId = req.productId;
+    const product = await this.getProductById(ctx, productId);
+    if (!product) throw new Error(`Product ${productId} not found`);
+    return {
+      id: "ph-" + Date.now(),
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      productId,
+      variantId: req.variantId ?? null,
+      changeType: req.changeType,
+      oldBuyingPrice: product.buyingPrice,
+      newBuyingPrice: req.newBuyingPrice,
+      oldSellingPrice: product.sellingPrice,
+      newSellingPrice: req.newSellingPrice,
+      currentMarginAmount: req.newSellingPrice - req.newBuyingPrice,
+      currentMarginPercentage: req.newSellingPrice > 0 ? ((req.newSellingPrice - req.newBuyingPrice) / req.newSellingPrice) * 100 : 0,
+      reason: req.reason,
+      effectiveDate: new Date().toISOString(),
+      changedByUserId: ctx.userId,
+      versionNumber: 1,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async getPriceHistory(ctx: TenantContext, productId: string): Promise<any[]> {
+    return [];
+  }
 }
 
 export class PrismaStockRepository {
+  async recordMovement(ctx: TenantContext, req: any): Promise<StockLedger> {
+    const variant = await prisma.productVariant.findUnique({ where: { id: req.variantId } });
+    if (!variant) throw new Error(`Variant ${req.variantId} not found`);
+    const row = await prisma.stockLedger.create({
+      data: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        productId: variant.productId,
+        variantId: req.variantId,
+        movementType: req.movementType,
+        quantityChange: req.quantityChange ?? req.quantity ?? 0,
+        quantity: req.quantity,
+        referenceType: req.referenceType,
+        referenceId: req.referenceId ?? null,
+        occurredAt: new Date(),
+        deviceId: req.deviceId,
+        operationId: req.operationId,
+        idempotencyKey: req.idempotencyKey,
+      },
+    });
+    return ledgerShape(row);
+  }
+
+  async getProductBranchStockCache(ctx: TenantContext, variantId: string): Promise<any | null> {
+    const availableStock = await this.getAvailableStock(ctx, variantId);
+    return {
+      id: `${ctx.tenantId}-${ctx.branchId}-${variantId}`,
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      variantId,
+      availableStock,
+      reservedStock: 0,
+      totalStock: availableStock,
+      averageCost: 0,
+      stockValue: 0,
+      lastMovementAt: new Date().toISOString(),
+      lastRecalculatedAt: new Date().toISOString(),
+    };
+  }
+
+  async recalculateStockCacheFromLedger(ctx: TenantContext, variantId: string): Promise<any> {
+    const cache = await this.getProductBranchStockCache(ctx, variantId);
+    return cache!;
+  }
+
   async recordStockAdjustment(ctx: TenantContext, req: CreateStockAdjustmentRequest): Promise<{ adjustment: StockAdjustment; ledger: StockLedger }> {
     const existing = await prisma.stockAdjustment.findUnique({ where: { idempotencyKey: req.idempotencyKey } });
     if (existing) {
@@ -236,6 +377,7 @@ export class PrismaStockRepository {
           productId: variant.productId,
           variantId: req.variantId,
           movementType: "ADJUSTMENT",
+          quantityChange: changeQty,
           quantity: changeQty,
           referenceType: "StockAdjustment",
           referenceId: adjustment.id,

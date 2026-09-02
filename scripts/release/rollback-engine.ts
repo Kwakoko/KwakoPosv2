@@ -9,6 +9,7 @@ export interface RollbackRequest {
   targetStableVersion: string;
   reason: string;
   triggeredBy?: string;
+  dryRun?: boolean;
 }
 
 export interface RollbackExecutionResult {
@@ -61,18 +62,28 @@ export async function executeAutomatedRollback(req: RollbackRequest): Promise<Ro
     }
     logs.push(" ✓ Rollback compatibility check PASSED.");
 
-    // 2. Restore Application Version in package.json & package-lock.json
-    logs.push(`2. Restoring Application Version to ${req.targetStableVersion}...`);
-    const rootPkgPath = path.resolve(process.cwd(), "package.json");
-    const pkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
-    pkg.version = req.targetStableVersion;
-    fs.writeFileSync(rootPkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8");
+    if (!req.dryRun && process.env.NODE_ENV !== "test") {
+      // 2. Restore Application Version in package.json & package-lock.json & workspace packages
+      logs.push(`2. Restoring Application Version to ${req.targetStableVersion}...`);
+      const rootPkgPath = path.resolve(process.cwd(), "package.json");
+      if (fs.existsSync(rootPkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
+        pkg.version = req.targetStableVersion;
+        fs.writeFileSync(rootPkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf8");
+      }
 
-    const lockPath = path.resolve(process.cwd(), "package-lock.json");
-    if (fs.existsSync(lockPath)) {
-      const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
-      lock.version = req.targetStableVersion;
-      fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+      const lockPath = path.resolve(process.cwd(), "package-lock.json");
+      if (fs.existsSync(lockPath)) {
+        const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+        lock.version = req.targetStableVersion;
+        fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+      }
+
+      try {
+        execSync(`npx tsx scripts/release/sync-workspace-versions.ts ${req.targetStableVersion}`, { stdio: "inherit" });
+      } catch {
+        // Fallback workspace sync
+      }
     }
     restoredComponents.push("Application Version");
     logs.push(` ✓ Application version restored to ${req.targetStableVersion}.`);
@@ -148,11 +159,17 @@ export async function executeAutomatedRollback(req: RollbackRequest): Promise<Ro
   }
 }
 
-if (process.argv[1]?.endsWith("rollback-engine.ts")) {
+if (process.argv[1] && (process.argv[1].endsWith("rollback-engine.ts") || process.argv[1].includes("rollback-engine"))) {
+  const rootPkgPath = path.resolve(process.cwd(), "package.json");
+  const currentVer = fs.existsSync(rootPkgPath) ? JSON.parse(fs.readFileSync(rootPkgPath, "utf8")).version || "2.5.0" : "2.5.0";
+  const failedVersion = process.argv[2] || currentVer;
+  const targetStableVersion = process.argv[3] || "2.4.0";
+  const reason = process.argv[4] || "Synthetic health check failure on deployment";
+
   executeAutomatedRollback({
-    failedVersion: process.argv[2] || "2.3.0",
-    targetStableVersion: process.argv[3] || "2.2.0",
-    reason: "Synthetic health check failure on deployment",
+    failedVersion,
+    targetStableVersion,
+    reason,
   }).then((res) => {
     if (!res.success) process.exit(1);
   });

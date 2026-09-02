@@ -4,6 +4,8 @@ import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
+import { globalReceiptService } from "./services/receiptService.js";
+import { receiptRoutes } from "./routes/receiptRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -47,6 +49,8 @@ import {
   CreateVariantRequestSchema,
   UpdateVariantRequestSchema,
   CreateStockAdjustmentRequestSchema,
+  CreateStockMovementRequestSchema,
+  CreatePriceChangeRequestSchema,
   CreateCustomerRequestSchema,
   UpdateCustomerRequestSchema,
   CreateSupplierRequestSchema,
@@ -650,6 +654,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: rollbackResult.success, data: rollbackResult };
   });
 
+  // =========================================================================
+  // CENTRALIZED RECEIPT MANAGEMENT MODULE REST ENDPOINTS
+  // =========================================================================
+
+  receiptRoutes(server);
+
   server.get("/admin/operations/freeze", async () => {
     return { success: true, data: ReleaseGovernancePolicy.getFreezeState() };
   });
@@ -794,7 +804,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const newTenantId = targetTenantId || ctx?.tenantId || "TNT-TZ-001";
     const newBranchId = targetBranchId || ctx?.branchId || "BR-DSM-01";
     const userId = ctx?.userId || randomUUID();
-    const userEmail = ctx?.email || "admin@kwakopos.com";
+    const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
 
     const tokenPayload = {
       sub: userId,
@@ -803,7 +813,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       email: userEmail,
       roles: ctx?.roles || ["ADMIN"],
       permissions: ctx?.permissions || ["*"],
-      deviceId: ctx?.deviceId || "device-server-01",
+      deviceId: (ctx as any)?.deviceId || "device-server-01",
     };
 
     const accessToken = generateAccessToken(tokenPayload);
@@ -852,6 +862,34 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: updated };
   });
 
+  server.post("/products/:id/price-change", async (req, reply) => {
+    const productId = (req.params as any).id;
+    const validated = CreatePriceChangeRequestSchema.parse({ ...(req.body as any), productId });
+    const result = await productRepo.recordPriceChange(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.post("/api/products/:id/price-change", async (req, reply) => {
+    const productId = (req.params as any).id;
+    const validated = CreatePriceChangeRequestSchema.parse({ ...(req.body as any), productId });
+    const result = await productRepo.recordPriceChange(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/products/:id/price-history", async (req) => {
+    const productId = (req.params as any).id;
+    const variantId = (req.query as any)?.variantId;
+    const history = await productRepo.getPriceHistory(req.tenantContext!, productId, variantId);
+    return { success: true, data: history };
+  });
+
+  server.get("/api/products/:id/price-history", async (req) => {
+    const productId = (req.params as any).id;
+    const variantId = (req.query as any)?.variantId;
+    const history = await productRepo.getPriceHistory(req.tenantContext!, productId, variantId);
+    return { success: true, data: history };
+  });
+
   server.post("/products/:id/variants", async (req, reply) => {
     const validated = CreateVariantRequestSchema.parse(req.body);
     const variant = await productRepo.addVariant(req.tenantContext!, (req.params as any).id, validated);
@@ -869,7 +907,53 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: { deleted } };
   });
 
-  // Inventory
+  // Inventory & Stock Ledger Movement Engine API
+  server.post("/inventory/movement", async (req, reply) => {
+    const validated = CreateStockMovementRequestSchema.parse(req.body);
+    const ledger = await stockRepo.recordMovement(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: ledger });
+  });
+
+  server.post("/api/inventory/movement", async (req, reply) => {
+    const validated = CreateStockMovementRequestSchema.parse(req.body);
+    const ledger = await stockRepo.recordMovement(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: ledger });
+  });
+
+  server.get("/products/:id/stock-history", async (req) => {
+    const productId = (req.params as any).id;
+    const variantId = (req.query as any)?.variantId;
+    const product = await productRepo.getProductById(req.tenantContext!, productId);
+    const ledgers = await stockRepo.getLedger(req.tenantContext!, variantId);
+    const filtered = ledgers.filter((l) => l.productId === productId);
+    return {
+      success: true,
+      data: {
+        productId,
+        productName: product?.name || "Product",
+        currentStock: product?.totalStock || 0,
+        movements: filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      },
+    };
+  });
+
+  server.get("/api/products/:id/stock-history", async (req) => {
+    const productId = (req.params as any).id;
+    const variantId = (req.query as any)?.variantId;
+    const product = await productRepo.getProductById(req.tenantContext!, productId);
+    const ledgers = await stockRepo.getLedger(req.tenantContext!, variantId);
+    const filtered = ledgers.filter((l) => l.productId === productId);
+    return {
+      success: true,
+      data: {
+        productId,
+        productName: product?.name || "Product",
+        currentStock: product?.totalStock || 0,
+        movements: filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      },
+    };
+  });
+
   server.post("/inventory/adjustments", async (req, reply) => {
     const validated = CreateStockAdjustmentRequestSchema.parse(req.body);
     const result = await stockRepo.recordStockAdjustment(req.tenantContext!, validated);
@@ -878,7 +962,28 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/inventory/stock/:variantId", async (req) => {
     const stock = await stockRepo.getAvailableStock(req.tenantContext!, (req.params as any).variantId);
-    return { success: true, data: { variantId: (req.params as any).variantId, availableStock: stock, available: stock } };
+    const cache = await stockRepo.getProductBranchStockCache(req.tenantContext!, (req.params as any).variantId);
+    return {
+      success: true,
+      data: {
+        variantId: (req.params as any).variantId,
+        availableStock: stock,
+        available: stock,
+        averageCost: cache?.averageCost || 0,
+        stockValue: cache?.stockValue || 0,
+      },
+    };
+  });
+
+  server.get("/inventory/cache/:variantId", async (req) => {
+    const cache = await stockRepo.getProductBranchStockCache(req.tenantContext!, (req.params as any).variantId);
+    return { success: true, data: cache };
+  });
+
+  server.post("/inventory/cache/recalculate", async (req) => {
+    const variantId = (req.body as any)?.variantId;
+    const updated = await stockRepo.recalculateStockCacheFromLedger(req.tenantContext!, variantId);
+    return { success: true, data: updated };
   });
 
   server.get("/inventory/ledger", async (req) => {

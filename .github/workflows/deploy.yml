@@ -76,7 +76,9 @@ jobs:
 
       - name: Automatic Rollback on Failure
         if: failure()
-        run: npx tsx scripts/release/rollback-engine.ts 2.3.0 2.2.0 "Deployment health check failed"
+        run: |
+          CURRENT_VER=$(node -p "require('./package.json').version")
+          npx tsx scripts/release/rollback-engine.ts "$CURRENT_VER" "2.4.0" "Deployment health check failed"
 
       - name: Publish Official GitHub Release
         if: success()

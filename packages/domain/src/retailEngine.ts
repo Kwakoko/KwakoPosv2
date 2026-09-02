@@ -92,8 +92,109 @@ export class RetailEngine {
     return current;
   }
 
-  calculateParentProductStockFromVariants(variants: ProductVariant[]): number {
-    return variants.reduce((sum, v) => sum + (v.isActive ? (v as any).stock || 0 : 0), 0);
+  calculateParentProductStockFromVariants(variants: ProductVariant[]): {
+    totalStock: number;
+    reservedStock: number;
+    availableStock: number;
+    lowStockVariantsCount: number;
+  } {
+    let totalStock = 0;
+    let reservedStock = 0;
+    let availableStock = 0;
+    let lowStockVariantsCount = 0;
+
+    for (const v of variants || []) {
+      if (!v.isActive) continue;
+      const stock = Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0);
+      const reserved = Number(v.reservedQuantity ?? 0);
+      const reorder = Number(v.reorderLevel ?? 0);
+
+      totalStock += stock;
+      reservedStock += reserved;
+      availableStock += Math.max(0, stock - reserved);
+      if (stock <= reorder) lowStockVariantsCount++;
+    }
+
+    return {
+      totalStock,
+      reservedStock,
+      availableStock,
+      lowStockVariantsCount,
+    };
+  }
+
+  getEffectiveVariantPrice(
+    product: { buyingPrice?: number; sellingPrice?: number },
+    variant: ProductVariant
+  ): { effectiveBuyingPrice: number; effectiveSellingPrice: number } {
+    const parentBuying = product.buyingPrice ?? 0;
+    const parentSelling = product.sellingPrice ?? 0;
+    const inheritBuying = variant.inheritBuyingPrice ?? true;
+    const inheritSelling = variant.inheritSellingPrice ?? true;
+
+    return {
+      effectiveBuyingPrice: inheritBuying ? parentBuying : variant.costPrice ?? 0,
+      effectiveSellingPrice: inheritSelling ? parentSelling : variant.price ?? 0,
+    };
+  }
+
+  generateVariantCombinations(
+    productName: string,
+    baseSku: string,
+    attributes: Array<{ name: string; values: string[] }>,
+    defaultBuyingPrice: number = 0,
+    defaultSellingPrice: number = 0
+  ): Array<{
+    name: string;
+    sku: string;
+    barcode: string;
+    inheritBuyingPrice: boolean;
+    inheritSellingPrice: boolean;
+    costPrice: number;
+    price: number;
+    effectiveBuyingPrice: number;
+    effectiveSellingPrice: number;
+    attributes: Record<string, string>;
+  }> {
+    if (!attributes || attributes.length === 0) return [];
+
+    const cartesian = (arrays: string[][]): string[][] => {
+      return arrays.reduce<string[][]>(
+        (acc, curr) => acc.flatMap((d) => curr.map((e) => [...d, e])),
+        [[]]
+      );
+    };
+
+    const valueArrays = attributes.map((a) => a.values);
+    const combinations = cartesian(valueArrays);
+    const cleanBaseSku = baseSku.replace(/[^a-zA-Z0-9-]/g, "").toUpperCase();
+
+    return combinations.map((combo, idx) => {
+      const attrMap: Record<string, string> = {};
+      attributes.forEach((attr, i) => {
+        attrMap[attr.name] = combo[i];
+      });
+
+      const comboStr = combo.join(" / ");
+      const skuSuffix = combo
+        .map((val) => val.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3))
+        .join("-");
+      const sku = `${cleanBaseSku}-${skuSuffix}`;
+      const barcodeSeed = Math.floor(10000000 + Math.random() * 90000000).toString();
+
+      return {
+        name: `${productName} (${comboStr})`,
+        sku,
+        barcode: `BAR-${barcodeSeed}`,
+        inheritBuyingPrice: true,
+        inheritSellingPrice: true,
+        costPrice: defaultBuyingPrice,
+        price: defaultSellingPrice,
+        effectiveBuyingPrice: defaultBuyingPrice,
+        effectiveSellingPrice: defaultSellingPrice,
+        attributes: attrMap,
+      };
+    });
   }
 
   generateSKU(prefix: string, productName: string, variantName?: string): string {

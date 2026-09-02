@@ -67,6 +67,10 @@ model Tenant {
   payrollInputs      PayrollInput[]
   syncOperations     SyncOperation[]
   auditEvents        AuditEvent[]
+  priceHistories     ProductPriceHistory[]
+  branchStocks       ProductBranchStock[]
+  receipts           Receipt[]
+  receiptTemplates   ReceiptTemplate[]
 
   @@map("tenants")
 }
@@ -122,6 +126,10 @@ model Branch {
   payrollInputs      PayrollInput[]
   syncOperations     SyncOperation[]
   auditEvents        AuditEvent[]
+  priceHistories     ProductPriceHistory[]
+  branchStocks       ProductBranchStock[]
+  receipts           Receipt[]
+  receiptTemplates   ReceiptTemplate[]
 
 
   @@unique([tenantId, code])
@@ -282,24 +290,39 @@ model Supplier {
 }
 
 model Product {
-  id           String           @id @default(uuid())
-  tenantId     String
-  branchId     String
-  categoryId   String?
-  brandId      String?          @map("brand_id")
-  name         String
-  description  String?
-  sku          String
-  category     String           @default("General")
-  isActive     Boolean          @default(true)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch       Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  categoryRel  Category?        @relation(fields: [categoryId], references: [id])
-  variants     ProductVariant[]
-  stockLedgers StockLedger[]
-  saleLines    SaleLine[]
+  id                    String           @id @default(uuid())
+  tenantId              String
+  branchId              String
+  categoryId            String?
+  brandId               String?          @map("brand_id")
+  supplierId            String?
+  taxId                 String?
+  name                  String
+  description           String?
+  sku                   String
+  category              String           @default("General")
+  buyingPrice           Decimal               @default(0) @db.Decimal(12, 2)
+  sellingPrice          Decimal               @default(0) @db.Decimal(12, 2)
+  currentMarginAmount   Decimal               @default(0) @db.Decimal(12, 2)
+  currentMarginPercentage Decimal             @default(0) @db.Decimal(7, 2)
+  activePriceVersionId  String?
+  images                String[]              @default([])
+  hasVariants           Boolean               @default(false)
+  totalStock            Decimal               @default(0) @db.Decimal(12, 4)
+  reservedStock         Decimal               @default(0) @db.Decimal(12, 4)
+  availableStock        Decimal               @default(0) @db.Decimal(12, 4)
+  lowStockVariantsCount Int                   @default(0)
+  isActive              Boolean               @default(true)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  categoryRel           Category?             @relation(fields: [categoryId], references: [id])
+  variants              ProductVariant[]
+  stockLedgers          StockLedger[]
+  priceHistories        ProductPriceHistory[]
+  branchStocks          ProductBranchStock[]
+  saleLines             SaleLine[]
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId, branchId])
@@ -307,48 +330,101 @@ model Product {
 }
 
 model ProductVariant {
-  id                   String                @id @default(uuid())
-  tenantId             String
-  branchId             String
-  productId            String
-  name                 String
-  sku                  String
-  barcode              String?
-  price                Decimal               @db.Decimal(12, 2)
-  costPrice            Decimal               @db.Decimal(12, 2)
-  isActive             Boolean               @default(true)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch               Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  product              Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
-  stockLedgers         StockLedger[]
-  stockAdjustments     StockAdjustment[]
-  purchaseOrderItems   PurchaseOrderItem[]
-  purchaseReceiptItems PurchaseReceiptItem[]
-  salesOrderItems      SalesOrderItem[]
-  saleLines            SaleLine[]
-  returnLines          ReturnLine[]
+  id                      String                @id @default(uuid())
+  tenantId                String
+  branchId                String
+  productId               String
+  name                    String
+  sku                     String
+  barcode                 String?
+  inheritBuyingPrice      Boolean               @default(true)
+  inheritSellingPrice     Boolean               @default(true)
+  price                   Decimal               @default(0) @db.Decimal(12, 2)
+  costPrice               Decimal               @default(0) @db.Decimal(12, 2)
+  currentMarginAmount     Decimal               @default(0) @db.Decimal(12, 2)
+  currentMarginPercentage Decimal               @default(0) @db.Decimal(7, 2)
+  activePriceVersionId    String?
+  inventoryQuantity       Decimal               @default(0) @db.Decimal(12, 4)
+  reservedQuantity        Decimal               @default(0) @db.Decimal(12, 4)
+  reorderLevel            Decimal               @default(0) @db.Decimal(12, 4)
+  imageUrl                String?
+  attributes              Json?
+  isActive                Boolean               @default(true)
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  tenant                  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                  Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product                 Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  stockLedgers            StockLedger[]
+  stockAdjustments        StockAdjustment[]
+  priceHistories          ProductPriceHistory[]
+  branchStocks            ProductBranchStock[]
+  purchaseOrderItems      PurchaseOrderItem[]
+  purchaseReceiptItems    PurchaseReceiptItem[]
+  salesOrderItems         SalesOrderItem[]
+  saleLines               SaleLine[]
+  returnLines             ReturnLine[]
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId, branchId, productId])
   @@map("product_variants")
 }
 
+model ProductPriceHistory {
+  id                  String          @id @default(uuid())
+  tenantId            String
+  branchId            String
+  productId           String
+  variantId           String?
+  versionNumber       Int
+  previousBuyingPrice  Decimal         @default(0) @db.Decimal(15, 2)
+  newBuyingPrice      Decimal         @db.Decimal(15, 2)
+  previousSellingPrice Decimal         @default(0) @db.Decimal(15, 2)
+  newSellingPrice     Decimal         @db.Decimal(15, 2)
+  marginAmount        Decimal         @db.Decimal(15, 2)
+  marginPercentage    Decimal         @db.Decimal(7, 2)
+  changeType          String          @default("MANUAL_ADJUSTMENT") // INITIAL_PRICE, PRICE_UPDATE, PROMOTION, SUPPLIER_CHANGE, MANUAL_ADJUSTMENT, BULK_UPDATE
+  changeReason        String
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  changedByUserId     String?
+  deviceId            String
+  idempotencyKey      String          @unique
+  createdAt           DateTime        @default(now())
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch              Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product             Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant             ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, productId])
+  @@index([tenantId, branchId, variantId])
+  @@index([tenantId, branchId, versionNumber])
+  @@map("product_price_history")
+}
+
 model StockLedger {
   id             String         @id @default(uuid())
   tenantId       String
   branchId       String
+  warehouseId    String?
   productId      String
   variantId      String
-  movementType   String // OPENING, PURCHASE, SALE, ADJUSTMENT, TRANSFER_IN, TRANSFER_OUT, RETURN, DAMAGE
-  quantity       Decimal        @db.Decimal(12, 4)
+  movementType   String // OPENING_STOCK, PURCHASE_RECEIVE, CUSTOMER_RETURN, TRANSFER_IN, PRODUCTION_OUTPUT, ADJUSTMENT_GAIN, SALE, SUPPLIER_RETURN, TRANSFER_OUT, DAMAGE, EXPIRY, ADJUSTMENT_LOSS, PRODUCTION_USAGE, SALE_CORRECTION
   referenceType  String
   referenceId    String?
-  occurredAt     DateTime
+  quantityBefore Decimal        @default(0) @db.Decimal(15, 4)
+  quantityChange Decimal        @db.Decimal(15, 4)
+  quantity       Decimal        @db.Decimal(15, 4)
+  quantityAfter  Decimal        @default(0) @db.Decimal(15, 4)
+  unitCost       Decimal        @default(0) @db.Decimal(15, 2)
+  totalCost      Decimal        @default(0) @db.Decimal(15, 2)
+  userId         String?
   deviceId       String
   operationId    String
   idempotencyKey String         @unique
+  notes          String?
+  synced         Boolean        @default(true)
+  occurredAt     DateTime
   createdAt      DateTime       @default(now())
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
@@ -358,6 +434,27 @@ model StockLedger {
   @@index([tenantId, branchId, variantId])
   @@index([tenantId, branchId, occurredAt])
   @@map("stock_ledgers")
+}
+
+model ProductBranchStock {
+  id              String         @id @default(uuid())
+  tenantId        String
+  branchId        String
+  warehouseId     String?
+  productId       String
+  variantId       String
+  currentQuantity Decimal        @default(0) @db.Decimal(15, 4)
+  averageCost     Decimal        @default(0) @db.Decimal(15, 2)
+  stockValue      Decimal        @default(0) @db.Decimal(15, 2)
+  updatedAt       DateTime       @updatedAt
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product         Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, warehouseId, productId, variantId])
+  @@index([tenantId, branchId, variantId])
+  @@map("product_branch_stock")
 }
 
 model StockAdjustment {
@@ -2305,5 +2402,159 @@ model ReleaseIncident {
   @@index([appVersionId])
   @@map("release_incidents")
 }
+
+// ==========================================
+// Centralized Production-Grade Receipt Management Engine
+// ==========================================
+
+model Receipt {
+  id               String            @id @default(uuid())
+  receiptNumber    String            @unique
+  transactionId    String
+  transactionType  String            @default("POS_SALE")
+  tenantId         String
+  branchId         String
+  cashierId        String
+  cashierName      String?
+  customerId       String?
+  customerName     String?
+  customerPhone    String?
+  customerEmail    String?
+  subtotal         Float             @default(0)
+  discountTotal    Float             @default(0)
+  taxTotal         Float             @default(0)
+  grandTotal       Float             @default(0)
+  paidAmount       Float             @default(0)
+  changeAmount     Float             @default(0)
+  paymentMethod    String            @default("CASH")
+  currency         String            @default("TZS")
+  exchangeRate     Float             @default(1.0)
+  status           String            @default("COMPLETED")
+  deviceId         String            @default("POS-DEV-001")
+  syncStatus       String            @default("SYNCED")
+  digitalSignature String
+  qrCodePayload    String
+  barcodePayload   String
+  reprintCount     Int               @default(0)
+  lastReprintedAt  DateTime?
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch            @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  items            ReceiptItem[]
+  printLogs        ReceiptPrintLog[]
+  shareLogs        ReceiptShareLog[]
+  auditLogs        ReceiptAuditLog[]
+
+  @@index([tenantId, branchId])
+  @@index([receiptNumber])
+  @@index([transactionId])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([status])
+  @@map("receipts")
+}
+
+model ReceiptItem {
+  id         String   @id @default(uuid())
+  receiptId  String
+  productId  String?
+  variantId  String?
+  sku        String
+  name       String
+  qty        Float
+  unitPrice  Float
+  discount   Float    @default(0)
+  taxRate    Float    @default(0)
+  taxAmount  Float    @default(0)
+  lineTotal  Float
+  createdAt  DateTime @default(now())
+
+  receipt    Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@map("receipt_items")
+}
+
+model ReceiptTemplate {
+  id               String   @id @default(uuid())
+  tenantId         String
+  branchId         String?
+  name             String
+  templateType     String   @default("THERMAL_80MM")
+  isDefault        Boolean  @default(false)
+  headerText       String?
+  footerText       String?
+  logoUrl          String?
+  primaryColor     String   @default("#1e293b")
+  fontFamily       String   @default("Inter, sans-serif")
+  showQrCode       Boolean  @default(true)
+  showBarcode      Boolean  @default(true)
+  showTaxBreakdown Boolean  @default(true)
+  showCustomerInfo Boolean  @default(true)
+  returnPolicyText String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("receipt_templates")
+}
+
+model ReceiptPrintLog {
+  id          String   @id @default(uuid())
+  receiptId   String
+  printedBy   String
+  printType   String   @default("INITIAL")
+  printerName String?
+  paperWidth  String?
+  reason      String?
+  timestamp   DateTime @default(now())
+
+  receipt     Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@map("receipt_print_logs")
+}
+
+model ReceiptShareLog {
+  id        String   @id @default(uuid())
+  receiptId String
+  channel   String
+  recipient String
+  sharedBy  String
+  status    String   @default("SENT")
+  timestamp DateTime @default(now())
+
+  receipt   Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@map("receipt_share_logs")
+}
+
+model ReceiptAuditLog {
+  id        String   @id @default(uuid())
+  receiptId String
+  action    String
+  actorId   String
+  actorName String?
+  deviceId  String?
+  branchId  String?
+  ipAddress String?
+  reason    String?
+  details   String?
+  timestamp DateTime @default(now())
+
+  receipt   Receipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@map("receipt_audit_logs")
+}
+
 
 

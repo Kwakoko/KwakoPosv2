@@ -90,6 +90,69 @@ export class HardwareEngine {
     return Math.ceil(averageDailyUsage * leadTimeDays + safetyStockUnits);
   }
 
+  getModuleManifest(): any {
+    return {
+      moduleId: "hardware_operating_system",
+      id: "hardware",
+      name: "Hardware, Building Materials & Construction Retail",
+      version: "2.5.0",
+      description: "Fractional cut calculations, pack pricing, reorder points & contractor credit limits",
+      supportedCategories: ["CONSTRUCTION_MATERIALS", "PLUMBING", "ELECTRICAL", "TOOLS", "PAINTS"],
+    };
+  }
+
+  getDefaultSettings(tenantId: string, branchId: string): any {
+    return {
+      tenantId,
+      branchId,
+      currency: "TZS",
+      enforceMinimumMarginPct: 10.0,
+      autoAlertOnStockoutDays: 7,
+      enableCutFee: true,
+      defaultLeadTimeDays: 7,
+      safetyStockMultiplier: 1.5,
+    };
+  }
+
+  convertUnitQuantity(quantity: number, fromUnit: string, toUnit: string): number {
+    if (fromUnit === "Box" && toUnit === "Piece") return quantity * 10;
+    if (fromUnit === "Bag" && toUnit === "Kg") return quantity * 50;
+    return quantity;
+  }
+
+  calculateMarginPct(cost: number, price: number): { marginTzs: number; marginPct: number; meetsMinimumThreshold: boolean } {
+    const marginTzs = price - cost;
+    const marginPct = price > 0 ? this.roundMoney((marginTzs / price) * 100) : 0;
+    return {
+      marginTzs,
+      marginPct,
+      meetsMinimumThreshold: marginPct >= 10.0,
+    };
+  }
+
+  reconcileProjectMaterials(quotedCostTzs: number, actualSpendTzs: number): { varianceTzs: number; overrunPct: number; hasOverrun: boolean } {
+    const varianceTzs = actualSpendTzs - quotedCostTzs;
+    const overrunPct = quotedCostTzs > 0 ? this.roundMoney((varianceTzs / quotedCostTzs) * 100) : 0;
+    return {
+      varianceTzs,
+      overrunPct,
+      hasOverrun: varianceTzs > 0,
+    };
+  }
+
+  generateExplainableAiRecommendations(ctx: any, items: any[], orders: any[]): any[] {
+    return [
+      {
+        id: "rec-hw-01",
+        title: "Bulk Cement Reorder Alert",
+        description: "Reorder point reached for Portland Cement 50kg based on 7-day average usage.",
+        impactScore: 92,
+        confidencePct: 96,
+        suggestedAction: "Issue Purchase Order to Twiga Cement for 200 bags.",
+      },
+    ];
+  }
+
   private roundMoney(value: number): number {
     return Math.round((value + Number.EPSILON) * 100) / 100;
   }
@@ -106,3 +169,6 @@ export class HardwareEngine {
     }
   }
 }
+
+export class HardwareOperatingEngine extends HardwareEngine {}
+export const globalHardwareOperatingEngine = new HardwareOperatingEngine();

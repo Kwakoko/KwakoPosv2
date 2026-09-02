@@ -48,7 +48,7 @@ export class PrismaSyncEngine {
     return {
       serverTimestamp: anchor.toISOString(),
       products,
-      variants: variants.map((v: any) => ({ id: v.id, tenantId: v.tenantId, branchId: v.branchId, productId: v.productId, name: v.name, sku: v.sku, barcode: v.barcode ?? null, price: Number(v.price), costPrice: Number(v.costPrice), isActive: v.isActive, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })),
+      variants: variants.map((v: any) => ({ id: v.id, tenantId: v.tenantId, branchId: v.branchId, productId: v.productId, name: v.name, sku: v.sku, barcode: v.barcode ?? null, price: Number(v.price), costPrice: Number(v.costPrice), isActive: v.isActive, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })) as any,
       stockLedger: ledger,
       adjustments: adjustments.map((a: any) => ({ id: a.id, tenantId: a.tenantId, branchId: a.branchId, variantId: a.variantId, adjustmentType: a.adjustmentType, quantityChange: Number(a.quantityChange), reason: a.reason, referenceNote: a.referenceNote ?? null, status: a.status, createdByUserId: a.createdByUserId, deviceId: a.deviceId, operationId: a.operationId, idempotencyKey: a.idempotencyKey, createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() })),
       customers: customers.map((c: any) => ({ ...c, creditLimit: Number(c.creditLimit), currentBalance: Number(c.currentBalance), openingBalance: Number(c.openingBalance), createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),

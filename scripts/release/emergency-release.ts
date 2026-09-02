@@ -66,7 +66,9 @@ export async function executeEmergencyRelease(req: EmergencyReleaseRequest): Pro
   fs.mkdirSync(artifactDir, { recursive: true });
   fs.writeFileSync(path.join(artifactDir, `emergency-release-${req.incidentId}.json`), JSON.stringify(auditRecord, null, 2), "utf8");
 
-  await publishGitHubRelease();
+  if (process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+    await publishGitHubRelease();
+  }
 
   console.log("========================================================================");
   console.log(` 🎉 EMERGENCY RELEASE PUBLISHED & CERTIFIED: v${version}`);

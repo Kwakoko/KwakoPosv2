@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/contracts",
-  "version": "2.5.0",
+  "version": "2.10.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./tenantOnboardingContracts": {
+      "types": "./dist/tenantOnboardingContracts.d.ts",
+      "import": "./dist/tenantOnboardingContracts.js",
+      "default": "./dist/tenantOnboardingContracts.js"
     }
   },
   "scripts": {

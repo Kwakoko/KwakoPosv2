@@ -3,6 +3,7 @@ import { loadConfig } from "@kwakopos2/config";
 import { prisma } from "@kwakopos2/database";
 import { comparePassword, generateAccessToken, globalSessionManager } from "@kwakopos2/auth";
 import { buildServer } from "./server.js";
+import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import type { JwtPayload } from "@kwakopos2/auth";
 
 function isProduction(config: ReturnType<typeof loadConfig>): boolean {
@@ -108,6 +109,9 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
   const productionPersistence = opts.productionPersistence ?? isProduction(config);
   if (productionPersistence) configurePersistentSessions();
   const server = buildServer({ config, productionPersistence });
+
+  // Tenant onboarding API is deliberately mounted behind the existing V2 authentication/authorization hook.
+  tenantOnboardingRoutes(server);
 
   server.addHook("preValidation", async (req, reply) => {
     if (!productionPersistence) return;

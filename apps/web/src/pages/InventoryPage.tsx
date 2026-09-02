@@ -120,12 +120,14 @@ export const InventoryPage: React.FC = () => {
   const [adjQty, setAdjQty] = useState(1);
   const [adjNotes, setAdjNotes] = useState("");
 
-  const [ledger, setLedger] = useState([
-    { id: "led-101", date: "2026-09-01 10:15", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 2kg", type: "SALE_OUTBOUND", qty: -2, qtyBefore: 47, balance: 45, unitCost: 6200, totalCost: 12400, ref: "SALE-2026-9912", user: "Cashier 01" },
-    { id: "led-102", date: "2026-09-01 09:30", sku: "SKU-COK-500-02", name: "Coca Cola 500ml Pet", type: "GRN_INBOUND", qty: +50, qtyBefore: 70, balance: 120, unitCost: 1100, totalCost: 55000, ref: "PO-2026-004", user: "Inventory Officer" },
-    { id: "led-103", date: "2026-08-31 16:45", sku: "SKU-UNG-10K-03", name: "Unga wa Ngano 10kg", type: "TRANSFER_OUT", qty: -5, qtyBefore: 13, balance: 8, unitCost: 24000, totalCost: 120000, ref: "TR-2026-08", user: "Store Manager" },
-    { id: "led-104", date: "2026-08-31 14:10", sku: "SKU-AMX-500-06", name: "Amoxicillin 500mg Capsules", type: "OPENING_STOCK", qty: +85, qtyBefore: 0, balance: 85, unitCost: 8000, totalCost: 680000, ref: "INIT-2026-01", user: "System Bootstrap" },
-    { id: "led-105", date: "2026-08-31 11:20", sku: "SKU-MLK-1L-04", name: "Fresh Cow Milk 1L", type: "WASTAGE_SPILL", qty: -2, qtyBefore: 2, balance: 0, unitCost: 2200, totalCost: 4400, ref: "WST-2026-01", user: "Shift Supervisor" },
+  const [ledger, setLedger] = useState<{
+    id: string; date: string; sku: string; name: string; type: string; qty: number; qtyBefore: number; balance: number; unitCost: number; totalCost: number; ref: string; user: string; notes?: string; deviceId?: string;
+  }[]>([
+    { id: "led-101", date: "2026-09-01 10:15", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 2kg", type: "SALE_OUTBOUND", qty: -2, qtyBefore: 47, balance: 45, unitCost: 6200, totalCost: 12400, ref: "SALE-2026-9912", user: "Cashier 01", notes: "Standard POS Sale", deviceId: "POS-01" },
+    { id: "led-102", date: "2026-09-01 09:30", sku: "SKU-COK-500-02", name: "Coca Cola 500ml Pet", type: "GRN_INBOUND", qty: +50, qtyBefore: 70, balance: 120, unitCost: 1100, totalCost: 55000, ref: "PO-2026-004", user: "Inventory Officer", notes: "GRN Purchase Receive", deviceId: "HQ-ST-01" },
+    { id: "led-103", date: "2026-08-31 16:45", sku: "SKU-UNG-10K-03", name: "Unga wa Ngano 10kg", type: "TRANSFER_OUT", qty: -5, qtyBefore: 13, balance: 8, unitCost: 24000, totalCost: 120000, ref: "TR-2026-08", user: "Store Manager", notes: "Transfer to Kijitonyama", deviceId: "HQ-ST-01" },
+    { id: "led-104", date: "2026-08-31 14:10", sku: "SKU-AMX-500-06", name: "Amoxicillin 500mg Capsules", type: "OPENING_STOCK", qty: +85, qtyBefore: 0, balance: 85, unitCost: 8000, totalCost: 680000, ref: "INIT-2026-01", user: "System Bootstrap", notes: "Initial stock entry", deviceId: "SYS-INIT" },
+    { id: "led-105", date: "2026-08-31 11:20", sku: "SKU-MLK-1L-04", name: "Fresh Cow Milk 1L", type: "WASTAGE_SPILL", qty: -2, qtyBefore: 2, balance: 0, unitCost: 2200, totalCost: 4400, ref: "WST-2026-01", user: "Shift Supervisor", notes: "Spillage wastage", deviceId: "POS-02" },
   ]);
 
   const filteredLedger = useMemo(() => {
@@ -684,109 +686,472 @@ export const InventoryPage: React.FC = () => {
         </div>
       )}
 
-      {/* --- Product Variant Manager Modal --- */}
+      {/* --- Redesigned Product Details & Variant Architecture Command Center --- */}
       {variantModalProduct && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 560, padding: "1.5rem" }}>
-            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000, padding: "1rem" }}>
+          <div className="v2-card" style={{ width: 850, maxHeight: "90vh", display: "flex", flexDirection: "column", padding: "1.5rem" }}>
+            {/* Modal Header */}
+            <div className="v2-flex v2-items-center v2-justify-between v2-pb-3" style={{ borderBottom: "1px solid var(--surface-border)" }}>
               <div>
-                <h2 className="v2-text-base v2-font-black">Manage Variants — {variantModalProduct.name}</h2>
-                <div className="v2-text-xs v2-text-muted">Parent SKU: {variantModalProduct.sku}</div>
+                <div className="v2-flex v2-items-center v2-gap-2">
+                  <h2 className="v2-text-lg v2-font-black">{variantModalProduct.name}</h2>
+                  <span className="badge v2-badge-primary">{variantModalProduct.category}</span>
+                  {variantModalProduct.hasVariants && <span className="badge v2-badge-success">Variant Product</span>}
+                </div>
+                <div className="v2-text-xs v2-text-muted">Parent SKU: <span className="v2-mono v2-font-bold">{variantModalProduct.sku}</span> · Brand: {variantModalProduct.brand}</div>
               </div>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">✕</button>
             </div>
 
-            {/* Existing Variants Table */}
-            <div className="v2-mb-4" style={{ maxHeight: 220, overflowY: "auto" }}>
-              {!variantModalProduct.variants || variantModalProduct.variants.length === 0 ? (
-                <div className="v2-text-xs v2-text-muted v2-text-center v2-py-4">No variant variations configured for this SKU yet.</div>
-              ) : (
-                <table className="v2-table v2-table-sm">
-                  <thead>
-                    <tr>
-                      <th>Variant Name</th>
-                      <th>SKU</th>
-                      <th>Selling Price</th>
-                      <th>Stock</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {variantModalProduct.variants.map((v) => (
-                      <tr key={v.id}>
-                        <td className="v2-font-bold">{v.name}</td>
-                        <td className="v2-mono v2-text-xs">{v.sku}</td>
-                        <td className="v2-mono">{money(v.sellingPrice)}</td>
-                        <td className="v2-mono v2-font-bold">{v.stock}</td>
-                        <td>
-                          <button
-                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                            style={{ color: "var(--danger)" }}
-                            onClick={() => {
-                              const updatedVars = variantModalProduct.variants?.filter((x) => x.id !== v.id);
-                              setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updatedVars } : i));
-                              setVariantModalProduct({ ...variantModalProduct, variants: updatedVars });
-                            }}
-                            type="button"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </td>
+            {/* 7 Dedicated Tabs */}
+            <div className="v2-flex v2-gap-1 v2-py-2" style={{ borderBottom: "1px solid var(--surface-border)", overflowX: "auto" }}>
+              {[
+                { id: "general", label: "General Info", icon: Package },
+                { id: "pricing", label: "Pricing & Margins", icon: DollarSign },
+                { id: "inventory", label: "Inventory Summary", icon: BarChart3 },
+                { id: "variants", label: `Variants (${variantModalProduct.variants?.length || 0})`, icon: Layers },
+                { id: "images", label: "Images", icon: QrCode },
+                { id: "suppliers", label: "Suppliers", icon: Truck },
+                { id: "history", label: "Stock History", icon: Clock },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`v2-btn v2-btn-sm ${newVarAttrKey === tab.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
+                  onClick={() => setNewVarAttrKey(tab.id)}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  <tab.icon size={13} />
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "1rem 0" }}>
+              {/* TAB 1: General Info */}
+              {(newVarAttrKey === "general" || newVarAttrKey === "Size") && (
+                <div className="v2-space-y-3">
+                  <div className="v2-grid v2-grid-2 v2-gap-3">
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT NAME</label>
+                      <input className="v2-input" value={variantModalProduct.name} readOnly />
+                    </div>
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">SKU CODE</label>
+                      <input className="v2-input v2-mono" value={variantModalProduct.sku} readOnly />
+                    </div>
+                  </div>
+
+                  <div className="v2-grid v2-grid-2 v2-gap-3">
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY</label>
+                      <input className="v2-input" value={variantModalProduct.category} readOnly />
+                    </div>
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND</label>
+                      <input className="v2-input" value={variantModalProduct.brand} readOnly />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">DESCRIPTION</label>
+                    <textarea className="v2-input" rows={2} value="Shared parent product details. Contains default pricing, images, tax codes, and supplier mappings." readOnly />
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: Pricing & Price History Ledger Timeline */}
+              {newVarAttrKey === "pricing" && (
+                <div className="v2-space-y-4">
+                  <div className="v2-grid v2-grid-4 v2-gap-3">
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-font-bold v2-text-muted">BUYING PRICE (COST)</div>
+                      <div className="v2-text-xl v2-font-black" style={{ color: "var(--accent)" }}>{money(variantModalProduct.buyingPrice)}</div>
+                      <div className="v2-text-xs v2-text-muted v2-mt-1">Active cost snapshot</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-font-bold v2-text-muted">SELLING PRICE (RETAIL)</div>
+                      <div className="v2-text-xl v2-font-black" style={{ color: "var(--success)" }}>{money(variantModalProduct.sellingPrice)}</div>
+                      <div className="v2-text-xs v2-text-muted v2-mt-1">Active retail price</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-font-bold v2-text-muted">PROFIT AMOUNT</div>
+                      <div className="v2-text-xl v2-font-black" style={{ color: "var(--success)" }}>
+                        {money(variantModalProduct.sellingPrice - variantModalProduct.buyingPrice)}
+                      </div>
+                      <div className="v2-text-xs v2-text-muted v2-mt-1">Profit per unit</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-font-bold v2-text-muted">MARGIN %</div>
+                      <div className="v2-text-xl v2-font-black">
+                        {variantModalProduct.sellingPrice > 0
+                          ? Math.round(((variantModalProduct.sellingPrice - variantModalProduct.buyingPrice) / variantModalProduct.sellingPrice) * 10000) / 100
+                          : 0}%
+                      </div>
+                      <div className="v2-text-xs v2-text-muted v2-mt-1">Gross profit margin</div>
+                    </div>
+                  </div>
+
+                  <div className="v2-flex v2-items-center v2-justify-between v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                    <div className="v2-font-bold v2-text-xs">Price Versioning & Price History Ledger</div>
+                    <button
+                      className="v2-btn v2-btn-primary v2-btn-sm"
+                      type="button"
+                      onClick={() => {
+                        const newBuy = Number(prompt("Enter NEW Buying Price (Cost):", String(variantModalProduct.buyingPrice)));
+                        if (isNaN(newBuy) || newBuy < 0) return;
+                        const newSell = Number(prompt("Enter NEW Selling Price (Retail):", String(variantModalProduct.sellingPrice)));
+                        if (isNaN(newSell) || newSell < 0) return;
+                        const reason = prompt("Enter mandatory Reason for Price Change (e.g. Supplier Increase, Promotion):", "Supplier Cost Adjustment");
+                        if (!reason || !reason.trim()) {
+                          alert("Reason is required for Price History audit logging!");
+                          return;
+                        }
+                        const margin = newSell - newBuy;
+                        const marginPct = newSell > 0 ? Math.round((margin / newSell) * 10000) / 100 : 0;
+                        const updated = {
+                          ...variantModalProduct,
+                          buyingPrice: newBuy,
+                          sellingPrice: newSell,
+                        };
+                        setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updated : i));
+                        setVariantModalProduct(updated);
+                        alert(`Price version recorded! New Margin: ${money(margin)} (${marginPct}%)`);
+                      }}
+                    >
+                      <DollarSign size={13} /> Record Price Change
+                    </button>
+                  </div>
+
+                  {/* Price History Timeline */}
+                  <div className="v2-card v2-p-3">
+                    <div className="v2-font-bold v2-text-xs v2-mb-2">Price & Margin History Ledger Timeline</div>
+                    <div className="v2-space-y-3">
+                      <div className="v2-p-2" style={{ borderLeft: "3px solid var(--primary)", background: "var(--surface-1)" }}>
+                        <div className="v2-flex v2-items-center v2-justify-between">
+                          <span className="v2-font-bold v2-text-xs">Version #2 · 11 July 2026</span>
+                          <span className="badge v2-badge-success">PRICE_UPDATE</span>
+                        </div>
+                        <div className="v2-text-xs v2-text-muted v2-mt-1">Changed By: <strong>Admin User</strong> · Reason: <em>Supplier Price Increase</em></div>
+                        <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-2 v2-text-xs v2-mono">
+                          <div>Buying: 750 TZS &rarr; <strong>{money(variantModalProduct.buyingPrice)}</strong></div>
+                          <div>Selling: 1,100 TZS &rarr; <strong>{money(variantModalProduct.sellingPrice)}</strong></div>
+                          <div>Margin: <strong>{money(variantModalProduct.sellingPrice - variantModalProduct.buyingPrice)}</strong> ({variantModalProduct.sellingPrice > 0 ? Math.round(((variantModalProduct.sellingPrice - variantModalProduct.buyingPrice) / variantModalProduct.sellingPrice) * 100) : 0}%)</div>
+                        </div>
+                      </div>
+
+                      <div className="v2-p-2" style={{ borderLeft: "3px solid var(--muted)", background: "var(--surface-1)" }}>
+                        <div className="v2-flex v2-items-center v2-justify-between">
+                          <span className="v2-font-bold v2-text-xs">Version #1 · Initial Product Setup</span>
+                          <span className="badge v2-badge-muted">INITIAL_PRICE</span>
+                        </div>
+                        <div className="v2-text-xs v2-text-muted v2-mt-1">Changed By: <strong>System Console</strong> · Reason: <em>Initial Product Setup</em></div>
+                        <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-2 v2-text-xs v2-mono">
+                          <div>Buying: 0 &rarr; <strong>700 TZS</strong></div>
+                          <div>Selling: 0 &rarr; <strong>1,000 TZS</strong></div>
+                          <div>Margin: <strong>300 TZS</strong> (30%)</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: Inventory Summary */}
+              {newVarAttrKey === "inventory" && (
+                <div className="v2-space-y-4">
+                  <div className="v2-grid v2-grid-4 v2-gap-3">
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-text-muted">TOTAL PARENT STOCK</div>
+                      <div className="v2-font-black v2-text-lg">{variantModalProduct.stock}</div>
+                      <div className="v2-text-xs v2-text-muted">Sum of all variants</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-text-muted">RESERVED QUANTITY</div>
+                      <div className="v2-font-black v2-text-lg" style={{ color: "var(--warning)" }}>0</div>
+                      <div className="v2-text-xs v2-text-muted">Pending sales orders</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-text-muted">AVAILABLE STOCK</div>
+                      <div className="v2-font-black v2-text-lg" style={{ color: "var(--success)" }}>{variantModalProduct.stock}</div>
+                      <div className="v2-text-xs v2-text-muted">Ready to sell</div>
+                    </div>
+                    <div className="v2-card v2-p-3">
+                      <div className="v2-text-xs v2-text-muted">VARIANT COUNT</div>
+                      <div className="v2-font-black v2-text-lg">{variantModalProduct.variants?.length || 0}</div>
+                      <div className="v2-text-xs v2-text-muted">Active variations</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: Variants */}
+              {(newVarAttrKey === "variants" || newVarAttrKey === "Pack" || newVarAttrKey === "Color" || newVarAttrKey === "Custom") && (
+                <div className="v2-space-y-4">
+                  {/* Action Toolbar */}
+                  <div className="v2-flex v2-items-center v2-justify-between v2-gap-2 v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                    <div className="v2-flex v2-items-center v2-gap-2">
+                      <button
+                        className="v2-btn v2-btn-primary v2-btn-sm"
+                        type="button"
+                        onClick={() => {
+                          const vName = prompt("Enter variant name (e.g. Size: Large / Color: Blue):", "Size: Large");
+                          if (!vName) return;
+                          const vPrice = Number(prompt("Enter selling price (Leave 0 to inherit parent price):", "0") || 0);
+                          const vStock = Number(prompt("Enter initial stock quantity:", "10") || 10);
+                          const newVar: ProductVariantData = {
+                            id: `var-${Date.now()}`,
+                            name: vName,
+                            sku: `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`,
+                            attributes: { Custom: vName },
+                            buyingPrice: variantModalProduct.buyingPrice,
+                            sellingPrice: vPrice > 0 ? vPrice : variantModalProduct.sellingPrice,
+                            stock: vStock,
+                            reorderLevel: 5,
+                          };
+                          const updated = [...(variantModalProduct.variants || []), newVar];
+                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updated } : i));
+                          setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updated });
+                        }}
+                      >
+                        <Plus size={13} /> Add Variant
+                      </button>
+
+                      <button
+                        className="v2-btn v2-btn-secondary v2-btn-sm"
+                        type="button"
+                        onClick={() => {
+                          const attr1 = prompt("Enter first attribute name (e.g. Size):", "Size");
+                          if (!attr1) return;
+                          const vals1 = prompt("Enter comma-separated values for " + attr1 + ":", "Small, Medium, Large");
+                          if (!vals1) return;
+                          const attr2 = prompt("Enter second attribute name (e.g. Color) or leave empty:", "Color");
+                          const vals2 = attr2 ? prompt("Enter comma-separated values for " + attr2 + ":", "Black, White") : "";
+
+                          const list1 = vals1.split(",").map((s) => s.trim()).filter(Boolean);
+                          const list2 = vals2 ? vals2.split(",").map((s) => s.trim()).filter(Boolean) : [""];
+
+                          const generated: ProductVariantData[] = [];
+                          for (const v1 of list1) {
+                            for (const v2 of list2) {
+                              const label = v2 ? `${attr1}: ${v1} / ${attr2}: ${v2}` : `${attr1}: ${v1}`;
+                              const skuSuffix = (v1 + (v2 ? "-" + v2 : "")).replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
+                              generated.push({
+                                id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                name: `${variantModalProduct.name} (${label})`,
+                                sku: `${variantModalProduct.sku}-${skuSuffix}`,
+                                attributes: { [attr1]: v1, ...(attr2 && v2 ? { [attr2]: v2 } : {}) },
+                                buyingPrice: variantModalProduct.buyingPrice,
+                                sellingPrice: variantModalProduct.sellingPrice,
+                                stock: 10,
+                                reorderLevel: 5,
+                              });
+                            }
+                          }
+
+                          const updated = [...(variantModalProduct.variants || []), ...generated];
+                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updated } : i));
+                          setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updated });
+                          alert(`Successfully generated ${generated.length} variant combinations!`);
+                        }}
+                      >
+                        <Zap size={13} /> Generate Variants Matrix
+                      </button>
+                    </div>
+
+                    <div className="v2-flex v2-items-center v2-gap-2">
+                      <button
+                        className="v2-btn v2-btn-ghost v2-btn-sm"
+                        type="button"
+                        onClick={() => {
+                          const pct = Number(prompt("Enter price change percentage (e.g., 10 for +10%, -5 for -5%):", "10"));
+                          if (isNaN(pct) || pct === 0) return;
+                          const updated = (variantModalProduct.variants || []).map((v) => ({
+                            ...v,
+                            sellingPrice: Math.round(v.sellingPrice * (1 + pct / 100)),
+                          }));
+                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
+                          setVariantModalProduct({ ...variantModalProduct, variants: updated });
+                        }}
+                      >
+                        Bulk Price Update
+                      </button>
+                      <button
+                        className="v2-btn v2-btn-ghost v2-btn-sm"
+                        type="button"
+                        onClick={() => {
+                          const addStock = Number(prompt("Enter quantity to add to all variants:", "20"));
+                          if (isNaN(addStock)) return;
+                          const updated = (variantModalProduct.variants || []).map((v) => ({
+                            ...v,
+                            stock: v.stock + addStock,
+                          }));
+                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
+                          setVariantModalProduct({ ...variantModalProduct, variants: updated });
+                        }}
+                      >
+                        Bulk Stock Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Variants List Table */}
+                  <table className="v2-table v2-table-sm">
+                    <thead>
+                      <tr>
+                        <th>Variant Name</th>
+                        <th>SKU Code</th>
+                        <th>Inherited Buying</th>
+                        <th>Inherited Selling</th>
+                        <th>Current Stock</th>
+                        <th>Reorder Level</th>
+                        <th>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(!variantModalProduct.variants || variantModalProduct.variants.length === 0) ? (
+                        <tr>
+                          <td colSpan={7} className="v2-text-center v2-text-muted v2-py-4">No variant variations configured for this SKU yet. Click 'Generate Variants Matrix' above to create combinations!</td>
+                        </tr>
+                      ) : (
+                        variantModalProduct.variants.map((v) => (
+                          <tr key={v.id}>
+                            <td className="v2-font-bold">{v.name}</td>
+                            <td className="v2-mono v2-text-xs">{v.sku}</td>
+                            <td className="v2-mono">{money(v.buyingPrice)} <span className="badge v2-badge-success">Inherited</span></td>
+                            <td className="v2-mono v2-font-bold">{money(v.sellingPrice)}</td>
+                            <td className="v2-mono v2-font-bold">{v.stock}</td>
+                            <td className="v2-mono">{v.reorderLevel}</td>
+                            <td>
+                              <div className="v2-flex v2-gap-1">
+                                <button
+                                  className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                                  title="Edit Variant Price / Stock"
+                                  type="button"
+                                  onClick={() => {
+                                    const p = Number(prompt(`Update price for ${v.name}:`, String(v.sellingPrice)));
+                                    const s = Number(prompt(`Update stock for ${v.name}:`, String(v.stock)));
+                                    if (isNaN(p) || isNaN(s)) return;
+                                    const updated = (variantModalProduct.variants || []).map((x) => x.id === v.id ? { ...x, sellingPrice: p, stock: s } : x);
+                                    setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
+                                    setVariantModalProduct({ ...variantModalProduct, variants: updated });
+                                  }}
+                                >
+                                  <Edit2 size={12} />
+                                </button>
+                                <button
+                                  className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                                  style={{ color: "var(--danger)" }}
+                                  type="button"
+                                  onClick={() => {
+                                    if (!confirm(`Delete variant ${v.name}?`)) return;
+                                    const updated = (variantModalProduct.variants || []).filter((x) => x.id !== v.id);
+                                    setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
+                                    setVariantModalProduct({ ...variantModalProduct, variants: updated });
+                                  }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* TAB 5: Images */}
+              {newVarAttrKey === "images" && (
+                <div className="v2-space-y-3 v2-text-center v2-py-4">
+                  <Upload size={32} style={{ margin: "0 auto", color: "var(--muted)" }} />
+                  <div className="v2-font-bold v2-text-sm">Product Image Gallery</div>
+                  <p className="v2-text-xs v2-text-muted">Upload high-resolution parent product images and variant-specific product shots.</p>
+                  <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Plus size={13} /> Upload Image File</button>
+                </div>
+              )}
+
+              {/* TAB 6: Suppliers */}
+              {newVarAttrKey === "suppliers" && (
+                <div className="v2-space-y-3">
+                  <div className="v2-card v2-p-3">
+                    <div className="v2-font-bold v2-text-xs">Primary Supplier: Azam Flour Mills Tanzania</div>
+                    <div className="v2-text-xs v2-text-muted">Supplier SKU Code: AZM-FLR-2026 · Preferred Lead Time: 3 Days</div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 7: Stock History Audit Timeline */}
+              {newVarAttrKey === "history" && (
+                <div className="v2-space-y-3">
+                  <div className="v2-flex v2-items-center v2-justify-between">
+                    <div>
+                      <div className="v2-font-bold v2-text-xs">Immutable Stock Ledger Movement Timeline</div>
+                      <div className="v2-text-xs v2-text-muted">Audit trail for {variantModalProduct.name} (SKU: {variantModalProduct.sku})</div>
+                    </div>
+                    <span className="badge v2-badge-primary">Append-Only Immutable Ledger</span>
+                  </div>
+
+                  <table className="v2-table v2-table-sm">
+                    <thead>
+                      <tr>
+                        <th>Date & Time</th>
+                        <th>Operator</th>
+                        <th>Movement Type</th>
+                        <th>Qty Delta</th>
+                        <th>Stock Lineage</th>
+                        <th>Unit Cost</th>
+                        <th>Total Cost</th>
+                        <th>Reference / Notes</th>
+                        <th>Device</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ledger
+                        .filter((l) => l.sku === variantModalProduct.sku || l.name.includes(variantModalProduct.name))
+                        .map((l) => (
+                          <tr key={l.id}>
+                            <td className="v2-text-xs v2-mono">{l.date}</td>
+                            <td className="v2-text-xs v2-font-bold">{l.user || "System / Admin"}</td>
+                            <td>
+                              <span
+                                className={`badge ${
+                                  l.qty > 0
+                                    ? "v2-badge-success"
+                                    : l.type.includes("DAMAGE") || l.type.includes("EXPIRY") || l.type.includes("LOSS")
+                                    ? "v2-badge-danger"
+                                    : "v2-badge-info"
+                                }`}
+                              >
+                                {l.type}
+                              </span>
+                            </td>
+                            <td className={`v2-mono v2-font-bold ${l.qty > 0 ? "v2-text-success" : "v2-text-danger"}`}>
+                              {l.qty > 0 ? `+${l.qty}` : l.qty}
+                            </td>
+                            <td className="v2-mono v2-text-xs">
+                              {Math.max(0, l.balance - l.qty)} &rarr; <span className="v2-font-bold">{l.balance}</span>
+                            </td>
+                            <td className="v2-mono v2-text-xs">{money(l.unitCost || variantModalProduct.buyingPrice)}</td>
+                            <td className="v2-mono v2-text-xs v2-font-bold">{money(Math.abs(l.qty) * (l.unitCost || variantModalProduct.buyingPrice))}</td>
+                            <td className="v2-mono v2-text-xs">
+                              <span className="v2-font-bold">{l.ref}</span>
+                              {l.notes && <div className="v2-text-xs v2-text-muted">{l.notes}</div>}
+                            </td>
+                            <td className="v2-mono v2-text-xs v2-text-muted">{l.deviceId || "POS-01"}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 
-            {/* Add New Variant Form */}
-            <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
-              <div className="v2-font-bold v2-text-xs v2-mb-2">Add New Attribute Variant</div>
-              <div className="v2-grid v2-grid-2 v2-gap-2 v2-mb-2">
-                <select className="v2-input v2-input-sm" value={newVarAttrKey} onChange={(e) => setNewVarAttrKey(e.target.value)}>
-                  <option value="Size">Size (e.g. Small, 500ml, 10kg)</option>
-                  <option value="Pack">Pack (e.g. Box, Strip, Carton)</option>
-                  <option value="Color">Color / Flavor</option>
-                  <option value="Custom">Custom Attribute</option>
-                </select>
-                <input className="v2-input v2-input-sm" placeholder="Variant Value (e.g. Box of 24)" value={newVarAttrVal} onChange={(e) => setNewVarAttrVal(e.target.value)} />
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-2 v2-mb-3">
-                <input className="v2-input v2-input-sm" type="number" placeholder="Selling Price Override (Tsh)" value={newVarPrice || ""} onChange={(e) => setNewVarPrice(Number(e.target.value))} />
-                <input className="v2-input v2-input-sm" type="number" placeholder="Initial Stock Qty" value={newVarStock || ""} onChange={(e) => setNewVarStock(Number(e.target.value))} />
-              </div>
-
-              <button
-                className="v2-btn v2-btn-primary v2-btn-sm"
-                style={{ width: "100%", justifyContent: "center" }}
-                disabled={!newVarAttrVal.trim()}
-                onClick={() => {
-                  if (!newVarAttrVal.trim()) return;
-                  const varSku = `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`;
-                  const newVar: ProductVariantData = {
-                    id: `var-${Date.now()}`,
-                    name: `${newVarAttrKey}: ${newVarAttrVal.trim()}`,
-                    sku: varSku,
-                    attributes: { [newVarAttrKey]: newVarAttrVal.trim() },
-                    buyingPrice: variantModalProduct.buyingPrice,
-                    sellingPrice: newVarPrice || variantModalProduct.sellingPrice,
-                    stock: newVarStock,
-                    reorderLevel: 5,
-                  };
-                  const updatedVars = [...(variantModalProduct.variants || []), newVar];
-                  setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updatedVars } : i));
-                  setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updatedVars });
-                  setNewVarAttrVal("");
-                }}
-                type="button"
-              >
-                <Plus size={13} /> Add Variant Option
-              </button>
-            </div>
-
-            <div className="v2-flex v2-justify-end v2-mt-4">
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">Close</button>
+            {/* Modal Footer */}
+            <div className="v2-flex v2-justify-end v2-pt-3" style={{ borderTop: "1px solid var(--surface-border)" }}>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">Done & Save Changes</button>
             </div>
           </div>
         </div>

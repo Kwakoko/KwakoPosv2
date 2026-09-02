@@ -34,14 +34,14 @@ function getStoredSession(): StoredSession | null {
   try {
     const raw = window.sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredSession> & { refreshToken?: unknown };
-    if (!parsed.sessionId || !parsed.user) return null;
-    // Migrate legacy browser-stored refresh tokens by overwriting the record.
-    if (Object.prototype.hasOwnProperty.call(parsed, "refreshToken")) {
-      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ sessionId: parsed.sessionId, user: parsed.user }));
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    if (!parsed.sessionId || !parsed.user) {
+      window.sessionStorage.removeItem(SESSION_KEY);
+      return null;
     }
-    return { sessionId: parsed.sessionId, user: parsed.user };
+    return { sessionId: parsed.sessionId, user: parsed.user as LoginResponseUser };
   } catch {
+    try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     return null;
   }
 }

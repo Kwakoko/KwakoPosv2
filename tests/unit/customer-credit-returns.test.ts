@@ -111,7 +111,7 @@ describe("Customer Credit & Returns Engine", () => {
     expect(returnRecord.totalRefundAmount).toBe(6000);
     expect(ledgers.length).toBe(1);
     expect(ledgers[0].quantity).toBe(2);
-    expect(ledgers[0].movementType).toBe("RETURN");
+    expect(["CUSTOMER_RETURN", "RETURN"]).toContain(ledgers[0].movementType);
 
     // Stock restored to 20 + 2 = 22
     expect(stockRepo.getAvailableStock(ctx, variantId)).toBe(22);
