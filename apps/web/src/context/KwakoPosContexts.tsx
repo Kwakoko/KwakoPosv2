@@ -1,17 +1,5 @@
-/**
- * KwakoPosv2 — Application Context Providers
- * ─────────────────────────────────────────────────────────────────────────────
- * Provides all global state via React context:
- *   Auth → Tenant → Branch → RBAC → Module → Sync → Theme
- *
- * V2 Module System:
- *   Module availability is resolved from RBAC permissions + tenant entitlements.
- *   Dexie is NEVER the authority for authorization decisions (fail-closed).
- * ─────────────────────────────────────────────────────────────────────────────
- */
 import React, {
-  createContext, useCallback, useContext, useEffect,
-  useMemo, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useState,
 } from "react";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { ClientSyncEngine } from "../clientSyncEngine.js";
@@ -29,14 +17,11 @@ import {
   type SidebarItem,
   MODULE_MANIFESTS,
   ALL_MODULE_KEYS,
-  searchModules,
+  searchModules as registrySearchModules,
   getDefaultTab,
 } from "../modules/moduleRegistry.js";
 
-// Re-export types consumers need
 export type { IndustryModule, ModuleManifest, SidebarItem };
-
-// ─── Auth ────────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
   id: string;
@@ -50,7 +35,6 @@ export interface AuthUser {
 interface JwtClaims {
   roles?: string[];
   permissions?: string[];
-  /** Tenant-level entitlements — module keys the tenant has subscribed to */
   moduleEntitlements?: string[];
 }
 
@@ -67,12 +51,6 @@ function decodeClaims(token: string | null): JwtClaims {
   }
 }
 
-// ─── Authoritative Tenant / Branch Scope Construction ───────────────────────
-// Production policy: No synthetic default tenant or branch fallbacks are permitted.
-// Unauthenticated or unprovisioned states evaluate to empty lists.
-
-// ─── Context Types ────────────────────────────────────────────────────────────
-
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
@@ -82,7 +60,11 @@ interface AuthContextType {
   logout: () => Promise<void>;
 }
 const AuthContext = createContext<AuthContextType | null>(null);
-export const useAuth = () => useContext(AuthContext)!;
+export const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside KwakoPosProvider");
+  return ctx;
+};
 
 interface TenantContextType {
   currentTenantId: string | null;
@@ -91,7 +73,11 @@ interface TenantContextType {
   switchTenant: (id: string) => Promise<void>;
 }
 const TenantContext = createContext<TenantContextType | null>(null);
-export const useTenant = () => useContext(TenantContext)!;
+export const useTenant = () => {
+  const ctx = useContext(TenantContext);
+  if (!ctx) throw new Error("useTenant must be used inside KwakoPosProvider");
+  return ctx;
+};
 
 interface BranchContextType {
   currentBranchId: string | null;
@@ -100,7 +86,11 @@ interface BranchContextType {
   switchBranch: (id: string) => Promise<void>;
 }
 const BranchContext = createContext<BranchContextType | null>(null);
-export const useBranch = () => useContext(BranchContext)!;
+export const useBranch = () => {
+  const ctx = useContext(BranchContext);
+  if (!ctx) throw new Error("useBranch must be used inside KwakoPosProvider");
+  return ctx;
+};
 
 interface RbacContextType {
   role: string | null;
@@ -109,76 +99,40 @@ interface RbacContextType {
   isSuperAdmin: boolean;
 }
 const RbacContext = createContext<RbacContextType | null>(null);
-export const useRbac = () => useContext(RbacContext)!;
+export const useRbac = () => {
+  const ctx = useContext(RbacContext);
+  if (!ctx) throw new Error("useRbac must be used inside KwakoPosProvider");
+  return ctx;
+};
 
-// ─── Module Context ───────────────────────────────────────────────────────────
-/**
- * V2 Module System — full resolution chain:
- *   Module Registry → Tenant Entitlement → Subscription → Feature Flag → RBAC
- *   → Module Availability → Navigation → Route → Workspace
- *
- * Fail-closed: unknown/unauthorized → not available.
- * Dexie is NEVER an authorization authority here.
- */
 export interface ModuleContextType {
-  // Active state
   activeModule: IndustryModule;
   setActiveModule: (module: IndustryModule) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
   manifest: ModuleManifest;
-
-  // Module availability — all resolved from V2 RBAC/entitlements
   availableModules: IndustryModule[];
   enabledModules: IndustryModule[];
   subscribedModules: IndustryModule[];
-
-  // Access guards
   canAccessModule: (module: IndustryModule) => boolean;
   canAccessTab: (tab: string) => boolean;
   isModuleEnabled: (module: IndustryModule) => boolean;
   isModuleSubscribed: (module: IndustryModule) => boolean;
-
-  // Navigation
   sidebarItems: SidebarItem[];
   bottomNavItems: Array<{ label: string; tab: string; icon: string }>;
-
-  // Search
   searchModules: (query: string) => IndustryModule[];
-
-  // Mobile sidebar
   isMobileSidebarOpen: boolean;
   setIsMobileSidebarOpen: (open: boolean) => void;
-
-  // Dev superuser flag (gets access to all modules regardless of entitlements)
   isDevSuperuser: boolean;
 }
 
-const DEFAULT_MODULE_CONTEXT: ModuleContextType = {
-  activeModule: "Retail",
-  setActiveModule: () => {},
-  activeTab: "Dashboard",
-  setActiveTab: () => {},
-  manifest: MODULE_MANIFESTS["Retail"],
-  availableModules: ALL_MODULE_KEYS,
-  enabledModules: ALL_MODULE_KEYS,
-  subscribedModules: ALL_MODULE_KEYS,
-  canAccessModule: () => true,
-  canAccessTab: () => true,
-  isModuleEnabled: () => true,
-  isModuleSubscribed: () => true,
-  sidebarItems: MODULE_MANIFESTS["Retail"].sidebar,
-  bottomNavItems: MODULE_MANIFESTS["Retail"].bottomNav,
-  searchModules,
-  isMobileSidebarOpen: false,
-  setIsMobileSidebarOpen: () => {},
-  isDevSuperuser: false,
+// Intentionally no permissive default context. Missing provider is a hard error.
+const ModuleContext = createContext<ModuleContextType | null>(null);
+export const useModule = (): ModuleContextType => {
+  const ctx = useContext(ModuleContext);
+  if (!ctx) throw new Error("useModule must be used inside KwakoPosProvider");
+  return ctx;
 };
-
-const ModuleContext = createContext<ModuleContextType>(DEFAULT_MODULE_CONTEXT);
-export const useModule = () => useContext(ModuleContext);
-
-// ─── Sync Context ─────────────────────────────────────────────────────────────
 
 interface SyncContextType {
   isOnline: boolean;
@@ -189,51 +143,69 @@ interface SyncContextType {
   syncError: string | null;
 }
 const SyncContext = createContext<SyncContextType | null>(null);
-export const useSync = () => useContext(SyncContext)!;
-
-// ─── Theme Context ────────────────────────────────────────────────────────────
+export const useSync = () => {
+  const ctx = useContext(SyncContext);
+  if (!ctx) throw new Error("useSync must be used inside KwakoPosProvider");
+  return ctx;
+};
 
 interface ThemeContextType {
   theme: "dark" | "light";
   toggleTheme: () => void;
 }
 const ThemeContext = createContext<ThemeContextType | null>(null);
-export const useTheme = () => useContext(ThemeContext)!;
+export const useTheme = () => {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error("useTheme must be used inside KwakoPosProvider");
+  return ctx;
+};
 
-// ─── Production Security Configuration ───────────────────────────────────────
-// Dev superuser emails are strictly prohibited in production. Superuser privileges
-// must originate solely from verified JWT claims (permissions includes "*").
+const TAB_PERMISSION_REQUIREMENTS: Record<string, string> = {
+  "Users & Roles": "users.manage",
+  "User Management": "users.manage",
+  "Roles & Permissions": "users.manage",
+  "Security": "security.manage",
+  "Audit Logs": "audit.read",
+  "API Keys": "integrations.manage",
+  "Webhooks": "integrations.manage",
+  "Billing": "billing.manage",
+  "Subscriptions": "billing.manage",
+  "Finance": "finance.read",
+  "Expenses": "expense.manage",
+  "Reports": "reports.view",
+  "Stock Adjustments": "inventory.adjust",
+  "Adjustments": "inventory.adjust",
+  "Transfers": "inventory.transfer",
+  "Branch Transfers": "inventory.transfer",
+};
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+function tabExists(manifest: ModuleManifest, tab: string): boolean {
+  const target = tab.trim().toLowerCase();
+  if (!target) return false;
+  if (manifest.sidebar.some((item) => {
+    if (typeof item === "string") return item.trim().toLowerCase() === target;
+    return item.name.trim().toLowerCase() === target || Boolean(item.subItems?.some((s) => s.trim().toLowerCase() === target));
+  })) return true;
+  return manifest.bottomNav.some((item) => item.tab.trim().toLowerCase() === target || item.label.trim().toLowerCase() === target);
+}
 
 export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-
-  // ── Infrastructure ──────────────────────────────────────────────────────────
   const [db] = useState(() => new LocalIndexedDbStore(3));
   const [syncEngine] = useState(
     () => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db),
   );
   useState(() => new PwaVersionManager("2.5.0", 3, db));
 
-  // ── Auth state ──────────────────────────────────────────────────────────────
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-
-  // ── Theme ───────────────────────────────────────────────────────────────────
   const [theme, setTheme] = useState<"dark" | "light">(() =>
-    typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light"
-      ? "light" : "dark",
+    typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light" ? "light" : "dark",
   );
-
-  // ── Online / Sync ───────────────────────────────────────────────────────────
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator !== "undefined" ? navigator.onLine : true,
-  );
+  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  // ── Module state ────────────────────────────────────────────────────────────
   const [activeModule, setActiveModuleState] = useState<IndustryModule>(() => {
     try {
       const saved = localStorage.getItem("kwakopos:v2:active-module");
@@ -252,32 +224,22 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // ── Session restore ─────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
     db.ready
       .then(() => restoreSession())
       .then((restored) => {
         if (mounted && restored) {
-          setUser({
-            id: restored.id,
-            name: restored.name,
-            email: restored.email,
-            role: restored.role,
-            tenantId: restored.tenantId,
-            branchId: restored.branchId,
-          });
+          setUser({ id: restored.id, name: restored.name, email: restored.email, role: restored.role, tenantId: restored.tenantId, branchId: restored.branchId });
         }
       })
       .catch((error) => {
-        if (mounted)
-          setAuthError(error instanceof Error ? error.message : "Session restore failed");
+        if (mounted) setAuthError(error instanceof Error ? error.message : "Session restore failed");
       })
       .finally(() => { if (mounted) setIsInitializing(false); });
     return () => { mounted = false; };
   }, [db]);
 
-  // ── Online detection ────────────────────────────────────────────────────────
   useEffect(() => {
     const update = () => setIsOnline(navigator.onLine);
     window.addEventListener("online", update);
@@ -289,14 +251,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     void db.ready.then(() => setPendingOutboxCount(db.getPendingOutbox().length));
   }, [db]);
 
-  // ── Auth actions ────────────────────────────────────────────────────────────
   const login = async (email: string, password: string) => {
     setAuthError(null);
     const loggedIn = await apiLogin(email, password);
-    setUser({
-      id: loggedIn.id, name: loggedIn.name, email: loggedIn.email,
-      role: loggedIn.role, tenantId: loggedIn.tenantId, branchId: loggedIn.branchId,
-    });
+    setUser({ id: loggedIn.id, name: loggedIn.name, email: loggedIn.email, role: loggedIn.role, tenantId: loggedIn.tenantId, branchId: loggedIn.branchId });
   };
 
   const logout = async () => {
@@ -304,238 +262,167 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setUser(null);
     setActiveModuleState("Retail");
     setActiveTabState("Dashboard");
+    try {
+      localStorage.removeItem("kwakopos:v2:active-module");
+      localStorage.removeItem("kwakopos:v2:active-tab");
+    } catch { /* ignore */ }
     setAuthError(null);
   };
 
-  // ── JWT claims → permissions & module entitlements ──────────────────────────
+  // These claims are UX hints only. All protected operations remain server-authorized.
   const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
   const permissions = useMemo(() => claims.permissions || [], [claims]);
-  const moduleEntitlements = useMemo(
-    () => claims.moduleEntitlements || [],
-    [claims],
-  );
-
+  const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
   const currentTenantId = user?.tenantId || null;
   const currentBranchId = user?.branchId || null;
+  const isSuperAdmin = Boolean(user && permissions.includes("*"));
 
-  // ── Superuser Status ───────────────────────────────────────────────────────
-  // Superuser privileges must strictly derive from validated JWT permissions wildcard (*).
-  const isDevSuperuser = Boolean(user && permissions.includes("*"));
-  const isSuperAdmin = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
+  const canAccessModule = useCallback((module: IndustryModule): boolean => {
+    if (!user) return false;
+    const manifest = MODULE_MANIFESTS[module];
+    if (!manifest) return false;
+    if (isSuperAdmin) return true;
+    if (manifest.requiresSubscription && !moduleEntitlements.includes(module)) return false;
+    if (manifest.requiredPermission && !permissions.includes(manifest.requiredPermission)) return false;
+    return true;
+  }, [user, isSuperAdmin, permissions, moduleEntitlements]);
 
-  // ── Module resolution (Strict Fail-Closed) ───────────────────────────────
-  /**
-   * Strict Production Entitlement Policy (Fail-Closed):
-   *  1. Unauthenticated users are denied.
-   *  2. Wildcard permissions (*) grant full access.
-   *  3. When a module requires subscription entitlement, moduleEntitlements MUST
-   *     explicitly include the module key. Absence of entitlement claim = DENY.
-   */
-  const canAccessModule = useCallback(
-    (module: IndustryModule): boolean => {
-      if (!user) return false;                         // must be authenticated
-      if (isDevSuperuser) return true;                  // JWT wildcard bypass
-      const manifest = MODULE_MANIFESTS[module];
-      if (!manifest) return false;                     // unknown → deny
+  const isModuleEnabled = useCallback((module: IndustryModule) => canAccessModule(module), [canAccessModule]);
+  const isModuleSubscribed = useCallback((module: IndustryModule): boolean => {
+    if (isSuperAdmin) return true;
+    const manifest = MODULE_MANIFESTS[module];
+    if (!manifest) return false;
+    if (!manifest.requiresSubscription) return true;
+    return moduleEntitlements.includes(module);
+  }, [isSuperAdmin, moduleEntitlements]);
 
-      // RBAC wildcard check
-      if (permissions.includes("*")) return true;
-
-      // Subscription check — STRICT FAIL-CLOSED (absence of entitlement claim = DENY)
-      if (manifest.requiresSubscription) {
-        const entitled = moduleEntitlements.includes(module);
-        if (!entitled) return false;
-      }
-
-      // Module-level RBAC permission check
-      if (manifest.requiredPermission && !permissions.includes(manifest.requiredPermission)) {
-        return false;
-      }
-
-      return true;
-    },
-    [user, isDevSuperuser, permissions, moduleEntitlements],
-  );
-
-  const isModuleEnabled = useCallback(
-    (module: IndustryModule) => canAccessModule(module),
-    [canAccessModule],
-  );
-
-  const isModuleSubscribed = useCallback(
-    (module: IndustryModule): boolean => {
-      if (isDevSuperuser) return true;
-      const manifest = MODULE_MANIFESTS[module];
-      if (!manifest?.requiresSubscription) return true;
-      return moduleEntitlements.includes(module);
-    },
-    [isDevSuperuser, moduleEntitlements],
-  );
-
-  const availableModules = useMemo(
-    () => ALL_MODULE_KEYS.filter((m) => canAccessModule(m)),
-    [canAccessModule],
-  );
-
+  const availableModules = useMemo(() => ALL_MODULE_KEYS.filter(canAccessModule), [canAccessModule]);
   const enabledModules = availableModules;
-  const subscribedModules = useMemo(
-    () => ALL_MODULE_KEYS.filter((m) => isModuleSubscribed(m)),
-    [isModuleSubscribed],
-  );
+  const subscribedModules = useMemo(() => ALL_MODULE_KEYS.filter(isModuleSubscribed), [isModuleSubscribed]);
 
-  const canAccessTab = useCallback(
-    (_tab: string) => {
-      // Tab-level RBAC can be extended here in future
-      return true;
-    },
-    [],
-  );
-
-  // ── Module setters with persistence ────────────────────────────────────────
-  const setActiveModule = useCallback(
-    (module: IndustryModule) => {
-      if (!canAccessModule(module)) return;            // fail-closed
-      setActiveModuleState(module);
-      const newTab = getDefaultTab(module);
-      setActiveTabState(newTab);
-      try {
-        localStorage.setItem("kwakopos:v2:active-module", module);
-        localStorage.setItem("kwakopos:v2:active-tab", newTab);
-      } catch { /* ignore */ }
-    },
-    [canAccessModule],
-  );
-
-  const setActiveTab = useCallback((tab: string) => {
-    setActiveTabState(tab);
-    try { localStorage.setItem("kwakopos:v2:active-tab", tab); } catch { /* ignore */ }
-  }, []);
-
-  // ── Manifest computation ───────────────────────────────────────────────────
+  const rawManifest = MODULE_MANIFESTS[activeModule] || MODULE_MANIFESTS["Retail"];
   const manifest = useMemo((): ModuleManifest => {
-    const raw = MODULE_MANIFESTS[activeModule] || MODULE_MANIFESTS["Retail"];
-    // Ensure Settings always has Users & Roles
-    const sidebar: SidebarItem[] = raw.sidebar.map((item) => {
+    if (!canAccessModule(activeModule)) return { ...rawManifest, sidebar: [], bottomNav: [] };
+    const sidebar: SidebarItem[] = rawManifest.sidebar.map((item) => {
       if (item === "Settings") return { name: "Settings", subItems: ["General Settings", "Users & Roles"] };
-      if (typeof item !== "string" && item.name === "Settings") {
-        return { ...item, subItems: [...(item.subItems || []).filter((s) => s !== "Users & Roles"), "Users & Roles"] };
-      }
+      if (typeof item !== "string" && item.name === "Settings") return { ...item, subItems: [...(item.subItems || []).filter((s) => s !== "Users & Roles"), "Users & Roles"] };
       return item;
     });
-    return { ...raw, sidebar };
-  }, [activeModule]);
+    return { ...rawManifest, sidebar };
+  }, [activeModule, canAccessModule, rawManifest]);
 
-  const sidebarItems = manifest.sidebar;
-  const bottomNavItems = manifest.bottomNav;
+  const canAccessTab = useCallback((tab: string): boolean => {
+    if (!user) return false;
+    if (!canAccessModule(activeModule)) return false;
+    if (!tabExists(manifest, tab)) return false;
+    const requiredPermission = TAB_PERMISSION_REQUIREMENTS[tab];
+    return !requiredPermission || permissions.includes("*") || permissions.includes(requiredPermission);
+  }, [user, canAccessModule, activeModule, manifest, permissions]);
 
-  // ── Tenant switching ───────────────────────────────────────────────────────
+  const setActiveModule = useCallback((module: IndustryModule) => {
+    if (!canAccessModule(module)) return;
+    const newTab = getDefaultTab(module);
+    if (!canAccessTab(newTab) && !MODULE_MANIFESTS[module].bottomNav.some((item) => item.tab === newTab || item.label === newTab)) return;
+    setActiveModuleState(module);
+    setActiveTabState(newTab);
+    try {
+      localStorage.setItem("kwakopos:v2:active-module", module);
+      localStorage.setItem("kwakopos:v2:active-tab", newTab);
+    } catch { /* ignore */ }
+  }, [canAccessModule, canAccessTab]);
+
+  const setActiveTab = useCallback((tab: string) => {
+    if (!canAccessTab(tab)) return;
+    setActiveTabState(tab);
+    try { localStorage.setItem("kwakopos:v2:active-tab", tab); } catch { /* ignore */ }
+  }, [canAccessTab]);
+
+  const searchModules = useCallback((query: string) => {
+    return registrySearchModules(query).filter(canAccessModule);
+  }, [canAccessModule]);
+
   const switchTenant = async (id: string) => {
     if (!id || id === currentTenantId) return;
+    if (!availableTenantsList.some((tenant) => tenant.id === id)) return;
+    if (!isOnline) return;
     try {
-      if (isOnline) {
-        const updated = await apiSwitchContext(id, currentBranchId || undefined);
-        setUser((prev) => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
-      } else {
-        setUser((prev) => prev ? { ...prev, tenantId: id } : null);
-      }
-    } catch {
-      setUser((prev) => prev ? { ...prev, tenantId: id } : null);
+      const updated = await apiSwitchContext(id, currentBranchId || undefined);
+      setUser((prev) => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Tenant switch failed");
     }
   };
 
   const switchBranch = async (id: string) => {
     if (!id || id === currentBranchId) return;
+    if (!availableBranchesList.some((branch) => branch.id === id)) return;
+    if (!isOnline) return;
     try {
-      if (isOnline) {
-        const updated = await apiSwitchContext(currentTenantId || undefined, id);
-        setUser((prev) => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
-      } else {
-        setUser((prev) => prev ? { ...prev, branchId: id } : null);
-      }
-    } catch {
-      setUser((prev) => prev ? { ...prev, branchId: id } : null);
+      const updated = await apiSwitchContext(currentTenantId || undefined, id);
+      setUser((prev) => prev ? { ...prev, tenantId: updated.tenantId, branchId: updated.branchId } : null);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Branch switch failed");
     }
   };
 
-  // ── Sync outbox ────────────────────────────────────────────────────────────
   const syncOutbox = async () => {
     if (!user || !isOnline) return;
     setSyncError(null);
     await db.ready;
-    await syncEngine
-      .syncWithServer(
-        async (request) => {
-          const response = await fetch("/sync/push", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
-            },
-            credentials: "include",
-            body: JSON.stringify(request),
-          });
-          if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
-          const body = await response.json();
-          return body.data || body;
-        },
-        async (since) => {
-          const url = since
-            ? `/sync/delta?since=${encodeURIComponent(since)}`
-            : "/sync/delta";
-          const response = await fetch(url, {
-            headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) },
-            credentials: "include",
-          });
-          if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
-          const body = await response.json();
-          return body.data || body;
-        },
-      )
-      .then(() => setPendingOutboxCount(db.getPendingOutbox().length))
-      .catch((error) => {
-        setSyncError(error instanceof Error ? error.message : "Synchronization failed");
-        throw error;
-      });
+    await syncEngine.syncWithServer(
+      async (request) => {
+        const response = await fetch("/sync/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) },
+          credentials: "include",
+          body: JSON.stringify(request),
+        });
+        if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
+        const body = await response.json();
+        return body.data || body;
+      },
+      async (since) => {
+        const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
+        const response = await fetch(url, { headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include" });
+        if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
+        const body = await response.json();
+        return body.data || body;
+      },
+    ).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => {
+      setSyncError(error instanceof Error ? error.message : "Synchronization failed");
+      throw error;
+    });
   };
 
-  // ── Tenant / branch list construction ─────────────────────────────────────
-  // Production Rule: Strictly load authoritative context from session. No synthetic fallbacks.
   const availableTenantsList = useMemo(() => {
-    if (!user || !user.tenantId) return [];
+    if (!user?.tenantId) return [];
     return [{ id: user.tenantId, name: `${user.tenantId} (Active)` }];
   }, [user]);
 
   const availableBranchesList = useMemo(() => {
-    if (!user || !user.branchId) return [];
+    if (!user?.branchId) return [];
     return [{ id: user.branchId, name: `${user.branchId} (Active)` }];
   }, [user]);
 
-  // ── Context values ─────────────────────────────────────────────────────────
-  const authValue: AuthContextType = {
-    user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout,
-  };
-
+  const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
   const tenantValue: TenantContextType = {
     currentTenantId,
     currentTenantName: availableTenantsList.find((t) => t.id === currentTenantId)?.name || currentTenantId,
     availableTenants: availableTenantsList,
     switchTenant,
   };
-
   const branchValue: BranchContextType = {
     currentBranchId,
     currentBranchName: availableBranchesList.find((b) => b.id === currentBranchId)?.name || currentBranchId,
     availableBranches: availableBranchesList,
     switchBranch,
   };
-
   const rbacValue: RbacContextType = {
     role: user?.role || null,
     permissions,
     hasPermission: (permission) => permissions.includes("*") || permissions.includes(permission),
     isSuperAdmin,
   };
-
   const moduleValue: ModuleContextType = {
     activeModule,
     setActiveModule,
@@ -549,18 +436,15 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     canAccessTab,
     isModuleEnabled,
     isModuleSubscribed,
-    sidebarItems,
-    bottomNavItems,
+    sidebarItems: manifest.sidebar,
+    bottomNavItems: manifest.bottomNav,
     searchModules,
     isMobileSidebarOpen,
     setIsMobileSidebarOpen,
-    isDevSuperuser,
+    // Kept for backward compatibility only; this is not a development bypass.
+    isDevSuperuser: isSuperAdmin,
   };
-
-  const syncValue: SyncContextType = {
-    isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError,
-  };
-
+  const syncValue: SyncContextType = { isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError };
   const themeValue: ThemeContextType = {
     theme,
     toggleTheme: () => setTheme((current) => {
@@ -577,9 +461,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           <RbacContext.Provider value={rbacValue}>
             <ModuleContext.Provider value={moduleValue}>
               <SyncContext.Provider value={syncValue}>
-                <ThemeContext.Provider value={themeValue}>
-                  {children}
-                </ThemeContext.Provider>
+                <ThemeContext.Provider value={themeValue}>{children}</ThemeContext.Provider>
               </SyncContext.Provider>
             </ModuleContext.Provider>
           </RbacContext.Provider>
@@ -589,7 +471,6 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 };
 
-// ─── Individual Provider Aliases for Modular / Legacy Backward Compatibility ─
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
 export const SessionProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
 export const ModuleProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
