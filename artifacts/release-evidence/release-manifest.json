@@ -1,12 +1,12 @@
 {
-  "version": "2.11.1",
-  "tag": "v2.11.1",
-  "gitSha": "f60db0882aec231b2b2137b9325ae9ed6260c4ea",
+  "version": "2.12.0",
+  "tag": "v2.12.0",
+  "gitSha": "46379bad19743a2b855fbbe0db1c7eb5bddd70fd",
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
   "releaseChannel": "development",
-  "releasedAt": "2026-09-02T15:35:29.792Z",
+  "releasedAt": "2026-09-02T18:34:50.770Z",
   "certification": "PASS",
   "compatibility": {
     "databaseSchemaVersion": 2,

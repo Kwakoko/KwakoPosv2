@@ -4,6 +4,25 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.0] - 2026-09-02
+
+### ✨ New Features
+- **phase46**: wire autonomous support scheduler to production lifecycle
+- **phase46**: add distributed autonomous support scheduler
+
+### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #11 from Kwakoko/feat/phase-46-production-hardening
+- **phase46**: add database resolution verification gate
+- **phase46**: extend certification for production hardening
+- **phase46**: add automated production-hardening regression gates
+
+### 🐛 Bug Fixes
+- **phase46**: enforce remediation verification before ticket resolution
+
+### 👥 Contributors
+Credit to: Jack91186, Kwakoko
+
+
 ## [2.11.1] - 2026-09-02
 
 ### ⚡ Improvements & Enhancements
