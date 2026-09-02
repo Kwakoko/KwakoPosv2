@@ -6,24 +6,29 @@ test.describe("Production Tenant Onboarding", () => {
 
   test("creates tenant, completes onboarding and enters workspace", async ({ page }) => {
     const baseUrl = process.env.KWAKOPOS_TENANT_ONBOARDING_BASE_URL;
-    const storageState = process.env.KWAKOPOS_TENANT_ONBOARDING_STORAGE_STATE;
-    if (!baseUrl || !storageState) throw new Error("Tenant onboarding E2E requires KWAKOPOS_TENANT_ONBOARDING_BASE_URL and KWAKOPOS_TENANT_ONBOARDING_STORAGE_STATE");
+    const adminEmail = process.env.KWAKOPOS_TENANT_ONBOARDING_ADMIN_EMAIL;
+    const adminPassword = process.env.KWAKOPOS_TENANT_ONBOARDING_ADMIN_PASSWORD;
+    if (!baseUrl || !adminEmail || !adminPassword) throw new Error("Tenant onboarding E2E requires isolated staging URL and admin credentials via environment variables");
     test.skip(/production/i.test(baseUrl), "Tenant onboarding E2E must not run against production");
 
-    await page.context().addCookies([]);
+    await page.goto(`${baseUrl}/login`);
+    await page.getByPlaceholder(/email/i).fill(adminEmail);
+    await page.getByPlaceholder(/password/i).fill(adminPassword);
+    await page.getByRole("button", { name: /sign in|login/i }).click();
     await page.goto(`${baseUrl}/tenant-onboarding`);
     await expect(page.getByRole("heading", { name: /Tenant Onboarding & Provisioning/i })).toBeVisible();
-    await page.getByPlaceholder("Business name").fill(`E2E Tenant ${Date.now()}`);
-    await page.getByPlaceholder("Tenant slug (optional)").fill(`e2e-tenant-${Date.now()}`);
+
+    const suffix = Date.now();
+    await page.getByPlaceholder("Business name").fill(`E2E Tenant ${suffix}`);
+    await page.getByPlaceholder("Tenant slug (optional)").fill(`e2e-tenant-${suffix}`);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByPlaceholder("Main branch name").fill("Main Branch");
     await page.getByRole("button", { name: "Continue" }).click();
-    const ownerEmail = `owner-${Date.now()}@example.invalid`;
     await page.getByPlaceholder("Owner name").fill("E2E Owner");
-    await page.getByPlaceholder("Owner email").fill(ownerEmail);
-    await page.getByPlaceholder("Password (12+ characters)").fill("production-e2e-password");
+    await page.getByPlaceholder("Owner email").fill(`owner-${suffix}@example.invalid`);
+    await page.getByPlaceholder("Password (12+ characters)").fill(`e2e-production-password-${suffix}`);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Provision Tenant" }).click();
     await expect(page.getByText(/Tenant provisioned, completed and owner authenticated/i)).toBeVisible({ timeout: 30_000 });
