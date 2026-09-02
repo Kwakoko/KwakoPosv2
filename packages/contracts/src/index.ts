@@ -94,6 +94,19 @@ export const CommercialPermissionEnum = z.enum([
   "REFUND_APPROVE",
   "CREDIT_NOTE_CREATE",
   "BILLING_REPORT_VIEW",
+  "RECEIPT_VIEW",
+  "RECEIPT_CREATE",
+  "RECEIPT_PRINT",
+  "RECEIPT_REPRINT",
+  "RECEIPT_EMAIL",
+  "RECEIPT_SMS",
+  "RECEIPT_WHATSAPP",
+  "RECEIPT_DOWNLOAD",
+  "RECEIPT_CANCEL",
+  "RECEIPT_REFUND",
+  "RECEIPT_VERIFY",
+  "RECEIPT_ARCHIVE",
+  "RECEIPT_MANAGE_TEMPLATES",
 ]);
 export type CommercialPermission = z.infer<typeof CommercialPermissionEnum>;
 
@@ -2444,6 +2457,207 @@ export * from "./platformSecurityContracts.js";
 export * from "./autonomousOperationsContracts.js";
 export * from "./platformIntelligenceContracts.js";
 export * from "./fullSystemCertificationContracts.js";
+
+// ==========================================
+// Centralized Production-Grade Receipt Management Contracts
+// ==========================================
+
+export const ReceiptStatusEnum = z.enum([
+  "DRAFT",
+  "COMPLETED",
+  "CANCELLED",
+  "REFUNDED",
+  "VOIDED",
+  "ARCHIVED",
+  "SYNCED",
+  "PENDING_SYNC",
+]);
+export type ReceiptStatus = z.infer<typeof ReceiptStatusEnum>;
+
+export const TransactionTypeEnum = z.enum([
+  "POS_SALE",
+  "RETURN",
+  "REFUND",
+  "LAYBY_PAYMENT",
+  "CUSTOMER_DEPOSIT",
+  "CREDIT_PAYMENT",
+  "SERVICE_INVOICE",
+  "RESTAURANT_ORDER",
+  "CASH_DRAWER",
+  "MEMBERSHIP_PAYMENT",
+  "SUBSCRIPTION_PAYMENT",
+]);
+export type TransactionType = z.infer<typeof TransactionTypeEnum>;
+
+export const ReceiptTemplateTypeEnum = z.enum([
+  "THERMAL_58MM",
+  "THERMAL_80MM",
+  "A4_INVOICE",
+  "EMAIL",
+  "SMS",
+]);
+export type ReceiptTemplateType = z.infer<typeof ReceiptTemplateTypeEnum>;
+
+export const ReceiptChannelEnum = z.enum([
+  "EMAIL",
+  "SMS",
+  "WHATSAPP",
+  "PRINT",
+  "DOWNLOAD",
+]);
+export type ReceiptChannel = z.infer<typeof ReceiptChannelEnum>;
+
+export const ReceiptItemDTOSchema = z.object({
+  id: z.string().optional(),
+  productId: z.string().optional(),
+  variantId: z.string().optional(),
+  sku: z.string(),
+  name: z.string(),
+  qty: z.number().positive(),
+  unitPrice: z.number().nonnegative(),
+  discount: z.number().default(0),
+  taxRate: z.number().default(0),
+  taxAmount: z.number().default(0),
+  lineTotal: z.number().nonnegative(),
+});
+export type ReceiptItemDTO = z.infer<typeof ReceiptItemDTOSchema>;
+
+export const ReceiptDTOSchema = z.object({
+  id: z.string(),
+  receiptNumber: z.string(),
+  transactionId: z.string(),
+  transactionType: TransactionTypeEnum,
+  tenantId: z.string(),
+  branchId: z.string(),
+  cashierId: z.string(),
+  cashierName: z.string().optional(),
+  customerId: z.string().optional(),
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().optional(),
+  subtotal: z.number().nonnegative(),
+  discountTotal: z.number().default(0),
+  taxTotal: z.number().default(0),
+  grandTotal: z.number().nonnegative(),
+  paidAmount: z.number().nonnegative(),
+  changeAmount: z.number().default(0),
+  paymentMethod: z.string(),
+  currency: z.string().default("TZS"),
+  exchangeRate: z.number().default(1),
+  status: ReceiptStatusEnum,
+  deviceId: z.string().default("POS-DEV-001"),
+  syncStatus: z.string().default("SYNCED"),
+  digitalSignature: z.string(),
+  qrCodePayload: z.string(),
+  barcodePayload: z.string(),
+  reprintCount: z.number().default(0),
+  lastReprintedAt: z.string().optional(),
+  notes: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  items: z.array(ReceiptItemDTOSchema).default([]),
+});
+export type ReceiptDTO = z.infer<typeof ReceiptDTOSchema>;
+
+export const ReceiptTemplateDTOSchema = z.object({
+  id: z.string(),
+  tenantId: z.string(),
+  branchId: z.string().optional(),
+  name: z.string(),
+  templateType: ReceiptTemplateTypeEnum,
+  isDefault: z.boolean().default(false),
+  headerText: z.string().optional(),
+  footerText: z.string().optional(),
+  logoUrl: z.string().optional(),
+  primaryColor: z.string().default("#1e293b"),
+  fontFamily: z.string().default("Inter, sans-serif"),
+  showQrCode: z.boolean().default(true),
+  showBarcode: z.boolean().default(true),
+  showTaxBreakdown: z.boolean().default(true),
+  showCustomerInfo: z.boolean().default(true),
+  returnPolicyText: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ReceiptTemplateDTO = z.infer<typeof ReceiptTemplateDTOSchema>;
+
+export const ReceiptPrintLogDTOSchema = z.object({
+  id: z.string(),
+  receiptId: z.string(),
+  printedBy: z.string(),
+  printType: z.enum(["INITIAL", "REPRINT"]),
+  printerName: z.string().optional(),
+  paperWidth: z.string().optional(),
+  reason: z.string().optional(),
+  timestamp: z.string(),
+});
+export type ReceiptPrintLogDTO = z.infer<typeof ReceiptPrintLogDTOSchema>;
+
+export const ReceiptShareLogDTOSchema = z.object({
+  id: z.string(),
+  receiptId: z.string(),
+  channel: ReceiptChannelEnum,
+  recipient: z.string(),
+  sharedBy: z.string(),
+  status: z.string(),
+  timestamp: z.string(),
+});
+export type ReceiptShareLogDTO = z.infer<typeof ReceiptShareLogDTOSchema>;
+
+export const ReceiptAuditLogDTOSchema = z.object({
+  id: z.string(),
+  receiptId: z.string(),
+  action: z.string(),
+  actorId: z.string(),
+  actorName: z.string().optional(),
+  deviceId: z.string().optional(),
+  branchId: z.string().optional(),
+  ipAddress: z.string().optional(),
+  reason: z.string().optional(),
+  details: z.string().optional(),
+  timestamp: z.string(),
+});
+export type ReceiptAuditLogDTO = z.infer<typeof ReceiptAuditLogDTOSchema>;
+
+export const ReceiptVerificationDTOSchema = z.object({
+  receiptNumber: z.string(),
+  isValid: z.boolean(),
+  status: z.string(),
+  digitalSignatureValid: z.boolean(),
+  receipt: ReceiptDTOSchema.optional(),
+  verificationMessage: z.string(),
+  verifiedAt: z.string(),
+});
+export type ReceiptVerificationDTO = z.infer<typeof ReceiptVerificationDTOSchema>;
+
+export const CreateReceiptRequestSchema = z.object({
+  transactionId: z.string(),
+  transactionType: TransactionTypeEnum,
+  cashierId: z.string(),
+  cashierName: z.string().optional(),
+  customerId: z.string().optional(),
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().optional(),
+  items: z.array(z.object({
+    productId: z.string().optional(),
+    variantId: z.string().optional(),
+    sku: z.string(),
+    name: z.string(),
+    qty: z.number().positive(),
+    unitPrice: z.number().nonnegative(),
+    discount: z.number().optional(),
+    taxRate: z.number().optional(),
+  })),
+  paidAmount: z.number().nonnegative(),
+  paymentMethod: z.string(),
+  currency: z.string().optional(),
+  exchangeRate: z.number().optional(),
+  deviceId: z.string().optional(),
+  notes: z.string().optional(),
+});
+export type CreateReceiptRequest = z.infer<typeof CreateReceiptRequestSchema>;
+
 
 
 

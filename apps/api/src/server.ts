@@ -4,6 +4,8 @@ import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
+import { globalReceiptService } from "./services/receiptService.js";
+import { receiptRoutes } from "./routes/receiptRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -651,6 +653,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
     return { success: rollbackResult.success, data: rollbackResult };
   });
+
+  // =========================================================================
+  // CENTRALIZED RECEIPT MANAGEMENT MODULE REST ENDPOINTS
+  // =========================================================================
+
+  receiptRoutes(server);
 
   server.get("/admin/operations/freeze", async () => {
     return { success: true, data: ReleaseGovernancePolicy.getFreezeState() };

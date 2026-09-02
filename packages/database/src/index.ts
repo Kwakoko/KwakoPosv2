@@ -1375,6 +1375,7 @@ export * from "./scopedTelecomRepository.js";
 export * from "./workforceRepositories.js";
 export * from "./atomicCommercialFinance.js";
 export * from "./financeHardening.js";
+export * from "./receiptRepositories.js";
 
 
 

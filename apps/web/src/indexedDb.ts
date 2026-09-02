@@ -2,7 +2,7 @@ import type { Product, ProductVariant, StockLedger, StockAdjustment, ProductBran
 
 export interface OutboxItem {
   id: string;
-  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "ProductPriceHistory" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment" | "User";
+  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "ProductPriceHistory" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment" | "User" | "Receipt";
   entityId: string;
   operationType: SyncOperationType;
   payload: Record<string, unknown>;
@@ -11,8 +11,8 @@ export interface OutboxItem {
   status: "PENDING" | "SYNCED" | "FAILED";
 }
 
-type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "stockBalance" | "productPriceHistory" | "syncOutbox" | "syncMetadata";
-const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "syncOutbox", "syncMetadata"];
+type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "stockBalance" | "productPriceHistory" | "receipts" | "syncOutbox" | "syncMetadata";
+const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "receipts", "syncOutbox", "syncMetadata"];
 const DB_NAME = "kwakopos-v2";
 const DEFAULT_SCHEMA_VERSION = 1;
 
@@ -25,6 +25,7 @@ export class LocalIndexedDbStore {
   stockAdjustments = new Map<string, StockAdjustment>();
   stockBalance = new Map<string, ProductBranchStock>();
   productPriceHistory = new Map<string, ProductPriceHistory>();
+  receipts = new Map<string, any>();
   syncOutbox = new Map<string, OutboxItem>();
   syncMetadata = new Map<string, string>();
   readonly ready: Promise<void>;
@@ -60,6 +61,7 @@ export class LocalIndexedDbStore {
       case "stockAdjustments": return this.stockAdjustments;
       case "stockBalance": return this.stockBalance;
       case "productPriceHistory": return this.productPriceHistory;
+      case "receipts": return this.receipts;
       case "syncOutbox": return this.syncOutbox;
       case "syncMetadata": return this.syncMetadata;
     }
