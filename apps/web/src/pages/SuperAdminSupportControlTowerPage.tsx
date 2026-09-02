@@ -1,0 +1,25 @@
+import React, { useEffect, useState } from "react";
+
+type Tower = { activeTenants:number; openTickets:Array<{status:string;severity:string;count:number}>; activeIncidents:Array<{id:string;severity:string;status:string;title:string;affected_module?:string;affected_version?:string}>; remediationStats:Array<{policy_decision:string;result?:string;count:number}>; supportEvents24h:number; generatedAt:string };
+type Health = { tenantId:string; health:string; sync:Record<string,number|string>; stockLedgerEntries:number; tickets:Record<string,number> };
+async function api(path:string, init?:RequestInit){ const r=await fetch(path,{credentials:"include",headers:{"Content-Type":"application/json",...(init?.headers||{})},...init}); const b=await r.json().catch(()=>({})); if(!r.ok||b.success===false) throw new Error(b?.error?.message||"Request failed"); return b.data; }
+
+export const SuperAdminSupportControlTowerPage:React.FC=()=>{
+ const [tower,setTower]=useState<Tower|null>(null); const [tenantId,setTenantId]=useState(""); const [health,setHealth]=useState<Health|null>(null); const [busy,setBusy]=useState(false); const [message,setMessage]=useState("");
+ const refresh=async()=>{setBusy(true);try{setTower(await api("/api/v1/super-admin/support/control-tower"));}catch(e){setMessage(e instanceof Error?e.message:"Unable to load control tower")}finally{setBusy(false)}};
+ useEffect(()=>{void refresh(); const id=window.setInterval(()=>void refresh(),30000); return()=>window.clearInterval(id)},[]);
+ const inspect=async()=>{if(!tenantId.trim())return;setBusy(true);try{setHealth(await api(`/api/v1/super-admin/support/tenants/${encodeURIComponent(tenantId.trim())}/health`));}catch(e){setMessage(e instanceof Error?e.message:"Unable to inspect tenant")}finally{setBusy(false)}};
+ return <main style={{padding:24,maxWidth:1250,margin:"0 auto"}}>
+  <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}><div><h1>Super Admin — 360° Support Control Tower</h1><p>Global support, incident, diagnostic and safe self-healing operations.</p></div><button onClick={()=>void refresh()} disabled={busy}>{busy?"Refreshing…":"Refresh"}</button></header>
+  {message&&<div role="alert" style={{padding:12,margin:"12px 0"}}>{message}</div>}
+  <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,margin:"20px 0"}}>
+   <div className="v2-card" style={{padding:18}}><strong>{tower?.activeTenants??"—"}</strong><div>Active tenants</div></div>
+   <div className="v2-card" style={{padding:18}}><strong>{tower?.openTickets?.reduce((n,x)=>n+x.count,0)??"—"}</strong><div>Open tickets</div></div>
+   <div className="v2-card" style={{padding:18}}><strong>{tower?.activeIncidents?.length??"—"}</strong><div>Active incidents</div></div>
+   <div className="v2-card" style={{padding:18}}><strong>{tower?.supportEvents24h??"—"}</strong><div>Support events / 24h</div></div>
+  </section>
+  <section className="v2-card" style={{padding:20,marginBottom:20}}><h2>Active Incidents</h2>{!tower?.activeIncidents.length?<p>No active incidents detected.</p>:<div style={{display:"grid",gap:10}}>{tower.activeIncidents.map(i=><article key={i.id} style={{padding:12,border:"1px solid var(--border, #ddd)",borderRadius:8}}><strong>{i.severity} · {i.title}</strong><div>{i.status}{i.affected_module?` · ${i.affected_module}`:""}{i.affected_version?` · ${i.affected_version}`:""}</div></article>)}</div>}</section>
+  <section className="v2-card" style={{padding:20,marginBottom:20}}><h2>Ticket Pressure</h2>{tower?.openTickets?.length?<div style={{display:"grid",gap:6}}>{tower.openTickets.map((x,i)=><div key={i}>{x.severity} · {x.status}: <strong>{x.count}</strong></div>)}</div>:<p>No open tickets.</p>}</section>
+  <section className="v2-card" style={{padding:20}}><h2>Tenant 360° Health Inspector</h2><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><input value={tenantId} onChange={e=>setTenantId(e.target.value)} placeholder="Tenant ID"/><button onClick={()=>void inspect()} disabled={busy||!tenantId.trim()}>Inspect tenant</button></div>{health&&<div style={{marginTop:16,display:"grid",gap:8}}><strong>Health: {health.health}</strong><div>Tenant: {health.tenantId}</div><div>Stock Ledger entries: {health.stockLedgerEntries}</div><div>Sync: {Object.entries(health.sync).map(([k,v])=><span key={k} style={{marginRight:12}}>{k}: {v}</span>)}</div><div>Tickets: {Object.entries(health.tickets).map(([k,v])=><span key={k} style={{marginRight:12}}>{k}: {v}</span>)}</div></div>}</section>
+ </main>;
+};
