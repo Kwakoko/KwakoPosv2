@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS tenant_onboardings (
   owner_user_id UUID,
   branch_id UUID,
   idempotency_key TEXT NOT NULL UNIQUE,
+  request_fingerprint TEXT NOT NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
