@@ -4,6 +4,39 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.11.0] - 2026-09-02
+
+### ✨ New Features
+- **phase46**: add autonomous scan and SLA visibility to control tower
+- **phase46**: expose incident scanner details and remediation verification
+- **phase46**: add autonomous support scanning and remediation verification
+- **core**: harden Phase 46 support indexes and incident correlation
+- **core**: route Super Admin support control tower
+- **core**: add Super Admin 360 support control tower UI
+- **core**: mount Super Admin support control tower
+- **core**: add Super Admin support control tower routes
+- **core**: add real diagnostics and safe sync self-healing
+- **support**: add Phase 46 support workspace
+- **support**: add Phase 46 support routes
+- **support**: add tenant-scoped support operations service
+- **support**: add Phase 46 support persistence
+- **support**: expose Phase 46 Support Operations workspace
+- **support**: mount Phase 46 support API on production server
+
+### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #10 from Kwakoko/feat/phase-46-support-operations
+- **core**: certify Phase 46 control tower and self-healing
+- **support**: add Phase 46 certification gate
+- **support**: register Phase 46 certification command
+
+### 🐛 Bug Fixes
+- **core**: normalize Phase 46 certification source assertions
+- **core**: correct self-healing certification assertion
+
+### 👥 Contributors
+Credit to: Jack91186, Kwakoko
+
+
 ## [2.10.0] - 2026-09-02
 
 ### ✨ New Features
