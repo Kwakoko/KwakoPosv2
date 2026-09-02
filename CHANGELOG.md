@@ -4,6 +4,15 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.7.0] - 2026-09-02
+
+### ✨ New Features
+- **receipts**: implement production-grade receipt management module with SHA256 signing, thermal rendering, reprint audit logging, and signature verification
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.6.1] - 2026-09-02
 
 ### 🐛 Bug Fixes

@@ -1,6 +1,6 @@
 {
   "name": "kwakopos2-monorepo",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "private": true,
   "main": "index.js",
   "type": "module",
