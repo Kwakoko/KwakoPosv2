@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { TenantOnboardingService, TenantOnboardingError } from "../../apps/api/src/services/tenantOnboardingService.js";
 
@@ -8,6 +9,12 @@ function validInput() {
     businessName: "Acme Retail Ltd", ownerName: "Owner User", ownerEmail: "owner@acme.example", ownerPassword: "a-strong-production-password", branchName: "Main Branch",
     country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", industry: "Retail", modules: ["Retail"], idempotencyKey: "idem-1234567890123456",
   };
+}
+
+function requestFingerprint(input: ReturnType<typeof validInput>): string {
+  const normalized = { ...input, ownerPassword: undefined };
+  const text = JSON.stringify(normalized, Object.keys(normalized).sort());
+  return createHash("sha256").update(text).digest("hex");
 }
 
 function makePrisma(overrides: Record<string, any> = {}) {
@@ -44,37 +51,20 @@ describe("TenantOnboardingService", () => {
 
   it("returns the existing onboarding record for the same idempotency key and fingerprint", async () => {
     const input = validInput();
-    const existing = [{ id: "33333333-3333-4333-8333-333333333333", tenantId: actor.tenantId, status: "READY", currentStep: "COMPLETE", industry: "Retail", modules: ["Retail"], country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", ownerUserId: actor.userId, branchId: "44444444-4444-4444-8444-444444444444", createdAt: new Date(), updatedAt: new Date(), completedAt: null, request_fingerprint: "" }];
-    const firstPrisma = makePrisma();
-    const firstService = new TenantOnboardingService(firstPrisma);
-    const first = await firstService.create(input, actor);
-    existing[0].request_fingerprint = (await firstPrisma.$queryRaw.mock.calls.length, "unused");
-
-    // Reproduce the service fingerprint deterministically by capturing it from the persistence call.
-    const insertCall = firstPrisma.__tx.$executeRaw.mock.calls[0][0];
-    expect(insertCall).toBeDefined();
-
-    const samePrisma = makePrisma({ $queryRaw: vi.fn(async () => [{ ...existing[0], request_fingerprint: "" }]) });
-    // An empty stored fingerprint is accepted as a legacy idempotency record.
-    const sameService = new TenantOnboardingService(samePrisma);
-    const result = await sameService.create(input, actor);
+    const existing = [{ id: "33333333-3333-4333-8333-333333333333", tenantId: actor.tenantId, status: "READY", currentStep: "COMPLETE", industry: "Retail", modules: ["Retail"], country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", ownerUserId: actor.userId, branchId: "44444444-4444-4444-8444-444444444444", createdAt: new Date(), updatedAt: new Date(), completedAt: null, request_fingerprint: requestFingerprint(input) }];
+    const prisma = makePrisma({ $queryRaw: vi.fn(async () => existing) });
+    const service = new TenantOnboardingService(prisma);
+    const result = await service.create(input, actor);
     expect(result.id).toBe(existing[0].id);
-    expect(samePrisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("rejects an idempotency key reused for materially different tenant data", async () => {
     const input = validInput();
-    const prisma = makePrisma();
-    const first = new TenantOnboardingService(prisma);
-    await first.create(input, actor);
-    const persistedQuery = prisma.__tx.$executeRaw.mock.calls.find((call: any[]) => String(call[0]).includes("tenant_onboardings"));
-    expect(persistedQuery).toBeDefined();
-
-    // The production path stores a SHA-256 request fingerprint; a non-matching value must conflict before provisioning.
-    const conflictingPrisma = makePrisma({ $queryRaw: vi.fn(async () => [{ id: "55555555-5555-4555-8555-555555555555", request_fingerprint: "different-fingerprint", status: "READY" }]) });
-    const conflicting = new TenantOnboardingService(conflictingPrisma);
+    const prisma = makePrisma({ $queryRaw: vi.fn(async () => [{ id: "55555555-5555-4555-8555-555555555555", request_fingerprint: requestFingerprint(input), status: "READY" }]) });
+    const conflicting = new TenantOnboardingService(prisma);
     await expect(conflicting.create({ ...input, businessName: "Different Business Ltd" }, actor)).rejects.toMatchObject<TenantOnboardingError>({ code: "CONFLICT", statusCode: 409 });
-    expect(conflictingPrisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("rejects modules that are not in the server catalog", async () => {
