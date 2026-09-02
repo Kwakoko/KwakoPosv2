@@ -3,6 +3,7 @@ import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts
 import { LoginPage } from "./pages/LoginPage.js";
 import { SystemAppShellLayout } from "./layouts/SystemAppShellLayout.js";
 import { TenantOnboardingPage } from "./pages/TenantOnboardingPage.js";
+import { SupportOperationsPage } from "./pages/SupportOperationsPage.js";
 import {
   DashboardPage, PosPage, InventoryPage, CustomersPage,
   PurchasingPage, FinancePage, ReportsPage, SettingsPage,
@@ -13,7 +14,7 @@ import {
 } from "./pages/WorkspacePages.js";
 
 const TAB_TO_PATH: Record<string, string> = {
-  "Dashboard": "/", "POS": "/pos", "Inventory": "/inventory", "Customers": "/customers", "Purchasing": "/purchasing", "Finance": "/finance", "Reports": "/reports", "Settings": "/settings", "General Settings": "/settings", "Users & Roles": "/users", "Super Admin": "/super-admin", "Diagnostics": "/diagnostics", "Expenses": "/expenses", "AI Insights": "/ai", "Cash Drawer": "/cash-drawer", "Receipts": "/receipts", "Trash": "/trash", "Law Firm": "/law-firm", "Pharmacy": "/pharmacy", "Poultry & Livestock": "/poultry-livestock", "Fleet Management": "/fleet", "Workforce": "/workforce", "Telecom": "/telecom", "Help": "/help",
+  "Dashboard": "/", "POS": "/pos", "Inventory": "/inventory", "Customers": "/customers", "Purchasing": "/purchasing", "Finance": "/finance", "Reports": "/reports", "Settings": "/settings", "General Settings": "/settings", "Users & Roles": "/users", "Super Admin": "/super-admin", "Diagnostics": "/diagnostics", "Expenses": "/expenses", "AI Insights": "/ai", "Cash Drawer": "/cash-drawer", "Receipts": "/receipts", "Trash": "/trash", "Law Firm": "/law-firm", "Pharmacy": "/pharmacy", "Poultry & Livestock": "/poultry-livestock", "Fleet Management": "/fleet", "Workforce": "/workforce", "Telecom": "/telecom", "Help": "/help", "Support & Operations": "/support",
 };
 const PATH_TO_TAB: Record<string, string> = Object.fromEntries(Object.entries(TAB_TO_PATH).map(([tab, path]) => [path, tab]));
 
@@ -23,14 +24,8 @@ const AuthenticatedApp: React.FC = () => {
   const [currentPath, setCurrentPath] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
 
   useEffect(() => {
-    const onPop = () => {
-      const path = window.location.pathname;
-      setCurrentPath(path);
-      const tab = PATH_TO_TAB[path] || "Dashboard";
-      setActiveTab(tab);
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    const onPop = () => { const path = window.location.pathname; setCurrentPath(path); setActiveTab(PATH_TO_TAB[path] || "Dashboard"); };
+    window.addEventListener("popstate", onPop); return () => window.removeEventListener("popstate", onPop);
   }, [setActiveTab]);
 
   useEffect(() => {
@@ -44,20 +39,14 @@ const AuthenticatedApp: React.FC = () => {
   if (!isAuthenticated || !user) return <LoginPage onAuthenticated={() => setActiveTab("Dashboard")} />;
 
   const handleNavigate = (path: string) => {
-    if (path === "/tenant-onboarding") {
-      setCurrentPath(path);
-      window.history.pushState({}, "", path);
-      return;
-    }
-    const tab = PATH_TO_TAB[path] || "Dashboard";
-    setActiveTab(tab);
+    if (path === "/tenant-onboarding") { setCurrentPath(path); window.history.pushState({}, "", path); return; }
+    setActiveTab(PATH_TO_TAB[path] || "Dashboard");
   };
 
   const renderView = () => {
     switch (currentPath) {
       case "/tenant-onboarding": return <TenantOnboardingPage />;
-      case "/":
-      case "/dashboard": return <DashboardPage onNavigate={handleNavigate} />;
+      case "/": case "/dashboard": return <DashboardPage onNavigate={handleNavigate} />;
       case "/pos": return <PosPage onNavigate={handleNavigate} />;
       case "/inventory": return <InventoryPage />;
       case "/customers": return <CustomersPage />;
@@ -80,10 +69,10 @@ const AuthenticatedApp: React.FC = () => {
       case "/workforce": return <WorkforcePage />;
       case "/telecom": return <TelecomPage />;
       case "/help": return <HelpPage />;
+      case "/support": return <SupportOperationsPage />;
       default: return <DashboardPage onNavigate={handleNavigate} />;
     }
   };
-
   return <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>{renderView()}</SystemAppShellLayout>;
 };
 
