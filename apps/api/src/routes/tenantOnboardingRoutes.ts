@@ -13,6 +13,10 @@ function isPlatformProvisioner(ctx: { roles: string[]; permissions: string[] }):
   const permissions = ctx.permissions.map(String).map((v) => v.toUpperCase());
   return roles.includes("SUPER_ADMIN") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 }
+function isOwner(ctx: { roles: string[]; permissions: string[] }): boolean {
+  const roles = ctx.roles.map(String).map((v) => v.toUpperCase());
+  return roles.includes("OWNER");
+}
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof TenantOnboardingError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
   if (error instanceof Error && error.name === "ZodError") return reply.status(400).send({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid tenant onboarding request" } });
@@ -45,7 +49,9 @@ export function tenantOnboardingRoutes(server: FastifyInstance): void {
   server.post("/api/v1/onboarding/tenants/:tenantId/complete", async (req, reply) => {
     try {
       const ctx = requireContext(req); const tenantId = String((req.params as any)?.tenantId || "");
-      return reply.send({ success: true, data: await service.complete(tenantId, { tenantId: ctx.tenantId, isSuperAdmin: isPlatformProvisioner(ctx), userId: ctx.userId, correlationId: String(req.headers["x-correlation-id"] || ""), traceId: String(req.headers["x-trace-id"] || "") }) });
+      const ownerAuthenticated = isOwner(ctx) && ctx.tenantId === tenantId;
+      if (!ownerAuthenticated) return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Owner authentication is required before onboarding completion" } });
+      return reply.send({ success: true, data: await service.complete(tenantId, { tenantId: ctx.tenantId, isSuperAdmin: false, userId: ctx.userId, correlationId: String(req.headers["x-correlation-id"] || ""), traceId: String(req.headers["x-trace-id"] || "") }) });
     } catch (error) { return sendError(reply, error); }
   });
 }
