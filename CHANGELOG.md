@@ -4,6 +4,23 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.9.0] - 2026-09-02
+
+### ✨ New Features
+- **auth**: expose authorized tenant provisioning entry point
+
+### ⚡ Improvements & Enhancements
+- **onboarding**: make idempotency fingerprint assertion deterministic
+- **onboarding**: cover idempotency conflicts and catalog validation
+
+### 🐛 Bug Fixes
+- **onboarding**: require owner authentication for completion
+- **onboarding**: complete only after owner authentication handoff
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.8.0] - 2026-09-02
 
 ### ✨ New Features

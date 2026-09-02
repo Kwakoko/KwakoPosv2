@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/web",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "private": true,
   "scripts": {
     "build": "tsx buildPwaAssets.ts && vite build && tsc -p tsconfig.json --noEmit",
