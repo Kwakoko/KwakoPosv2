@@ -1,8 +1,8 @@
-import type { Product, ProductVariant, StockLedger, StockAdjustment, SyncOperationType } from "@kwakopos2/contracts";
+import type { Product, ProductVariant, StockLedger, StockAdjustment, ProductBranchStock, ProductPriceHistory, SyncOperationType } from "@kwakopos2/contracts";
 
 export interface OutboxItem {
   id: string;
-  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment" | "User";
+  entityType: "Product" | "ProductVariant" | "StockAdjustment" | "StockLedger" | "ProductPriceHistory" | "Sale" | "Customer" | "PurchaseOrder" | "PurchaseReceipt" | "Payment" | "User";
   entityId: string;
   operationType: SyncOperationType;
   payload: Record<string, unknown>;
@@ -11,8 +11,8 @@ export interface OutboxItem {
   status: "PENDING" | "SYNCED" | "FAILED";
 }
 
-type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "syncOutbox" | "syncMetadata";
-const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "syncOutbox", "syncMetadata"];
+type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjustments" | "stockBalance" | "productPriceHistory" | "syncOutbox" | "syncMetadata";
+const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "syncOutbox", "syncMetadata"];
 const DB_NAME = "kwakopos-v2";
 const DEFAULT_SCHEMA_VERSION = 1;
 
@@ -23,6 +23,8 @@ export class LocalIndexedDbStore {
   productVariants = new Map<string, ProductVariant>();
   stockLedger = new Map<string, StockLedger>();
   stockAdjustments = new Map<string, StockAdjustment>();
+  stockBalance = new Map<string, ProductBranchStock>();
+  productPriceHistory = new Map<string, ProductPriceHistory>();
   syncOutbox = new Map<string, OutboxItem>();
   syncMetadata = new Map<string, string>();
   readonly ready: Promise<void>;
@@ -56,6 +58,8 @@ export class LocalIndexedDbStore {
       case "productVariants": return this.productVariants;
       case "stockLedger": return this.stockLedger;
       case "stockAdjustments": return this.stockAdjustments;
+      case "stockBalance": return this.stockBalance;
+      case "productPriceHistory": return this.productPriceHistory;
       case "syncOutbox": return this.syncOutbox;
       case "syncMetadata": return this.syncMetadata;
     }
@@ -87,7 +91,7 @@ export class LocalIndexedDbStore {
   }
 
   clear(): void {
-    this.products.clear(); this.productVariants.clear(); this.stockLedger.clear(); this.stockAdjustments.clear(); this.syncOutbox.clear(); this.syncMetadata.clear();
+    this.products.clear(); this.productVariants.clear(); this.stockLedger.clear(); this.stockAdjustments.clear(); this.stockBalance.clear(); this.productPriceHistory.clear(); this.syncOutbox.clear(); this.syncMetadata.clear();
     if (this.nativeDb) for (const store of STORE_NAMES) {
       try { this.nativeDb.transaction(store, "readwrite").objectStore(store).clear(); } catch { /* best effort */ }
     }
@@ -97,6 +101,8 @@ export class LocalIndexedDbStore {
   saveVariantLocal(variant: ProductVariant): void { this.productVariants.set(variant.id, variant); this.persist("productVariants", variant.id, variant); }
   saveStockLedgerLocal(entry: StockLedger): void { this.stockLedger.set(entry.id, entry); this.persist("stockLedger", entry.id, entry); }
   saveStockAdjustmentLocal(adjustment: StockAdjustment): void { this.stockAdjustments.set(adjustment.id, adjustment); this.persist("stockAdjustments", adjustment.id, adjustment); }
+  saveStockBalanceLocal(balance: ProductBranchStock): void { this.stockBalance.set(balance.id, balance); this.persist("stockBalance", balance.id, balance); }
+  saveProductPriceHistoryLocal(history: ProductPriceHistory): void { this.productPriceHistory.set(history.id, history); this.persist("productPriceHistory", history.id, history); }
   recordOutboxMutation(item: OutboxItem): void { this.syncOutbox.set(item.id, item); this.persist("syncOutbox", item.id, item); }
 
   enqueueOutbox(item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem {

@@ -84,6 +84,83 @@ export class ElectronicsEngine {
     });
   }
 
+  getModuleManifest(): any {
+    return {
+      moduleId: "electronics_operating_system",
+      id: "electronics",
+      name: "Electronics & Tech Retail",
+      version: "2.5.0",
+      description: "Serialized inventory, warranty tracking & repair job command center",
+      supportedCategories: ["SMARTPHONES", "LAPTOPS", "TABLETS", "ACCESSORIES"],
+    };
+  }
+
+  getDefaultSettings(tenantId: string, branchId: string): any {
+    return {
+      tenantId,
+      branchId,
+      currency: "TZS",
+      enforceUniqueImeiRegistration: true,
+      defaultWarrantyMonths: 12,
+      requireImeiOnSale: true,
+      defaultWarrantyDays: 365,
+      autoAssignTechnician: true,
+    };
+  }
+
+  transitionDeviceState(device: any, targetState: string): any {
+    const validTransitions: Record<string, string[]> = {
+      RECEIVED: ["INSPECTION"],
+      INSPECTION: ["AVAILABLE", "QUARANTINE"],
+      AVAILABLE: ["SOLD", "RESERVED", "TRANSFERRED"],
+      SOLD: ["CUSTOMER_OWNED"],
+      CUSTOMER_OWNED: ["REPAIR_INTAKE", "TRADE_IN"],
+      REPAIR_INTAKE: ["REPAIR_IN_PROGRESS"],
+      REPAIR_IN_PROGRESS: ["REPAIR_COMPLETED"],
+      REPAIR_COMPLETED: ["CUSTOMER_OWNED"],
+    };
+    const currentState = device.state || "RECEIVED";
+    const allowed = validTransitions[currentState] || [];
+    if (!allowed.includes(targetState)) {
+      throw new Error(`Invalid Serialized Device State Transition! Cannot transition from ${currentState} to ${targetState}`);
+    }
+    return { ...device, state: targetState, updatedAt: new Date().toISOString() };
+  }
+
+  verifyWarrantyValidity(saleDateStr: string, warrantyMonths: number, refDate: Date = new Date()): { isValid: boolean; daysRemaining: number } {
+    const saleDate = new Date(saleDateStr);
+    const expiryDate = new Date(saleDate);
+    expiryDate.setMonth(expiryDate.getMonth() + warrantyMonths);
+    const diffMs = expiryDate.getTime() - refDate.getTime();
+    const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    return {
+      isValid: refDate < expiryDate,
+      daysRemaining,
+    };
+  }
+
+  calculateRepairBill(partsCost: number, laborCost: number): { totalRepairCostTzs: number; laborRatioPct: number } {
+    const totalRepairCostTzs = partsCost + laborCost;
+    const laborRatioPct = totalRepairCostTzs > 0 ? (laborCost / totalRepairCostTzs) * 100 : 0;
+    return {
+      totalRepairCostTzs,
+      laborRatioPct,
+    };
+  }
+
+  generateExplainableAiRecommendations(ctx: any, devices: any[], repairs: any[]): any[] {
+    return [
+      {
+        id: "rec-elec-01",
+        title: "High Repair SLA Risk",
+        description: `${repairs.filter((r: any) => r.status === "INTAKE").length} repair tickets pending intake technician assignment.`,
+        impactScore: 88,
+        confidencePct: 94,
+        suggestedAction: "Assign dedicated technician to pending intake queue.",
+      },
+    ];
+  }
+
   private parseDate(value: string, name: string): Date {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
@@ -107,3 +184,6 @@ export class ElectronicsEngine {
     return sum % 10 === 0;
   }
 }
+
+export class ElectronicsOperatingEngine extends ElectronicsEngine {}
+export const globalElectronicsOperatingEngine = new ElectronicsOperatingEngine();

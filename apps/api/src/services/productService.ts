@@ -3,6 +3,11 @@ import type {
   TenantContext,
   Product,
   ProductVariant,
+  StockLedger,
+  ProductBranchStock,
+  ProductPriceHistory,
+  CreatePriceChangeRequest,
+  CreateStockMovementRequest,
   CreateProductRequest,
   UpdateProductRequest,
   CreateVariantRequest,
@@ -191,8 +196,221 @@ export class ProductService {
     return this.productRepo.deleteVariant(ctx, variantId);
   }
 
+  generateVariantsForProduct(
+    ctx: TenantContext,
+    productId: string,
+    attributes: Array<{ name: string; values: string[] }>,
+    baseSku?: string
+  ): ProductVariant[] {
+    const product = this.getProductById(ctx, productId);
+    if (!product) throw new Error(`Product ${productId} not found`);
+
+    const cleanBaseSku = baseSku || product.sku;
+    const cartesian = (arrays: string[][]): string[][] =>
+      arrays.reduce<string[][]>((acc, curr) => acc.flatMap((d) => curr.map((e) => [...d, e])), [[]]);
+
+    const valueArrays = attributes.map((a) => a.values);
+    const combinations = cartesian(valueArrays);
+    const created: ProductVariant[] = [];
+
+    for (const combo of combinations) {
+      const attrMap: Record<string, string> = {};
+      attributes.forEach((attr, i) => {
+        attrMap[attr.name] = combo[i];
+      });
+
+      const comboStr = combo.join(" / ");
+      const skuSuffix = combo
+        .map((v) => v.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3))
+        .join("-");
+      const sku = `${cleanBaseSku}-${skuSuffix}`;
+      const barcodeSeed = Math.floor(10000000 + Math.random() * 90000000).toString();
+
+      const variant = this.addVariant(ctx, productId, {
+        name: `${product.name} (${comboStr})`,
+        sku,
+        barcode: `BAR-${barcodeSeed}`,
+        inheritBuyingPrice: true,
+        inheritSellingPrice: true,
+        costPrice: product.buyingPrice || 0,
+        price: product.sellingPrice || 0,
+        attributes: attrMap,
+      });
+
+      created.push(variant);
+    }
+
+    return created;
+  }
+
+  bulkUpdateVariants(
+    ctx: TenantContext,
+    productId: string,
+    req: {
+      variantIds: string[];
+      action: "UPDATE_PRICES" | "UPDATE_STOCK" | "SET_STATUS";
+      priceData?: { inheritBuyingPrice?: boolean; inheritSellingPrice?: boolean; costPrice?: number; price?: number };
+      stockData?: { mode: "SET" | "ADD"; quantity: number };
+      isActive?: boolean;
+    }
+  ): ProductVariant[] {
+    const product = this.getProductById(ctx, productId);
+    if (!product) throw new Error(`Product ${productId} not found`);
+
+    const updatedVariants: ProductVariant[] = [];
+
+    for (const vId of req.variantIds) {
+      const variant = (product.variants || []).find((v) => v.id === vId);
+      if (!variant) continue;
+
+      if (req.action === "UPDATE_PRICES" && req.priceData) {
+        const updated = this.updateVariant(ctx, vId, {
+          inheritBuyingPrice: req.priceData.inheritBuyingPrice,
+          inheritSellingPrice: req.priceData.inheritSellingPrice,
+          costPrice: req.priceData.costPrice,
+          price: req.priceData.price,
+        });
+        updatedVariants.push(updated);
+      } else if (req.action === "UPDATE_STOCK" && req.stockData) {
+        const currentStock = variant.stock || 0;
+        const newStock =
+          req.stockData.mode === "ADD" ? currentStock + req.stockData.quantity : req.stockData.quantity;
+
+        const updated = this.updateVariant(ctx, vId, {
+          inventoryQuantity: Math.max(0, newStock),
+          stock: Math.max(0, newStock),
+        });
+
+        // Record stock adjustment ledger entry for audit trail
+        this.stockRepo.recordStockAdjustment(ctx, {
+          variantId: vId,
+          adjustmentType: "SET",
+          quantityChange: Math.max(0, newStock),
+          reason: "BULK_STOCK_UPDATE",
+          deviceId: "SYSTEM_CONSOLE",
+          operationId: randomUUID(),
+          idempotencyKey: `bulk-stock-${vId}-${Date.now()}`,
+        });
+
+        updatedVariants.push(updated);
+      } else if (req.action === "SET_STATUS" && req.isActive !== undefined) {
+        const updated = this.updateVariant(ctx, vId, {
+          isActive: req.isActive,
+        });
+        updatedVariants.push(updated);
+      }
+    }
+
+    return updatedVariants;
+  }
+
+  searchVariantsForPos(
+    ctx: TenantContext,
+    query: string
+  ): Array<{
+    productId: string;
+    variantId: string;
+    productName: string;
+    variantName: string;
+    sku: string;
+    barcode: string | null;
+    effectiveSellingPrice: number;
+    effectiveBuyingPrice: number;
+    availableStock: number;
+    attributes?: Record<string, string>;
+  }> {
+    const q = query.trim().toLowerCase();
+    const products = this.getProducts(ctx);
+    const results: Array<{
+      productId: string;
+      variantId: string;
+      productName: string;
+      variantName: string;
+      sku: string;
+      barcode: string | null;
+      effectiveSellingPrice: number;
+      effectiveBuyingPrice: number;
+      availableStock: number;
+      attributes?: Record<string, string>;
+    }> = [];
+
+    for (const p of products) {
+      const pMatch = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+      for (const v of p.variants || []) {
+        if (!v.isActive) continue;
+
+        const barcodeMatch = v.barcode ? v.barcode.toLowerCase() === q : false;
+        const skuMatch = v.sku.toLowerCase().includes(q);
+        const nameMatch = v.name.toLowerCase().includes(q);
+
+        if (barcodeMatch || skuMatch || nameMatch || pMatch) {
+          const effectiveSelling = v.effectiveSellingPrice ?? (v.inheritSellingPrice ? p.sellingPrice : v.price);
+          const effectiveBuying = v.effectiveBuyingPrice ?? (v.inheritBuyingPrice ? p.buyingPrice : v.costPrice);
+
+          results.push({
+            productId: p.id,
+            variantId: v.id,
+            productName: p.name,
+            variantName: v.name,
+            sku: v.sku,
+            barcode: v.barcode || null,
+            effectiveSellingPrice: effectiveSelling,
+            effectiveBuyingPrice: effectiveBuying,
+            availableStock: v.availableStock ?? Math.max(0, (v.stock || 0) - (v.reservedQuantity || 0)),
+            attributes: v.attributes,
+          });
+        }
+      }
+    }
+
+    return results;
+  }
+
   getAvailableStock(ctx: TenantContext, variantId: string): number {
     return this.stockRepo.getAvailableStock(ctx, variantId);
+  }
+
+  recordStockMovement(ctx: TenantContext, req: CreateStockMovementRequest): StockLedger {
+    return this.stockRepo.recordMovement(ctx, req);
+  }
+
+  getProductStockHistory(ctx: TenantContext, productId: string, variantId?: string): {
+    productId: string;
+    productName: string;
+    currentStock: number;
+    movements: StockLedger[];
+  } {
+    const product = this.getProductById(ctx, productId);
+    if (!product) throw new Error(`Product ${productId} not found`);
+
+    let ledgers = this.stockRepo.getLedger(ctx, variantId);
+    ledgers = ledgers.filter((l) => l.productId === productId);
+
+    return {
+      productId: product.id,
+      productName: product.name,
+      currentStock: product.totalStock,
+      movements: ledgers.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    };
+  }
+
+  getProductBranchStockCache(ctx: TenantContext, variantId: string): ProductBranchStock | null {
+    return this.stockRepo.getProductBranchStockCache(ctx, variantId);
+  }
+
+  recalculateStockCache(ctx: TenantContext, variantId?: string): ProductBranchStock[] {
+    return this.stockRepo.recalculateStockCacheFromLedger(ctx, variantId);
+  }
+
+  recordPriceChange(
+    ctx: TenantContext,
+    req: CreatePriceChangeRequest
+  ): { priceHistory: ProductPriceHistory; product: Product; variant?: ProductVariant } {
+    return this.productRepo.recordPriceChange(ctx, req);
+  }
+
+  getPriceHistory(ctx: TenantContext, productId: string, variantId?: string): ProductPriceHistory[] {
+    return this.productRepo.getPriceHistory(ctx, productId, variantId);
   }
 }
 

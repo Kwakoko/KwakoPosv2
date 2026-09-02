@@ -43,7 +43,7 @@ import {
   TransactionNumbering,
   calculateAvailableStock,
 } from "@kwakopos2/domain";
-import type { InMemoryStore } from "./index.js";
+import { InMemoryStore, ScopedStockRepository } from "./index.js";
 import { randomUUID } from "crypto";
 
 export class ScopedCommercialRepository {
@@ -281,26 +281,22 @@ export class ScopedCommercialRepository {
     supplier.outstandingBalance = (supplier.outstandingBalance || 0) + totalReceiptCost;
 
     // Generate StockLedger additions (movementType: "PURCHASE")
+    const stockRepo = new ScopedStockRepository(this.store);
     const ledgers: StockLedger[] = req.items.map((item) => {
       const variant = this.store.variants.get(item.variantId);
-      const ledger: StockLedger = {
-        id: randomUUID(),
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
+      return stockRepo.recordMovement(ctx, {
         productId: variant ? variant.productId : randomUUID(),
         variantId: item.variantId,
         movementType: "PURCHASE",
-        quantity: item.quantityReceived,
+        quantityChange: item.quantityReceived,
         referenceType: "PURCHASE_RECEIPT",
         referenceId: receiptId,
-        occurredAt: now,
+        unitCost: item.unitCost,
+        totalCost: item.unitCost * item.quantityReceived,
         deviceId: req.deviceId,
         operationId: req.operationId,
         idempotencyKey: `${req.idempotencyKey}-${item.variantId}`,
-        createdAt: now,
-      };
-      this.store.stockLedgers.set(ledger.id, ledger);
-      return ledger;
+      });
     });
 
     assertPurchaseReceiptHasInventory(receiptId, req.items, ledgers);
@@ -333,9 +329,14 @@ export class ScopedCommercialRepository {
     const saleNumber = TransactionNumbering.formatNumber("SAL", "MAIN", this.sales.size + 1);
 
     const lines: SaleLine[] = req.items.map((item) => {
+      const product = this.store.products.get(item.productId);
+      const variant = this.store.variants.get(item.variantId);
+      const defaultCost = variant?.effectiveBuyingPrice ?? variant?.costPrice ?? product?.buyingPrice ?? 0;
+      const unitCost = item.unitCost !== undefined && item.unitCost !== null && item.unitCost > 0 ? item.unitCost : defaultCost;
+
       const lineCalc = PricingTaxEngine.calculateLineItem({
         unitPrice: item.unitPrice,
-        unitCost: item.unitCost || 0,
+        unitCost,
         quantity: item.quantity,
         discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
       });
@@ -453,25 +454,22 @@ export class ScopedCommercialRepository {
     }
 
     // Generate StockLedger deductions (movementType: "SALE")
+    const stockRepo = new ScopedStockRepository(this.store);
     const ledgers: StockLedger[] = lines.map((line) => {
-      const ledger: StockLedger = {
-        id: randomUUID(),
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
+      return stockRepo.recordMovement(ctx, {
         productId: line.productId,
         variantId: line.variantId,
         movementType: "SALE",
-        quantity: -Math.abs(line.quantity),
+        quantityChange: -Math.abs(line.quantity),
         referenceType: "SALE",
         referenceId: saleId,
-        occurredAt: now,
+        unitCost: line.unitCost,
+        totalCost: line.unitCost * line.quantity,
         deviceId: req.deviceId,
         operationId: req.operationId,
         idempotencyKey: `${req.idempotencyKey}-${line.variantId}`,
-        createdAt: now,
-      };
-      this.store.stockLedgers.set(ledger.id, ledger);
-      return ledger;
+        notes: `POS Sale #${saleNumber}`,
+      });
     });
 
     assertStockAffectingSaleHasLedger(saleId, lines, ledgers);
@@ -537,29 +535,26 @@ export class ScopedCommercialRepository {
       }
     }
 
-    // Generate StockLedger additions (movementType: "RETURN") for items in GOOD condition
+    // Generate StockLedger additions (movementType: "CUSTOMER_RETURN") for items in GOOD condition
+    const stockRepo = new ScopedStockRepository(this.store);
     const ledgers: StockLedger[] = returnLines
       .filter((item) => item.condition === "GOOD")
       .map((item) => {
         const variant = this.store.variants.get(item.variantId);
-        const ledger: StockLedger = {
-          id: randomUUID(),
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
+        return stockRepo.recordMovement(ctx, {
           productId: variant ? variant.productId : randomUUID(),
           variantId: item.variantId,
-          movementType: "RETURN",
-          quantity: item.quantityReturned,
-          referenceType: "RETURN",
+          movementType: "CUSTOMER_RETURN",
+          quantityChange: item.quantityReturned,
+          referenceType: "CUSTOMER_RETURN",
           referenceId: returnId,
-          occurredAt: now,
+          unitCost: item.refundUnitPrice,
+          totalCost: item.refundLineTotal,
           deviceId: req.deviceId,
           operationId: req.operationId,
           idempotencyKey: `${req.idempotencyKey}-${item.variantId}`,
-          createdAt: now,
-        };
-        this.store.stockLedgers.set(ledger.id, ledger);
-        return ledger;
+          notes: `Customer Return #${returnRecord.returnNumber}`,
+        });
       });
 
     this.returns.set(returnId, returnRecord);

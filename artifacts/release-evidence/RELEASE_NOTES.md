@@ -1,0 +1,193 @@
+# Release Notes - KwakoPos v2.5.1 (2026-09-02)
+
+### 🚀 Features
+- feat(users-roles): implement unified users and roles access security system
+- feat(cash-drawer): implement production-grade cash drawer command center
+- feat(inventory): add SaaS production inventory valuation metrics, WAC calculation, product profitability breakdown, and multi-branch historical reports
+- feat(context): export AuthProvider, SessionProvider, ModuleProvider, SyncProvider, TenantProvider, BranchProvider, RbacProvider, and ThemeProvider aliases from KwakoPosContexts
+- feat(milestone): complete Legacy Behavioral Parity → V2 Production Implementation
+- feat(inventory): implement full-fidelity Product Variants & Attribute Builder
+- feat(inventory): implement dedicated full-fidelity Inventory & Stock Operations Command Center
+- feat(pos): implement dedicated full-fidelity Core POS Counter Workspace
+- feat(ui): extract dedicated full-fidelity modular pages for Customers, Purchasing, and Settings
+- feat(ui): extract dedicated full-fidelity modular pages for Reports, Users & Roles, SuperAdmin, CashDrawer, Receipts, Trash, and Help
+- feat(cert): add strict security runtime gate with fail-closed evidence checks
+- feat(auth-ui): add dedicated V2 authentication styles
+- feat(security): incorporate KwakoPosv2 Certification Status Hierarchy & PASS_WITH_P3_HARDENING state machine
+- feat(ui): migrate mature legacy UX components to KwakoPosv2 design system
+- feat(web): realize full matured UI composition with 23 domain workspace views and standalone TopBar/Sidebar/BottomNav/AppVersionFooter components
+- feat(web,api): implement full live tenant and branch context switching with server JWT re-issuance
+- feat(web): restore full 23-component KwakoPos UX composition and domain views
+- feat(web): isolate PWA asset generation from legacy HTML shell
+- feat(web): add V2 React System UI stylesheet
+- feat(web): add real Vite React HTML entrypoint
+- feat(web): add real authentication entry screen
+- feat(web): realize KwakoPosv2 real React application foundation with provider suite, layouts, and workspace pages
+- feat(ui): realize interactive client SPA router and 11 browser workflows with concrete E2E evidence
+- feat(pwa): complete Phase 30.5 System UI realization, old-app parity matrix, and 40-control certification
+- feat(pwa): separate Web UI landing shell from API routing and enforce PWA distribution hardening
+- feat(api): expose public GET / root info endpoint
+- feat(release): bind folder sync evidence to release proof and add concurrency lock crash recovery
+- feat(release): add fail-closed verification, true semver, real rollback, and evidence generation to folder sync engine
+- feat(release): implement local semantic version folder synchronization engine
+- feat(golive-certificate): issue KwakoPos Production Release Candidate / Go-Live Certificate for SHA a9eb1d89de5e411272e7a7633cab2c22a7f33d06
+- feat(trust-certification): complete Final Production Trust Certification gates (fail-closed candidate evidence, mandatory PostgreSQL sessions in prod, adversarial AI authorization test suite)
+- feat(full-system-certification): implement Phase 45 — Full KwakoPos Operating System Certification (KFOS-CERT v1.0.0)
+- feat(platform-intelligence): implement Phase 44 — KwakoPos Platform Intelligence & Decision Support OS (KPIOL v1.0.0)
+- feat(autonomous-operations): implement Phase 43 — KwakoPos Autonomous Operations Platform OS (KAOL v2.0.0)
+- feat(security): implement Phase 42 — KwakoPos Security & Permanent Platform Control OS (KSOL v2.0.0)
+- feat(autonomous-business): implement Phase 42 — KwakoPos Autonomous Business Operations OS (KABO v1.0.0)
+- feat(global-platform): implement Phase 41 — KwakoPos Global Platform & Multi-Region OS (KGPA v1.0.0)
+- feat(marketplace): implement Phase 40 — KwakoPos Marketplace & Commercial Ecosystem OS (KMKOL v1.0.0)
+- feat(licensing): implement Phase 45 — KwakoPos Platform Licensing & Monetization Operating Layer (KPLOL v1.0.0)
+- feat(multisite): implement Phase 44 — KwakoPos Multi-Site & Enterprise Admin Operating Layer (KMAOL v1.0.0)
+- feat(compliance): implement Phase 43 — KwakoPos Compliance & Audit Operating Layer (KCAOL v1.0.0)
+- feat(notifications): implement Phase 42 — KwakoPos Notification Operating Layer (KNCOL v1.0.0)
+- feat(security): implement Phase 41 — KwakoPos Security & Risk Operating Layer (KSROL v1.0.0)
+- feat(documents): implement Phase 40 — KwakoPos Document & Asset Operating Layer (KDAOL v1.0.0)
+- feat(integration): implement Phase 39 — KwakoPos Integration Center Operating Layer (KIOL v1.0.0)
+- feat(crm): implement Phase 38 — KwakoPos CRM Operating Layer (KCRML v1.0.0)
+- feat(workforce): implement Phase 37 — KwakoPos Workforce Operating Layer (KWOL v1.0.0)
+- feat(supply-chain): implement Phase 36 — KwakoPos Supply Chain Operating Layer (KSCOL v1.0.0)
+- feat(treasury): implement Phase 35 — Finance & Treasury Operating Layer (KFTL v1.0.0)
+- feat: Phase 34 -- Enterprise Approvals (KEAE v1.0.0) -- 85 Pillars 100% Certified -- 42/42 Modules PASS
+- feat: Implement Phase 33 — AI Operating Layer OS with 75-Pillar Engine
+- feat: Implement Phase 32 — BI / Analytics OS with 85-Pillar Engine
+- feat: Implement Phase 31 — Workflow, Automation & Business Process OS with 75-Pillar Engine
+- feat: Implement Phase 30 — UI Certification Framework with 80-Pillar Engine
+- feat: Implement Phase 29 — Super Admin & Platform UI with 70-Pillar Certification Engine
+- feat: Implement Phase 28 — Dynamic Module UI with 74-Pillar Certification Engine
+- feat: Implement Phase 27 — Core Operating UI with 73-Pillar Certification Engine
+- feat: Implement Phase 26 — KwakoPos Design System (KDS) with 65-Pillar Certification Engine
+- feat: Implement Phase 25 — KwakoPos System UI & Experience Architecture with 30-Pillar Certification Engine
+- feat: Implement Advanced Workforce Tracking & Time Management Operating System with 58-Pillar Certification Engine
+- feat: Implement Phase 24 — Platform Governance (KPGA) Framework with 58-Pillar Certification Engine
+- feat: Implement Phase 23 — KwakoPos Certification Program (KCA) Framework with 48-Pillar Certification Engine
+- feat: Implement Phase 22 — Autonomous Operations (KAOF) Framework with 56-Pillar Certification Engine
+- feat: Implement Phase 21 — AI-Native Business Operations (KAGS) Framework with 50-Pillar Certification Engine
+- feat: Implement Phase 20 — Global Expansion (KGF) Framework with 55-Pillar Certification Engine
+- feat: Implement Phase 19 — Partner Ecosystem Scale (KPP) Framework with 48-Pillar Certification Engine
+- feat: Implement Phase 18 — Enterprise Customer Onboarding (KEIF) Framework with 40-Pillar Certification Engine
+- feat: Promote high-margin enterprise verticals (Wholesale, Construction, Real Estate, Telecom, Bar Lounge) to Tier 1 Flagship commercial portfolio
+- feat: Add Real Estate (61-Pillar), Bar Lounge (59-Pillar), and Telecom (67-Pillar) OS modules into KwakoPos SaaS Monorepo
+- feat(industry): add Advanced Garage OS, Advanced Wholesale OS, and Advanced Construction OS modules with 100% 183-Pillar certification
+- feat(pmf): implement Phase 17 Product-Market Validation engine & evidence framework
+- feat(commercial): implement Phase 16 Commercial Product Readiness engine & portfolio governance
+- feat(pillars): add Locked Automated GitHub Release & Tagging Engine (21 Pillars) to production matrix
+- feat(release): implement and lock Enterprise Automated GitHub Release & Tagging Engine
+- feat(industry): export complete industry catalog
+- feat(industry): compose enterprise industry catalog
+- feat(industry): export hardware and electronics engines
+- feat(industry): add hardware and electronics plugin manifests
+- feat(industry): add electronics serial and warranty engine
+- feat(industry): add hardware industry engine
+
+### 🐛 Bug Fixes
+- fix(contexts): purge synthetic DEFAULT_TENANTS and DEFAULT_BRANCHES arrays
+- fix(users-roles): replace synthetic user, session, and role arrays with live V2 API & RBAC integration
+- fix(dashboard,customers): replace synthetic data arrays with live operational V2 API and LocalIndexedDbStore integration
+- fix(cert): route security certification through strict runtime gate
+- fix(cert): remove hard-coded go-live credentials and validate auth cookie rotation
+- fix(auth-ui): load dedicated authentication styles
+- fix(auth): correct fixed-server startup guard
+- fix(auth): use HttpOnly refresh cookie and remove runtime bootstrap login
+- fix(auth): keep refresh tokens out of browser storage
+- fix(auth-ui): remove unsupported POS PIN authentication path
+- fix(sec): complete production cleanup of DEMO_ACCOUNTS and pre-filled authentication credentials
+- fix(certification): require exact-commit executable UI evidence for production certification
+- fix(context): remove synthetic tenant/branch lists and fail closed on context switching
+- fix(ui): remove hard-coded secondary workspace data and keep V2 UI evidence honest
+- fix(api): resolve static asset routing and MIME types for web dist JS/CSS bundles
+- fix sync cursor race by anchoring delta reads to a pre-query server timestamp
+- fix client sync to persist pulled inventory state and retain failed operations for explicit retry
+- fix production offline sync for POS sales and purchase receipts using atomic finance transactions
+- fix auth gateway body parsing and ambiguous multi-tenant login selection
+- fix PWA version detection and stop reporting unknown server state as up-to-date
+- fix production authentication persistence without disturbing existing API routes
+- fix(web): remove synthetic search and add real responsive System UI controls
+- fix(web): await local hydration before restoring authenticated workspace
+- fix(web): persist V2 local operational state in browser IndexedDB
+- fix(web): replace demo workspace data with real V2 API and local-state workflows
+- fix(web): gate System UI behind real V2 authentication
+- fix(web): build and serve the real React app through Vite
+- fix(web): load React System UI styles from Vite entrypoint
+- fix(web): replace React provider placeholders with V2 auth session and scoped runtime
+- fix(web): add real V2 API/session client for React application
+- fix(config): add container runtime environment fallbacks for resolveRealGitSha in Cloud Run
+- fix(deploy): use dynamic multi-candidate path resolver in index.js for Cloud Run start
+- fix(deploy): add root start entrypoint and configure runtime secrets for App Hosting buildpack
+- fix(security): enforce admin RBAC and tenant isolation
+- fix(test): align commercial readiness tier expectations
+- fix(certification): final production certification closure, fail-closed SHA provenance, ed25519 signing & route fixes
+- fix(release): inject runtime secrets from Secret Manager without exposing values
+- fix(security): remove credentials from environment example
+- fix(auth): remove hard-coded dev secret and enforce persistent session store lifecycle
+- fix(config): eliminate fake release identities and hard-coded secrets
+- fix(sync): eliminate remaining fail-open release and repository verification paths
+- fix(release): bind container provenance and trusted signing to exact release
+- fix(certification): fully close provenance, CI, signature, and release-tag gaps
+- fix(security): make vulnerability audit fail closed
+- fix(release): verify container provenance independently and remove credential fallbacks
+- fix(release): embed immutable source provenance in container image
+- fix(certification): resolve git init in certification test fixture
+- fix(certification): harden provenance inputs and CI evidence access
+- fix(ci): enforce independent release provenance certification and fail-closed CI evidence
+- fix(certification): use real fixture repositories and explicit CI check policy
+- fix(certification): isolate synthetic safety tests and enforce independent production provenance
+- fix(certification): make release integrity gates fail-closed and independently verifiable
+- fix(release): implement 15-gate release integrity certification and 5-field evidence bundle
+- fix(sync): enforce strict release chain, tag peeling, tripartite SHA verification, and atomic locks
+- fix(version-gate): synchronize monorepo package versions to 2.5.0 and pass complete production certification
+- fix(remediation): complete priority remediation checklist (test-auth bypass, CORS, mandatory secrets, scrypt hashing, postgres session store, pipeline cleanup)
+- fix(security): enforce salted scrypt password hashing, mandatory JWT secret in prod, and replace db:push with db:migrate
+- fix(release): enable auto credential extraction & PATCH updates in publish-github-release
+- fix(industry): keep electronics dependencies within plugin graph
+
+### 🛠 Refactoring & Architecture
+- refactor(web): eliminate legacy RealAppShell and ClientAppRoot DOM paths in favor of canonical V2 React app
+- refactor(cert): complete full platform refinement, verification, testing, and 100% multi-domain certification
+- refactor(industry): keep domain index diff minimal
+
+### 📚 Documentation
+- docs(security): record production hardening blockers
+
+### 🔧 Maintenance & Chores
+- security(rbac): enforce strict fail-closed module entitlement and purge dev superuser emails
+- Merge pull request #6 from Kwakoko/feat/industry-modules-wholesale-restaurant-pharmacy-hardware-electronics
+- Merge branch 'main' into feat/industry-modules-wholesale-restaurant-pharmacy-hardware-electronics
+- chore(web): completely delete buildWeb.ts script and purge remaining legacy UI references from parity matrix
+- invalidate stale release certification provenance for current main
+- require compiled production artifacts and version-bound PWA service worker in strict certification
+- align strict runtime certification with actual IndexedDB implementation APIs
+- use actual PWA schema version in IndexedDB initialization
+- make actual IndexedDB version match requested PWA schema version
+- refine IndexedDB hydration to avoid duplicate callbacks and centralize store definitions
+- bind PWA service-worker cache lifecycle to release version
+- eliminate IndexedDB hydration race in synchronization and harden JWT decoding
+- persist server-pulled StockLedger, StockAdjustment and sync metadata through IndexedDB
+- add permanent release-version consistency enforcement to strict certification
+- align monorepo release version with active API and web version 2.5.0
+- extend strict runtime certification to production auth and commercial sync invariants
+- scope blocking dependency audit to production runtime dependencies
+- refine strict runtime gate to detect silent local sync completion bypasses
+- add CI strict runtime certification gate
+- add strict runtime certification gate that rejects synthetic or bypassed production behavior
+- add safe automatic access-token refresh and resilient session handling
+- make hardened API gateway the preferred production entrypoint
+- run hardened auth gateway as API entrypoint
+- harden production auth gateway and persistent sessions
+- chore(cert): update evidence artifacts for refinement and certification pass
+- chore(cert): update evidence artifacts for Old App UX + V2 Architecture certification
+- chore(cert): update evidence artifacts for Phase 30.5 workstream certification
+- chore(evidence): update local release evidence artifacts
+- chore(config): specify Node >=20 engines requirement in package.json
+- chore(security): apply centralized tenant/rbac hardening
+- merge: integrate remote main changes with production certification closure
+- chore(ci): restrict workflow permissions to required read access
+- test(sync): align fixtures with strict Git provenance verification
+- build(release): propagate immutable source SHA into Cloud Build image provenance
+- test(industry): certify five-industry catalog coverage
+- test(industry): use public domain exports for electronics
+- test(industry): use public domain exports for hardware
+- test(industry): certify electronics serial and warranty controls
+- test(industry): certify hardware engine rules

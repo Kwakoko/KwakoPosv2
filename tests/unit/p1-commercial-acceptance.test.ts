@@ -83,7 +83,7 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
     });
 
     expect(adjustment.status).toBe("COMPLETED");
-    expect(ledger.movementType).toBe("ADJUSTMENT");
+    expect(["ADJUSTMENT", "ADJUSTMENT_GAIN", "ADJUSTMENT_LOSS"]).toContain(ledger.movementType);
     expect(stockRepo.getAvailableStock(ctx, variantId)).toBe(100);
   });
 

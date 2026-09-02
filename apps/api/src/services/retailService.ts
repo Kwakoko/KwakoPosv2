@@ -25,7 +25,7 @@ import {
 import { globalProductService, ProductService } from "./productService.js";
 
 export class RetailService {
-  private engine: RetailEngine;
+  private engine?: RetailEngine;
   private store: InMemoryStore;
   private productService: ProductService;
   private productRepo: ScopedProductRepository;
@@ -41,7 +41,7 @@ export class RetailService {
     store?: InMemoryStore,
     productService?: ProductService
   ) {
-    this.engine = engine || globalRetailEngine;
+    this.engine = engine;
     this.store = store || globalInMemoryStore;
     this.productService = productService || globalProductService;
     this.productRepo = new ScopedProductRepository(this.store);
@@ -49,14 +49,21 @@ export class RetailService {
     this.commercialRepo = new ScopedCommercialRepository(this.store);
   }
 
+  private getEngine(): RetailEngine {
+    if (!this.engine) {
+      this.engine = globalRetailEngine || new RetailEngine();
+    }
+    return this.engine;
+  }
+
   getManifest(): RetailModuleManifest {
-    return this.engine.getModuleManifest();
+    return this.getEngine().getModuleManifest();
   }
 
   getSettings(ctx: TenantContext): RetailSettings {
     const key = `${ctx.tenantId}:${ctx.branchId}`;
     if (!this.settingsMap.has(key)) {
-      this.settingsMap.set(key, this.engine.getDefaultSettings(ctx.tenantId, ctx.branchId));
+      this.settingsMap.set(key, this.getEngine().getDefaultSettings(ctx.tenantId, ctx.branchId));
     }
     return this.settingsMap.get(key)!;
   }
@@ -105,7 +112,7 @@ export class RetailService {
     customerId?: string
   ): Sale {
     const settings = this.getSettings(ctx);
-    const totals = this.engine.calculatePOSCartTotals(
+    const totals = this.getEngine().calculatePOSCartTotals(
       items,
       cartDiscountPct,
       settings.taxRatePct,
@@ -166,7 +173,7 @@ export class RetailService {
     }
 
     const salesVelocityMap = new Map<string, number>();
-    return this.engine.calculateReplenishmentSuggestions(items, salesVelocityMap);
+    return this.getEngine().calculateReplenishmentSuggestions(items, salesVelocityMap);
   }
 
   getAiRecommendations(ctx: TenantContext): RetailAiRecommendation[] {
@@ -192,7 +199,7 @@ export class RetailService {
       discountGiven: 0,
     }));
 
-    return this.engine.generateExplainableAiRecommendations(ctx, inventory, salesHistory);
+    return this.getEngine().generateExplainableAiRecommendations(ctx, inventory, salesHistory);
   }
 
   recordAuditEvent(
@@ -204,7 +211,7 @@ export class RetailService {
     afterState?: Record<string, any>,
     reason?: string
   ): RetailAuditEvent {
-    const event = this.engine.createAuditEvent(ctx, action, entityType, entityId, beforeState, afterState, reason);
+    const event = this.getEngine().createAuditEvent(ctx, action, entityType, entityId, beforeState, afterState, reason);
     const key = ctx.tenantId;
     if (!this.auditEventsMap.has(key)) {
       this.auditEventsMap.set(key, []);

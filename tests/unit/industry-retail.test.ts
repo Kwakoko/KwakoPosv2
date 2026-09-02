@@ -41,7 +41,7 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     ];
 
     const parentTotal = engine.calculateParentProductStockFromVariants(variants);
-    expect(parentTotal).toBe(40); // 15 + 25 = 40 (inactive variant 50 ignored)
+    expect(parentTotal.totalStock).toBe(40); // 15 + 25 = 40 (inactive variant 50 ignored)
   });
 
   it("should evaluate pricing, promotions, and POS cart totals correctly", () => {

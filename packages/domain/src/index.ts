@@ -11,23 +11,87 @@ import type {
  */
 export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
   return ledgerEntries.reduce((total, entry) => {
-    const qty = Number(entry.quantity);
+    const qty = Number(entry.quantityChange !== undefined ? entry.quantityChange : entry.quantity);
     switch (entry.movementType) {
+      case "OPENING_STOCK":
       case "OPENING":
+      case "PURCHASE_RECEIVE":
       case "PURCHASE":
       case "TRANSFER_IN":
+      case "CUSTOMER_RETURN":
       case "RETURN":
-        return total + qty;
+      case "ADJUSTMENT_GAIN":
+      case "PRODUCTION_OUTPUT":
+        return total + Math.abs(qty);
       case "SALE":
+      case "SUPPLIER_RETURN":
       case "TRANSFER_OUT":
       case "DAMAGE":
+      case "EXPIRY":
+      case "ADJUSTMENT_LOSS":
+      case "PRODUCTION_USAGE":
         return total - Math.abs(qty);
       case "ADJUSTMENT":
+      case "SALE_CORRECTION":
         return total + qty;
       default:
-        return total;
+        return total + qty;
     }
   }, 0);
+}
+
+/**
+ * Computes Stock Lineage: quantityBefore -> quantityChange -> quantityAfter.
+ */
+export function calculateStockLineage(
+  currentStock: number,
+  quantityChange: number
+): { quantityBefore: number; quantityChange: number; quantityAfter: number } {
+  const quantityBefore = Math.max(0, currentStock);
+  const quantityAfter = Math.max(0, quantityBefore + quantityChange);
+  return {
+    quantityBefore,
+    quantityChange,
+    quantityAfter,
+  };
+}
+
+/**
+ * Enforces StockLedger immutability. Rejects edits or deletes of existing entries.
+ */
+export function assertStockLedgerImmutability(existingLedgerId?: string): void {
+  if (existingLedgerId) {
+    throw new Error(
+      `IMMUTABLE_STOCK_LEDGER_VIOLATION: Stock Ledger entry ${existingLedgerId} is immutable and cannot be updated or deleted. Create a compensating movement record instead.`
+    );
+  }
+}
+
+/**
+ * Calculates profit margin amount and profit margin percentage.
+ */
+export function calculateMargin(
+  buyingPrice: number,
+  sellingPrice: number
+): { marginAmount: number; marginPercentage: number } {
+  const marginAmount = Math.round((sellingPrice - buyingPrice) * 100) / 100;
+  const marginPercentage =
+    sellingPrice > 0 ? Math.round(((sellingPrice - buyingPrice) / sellingPrice) * 10000) / 100 : 0;
+  return {
+    marginAmount,
+    marginPercentage,
+  };
+}
+
+/**
+ * Enforces ProductPriceHistory immutability. Existing price history records can never be updated or deleted.
+ */
+export function assertPriceHistoryImmutability(existingHistoryId?: string): void {
+  if (existingHistoryId) {
+    throw new Error(
+      `IMMUTABLE_PRICE_HISTORY_VIOLATION: Product Price History record ${existingHistoryId} is immutable and cannot be updated or deleted. Append a new price version record instead.`
+    );
+  }
 }
 
 /**
@@ -308,4 +372,53 @@ export * from "./telecomCostingEngine.js";
 
 // Phase 6: SaaS Monetization & Revenue Management
 export * from "./monetizationEngine.js";
+export * from "./retailEngine.js";
+
+// Enterprise Domain Engines & Certification Modules
+export * from "./accountingEngine.js";
+export * from "./aiNativeEngine.js";
+export * from "./aiOperatingLayerEngine.js";
+export * from "./autonomousBusinessEngine.js";
+export * from "./autonomousOperationsEngine.js";
+export * from "./barLoungeEngine.js";
+export * from "./biAnalyticsEngine.js";
+export * from "./commercialGovernanceEngine.js";
+export * from "./complianceEngine.js";
+export * from "./coreOperatingUiEngine.js";
+export * from "./crmEngine.js";
+export * from "./documentEngine.js";
+export * from "./dynamicModuleUiEngine.js";
+export * from "./enterpriseApprovalsEngine.js";
+export * from "./enterpriseOnboardingEngine.js";
+export * from "./financeInvariants.js";
+export * from "./financeTreasuryEngine.js";
+export * from "./fullSystemCertificationEngine.js";
+export * from "./globalExpansionEngine.js";
+export * from "./globalPlatformEngine.js";
+export * from "./integrationEngine.js";
+export * from "./kwakoposCertificationEngine.js";
+export * from "./kwakoposDesignSystemEngine.js";
+export * from "./lawFirmEngine.js";
+export * from "./licensingEngine.js";
+export * from "./marketplaceEngine.js";
+export * from "./microfinanceEngine.js";
+export * from "./multiSiteEngine.js";
+export * from "./notificationEngine.js";
+export * from "./partnerEcosystemEngine.js";
+export * from "./platformGovernanceEngine.js";
+export * from "./platformIntelligenceEngine.js";
+export * from "./platformSecurityEngine.js";
+export * from "./pmfValidationEngine.js";
+export * from "./poultryLivestockEngine.js";
+export * from "./realEstateEngine.js";
+export * from "./saccoVicobaEngine.js";
+export * from "./securityEngine.js";
+export * from "./superAdminPlatformEngine.js";
+export * from "./supplyChainEngine.js";
+export * from "./systemUiEngine.js";
+export * from "./uiCertificationEngine.js";
+export * from "./vehicleFleetEngine.js";
+export * from "./workflowAutomationEngine.js";
+export * from "./workforceEngine.js";
+export * from "./workforceTrackingEngine.js";
 

@@ -2,9 +2,15 @@
   "isTampered": true,
   "protectedFilesChecked": 7,
   "modifiedProtectedFiles": [
-    "package-lock.json"
+    ".github/workflows/ci.yml",
+    "package-lock.json",
+    "package.json",
+    ".github/workflows/release.yml",
+    "scripts/release/certify-version-sync.ts",
+    "scripts/release/generate-release-notes.ts",
+    "scripts/release/validate-semver.ts"
   ],
   "branchName": "main",
-  "gitSha": "8d7fafb66c505fa4208172ec609b8934042cc618",
-  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: package-lock.json"
+  "gitSha": "cd5088d4eb4a6edf3c41c4ebbfd1efd835002566",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/ci.yml, package-lock.json, package.json, .github/workflows/release.yml, scripts/release/certify-version-sync.ts, scripts/release/generate-release-notes.ts, scripts/release/validate-semver.ts"
 }

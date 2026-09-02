@@ -302,6 +302,12 @@ export type UpdateSupplierRequest = z.infer<typeof UpdateSupplierRequestSchema>;
 // Product & ProductVariant Contracts
 // ==========================================
 
+export const VariantAttributeSchema = z.object({
+  name: z.string().min(1),
+  values: z.array(z.string().min(1)).min(1),
+});
+export type VariantAttribute = z.infer<typeof VariantAttributeSchema>;
+
 export const ProductVariantSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
@@ -310,8 +316,22 @@ export const ProductVariantSchema = z.object({
   name: z.string().min(1),
   sku: z.string().min(1),
   barcode: z.string().nullable().optional(),
-  price: z.number().nonnegative(),
-  costPrice: z.number().nonnegative(),
+  inheritBuyingPrice: z.boolean().default(true),
+  inheritSellingPrice: z.boolean().default(true),
+  price: z.number().nonnegative(), // Selling price override
+  costPrice: z.number().nonnegative(), // Buying price override
+  effectiveBuyingPrice: z.number().nonnegative().optional(),
+  effectiveSellingPrice: z.number().nonnegative().optional(),
+  currentMarginAmount: z.number().default(0),
+  currentMarginPercentage: z.number().default(0),
+  activePriceVersionId: z.string().nullable().optional(),
+  inventoryQuantity: z.number().default(0),
+  stock: z.number().default(0),
+  reservedQuantity: z.number().default(0),
+  availableStock: z.number().default(0),
+  reorderLevel: z.number().default(0),
+  imageUrl: z.string().nullable().optional(),
+  attributes: z.record(z.string()).optional(),
   isActive: z.boolean().default(true),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
@@ -329,6 +349,19 @@ export const ProductSchema = z.object({
   description: z.string().nullable().optional(),
   sku: z.string().min(1),
   category: z.string().default("General"),
+  buyingPrice: z.number().nonnegative().default(0),
+  sellingPrice: z.number().nonnegative().default(0),
+  currentMarginAmount: z.number().default(0),
+  currentMarginPercentage: z.number().default(0),
+  activePriceVersionId: z.string().nullable().optional(),
+  taxId: z.string().uuid().nullable().optional(),
+  supplierId: z.string().uuid().nullable().optional(),
+  images: z.array(z.string()).default([]),
+  hasVariants: z.boolean().default(false),
+  totalStock: z.number().default(0),
+  reservedStock: z.number().default(0),
+  availableStock: z.number().default(0),
+  lowStockVariantsCount: z.number().default(0),
   isActive: z.boolean().default(true),
   variants: z.array(ProductVariantSchema).optional(),
   createdAt: z.string().or(z.date()),
@@ -336,13 +369,74 @@ export const ProductSchema = z.object({
 });
 export type Product = z.infer<typeof ProductSchema>;
 
+// ==========================================
+// Product Price History & Versioning Contracts
+// ==========================================
+
+export const PriceChangeTypeEnum = z.enum([
+  "INITIAL_PRICE",
+  "PRICE_UPDATE",
+  "PROMOTION",
+  "SUPPLIER_CHANGE",
+  "MANUAL_ADJUSTMENT",
+  "BULK_UPDATE",
+]);
+export type PriceChangeType = z.infer<typeof PriceChangeTypeEnum>;
+
+export const ProductPriceHistorySchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  productId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
+  versionNumber: z.number().int().positive(),
+  previousBuyingPrice: z.number().default(0),
+  newBuyingPrice: z.number(),
+  previousSellingPrice: z.number().default(0),
+  newSellingPrice: z.number(),
+  marginAmount: z.number(),
+  marginPercentage: z.number(),
+  changeType: PriceChangeTypeEnum,
+  changeReason: z.string(),
+  effectiveFrom: z.string().or(z.date()),
+  effectiveTo: z.string().or(z.date()).nullable().optional(),
+  changedByUserId: z.string().uuid().nullable().optional(),
+  deviceId: z.string(),
+  idempotencyKey: z.string(),
+  createdAt: z.string().or(z.date()),
+});
+export type ProductPriceHistory = z.infer<typeof ProductPriceHistorySchema>;
+
+export const CreatePriceChangeRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  productId: z.string().uuid(),
+  variantId: z.string().uuid().optional(),
+  newBuyingPrice: z.number().nonnegative(),
+  newSellingPrice: z.number().nonnegative(),
+  changeType: PriceChangeTypeEnum.default("MANUAL_ADJUSTMENT"),
+  changeReason: z.string().min(1, "Change reason is required"),
+  effectiveFrom: z.string().optional(),
+  deviceId: z.string().min(1),
+  operationId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+});
+export type CreatePriceChangeRequest = z.infer<typeof CreatePriceChangeRequestSchema>;
+
 export const CreateVariantRequestSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1),
   sku: z.string().min(1),
   barcode: z.string().optional(),
-  price: z.number().nonnegative(),
-  costPrice: z.number().nonnegative(),
+  inheritBuyingPrice: z.boolean().optional(),
+  inheritSellingPrice: z.boolean().optional(),
+  price: z.number().nonnegative().optional(),
+  costPrice: z.number().nonnegative().optional(),
+  inventoryQuantity: z.number().optional(),
+  stock: z.number().optional(),
+  reservedQuantity: z.number().optional(),
+  reorderLevel: z.number().optional(),
+  imageUrl: z.string().optional(),
+  attributes: z.record(z.string()).optional(),
   isActive: z.boolean().optional(),
 });
 export type CreateVariantRequest = z.infer<typeof CreateVariantRequestSchema>;
@@ -356,6 +450,12 @@ export const CreateProductRequestSchema = z.object({
   description: z.string().optional(),
   sku: z.string().min(1),
   category: z.string().optional(),
+  buyingPrice: z.number().nonnegative().optional(),
+  sellingPrice: z.number().nonnegative().optional(),
+  taxId: z.string().uuid().optional(),
+  supplierId: z.string().uuid().optional(),
+  images: z.array(z.string()).optional(),
+  hasVariants: z.boolean().optional(),
   variants: z.array(CreateVariantRequestSchema).optional(),
 });
 export type CreateProductRequest = z.infer<typeof CreateProductRequestSchema>;
@@ -368,34 +468,87 @@ export const UpdateProductRequestSchema = z.object({
   categoryId: z.string().uuid().optional(),
   brandId: z.string().uuid().optional(),
   brand_id: z.string().uuid().optional(),
+  buyingPrice: z.number().nonnegative().optional(),
+  sellingPrice: z.number().nonnegative().optional(),
+  taxId: z.string().uuid().optional(),
+  supplierId: z.string().uuid().optional(),
+  images: z.array(z.string()).optional(),
+  hasVariants: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequestSchema>;
-
 
 export const UpdateVariantRequestSchema = z.object({
   name: z.string().min(1).optional(),
   sku: z.string().min(1).optional(),
   barcode: z.string().optional(),
+  inheritBuyingPrice: z.boolean().optional(),
+  inheritSellingPrice: z.boolean().optional(),
   price: z.number().nonnegative().optional(),
   costPrice: z.number().nonnegative().optional(),
+  inventoryQuantity: z.number().optional(),
+  stock: z.number().optional(),
+  reservedQuantity: z.number().optional(),
+  reorderLevel: z.number().optional(),
+  imageUrl: z.string().optional(),
+  attributes: z.record(z.string()).optional(),
   isActive: z.boolean().optional(),
 });
 export type UpdateVariantRequest = z.infer<typeof UpdateVariantRequestSchema>;
+
+export const GenerateVariantsRequestSchema = z.object({
+  productId: z.string().uuid().optional(),
+  attributes: z.array(VariantAttributeSchema).min(1),
+  baseSku: z.string().optional(),
+  defaultBuyingPrice: z.number().nonnegative().optional(),
+  defaultSellingPrice: z.number().nonnegative().optional(),
+});
+export type GenerateVariantsRequest = z.infer<typeof GenerateVariantsRequestSchema>;
+
+export const BulkVariantOperationRequestSchema = z.object({
+  variantIds: z.array(z.string().uuid()).min(1),
+  action: z.enum(["UPDATE_PRICES", "UPDATE_STOCK", "SET_STATUS"]),
+  priceData: z
+    .object({
+      inheritBuyingPrice: z.boolean().optional(),
+      inheritSellingPrice: z.boolean().optional(),
+      costPrice: z.number().nonnegative().optional(),
+      price: z.number().nonnegative().optional(),
+    })
+    .optional(),
+  stockData: z
+    .object({
+      mode: z.enum(["SET", "ADD"]),
+      quantity: z.number(),
+    })
+    .optional(),
+  isActive: z.boolean().optional(),
+});
+export type BulkVariantOperationRequest = z.infer<typeof BulkVariantOperationRequestSchema>;
 
 // ==========================================
 // StockLedger & StockAdjustment Contracts
 // ==========================================
 
 export const StockMovementTypeEnum = z.enum([
+  "OPENING_STOCK",
   "OPENING",
+  "PURCHASE_RECEIVE",
   "PURCHASE",
-  "SALE",
-  "ADJUSTMENT",
-  "TRANSFER_IN",
-  "TRANSFER_OUT",
+  "CUSTOMER_RETURN",
   "RETURN",
+  "TRANSFER_IN",
+  "PRODUCTION_OUTPUT",
+  "ADJUSTMENT_GAIN",
+  "SALE",
+  "SUPPLIER_RETURN",
+  "TRANSFER_OUT",
   "DAMAGE",
+  "EXPIRY",
+  "ADJUSTMENT_LOSS",
+  "ADJUSTMENT",
+  "PRODUCTION_USAGE",
+  "SALE_CORRECTION",
 ]);
 export type StockMovementType = z.infer<typeof StockMovementTypeEnum>;
 
@@ -403,19 +556,61 @@ export const StockLedgerSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
+  warehouseId: z.string().uuid().nullable().optional(),
   productId: z.string().uuid(),
   variantId: z.string().uuid(),
   movementType: StockMovementTypeEnum,
-  quantity: z.number(),
   referenceType: z.string(),
   referenceId: z.string().uuid().nullable().optional(),
-  occurredAt: z.string().or(z.date()),
+  quantityBefore: z.number().default(0),
+  quantityChange: z.number(),
+  quantity: z.number(),
+  quantityAfter: z.number().default(0),
+  unitCost: z.number().default(0),
+  totalCost: z.number().default(0),
+  userId: z.string().uuid().nullable().optional(),
   deviceId: z.string(),
   operationId: z.string(),
   idempotencyKey: z.string(),
+  notes: z.string().nullable().optional(),
+  synced: z.boolean().default(true),
+  occurredAt: z.string().or(z.date()),
   createdAt: z.string().or(z.date()),
 });
 export type StockLedger = z.infer<typeof StockLedgerSchema>;
+
+export const ProductBranchStockSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  warehouseId: z.string().uuid().nullable().optional(),
+  productId: z.string().uuid(),
+  variantId: z.string().uuid(),
+  currentQuantity: z.number().default(0),
+  averageCost: z.number().default(0),
+  stockValue: z.number().default(0),
+  updatedAt: z.string().or(z.date()),
+});
+export type ProductBranchStock = z.infer<typeof ProductBranchStockSchema>;
+
+export const CreateStockMovementRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  productId: z.string().uuid(),
+  variantId: z.string().uuid(),
+  movementType: StockMovementTypeEnum,
+  quantityChange: z.number(),
+  referenceType: z.string().optional(),
+  referenceId: z.string().uuid().optional(),
+  unitCost: z.number().nonnegative().optional(),
+  totalCost: z.number().nonnegative().optional(),
+  warehouseId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  deviceId: z.string().min(1),
+  operationId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  notes: z.string().optional(),
+});
+export type CreateStockMovementRequest = z.infer<typeof CreateStockMovementRequestSchema>;
 
 export const StockAdjustmentSchema = z.object({
   id: z.string().uuid(),
