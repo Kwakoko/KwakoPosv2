@@ -1,6 +1,7 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type { PrismaClient } from "@prisma/client";
 import { hashPassword } from "@kwakopos2/auth";
+import { StandardPluginCatalog } from "@kwakopos2/domain";
 import { TenantOnboardingCreateRequestSchema, TenantOnboardingUpdateRequestSchema } from "@kwakopos2/contracts/tenantOnboardingContracts";
 
 const OWNER_PERMISSIONS = [
@@ -26,17 +27,41 @@ function normalizeBranchCode(input: string | undefined, tenantSlug: string): str
   const explicit = input?.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
   return (explicit || `${tenantSlug.slice(0, 8).toUpperCase()}-HQ`).slice(0, 20);
 }
+function fingerprint(value: unknown): string {
+  const text = JSON.stringify(value, Object.keys(value as any).sort());
+  return createHash("sha256").update(text).digest("hex");
+}
+function canonicalModule(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  const manifest = StandardPluginCatalog.find((p: any) => [p.id, p.name, p.industry].filter(Boolean).some((candidate: string) => String(candidate).trim().toLowerCase() === normalized));
+  if (!manifest) throw new TenantOnboardingError("VALIDATION_ERROR", `Unknown or unauthorized module: ${value}`);
+  return manifest.id;
+}
+function canonicalIndustry(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  const manifest = StandardPluginCatalog.find((p: any) => [p.id, p.name, p.industry].filter(Boolean).some((candidate: string) => String(candidate).trim().toLowerCase() === normalized));
+  if (!manifest) throw new TenantOnboardingError("VALIDATION_ERROR", `Unknown or unauthorized industry: ${value}`);
+  return manifest.industry;
+}
 function iso(value: Date | string | null): string | null { return value ? (value instanceof Date ? value.toISOString() : new Date(value).toISOString()) : null; }
 
 export class TenantOnboardingService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async create(input: unknown, actor?: { userId: string; tenantId: string; isSuperAdmin: boolean }) {
+  async create(input: unknown, actor?: { userId: string; tenantId: string; isSuperAdmin: boolean; correlationId?: string; traceId?: string }) {
     if (!actor?.isSuperAdmin) throw new TenantOnboardingError("FORBIDDEN", "Platform provisioning privileges are required", 403);
     const data = TenantOnboardingCreateRequestSchema.parse(input);
+    const modules = Array.from(new Set(data.modules.map(canonicalModule)));
+    const industry = canonicalIndustry(data.industry);
+    const normalized = { ...data, modules, industry };
     const slug = normalizeSlug(data.slug || data.businessName);
+    const requestFingerprint = fingerprint({ ...normalized, ownerPassword: undefined });
+
     const existing = await this.prisma.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE idempotency_key = ${data.idempotencyKey} LIMIT 1`;
-    if (existing[0]) return this.toSafeResponse(existing[0]);
+    if (existing[0]) {
+      if (existing[0].request_fingerprint && existing[0].request_fingerprint !== requestFingerprint) throw new TenantOnboardingError("CONFLICT", "Idempotency key was already used for different tenant data", 409);
+      return this.toSafeResponse(existing[0]);
+    }
     if (await this.prisma.tenant.findUnique({ where: { slug } })) throw new TenantOnboardingError("CONFLICT", "Tenant slug is already in use", 409);
 
     const tenantId = randomUUID(); const branchId = randomUUID(); const roleId = randomUUID(); const ownerId = randomUUID(); const onboardingId = randomUUID();
@@ -50,23 +75,21 @@ export class TenantOnboardingService {
         const user = await tx.user.create({ data: { id: ownerId, tenantId, branchId, email: data.ownerEmail.trim().toLowerCase(), passwordHash: hashPassword(data.ownerPassword), name: data.ownerName.trim(), roleId, status: "ACTIVE" } });
         await tx.$executeRaw`
           INSERT INTO tenant_onboardings
-          (id, tenant_id, business_name, slug, branch_name, branch_code, status, current_step, industry, modules, country, currency, timezone, locale, owner_user_id, branch_id, idempotency_key, metadata)
-          VALUES (${onboardingId}::uuid, ${tenantId}::uuid, ${data.businessName.trim()}, ${slug}, ${data.branchName.trim()}, ${branchCode}, 'READY', 'COMPLETE', ${data.industry}, ${data.modules}::text[], ${data.country.toUpperCase()}, ${data.currency.toUpperCase()}, ${data.timezone}, ${data.locale}, ${ownerId}::uuid, ${branchId}::uuid, ${data.idempotencyKey}, ${JSON.stringify({ source: "tenant-onboarding", actorUserId: actor.userId })}::jsonb)
+          (id, tenant_id, business_name, slug, branch_name, branch_code, status, current_step, industry, modules, country, currency, timezone, locale, owner_user_id, branch_id, idempotency_key, request_fingerprint, metadata)
+          VALUES (${onboardingId}::uuid, ${tenantId}::uuid, ${data.businessName.trim()}, ${slug}, ${data.branchName.trim()}, ${branchCode}, 'READY', 'COMPLETE', ${industry}, ${modules}::text[], ${data.country.toUpperCase()}, ${data.currency.toUpperCase()}, ${data.timezone}, ${data.locale}, ${ownerId}::uuid, ${branchId}::uuid, ${data.idempotencyKey}, ${requestFingerprint}, ${JSON.stringify({ source: "tenant-onboarding", actorUserId: actor.userId, correlationId: actor.correlationId || null, traceId: actor.traceId || null })}::jsonb)
         `;
         await tx.$executeRaw`
           INSERT INTO tenant_configurations (tenant_id, country, currency, timezone, locale, numbering_policy, branch_code_policy, tax_configuration)
           VALUES (${tenantId}::uuid, ${data.country.toUpperCase()}, ${data.currency.toUpperCase()}, ${data.timezone}, ${data.locale}, 'SEQUENTIAL', 'TENANT_PREFIXED', '{}'::jsonb)
         `;
-        for (const moduleKey of Array.from(new Set(data.modules.length ? data.modules : [data.industry]))) {
-          await tx.$executeRaw`
-            INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source)
-            VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')
-            ON CONFLICT (tenant_id, module_key) DO NOTHING
-          `;
-        }
+        for (const moduleKey of modules) await tx.$executeRaw`
+          INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source)
+          VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')
+          ON CONFLICT (tenant_id, module_key) DO NOTHING
+        `;
         await tx.$executeRaw`
-          INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, metadata)
-          VALUES (${randomUUID()}::uuid, ${onboardingId}::uuid, ${tenantId}::uuid, ${actor.userId}::uuid, 'PROVISIONED', 'SUCCESS', ${JSON.stringify({ branchId, ownerUserId: ownerId, roleId })}::jsonb)
+          INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata)
+          VALUES (${randomUUID()}::uuid, ${onboardingId}::uuid, ${tenantId}::uuid, ${actor.userId}::uuid, 'PROVISIONED', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, ${JSON.stringify({ branchId, ownerUserId: ownerId, roleId, modules })}::jsonb)
         `;
         return { onboardingId, tenantId: tenant.id, branchId: branch.id, ownerUserId: user.id, status: "READY", nextStep: "LOGIN" as const };
       });
@@ -90,22 +113,21 @@ export class TenantOnboardingService {
     if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
     if (rows[0].status === "COMPLETED") throw new TenantOnboardingError("CONFLICT", "Completed onboarding cannot be modified", 409);
     await this.prisma.$executeRaw`
-      UPDATE tenant_onboardings SET status=COALESCE(${data.status || null}, status), current_step=COALESCE(${data.currentStep || null}, current_step),
-      business_name=COALESCE(${data.businessName || null}, business_name), country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency),
-      timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), industry=COALESCE(${data.industry || null}, industry),
-      modules=COALESCE(${data.modules ? data.modules : null}::text[], modules), branch_name=COALESCE(${data.branchName || null}, branch_name), branch_code=COALESCE(${data.branchCode || null}, branch_code), updated_at=NOW()
-      WHERE id=${rows[0].id}::uuid
+      UPDATE tenant_onboardings SET status=COALESCE(${data.status || null}, status), current_step=COALESCE(${data.currentStep || null}, current_step), business_name=COALESCE(${data.businessName || null}, business_name), country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), industry=COALESCE(${data.industry || null}, industry), modules=COALESCE(${data.modules ? data.modules.map(canonicalModule) : null}::text[], modules), branch_name=COALESCE(${data.branchName || null}, branch_name), branch_code=COALESCE(${data.branchCode || null}, branch_code), updated_at=NOW() WHERE id=${rows[0].id}::uuid
     `;
     return this.getForActor(tenantId, actor);
   }
 
-  async complete(tenantId: string, actor: { tenantId: string; isSuperAdmin: boolean }) {
+  async complete(tenantId: string, actor: { tenantId: string; isSuperAdmin: boolean; correlationId?: string; traceId?: string }) {
     if (!actor.isSuperAdmin && actor.tenantId !== tenantId) throw new TenantOnboardingError("FORBIDDEN", "Cross-tenant onboarding access denied", 403);
     const rows = await this.prisma.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1`;
     if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
     if (rows[0].status === "COMPLETED") return this.toSafeResponse(rows[0]);
     if (rows[0].status !== "READY") throw new TenantOnboardingError("CONFLICT", "Tenant onboarding is not ready for completion", 409);
-    await this.prisma.$executeRaw`UPDATE tenant_onboardings SET status='COMPLETED', current_step='COMPLETE', completed_at=NOW(), updated_at=NOW() WHERE id=${rows[0].id}::uuid`;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE tenant_onboardings SET status='COMPLETED', current_step='COMPLETE', completed_at=NOW(), updated_at=NOW() WHERE id=${rows[0].id}::uuid`;
+      await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${rows[0].id}::uuid, ${tenantId}::uuid, ${actor.isSuperAdmin ? null : null}::uuid, 'COMPLETED', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
+    });
     return this.getForActor(tenantId, actor);
   }
 
