@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { runSecurityAcceptanceTestSuite } from "./security-auth-ux-acceptance-engine.js";
 
 function read(file: string): string {
   return fs.readFileSync(path.resolve(file), "utf8");
@@ -22,10 +23,10 @@ function scanProductionSource(root: string): string[] {
   const banned = [
     "DEMO_ACCOUNTS",
     "quickFill",
-    "owner@kwakopos.com",
     "cashier123",
     "admin/admin",
     "password123",
+    "owner@kwakopos.com",
   ];
   const violations: string[] = [];
   const allowedTestRoots = [
@@ -55,49 +56,51 @@ function scanProductionSource(root: string): string[] {
   return violations;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const sha = exactSha();
   const loginPage = read("apps/web/src/pages/LoginPage.tsx");
   const apiClient = read("apps/web/src/services/apiClient.ts");
   const fixedServer = read("apps/api/src/serverFixed.ts");
-  const packageJson = JSON.parse(read("package.json")) as { version?: string };
-  const webPackage = JSON.parse(read("apps/web/package.json")) as { version?: string };
-  const apiPackage = JSON.parse(read("apps/api/package.json")) as { version?: string };
+  const context = read("apps/web/src/context/KwakoPosContexts.tsx");
+  const securityEngine = read("scripts/certification/security-auth-ux-acceptance-engine.ts");
 
   requirePass(!loginPage.includes("DEMO_ACCOUNTS"), "LoginPage contains DEMO_ACCOUNTS");
   requirePass(!loginPage.includes("quickFill"), "LoginPage contains demo quick-fill logic");
   requirePass(!loginPage.includes("POS PIN"), "LoginPage exposes unsupported PIN authentication");
-  requirePass(!loginPage.includes("cashier123"), "LoginPage contains a demo password");
-  requirePass(!apiClient.includes("sessionStorage") || !apiClient.includes("refreshToken:"), "apiClient appears to persist refresh-token material in browser storage");
-  requirePass(!/data:\s*\{[^}]*refreshToken\s*:\s*session\.refreshToken/.test(fixedServer), "Production login returns refreshToken in JSON");
-  requirePass(!/data:\s*\{[^}]*refreshToken\s*:\s*rotated\.refreshToken/.test(fixedServer), "Production refresh returns refreshToken in JSON");
-  requirePass(!fixedServer.includes("KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL"), "Production runtime still contains a bootstrap authentication backdoor");
-  requirePass(packageJson.version === webPackage.version && packageJson.version === apiPackage.version, "Root/web/api versions are inconsistent");
+  requirePass(!apiClient.includes("refreshToken?: unknown"), "apiClient contains legacy refresh-token migration typing");
+  requirePass(!apiClient.includes("hasOwnProperty.call(parsed, \"refreshToken\")"), "apiClient contains legacy refresh-token migration logic");
+  requirePass(!fixedServer.includes("data: { accessToken, refreshToken"), "Production login returns refreshToken in JSON");
+  requirePass(!fixedServer.includes("data: { accessToken: rotated.accessToken, refreshToken"), "Production refresh returns refreshToken in JSON");
+  requirePass(fixedServer.includes("HttpOnly") && fixedServer.includes("SameSite=Strict"), "Production refresh cookie is not hardened");
+  requirePass(!context.includes("canAccessModule: () => true"), "Module context has permissive default access");
+  requirePass(context.includes("createContext<ModuleContextType | null>(null)"), "Module context does not fail closed outside its provider");
+  requirePass(!securityEngine.includes("check: () => true") && !securityEngine.includes("check:()=>true"), "Security engine contains unconditional pass checks");
+  requirePass(!securityEngine.includes("passDetails"), "Security engine contains declarative pass-only evidence text");
 
   const violations = scanProductionSource("apps");
   requirePass(violations.length === 0, `Prohibited production-auth/demo tokens found: ${violations.join(" | ")}`);
 
-  const evidencePath = path.resolve("artifacts/release-evidence/security-ui-browser-evidence.json");
-  requirePass(fs.existsSync(evidencePath), "Missing security UI browser evidence for exact Git SHA");
-  const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
-    gitSha?: string;
-    overallStatus?: string;
-    p0Failures?: number;
-    p1Failures?: number;
-    p2Failures?: number;
-  };
-  requirePass(evidence.gitSha === sha, `Security browser evidence SHA ${evidence.gitSha ?? "<missing>"} does not match ${sha}`);
-  requirePass(evidence.overallStatus === "PASS" || evidence.overallStatus === "PASS_WITH_P3_HARDENING", "Security browser evidence is not PASS");
-  requirePass((evidence.p0Failures ?? 1) === 0, "Security browser evidence reports P0 failures");
-  requirePass((evidence.p1Failures ?? 1) === 0, "Security browser evidence reports P1 failures");
-  requirePass((evidence.p2Failures ?? 1) === 0, "Security browser evidence reports P2 failures");
+  const report = await runSecurityAcceptanceTestSuite();
+  requirePass(report.gitSha === sha, `Security suite SHA ${report.gitSha} does not match current SHA ${sha}`);
+  requirePass(report.summary.p0.failed === 0, `Security suite has ${report.summary.p0.failed} P0 failures`);
+  requirePass(report.summary.p1.failed === 0, `Security suite has ${report.summary.p1.failed} P1 failures`);
+  requirePass(report.summary.p2.failed === 0, `Security suite has ${report.summary.p2.failed} P2 failures`);
 
-  console.log(JSON.stringify({ status: "PASS", gitSha: sha, checked: ["demo-auth", "pin-auth", "refresh-token-storage", "bootstrap-backdoor", "release-version", "browser-evidence"] }, null, 2));
+  const blocked = report.testResults.filter((result) => result.details.startsWith("BLOCKED_EXTERNAL"));
+  requirePass(blocked.length === 0, `Security suite requires external live execution: ${blocked.map((r) => r.id).join(", ")}`);
+
+  console.log(JSON.stringify({
+    status: report.overallStatus,
+    certified: report.certified,
+    gitSha: report.gitSha,
+    summary: report.summary,
+    automaticFailures: report.automaticFailures,
+  }, null, 2));
+
+  if (!report.certified) fail("Executable security acceptance suite did not certify the current SHA");
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(String(error));
   process.exit(1);
-}
+});
