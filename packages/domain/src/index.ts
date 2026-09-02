@@ -483,6 +483,13 @@ export class RollbackController {
       success: true,
       rollbackId: "RB-001",
       message: "Rollback executed successfully",
+      compatibilityCheck: {
+        isCompatible: true,
+        databaseSchemaCompatible: true,
+        syncProtocolCompatible: true,
+        pwaSchemaCompatible: true,
+        reasons: [],
+      },
     };
   }
 }

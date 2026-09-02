@@ -2,15 +2,12 @@
   "isTampered": true,
   "protectedFilesChecked": 7,
   "modifiedProtectedFiles": [
-    ".github/workflows/ci.yml",
-    "package-lock.json",
+    ".github/workflows/deploy.yml",
     "package.json",
-    ".github/workflows/release.yml",
-    "scripts/release/certify-version-sync.ts",
-    "scripts/release/generate-release-notes.ts",
-    "scripts/release/validate-semver.ts"
+    "scripts/release/emergency-release.ts",
+    "scripts/release/rollback-engine.ts"
   ],
   "branchName": "main",
-  "gitSha": "cd5088d4eb4a6edf3c41c4ebbfd1efd835002566",
-  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/ci.yml, package-lock.json, package.json, .github/workflows/release.yml, scripts/release/certify-version-sync.ts, scripts/release/generate-release-notes.ts, scripts/release/validate-semver.ts"
+  "gitSha": "add2ce398a466f4d48e5aba81537d742aec0c98e",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: .github/workflows/deploy.yml, package.json, scripts/release/emergency-release.ts, scripts/release/rollback-engine.ts"
 }
