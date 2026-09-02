@@ -17,7 +17,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@kwakopos2/contracts": "*",
+    "@kwakopos2/config": "2.5.0",
+    "@kwakopos2/contracts": "2.5.0",
     "@kwakopos2/domain": "*",
     "@kwakopos2/database": "*",
     "typescript": "^5.3.3"
