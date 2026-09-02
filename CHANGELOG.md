@@ -4,6 +4,15 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.6.1] - 2026-09-02
+
+### 🐛 Bug Fixes
+- **release**: resolve automated rollback step execution and compatibility verification
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.6.0] - 2026-09-02
 
 ### ✨ New Features
