@@ -6,6 +6,7 @@ import { buildServer } from "./server.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
 import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
+import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
 import type { JwtPayload } from "@kwakopos2/auth";
 
 function isProduction(config: ReturnType<typeof loadConfig>): boolean { return config.NODE_ENV === "production" || config.NODE_ENV === "production-certification"; }
@@ -35,6 +36,9 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
   const config = opts.config ?? loadConfig(); const productionPersistence = opts.productionPersistence ?? isProduction(config); if (productionPersistence) configurePersistentSessions();
   const server = buildServer({ config, productionPersistence });
   tenantOnboardingRoutes(server); supportOperationsRoutes(server); supportControlTowerRoutes(server);
+  let supportScheduler: { stop: () => void } | undefined;
+  if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();
+  server.addHook("onClose", async () => { supportScheduler?.stop(); });
   server.addHook("preValidation", async (req, reply) => {
     if (!productionPersistence) return; const routePath = req.url.split("?")[0];
     if (routePath === "/auth/login" && req.method === "POST") { await handleProductionLogin(req, reply); return; }
