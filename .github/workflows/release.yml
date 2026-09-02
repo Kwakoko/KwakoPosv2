@@ -1,0 +1,114 @@
+name: Automated Release & Semantic Versioning
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Calculate Next Version (Conventional Commits)
+        id: semver
+        run: |
+          # Get commit history since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          COMMITS=$(git log ${LAST_TAG}..HEAD --oneline)
+          
+          # Parse conventional commits
+          if echo "$COMMITS" | grep -q "^[a-f0-9]\{7\} feat!"; then
+            VERSION_BUMP="major"
+          elif echo "$COMMITS" | grep -q "^[a-f0-9]\{7\} feat"; then
+            VERSION_BUMP="minor"
+          elif echo "$COMMITS" | grep -q "^[a-f0-9]\{7\} fix"; then
+            VERSION_BUMP="patch"
+          else
+            VERSION_BUMP="none"
+          fi
+          
+          echo "version_bump=${VERSION_BUMP}" >> $GITHUB_OUTPUT
+          echo "last_tag=${LAST_TAG}" >> $GITHUB_OUTPUT
+          echo "Commits since ${LAST_TAG}:"
+          echo "$COMMITS"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Validate Commits
+        run: npx tsx scripts/release/validate-semver.ts
+
+      - name: Bump Version
+        if: steps.semver.outputs.version_bump != 'none'
+        run: |
+          npm version ${{ steps.semver.outputs.version_bump }} --no-git-tag-version
+          NEXT_VERSION=$(node -p "require('./package.json').version")
+          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_ENV
+          echo "Version bumped to: ${NEXT_VERSION}"
+
+      - name: Sync Workspace Versions
+        if: steps.semver.outputs.version_bump != 'none'
+        run: |
+          npx tsx scripts/release/sync-workspace-versions.ts ${{ env.NEXT_VERSION }}
+
+      - name: Run Quality Gates (Lint)
+        run: npm run lint
+
+      - name: Run Quality Gates (Build)
+        run: npm run build
+
+      - name: Run Quality Gates (Tests)
+        run: npm run test:unit
+
+      - name: Verify Version Sync
+        if: steps.semver.outputs.version_bump != 'none'
+        run: npx tsx scripts/release/certify-version-sync.ts ${{ env.NEXT_VERSION }}
+
+      - name: Commit Version Changes
+        if: steps.semver.outputs.version_bump != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json "packages/*/package.json" "apps/*/package.json"
+          git commit -m "chore(release): bump version to ${{ env.NEXT_VERSION }}"
+
+      - name: Create Release Tag
+        if: steps.semver.outputs.version_bump != 'none'
+        run: |
+          git tag -a v${{ env.NEXT_VERSION }} -m "Release v${{ env.NEXT_VERSION }}"
+          git push origin main
+          git push origin v${{ env.NEXT_VERSION }}
+
+      - name: Create GitHub Release
+        if: steps.semver.outputs.version_bump != 'none'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.NEXT_VERSION }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report Release Status
+        if: always()
+        run: |
+          echo "## Release Pipeline Status"
+          echo "- Version Bump: ${{ steps.semver.outputs.version_bump }}"
+          echo "- Last Tag: ${{ steps.semver.outputs.last_tag }}"
+          echo "- Next Version: ${{ env.NEXT_VERSION }}"
+          echo "- Status: ${{ job.status }}"
