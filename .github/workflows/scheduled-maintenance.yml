@@ -1,19 +1,37 @@
 name: Scheduled Maintenance & Health Reports
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   schedule:
-    - cron: '0 0 * * *' # Nightly build
-    - cron: '0 6 * * 1' # Weekly health report on Mondays
+    - cron: '0 0 * * *'
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-maintenance-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   nightly-build-and-health:
-    name: Nightly Build & Health Report
+    name: Build, Test & Health Report
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
+        with:
+          node-version: '20'
+          cache: npm
       - run: npm ci
+      - run: npm run db:generate
       - run: npm run build
       - run: npm test
       - run: npx tsx scripts/release/health-check-gate.ts
