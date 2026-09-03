@@ -4,6 +4,15 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.5] - 2026-09-03
+
+### 🐛 Bug Fixes
+- **sync**: retire legacy fallback variants during explicit variant creation
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.12.4] - 2026-09-03
 
 ### ⚡ Improvements & Enhancements
