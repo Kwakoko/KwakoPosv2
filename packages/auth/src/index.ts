@@ -1,8 +1,12 @@
 import jwt from "jsonwebtoken";
+import argon2 from "argon2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
-import type { TenantContext, UserRole } from "@kwakopos2/contracts";
+import type { TenantContext } from "@kwakopos2/contracts";
 
 const developmentJwtSecret = randomBytes(48).toString("hex");
+const ARGON2_MEMORY_COST = Number(process.env.KWAKOPOS_ARGON2_MEMORY_COST || 65536);
+const ARGON2_TIME_COST = Number(process.env.KWAKOPOS_ARGON2_TIME_COST || 3);
+const ARGON2_PARALLELISM = Number(process.env.KWAKOPOS_ARGON2_PARALLELISM || 1);
 
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -25,15 +29,28 @@ export interface JwtPayload {
   deviceId: string;
 }
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const derivedKey = scryptSync(password, salt, 64).toString("hex");
-  return `scrypt:${salt}:${derivedKey}`;
+export async function hashPassword(password: string): Promise<string> {
+  if (!password || password.length < 12) throw new Error("Password must contain at least 12 characters.");
+  return argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: ARGON2_MEMORY_COST,
+    timeCost: ARGON2_TIME_COST,
+    parallelism: ARGON2_PARALLELISM,
+    hashLength: 32,
+  });
 }
 
-export function comparePassword(password: string, hash: string): boolean {
-  if (hash.startsWith("scrypt:")) {
-    const [, salt, originalKey] = hash.split(":");
+export async function comparePassword(password: string, storedHash: string): Promise<boolean> {
+  if (!storedHash) return false;
+  if (storedHash.startsWith("$argon2id$")) {
+    try {
+      return await argon2.verify(storedHash, password);
+    } catch {
+      return false;
+    }
+  }
+  if (storedHash.startsWith("scrypt:")) {
+    const [, salt, originalKey] = storedHash.split(":");
     if (!salt || !originalKey) return false;
     try {
       const derivedKey = scryptSync(password, salt, 64).toString("hex");
@@ -45,7 +62,11 @@ export function comparePassword(password: string, hash: string): boolean {
     }
   }
   const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
-  return legacyHash === hash;
+  return timingSafeEqual(Buffer.from(legacyHash), Buffer.from(storedHash));
+}
+
+export function passwordNeedsRehash(storedHash: string): boolean {
+  return !storedHash.startsWith("$argon2id$");
 }
 
 export function generateAccessToken(payload: JwtPayload): string {
