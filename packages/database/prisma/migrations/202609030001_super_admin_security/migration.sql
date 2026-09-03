@@ -1,5 +1,7 @@
 -- Platform security is intentionally stored separately from tenant role metadata so
 -- SUPER_ADMIN cannot be elevated through ordinary tenant-scoped role APIs.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS platform_super_admin_security (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   bootstrap_pending BOOLEAN NOT NULL DEFAULT TRUE,
