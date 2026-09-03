@@ -4,24 +4,61 @@ on:
   workflow_dispatch:
     inputs:
       failed_version:
-        description: 'Failed Version to Rollback'
+        description: 'Exact failed release version to roll back'
         required: true
+        type: string
       target_stable_version:
-        description: 'Target Stable Version'
+        description: 'Exact previously certified stable version'
         required: true
-        default: '2.2.0'
+        type: string
       reason:
-        description: 'Rollback Reason'
+        description: 'Rollback reason / incident reference'
         required: true
-        default: 'Manual emergency rollback triggered'
+        type: string
+      confirm:
+        description: 'Type ROLLBACK to authorize the emergency action'
+        required: true
+        type: string
+
+concurrency:
+  group: kwakopos-rollback-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   execute-rollback:
     name: Execute Automated Rollback
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
     steps:
+      - name: Verify explicit rollback authorization
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRM" == "ROLLBACK" ]] || { echo "ROLLBACK_BLOCKED: explicit confirmation missing"; exit 1; }
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
+        with:
+          node-version: '20'
+          cache: npm
       - run: npm ci
-      - run: npx tsx scripts/release/rollback-engine.ts ${{ github.event.inputs.failed_version }} ${{ github.event.inputs.target_stable_version }} "${{ github.event.inputs.reason }}"
+      - name: Validate rollback versions
+        shell: bash
+        env:
+          FAILED_VERSION: ${{ inputs.failed_version }}
+          TARGET_VERSION: ${{ inputs.target_stable_version }}
+        run: |
+          set -euo pipefail
+          [[ "$FAILED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ROLLBACK_BLOCKED: failed_version must be SemVer"; exit 1; }
+          [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ROLLBACK_BLOCKED: target_stable_version must be SemVer"; exit 1; }
+      - name: Execute rollback engine
+        run: npx tsx scripts/release/rollback-engine.ts "${{ inputs.failed_version }}" "${{ inputs.target_stable_version }}" "${{ inputs.reason }}"
