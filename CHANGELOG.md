@@ -4,6 +4,28 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.4] - 2026-09-03
+
+### ⚡ Improvements & Enhancements
+- **ci**: execute full verification on repaired main
+- **core**: repair duplicate database variant property
+- **ci**: verify repaired release gate on main
+- **core**: add one-time repair workflow for release gate failures
+
+### 🐛 Bug Fixes
+- **core**: repair sync receipt and emergency release gates
+- **core**: apply verified sync receipt release repairs
+- **core**: repair remaining sync receipt and emergency gate defects
+- **core**: repair sync receipt and release test gates
+- **ci**: verify repaired database build on main
+- **core**: remove duplicate variant attributes property
+- **core**: repair release workflow failures
+- **ci**: make one-time release failure repair executable
+
+### 👥 Contributors
+Credit to: Kwakoko, github-actions[bot]
+
+
 ## [2.12.3] - 2026-09-03
 
 ### ⚡ Improvements & Enhancements
