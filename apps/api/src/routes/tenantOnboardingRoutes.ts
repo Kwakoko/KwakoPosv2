@@ -14,8 +14,7 @@ function isPlatformProvisioner(ctx: { roles: string[]; permissions: string[] }):
   return roles.includes("SUPER_ADMIN") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 }
 function isOwner(ctx: { roles: string[]; permissions: string[] }): boolean {
-  const roles = ctx.roles.map(String).map((v) => v.toUpperCase());
-  return roles.includes("OWNER");
+  return ctx.roles.map(String).map((v) => v.toUpperCase()).includes("OWNER");
 }
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof TenantOnboardingError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
@@ -43,7 +42,7 @@ export function tenantOnboardingRoutes(server: FastifyInstance): void {
   server.patch("/api/v1/onboarding/tenants/:tenantId", async (req, reply) => {
     try {
       const ctx = requireContext(req); const tenantId = String((req.params as any)?.tenantId || "");
-      return reply.send({ success: true, data: await service.update(tenantId, req.body, { tenantId: ctx.tenantId, userId: ctx.userId, isSuperAdmin: isPlatformProvisioner(ctx) }));
+      return reply.send({ success: true, data: await service.update(tenantId, req.body, { tenantId: ctx.tenantId, userId: ctx.userId, isSuperAdmin: isPlatformProvisioner(ctx) }) });
     } catch (error) { return sendError(reply, error); }
   });
   server.post("/api/v1/onboarding/tenants/:tenantId/complete", async (req, reply) => {
