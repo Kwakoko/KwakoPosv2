@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Shield,
   Lock,
@@ -26,6 +26,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
   const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [release, setRelease] = useState<{ appVersion?: string; gitSha?: string } | null>(null);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -45,6 +46,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
     window.history.pushState({}, "", "/tenant-onboarding");
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/system/version")
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to fetch release");
+        return r.json();
+      })
+      .then((j) => {
+        if (!alive) return;
+        const identity = j?.data || j;
+        setRelease({
+          appVersion: identity?.appVersion || identity?.version,
+          gitSha: identity?.gitSha,
+        });
+      })
+      .catch(() => {
+        // ignore; fallback will be used
+      });
+    return () => { alive = false; };
+  }, []);
 
   return (
     <main className="v2-auth-page">
@@ -80,7 +102,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           </div>
         </div>
         <div className="v2-flex v2-items-center v2-justify-between v2-auth-footer">
-          <span className="v2-text-xs v2-text-muted">© 2026 KwakoPos Platform Systems · Build 2.0.0</span>
+          <span className="v2-text-xs v2-text-muted">
+            © {new Date().getFullYear()} KwakoPos Platform Systems
+            <span className="footer-dot"> · </span>
+            {release?.appVersion ? `v${release.appVersion}` : "v2.0.0"}
+            {release?.gitSha && (
+              <>
+                <span className="footer-dot"> · </span>
+                <span className="v2-mono">build {release.gitSha.slice(0, 8)}</span>
+              </>
+            )}
+          </span>
           <span className="v2-text-xs v2-flex v2-items-center v2-gap-1 v2-auth-system-status">
             <CheckCircle size={12} /> System Operational
           </span>
@@ -126,7 +158,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
             <label htmlFor="password" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">PASSWORD</label>
             <div className="v2-auth-input-wrap">
               <Lock size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" />
+              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" autoComplete="current-password" />
               <button type="button" className="v2-auth-password-toggle" onClick={() => setShowPass((current) => !current)} aria-label={showPass ? "Hide password" : "Show password"}>
                 {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
