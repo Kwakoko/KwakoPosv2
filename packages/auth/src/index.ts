@@ -7,6 +7,9 @@ const developmentJwtSecret = randomBytes(48).toString("hex");
 const ARGON2_MEMORY_COST = Number(process.env.KWAKOPOS_ARGON2_MEMORY_COST || 65536);
 const ARGON2_TIME_COST = Number(process.env.KWAKOPOS_ARGON2_TIME_COST || 3);
 const ARGON2_PARALLELISM = Number(process.env.KWAKOPOS_ARGON2_PARALLELISM || 1);
+const JWT_ALGORITHM = "HS256" as const;
+const JWT_ISSUER = String(process.env.JWT_ISSUER || "kwakopos-api").trim();
+const JWT_AUDIENCE = String(process.env.JWT_AUDIENCE || "kwakopos-web").trim();
 
 export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
@@ -19,6 +22,14 @@ export function getJwtSecret(): string {
   return secret;
 }
 
+export function getJwtIssuer(): string {
+  return JWT_ISSUER;
+}
+
+export function getJwtAudience(): string {
+  return JWT_AUDIENCE;
+}
+
 export interface JwtPayload {
   sub: string;
   tenantId: string;
@@ -27,6 +38,18 @@ export interface JwtPayload {
   roles: string[];
   permissions: string[];
   deviceId: string;
+}
+
+function assertJwtPayload(payload: unknown): asserts payload is JwtPayload {
+  const value = payload as Partial<JwtPayload> | null;
+  if (!value || typeof value !== "object" || typeof value.sub !== "string" || !value.sub ||
+      typeof value.tenantId !== "string" || !value.tenantId || typeof value.branchId !== "string" || !value.branchId ||
+      typeof value.email !== "string" || !value.email || !Array.isArray(value.roles) || !Array.isArray(value.permissions) ||
+      typeof value.deviceId !== "string" || !value.deviceId ||
+      !value.roles.every((role) => typeof role === "string") ||
+      !value.permissions.every((permission) => typeof permission === "string")) {
+    throw new Error("Invalid access-token claims.");
+  }
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -76,7 +99,12 @@ export function passwordNeedsRehash(storedHash: string): boolean {
 }
 
 export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: "15m" });
+  return jwt.sign(payload, getJwtSecret(), {
+    algorithm: JWT_ALGORITHM,
+    expiresIn: "15m",
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  });
 }
 
 export function generateRefreshToken(): string {
@@ -85,7 +113,13 @@ export function generateRefreshToken(): string {
 
 export function verifyAccessToken(token: string): JwtPayload {
   try {
-    return jwt.verify(token, getJwtSecret()) as JwtPayload;
+    const decoded = jwt.verify(token, getJwtSecret(), {
+      algorithms: [JWT_ALGORITHM],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+    });
+    assertJwtPayload(decoded);
+    return decoded;
   } catch {
     throw new Error("UNAUTHORIZED: Invalid or expired access token.");
   }
