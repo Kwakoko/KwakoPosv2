@@ -14,43 +14,19 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           def replace(path, old, new):
               p=Path(path); s=p.read_text()
               if old not in s: raise SystemExit(f'MISSING: {path}: {old[:100]}')
               p.write_text(s.replace(old,new,1))
-
-          replace('scripts/certification/security-auth-ux-acceptance-engine.ts',
-            'const missing = required.filter(([, value]) => !value).map(([name]) => name);\n  if (missing.length) {',
-            'const missing = required.filter(([, value]) => !value).map(([name]) => name);\n  if (missing.length) {')
-          replace('scripts/certification/security-auth-ux-acceptance-engine.ts',
-            '    return results;\n  }\n\n  try {',
-            '    return results;\n  }\n\n  const targetUrl = baseUrl as string;\n  const testEmail = email as string;\n\n  try {')
-          replace('scripts/certification/security-auth-ux-acceptance-engine.ts', 'liveRequest(baseUrl,', 'liveRequest(targetUrl,')
-          replace('scripts/certification/security-auth-ux-acceptance-engine.ts', 'body: JSON.stringify({ email, password:', 'body: JSON.stringify({ email: testEmail, password:')
-          replace('scripts/certification/security-auth-ux-acceptance-engine.ts', 'body: JSON.stringify({ email, password, deviceId:', 'body: JSON.stringify({ email: testEmail, password, deviceId:')
-
-          replace('scripts/certification/workflow-automation-certification-engine.ts',
-            'NOTIFICATION: ({ action }) => actionCalls.push(action.actionId),\n    CREATE_TASK: ({ action }) => actionCalls.push(action.actionId),',
-            'NOTIFICATION: ({ action }) => { actionCalls.push(action.actionId); },\n    CREATE_TASK: ({ action }) => { actionCalls.push(action.actionId); },')
-
-          replace('scripts/cli/kwakopos-version.ts',
-            'const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B" : "MODE_A";',
-            'const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B_RELEASE_PROMOTION" : "MODE_A";')
-          replace('scripts/cli/kwakopos-version.ts',
-            '          mode,\n        };',
-            '          mode,\n          transactionPhase: "COMPLETED",\n        };')
-
-          replace('scripts/ops/synthetic-monitor.ts',
-            'const passP08 = qaAllowedP08 && woP08.grandTotal === 340000;',
-            'const passP08 = qaAllowedP08 && Number(woP08.grandTotal) === 340000;')
-          replace('scripts/ops/synthetic-monitor.ts',
-            'const passP10 = priceP10 === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;',
-            'const passP10 = Number(priceP10) === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;')
-
-          replace('scripts/release/localVersionFolderSyncEngine.ts',
-            'export type FolderSyncMode = "MODE_A" | "MODE_B_RELEASE_PROMOTION";',
-            'export type FolderSyncMode = "MODE_A" | "MODE_B_RELEASE_PROMOTION";')
+          replace('scripts/certification/security-auth-ux-acceptance-engine.ts','    return results;\n  }\n\n  try {','    return results;\n  }\n\n  const targetUrl = baseUrl as string;\n  const testEmail = email as string;\n\n  try {')
+          replace('scripts/certification/security-auth-ux-acceptance-engine.ts','liveRequest(baseUrl,','liveRequest(targetUrl,')
+          replace('scripts/certification/security-auth-ux-acceptance-engine.ts','body: JSON.stringify({ email, password:','body: JSON.stringify({ email: testEmail, password:')
+          replace('scripts/certification/security-auth-ux-acceptance-engine.ts','body: JSON.stringify({ email, password, deviceId:','body: JSON.stringify({ email: testEmail, password, deviceId:')
+          replace('scripts/certification/workflow-automation-certification-engine.ts','NOTIFICATION: ({ action }) => actionCalls.push(action.actionId),\n    CREATE_TASK: ({ action }) => actionCalls.push(action.actionId),','NOTIFICATION: ({ action }) => { actionCalls.push(action.actionId); },\n    CREATE_TASK: ({ action }) => { actionCalls.push(action.actionId); },')
+          replace('scripts/cli/kwakopos-version.ts','const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B" : "MODE_A";','const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B_RELEASE_PROMOTION" : "MODE_A";')
+          replace('scripts/cli/kwakopos-version.ts','          mode,\n        };','          mode,\n          transactionPhase: "COMPLETED",\n        };')
+          replace('scripts/ops/synthetic-monitor.ts','const passP08 = qaAllowedP08 && woP08.grandTotal === 340000;','const passP08 = qaAllowedP08 && Number(woP08.grandTotal) === 340000;')
+          replace('scripts/ops/synthetic-monitor.ts','const passP10 = priceP10 === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;','const passP10 = Number(priceP10) === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;')
           PY
       - name: Typecheck
         run: npm run typecheck
@@ -58,7 +34,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/certification/security-auth-ux-acceptance-engine.ts scripts/certification/workflow-automation-certification-engine.ts scripts/cli/kwakopos-version.ts scripts/ops/synthetic-monitor.ts scripts/release/localVersionFolderSyncEngine.ts
+          git add scripts/certification/security-auth-ux-acceptance-engine.ts scripts/certification/workflow-automation-certification-engine.ts scripts/cli/kwakopos-version.ts scripts/ops/synthetic-monitor.ts
           git diff --cached --quiet && exit 0
           git commit -m "fix(cert): resolve release certification type errors"
           git push
+          # trigger repair
