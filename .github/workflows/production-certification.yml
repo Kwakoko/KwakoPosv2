@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: kwakopos-production-certification-main
+  group: kwakopos-production-certification-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
