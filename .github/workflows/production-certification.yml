@@ -33,18 +33,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Repair NPM Lockfile Drift on Pull Requests
-        if: github.event_name == 'pull_request'
+      - name: Verify NPM Lockfile Is Deterministic
         run: |
           set -euo pipefail
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          if ! git diff --quiet -- package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "chore(deps): synchronize npm lockfile"
-            git push
-          fi
+          git diff --exit-code -- package-lock.json || {
+            echo "RELEASE_BLOCKED: package-lock.json is out of sync with package.json. Regenerate and commit the lockfile before merging."
+            exit 1
+          }
 
       - name: Install Dependencies
         run: npm ci
@@ -140,11 +136,11 @@ jobs:
         if: github.event_name != 'pull_request'
         run: npm run production:browser:install
 
-      - name: Synchronize Database Schema
+      - name: Apply Versioned Production Database Migrations
         if: github.event_name != 'pull_request'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npm run db:push
+        run: npm run db:migrate
 
       - name: Deploy Immutable Cloud Run Candidate — 0% Traffic
         if: github.event_name != 'pull_request'
