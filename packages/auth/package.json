@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/auth",
-  "version": "2.12.5",
+  "version": "2.12.6",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -19,6 +19,7 @@
   "dependencies": {
     "@kwakopos2/contracts": "*",
     "@kwakopos2/config": "*",
+    "@node-rs/argon2": "^2.2.0",
     "jsonwebtoken": "^9.0.2",
     "typescript": "^5.3.3"
   },
