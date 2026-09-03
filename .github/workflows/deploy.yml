@@ -46,18 +46,27 @@ jobs:
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Validate release quality contract
         run: npx tsx scripts/release/quality-gates.ts
-      - name: Assert deployment authority is production certification pipeline
+      - name: Assert deployment authority is production release certification pipeline
         shell: bash
         run: |
           set -euo pipefail
           test -f .github/workflows/production-certification.yml
           test -f .github/workflows/production-release-certification.yml
-          grep -q "release:deploy-candidate" .github/workflows/production-certification.yml
-          grep -q "release:promote" .github/workflows/production-certification.yml
+          # PR candidate certification must remain strictly non-mutating.
+          ! grep -q "release:deploy-candidate" .github/workflows/production-certification.yml
+          ! grep -q "release:promote" .github/workflows/production-certification.yml
+          ! grep -q "google-github-actions/auth" .github/workflows/production-certification.yml
+          # Exact production release certification is the sole deployment authority.
           grep -q "release:deploy-candidate" .github/workflows/production-release-certification.yml
           grep -q "release:promote" .github/workflows/production-release-certification.yml
+          grep -q "google-github-actions/auth" .github/workflows/production-release-certification.yml
+          # This contract workflow itself must never mutate main or production infrastructure.
           if grep -q "git push origin HEAD:main" .github/workflows/deploy.yml; then
             echo "DEPLOYMENT_CONTRACT_FAIL: duplicate workflow may mutate main directly."
+            exit 1
+          fi
+          if grep -q "gcloud run deploy" .github/workflows/deploy.yml; then
+            echo "DEPLOYMENT_CONTRACT_FAIL: contract workflow may mutate Cloud Run directly."
             exit 1
           fi
           echo "Deployment contract valid: production certification is the only deployment authority."
