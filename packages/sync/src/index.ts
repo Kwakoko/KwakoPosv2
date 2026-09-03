@@ -11,7 +11,6 @@ import type {
   CreateCustomerRequest,
   CreateSupplierRequest,
   CreatePosSaleRequest,
-  CreateSaleReturnRequest,
   CreatePurchaseOrderRequest,
   CreatePurchaseReceiptRequest,
   CreatePaymentRequest,
@@ -26,6 +25,13 @@ import {
   InMemoryStore,
 } from "@kwakopos2/database";
 import { randomUUID } from "crypto";
+import {
+  getBaseUpdatedAt,
+  operationFingerprint,
+  orderSyncOperations,
+  stripSyncControlFields,
+  validateSyncRequest,
+} from "./syncIntegrity.js";
 
 export class SyncEngine {
   private productRepo: ScopedProductRepository;
@@ -51,10 +57,12 @@ export class SyncEngine {
   }
 
   processPush(ctx: TenantContext, req: SyncPushRequest): SyncPushResponse {
+    validateSyncRequest(req);
     const results: SyncPushResponse["results"] = [];
     let processedCount = 0;
+    const orderedOperations = orderSyncOperations(req.operations);
 
-    for (const op of req.operations) {
+    for (const op of orderedOperations) {
       const existingOp = Array.from(this.store.syncOperations.values()).find(
         (o) =>
           o.tenantId === ctx.tenantId &&
@@ -62,18 +70,27 @@ export class SyncEngine {
           (o.idempotencyKey === op.idempotencyKey || o.operationId === op.operationId)
       );
       if (existingOp) {
-        results.push({
-          operationId: op.operationId,
-          idempotencyKey: op.idempotencyKey,
-          status: "ALREADY_PROCESSED",
+        const existingFingerprint = operationFingerprint({
+          operationId: existingOp.operationId,
+          entityType: existingOp.entityType as any,
+          entityId: existingOp.entityId,
+          operationType: existingOp.operationType as any,
+          payload: existingOp.payload as any,
+          clientCreatedAt: existingOp.clientCreatedAt,
+          idempotencyKey: existingOp.idempotencyKey,
         });
+        if (existingFingerprint !== operationFingerprint(op)) {
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_IDEMPOTENCY_CONFLICT: operation identity already exists with different content" });
+        } else {
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+        }
         continue;
       }
 
       try {
         if (op.entityType === "Product" && op.operationType === "CREATE") {
           const productPayload = op.payload as unknown as CreateProductRequest;
-          const hasExplicitVariantCreate = req.operations.some((candidate) =>
+          const hasExplicitVariantCreate = orderedOperations.some((candidate) =>
             candidate.entityType === "ProductVariant" &&
             candidate.operationType === "CREATE" &&
             (candidate.payload as any)?.productId === op.entityId
@@ -84,15 +101,16 @@ export class SyncEngine {
             hasVariants: Boolean(productPayload.hasVariants || productPayload.variants?.length || hasExplicitVariantCreate),
           });
         } else if (op.entityType === "Product" && op.operationType === "UPDATE") {
-          this.productRepo.updateProduct(ctx, op.entityId, op.payload as any);
+          const current = this.productRepo.getProductById(ctx, op.entityId);
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!current) throw new Error(`Product ${op.entityId} not found`);
+          if (baseUpdatedAt && new Date(current.updatedAt).getTime() > new Date(baseUpdatedAt).getTime()) {
+            throw new Error("STALE_WRITE_CONFLICT: product changed on server after local edit began");
+          }
+          this.productRepo.updateProduct(ctx, op.entityId, stripSyncControlFields(op.payload as any));
         } else if (op.entityType === "ProductVariant" && op.operationType === "CREATE") {
           const payload = op.payload as unknown as CreateVariantRequest & { productId: string };
           const createdVariant = this.productRepo.addVariant(ctx, payload.productId, { ...payload, id: op.entityId });
-
-          // Compatibility cleanup for products created before the fallback-variant
-          // marker was normalized to a string. Explicit variant creation must retire
-          // any remaining system fallback, otherwise multi-device convergence produces
-          // an impossible third variant.
           for (const variant of Array.from(this.store.variants.values())) {
             if (
               variant.id !== createdVariant.id &&
@@ -107,8 +125,20 @@ export class SyncEngine {
           }
           this.productRepo.recalculateProductStock(ctx, payload.productId);
         } else if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
-          this.productRepo.updateVariant(ctx, op.entityId, op.payload as any);
+          const current = this.store.variants.get(op.entityId);
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!current) throw new Error(`Variant ${op.entityId} not found`);
+          if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("Variant entity belongs to another tenant or branch");
+          if (baseUpdatedAt && new Date(current.updatedAt).getTime() > new Date(baseUpdatedAt).getTime()) {
+            throw new Error("STALE_WRITE_CONFLICT: variant changed on server after local edit began");
+          }
+          this.productRepo.updateVariant(ctx, op.entityId, stripSyncControlFields(op.payload as any));
         } else if (op.entityType === "ProductVariant" && op.operationType === "DELETE") {
+          const current = this.store.variants.get(op.entityId);
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (current && baseUpdatedAt && new Date(current.updatedAt).getTime() > new Date(baseUpdatedAt).getTime()) {
+            throw new Error("STALE_WRITE_CONFLICT: variant changed on server after local delete began");
+          }
           this.productRepo.deleteVariant(ctx, op.entityId);
         } else if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") {
           this.stockRepo.recordStockAdjustment(ctx, {
@@ -119,39 +149,21 @@ export class SyncEngine {
             idempotencyKey: op.idempotencyKey,
           });
         } else if (op.entityType === "Customer" && op.operationType === "CREATE") {
-          this.commercialRepo.createCustomer(ctx, {
-            ...(op.payload as unknown as CreateCustomerRequest),
-            id: op.entityId,
-          });
+          this.commercialRepo.createCustomer(ctx, { ...(op.payload as unknown as CreateCustomerRequest), id: op.entityId });
         } else if (op.entityType === "Supplier" && op.operationType === "CREATE") {
-          this.commercialRepo.createSupplier(ctx, {
-            ...(op.payload as unknown as CreateSupplierRequest),
-            id: op.entityId,
-          });
+          this.commercialRepo.createSupplier(ctx, { ...(op.payload as unknown as CreateSupplierRequest), id: op.entityId });
         } else if (op.entityType === "Sale" && op.operationType === "CREATE") {
-          this.commercialRepo.createPosSale(ctx, {
-            ...(op.payload as unknown as CreatePosSaleRequest),
-            id: op.entityId,
-            deviceId: req.deviceId,
-            operationId: op.operationId,
-            idempotencyKey: op.idempotencyKey,
-          });
+          this.commercialRepo.createPosSale(ctx, { ...(op.payload as unknown as CreatePosSaleRequest), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
         } else if (op.entityType === "PurchaseOrder" && op.operationType === "CREATE") {
           this.commercialRepo.createPurchaseOrder(ctx, op.payload as unknown as CreatePurchaseOrderRequest);
         } else if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
-          this.commercialRepo.createPurchaseReceipt(ctx, {
-            ...(op.payload as unknown as CreatePurchaseReceiptRequest),
-            deviceId: req.deviceId,
-            operationId: op.operationId,
-            idempotencyKey: op.idempotencyKey,
-          });
+          this.commercialRepo.createPurchaseReceipt(ctx, { ...(op.payload as unknown as CreatePurchaseReceiptRequest), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
         } else if (op.entityType === "Payment" && op.operationType === "CREATE") {
           const payload = op.payload as unknown as CreatePaymentRequest;
-          // Payment handled via sale or purchase allocation
+          void payload;
         } else if (op.entityType === "CashSession" && op.operationType === "CREATE") {
           this.commercialRepo.openCashSession(ctx, op.payload as unknown as OpenCashSessionRequest);
         } else if (op.entityType?.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(op.entityType)) {
-          // Dynamic Plugin Entity Sync
           const pluginEntityMap = (this.store as any).pluginCustomEntities || new Map();
           pluginEntityMap.set(`${ctx.tenantId}:${op.entityType}:${op.entityId}`, {
             id: op.entityId,
@@ -165,7 +177,6 @@ export class SyncEngine {
         } else {
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
-
 
         const syncOp: SyncOperation = {
           id: randomUUID(),
@@ -185,18 +196,9 @@ export class SyncEngine {
         };
         this.store.syncOperations.set(syncOp.id, syncOp);
         processedCount += 1;
-        results.push({
-          operationId: op.operationId,
-          idempotencyKey: op.idempotencyKey,
-          status: "SUCCESS",
-        });
+        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "SUCCESS" });
       } catch (err: any) {
-        results.push({
-          operationId: op.operationId,
-          idempotencyKey: op.idempotencyKey,
-          status: "FAILED",
-          error: err?.message || "Sync operation failed",
-        });
+        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: err?.message || "Sync operation failed" });
       }
     }
 
@@ -205,18 +207,23 @@ export class SyncEngine {
 
   processDelta(ctx: TenantContext, req: SyncDeltaRequest): SyncDeltaResponse {
     const sinceDate = req.since ? new Date(req.since) : new Date(0);
+    if (Number.isNaN(sinceDate.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
+    const anchor = new Date();
     return {
-      serverTimestamp: new Date().toISOString(),
-      products: this.productRepo.getProducts(ctx).filter((p) => new Date(p.updatedAt) >= sinceDate),
+      serverTimestamp: anchor.toISOString(),
+      products: this.productRepo.getProducts(ctx).filter((p) => {
+        const t = new Date(p.updatedAt).getTime();
+        return t >= sinceDate.getTime() && t <= anchor.getTime();
+      }).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
       variants: Array.from(this.store.variants.values()).filter(
-        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt) >= sinceDate
-      ),
-      stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt) >= sinceDate),
+        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= anchor.getTime()
+      ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id)),
       adjustments: Array.from(this.store.stockAdjustments.values()).filter(
-        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt) >= sinceDate
-      ),
-      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt) >= sinceDate),
-      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt) >= sinceDate),
+        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= anchor.getTime()
+      ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
     };
   }
 }
