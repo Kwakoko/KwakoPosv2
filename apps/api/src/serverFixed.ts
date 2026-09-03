@@ -15,6 +15,10 @@ function isProduction(config: ReturnType<typeof loadConfig>): boolean {
 const REFRESH_COOKIE = "kwakopos_refresh";
 const COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
+type LoginRequestBody = { email?: unknown; password?: unknown; deviceId?: unknown };
+type RefreshRequestBody = { sessionId?: unknown };
+type LogoutRequestBody = { sessionId?: unknown };
+
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
     create: async (record) => { await prisma.deviceSession.create({ data: record as any }); },
@@ -33,19 +37,19 @@ function parseCookies(header: string | undefined): Record<string, string> {
   return result;
 }
 
-function setRefreshCookie(reply: any, token: string, secure: boolean): void {
+function setRefreshCookie(reply: FastifyReply, token: string, secure: boolean): void {
   reply.header("Set-Cookie", `${REFRESH_COOKIE}=${encodeURIComponent(token)}; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE_SECONDS}${secure ? "; Secure" : ""}`);
 }
 
-function clearRefreshCookie(reply: any, secure: boolean): void {
+function clearRefreshCookie(reply: FastifyReply, secure: boolean): void {
   reply.header("Set-Cookie", `${REFRESH_COOKIE}=; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`);
 }
 
 async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
-  const email = String(req.body?.email || "").trim().toLowerCase();
-  const password = String(req.body?.password || "");
-  const deviceId = String(req.body?.deviceId || "").trim();
-
+  const body = (req.body || {}) as LoginRequestBody;
+  const email = String(body.email || "").trim().toLowerCase();
+  const password = String(body.password || "");
+  const deviceId = String(body.deviceId || "").trim();
   if (!email || !password || !deviceId) {
     reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email, password and deviceId are required" } });
     return;
@@ -62,35 +66,15 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   const permissions = Array.isArray(user.role?.permissions) ? user.role.permissions.map((value) => String(value)) : [];
   const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId };
   const accessToken = generateAccessToken(payload);
-  const session = await globalSessionManager.createSession(payload);
+  const session = await globalSessionManager.createSession(user.tenantId, user.id, deviceId);
   setRefreshCookie(reply, session.refreshToken, true);
-
-  reply.send({
-    success: true,
-    data: {
-      accessToken,
-      sessionId: session.sessionId,
-      user: { id: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, name: user.name, role: roles[0] },
-    },
-  });
-}
-
-async function bootstrapAdminIfNeeded() {
-  const bootstrapEmail = process.env.KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL;
-  const bootstrapPassword = process.env.KWAKOPOS_BOOTSTRAP_ADMIN_PASSWORD;
-  if (!bootstrapEmail || !bootstrapPassword) return;
-  const existing = await prisma.user.findFirst({ where: { email: bootstrapEmail } });
-  if (existing) return;
-  console.log(`[Bootstrap] Creating initial admin user: ${bootstrapEmail}`);
+  reply.send({ success: true, data: { accessToken, sessionId: session.sessionId, user: { id: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, name: user.name, role: roles[0] } } });
 }
 
 export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>; productionPersistence?: boolean } = {}) {
   const config = opts.config ?? loadConfig();
   const productionPersistence = opts.productionPersistence ?? isProduction(config);
-
-  if (productionPersistence) {
-    configurePersistentSessions();
-  }
+  if (productionPersistence) configurePersistentSessions();
 
   const server = buildServer({ config, productionPersistence });
   tenantOnboardingRoutes(server);
@@ -98,17 +82,11 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
   supportControlTowerRoutes(server);
 
   let supportScheduler: { stop: () => void } | undefined;
-  if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") {
-    supportScheduler = startSupportAutomationScheduler();
-  }
-
-  server.addHook("onClose", async () => {
-    supportScheduler?.stop();
-  });
+  if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();
+  server.addHook("onClose", async () => { supportScheduler?.stop(); });
 
   server.addHook("preValidation", async (req, reply) => {
     if (!productionPersistence) return;
-
     const routePath = req.url.split("?")[0];
 
     if (routePath === "/auth/login" && req.method === "POST") {
@@ -117,10 +95,9 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/refresh" && req.method === "POST") {
-      const body = (req.body || {});
+      const body = (req.body || {}) as RefreshRequestBody;
       const sessionId = String(body.sessionId || "");
       const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
-
       if (!sessionId || !refreshToken) {
         reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired session" } });
         return;
@@ -140,28 +117,25 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
         email: session.user.email,
         roles: [String(session.user.role?.name || "ADMIN")],
         permissions: Array.isArray(session.user.role?.permissions) ? session.user.role.permissions.map((v) => String(v)) : [],
-        deviceId: session.deviceId,
       });
       if (!rotated) {
         clearRefreshCookie(reply, true);
         reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked refresh token" } });
         return;
       }
-
       setRefreshCookie(reply, rotated.refreshToken, true);
       reply.send({ success: true, data: { accessToken: rotated.accessToken } });
       return;
     }
 
     if (routePath === "/auth/logout" && req.method === "POST") {
-      const sessionId = String((req.body as any)?.sessionId || "");
+      const body = (req.body || {}) as LogoutRequestBody;
+      const sessionId = String(body.sessionId || "");
       if (sessionId) await globalSessionManager.revokeSession(sessionId);
       clearRefreshCookie(reply, true);
       reply.send({ success: true });
-      return;
     }
   });
-
   return server;
 }
 
@@ -171,6 +145,4 @@ export async function startFixedServer(): Promise<FastifyInstance> {
   return server;
 }
 
-if (typeof require !== "undefined" && require.main === module) {
-  void startFixedServer();
-}
+if (typeof require !== "undefined" && require.main === module) void startFixedServer();
