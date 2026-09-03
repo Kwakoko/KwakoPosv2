@@ -1,5 +1,4 @@
 import type { Product, ProductVariant, StockLedger, StockAdjustment, ProductBranchStock, ProductPriceHistory, SyncOperationType, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { orderSyncOperations } from "../../packages/sync/src/syncIntegrity";
 
 export interface OutboxItem {
   id: string;
@@ -16,6 +15,25 @@ type NativeStore = "products" | "productVariants" | "stockLedger" | "stockAdjust
 const STORE_NAMES: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata"];
 const DB_NAME = "kwakopos-v2";
 const DEFAULT_SCHEMA_VERSION = 2;
+
+function localSyncRank(item: { entityType: string; operationType: string }): number {
+  if (item.entityType === "Product" && item.operationType === "CREATE") return 10;
+  if (item.entityType === "Product" && item.operationType === "UPDATE") return 20;
+  if (item.entityType === "ProductVariant" && item.operationType === "CREATE") return 30;
+  if (item.entityType === "ProductVariant" && item.operationType === "UPDATE") return 40;
+  if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
+  if (item.entityType === "StockAdjustment") return 60;
+  if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
+  if (item.entityType === "PurchaseOrder") return 80;
+  if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
+  if (item.entityType === "Payment" || item.entityType === "CashSession") return 100;
+  if (item.entityType.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(item.entityType)) return 110;
+  return 120;
+}
+
+function orderPendingOutbox(items: OutboxItem[]): OutboxItem[] {
+  return [...items].sort((a, b) => localSyncRank(a) - localSyncRank(b) || Date.parse(a.clientCreatedAt) - Date.parse(b.clientCreatedAt) || a.id.localeCompare(b.id));
+}
 
 export class LocalIndexedDbStore {
   schemaVersion: number;
@@ -90,10 +108,7 @@ export class LocalIndexedDbStore {
       const keyRequest = tx.objectStore(store).getAllKeys();
       let values: T[] | null = null;
       let keys: IDBValidKey[] | null = null;
-      const finish = () => {
-        if (!values || !keys) return;
-        for (let index = 0; index < Math.min(keys.length, values.length); index++) target.set(String(keys[index]), values[index]);
-      };
+      const finish = () => { if (!values || !keys) return; for (let index = 0; index < Math.min(keys.length, values.length); index++) target.set(String(keys[index]), values[index]); };
       request.onsuccess = () => { values = request.result as T[]; finish(); };
       keyRequest.onsuccess = () => { keys = keyRequest.result as IDBValidKey[]; finish(); };
       tx.oncomplete = () => resolve();
@@ -122,9 +137,7 @@ export class LocalIndexedDbStore {
 
   clear(): void {
     this.products.clear(); this.productVariants.clear(); this.stockLedger.clear(); this.stockAdjustments.clear(); this.stockBalance.clear(); this.productPriceHistory.clear(); this.receipts.clear(); this.customers.clear(); this.suppliers.clear(); this.syncOutbox.clear(); this.syncMetadata.clear(); this.persistenceError = null;
-    if (this.nativeDb) for (const store of STORE_NAMES) {
-      try { this.nativeDb.transaction(store, "readwrite").objectStore(store).clear(); } catch { /* best effort */ }
-    }
+    if (this.nativeDb) for (const store of STORE_NAMES) { try { this.nativeDb.transaction(store, "readwrite").objectStore(store).clear(); } catch { /* best effort */ } }
   }
 
   saveProductLocal(product: Product): void { this.products.set(product.id, product); this.persist("products", product.id, product); for (const variant of product.variants || []) this.saveVariantLocal(variant); }
@@ -138,9 +151,7 @@ export class LocalIndexedDbStore {
   recordOutboxMutation(item: OutboxItem): void { this.syncOutbox.set(item.id, item); this.persist("syncOutbox", item.id, item); }
 
   private pendingFor(entityType: string, entityId: string): OutboxItem | null {
-    for (const item of this.syncOutbox.values()) {
-      if (item.status === "PENDING" && item.entityType === entityType && item.entityId === entityId) return item;
-    }
+    for (const item of this.syncOutbox.values()) if (item.status === "PENDING" && item.entityType === entityType && item.entityId === entityId) return item;
     return null;
   }
 
@@ -219,19 +230,19 @@ export class LocalIndexedDbStore {
   enqueueOutbox(item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem {
     const opId = item.id || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `OP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     const entityType = (item.entityType || item.entity || "Product") as OutboxItem["entityType"];
+    const entityId = item.entityId || opId;
     const operationType = item.operationType || "CREATE";
     const sourcePayload = item.payload || item.data || {};
-    const payload = (operationType === "UPDATE" || operationType === "DELETE") && !sourcePayload._baseUpdatedAt
-      ? { ...sourcePayload, _baseUpdatedAt: this.localUpdatedAt(entityType, item.entityId || opId) }
+    const baseUpdatedAt = this.localUpdatedAt(entityType, entityId);
+    const payload = (operationType === "UPDATE" || operationType === "DELETE") && baseUpdatedAt && !sourcePayload._baseUpdatedAt
+      ? { ...sourcePayload, _baseUpdatedAt: baseUpdatedAt }
       : sourcePayload;
-    const outboxItem: OutboxItem = { id: opId, entityType, entityId: item.entityId || opId, operationType, payload, clientCreatedAt: item.clientCreatedAt || new Date().toISOString(), idempotencyKey: item.idempotencyKey || opId, status: "PENDING" };
+    const outboxItem: OutboxItem = { id: opId, entityType, entityId, operationType, payload, clientCreatedAt: item.clientCreatedAt || new Date().toISOString(), idempotencyKey: item.idempotencyKey || opId, status: "PENDING" };
     this.recordOutboxMutation(outboxItem);
     return outboxItem;
   }
 
-  getPendingOutbox(): OutboxItem[] {
-    return orderSyncOperations([...this.syncOutbox.values()].filter((item) => item.status === "PENDING") as any) as unknown as OutboxItem[];
-  }
+  getPendingOutbox(): OutboxItem[] { return orderPendingOutbox([...this.syncOutbox.values()].filter((item) => item.status === "PENDING")); }
   getFailedOutbox(): OutboxItem[] { return [...this.syncOutbox.values()].filter((item) => item.status === "FAILED"); }
   retryOutbox(operationId: string): void {
     const item = this.syncOutbox.get(operationId);
