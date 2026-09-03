@@ -51,3 +51,5 @@ jobs:
           echo "- Node Version: $(node --version)"
           echo "- npm Version: $(npm --version)"
           echo "- Status: ${{ job.status }}"
+
+# Re-run verification after the release-gate repair on main.
