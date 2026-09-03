@@ -318,6 +318,7 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
         passed: sourceContains("apps/api/src/serverFixed.ts", "HttpOnly") && sourceContains("apps/api/src/serverFixed.ts", "SameSite=Strict"),
         details: "Production auth path issues refresh tokens through hardened HttpOnly/SameSite cookie transport",
       }),
+    },
   ];
 
   const results: SecuritySuiteReport["testResults"] = [];

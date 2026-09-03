@@ -213,6 +213,7 @@ export class ScopedProductRepository {
         currentMarginAmount: margin.marginAmount,
         currentMarginPercentage: margin.marginPercentage,
         activePriceVersionId: initialHistoryId,
+        attributes: { __systemDefaultVariant: true },
         inventoryQuantity: 0,
         stock: 0,
         reservedQuantity: 0,
@@ -471,6 +472,19 @@ export class ScopedProductRepository {
   addVariant(ctx: TenantContext, productId: string, req: CreateVariantRequest): ProductVariant {
     const product = this.getProductById(ctx, productId);
     if (!product) throw new Error(`Product ${productId} not found`);
+
+    // A simple product starts with one system-generated fallback variant.
+    // Once the tenant explicitly adds a real variant, retire that fallback so
+    // the product does not incorrectly converge to an extra third variant.
+    const defaultVariant = Array.from(this.store.variants.values()).find(
+      (variant) =>
+        variant.productId === productId &&
+        variant.tenantId === ctx.tenantId &&
+        variant.branchId === ctx.branchId &&
+        (variant.attributes as any)?.__systemDefaultVariant === true
+    );
+    if (defaultVariant) this.store.variants.delete(defaultVariant.id);
+
     const now = new Date().toISOString();
 
     const inheritBuying = req.inheritBuyingPrice ?? true;
