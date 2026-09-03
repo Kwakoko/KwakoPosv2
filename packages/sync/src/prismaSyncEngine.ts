@@ -1,6 +1,7 @@
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService } from "@kwakopos2/database";
 import { prisma } from "@kwakopos2/database";
+import { getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 
 export class PrismaSyncEngine {
   private readonly atomicCommercialFinance: PrismaAtomicCommercialFinanceService;
@@ -10,13 +11,13 @@ export class PrismaSyncEngine {
   }
 
   async processPush(ctx: TenantContext, req: SyncPushRequest): Promise<SyncPushResponse> {
+    validateSyncRequest(req);
     const results: SyncPushResponse["results"] = [];
     let processedCount = 0;
+    const orderedOperations = orderSyncOperations(req.operations);
 
-    for (const op of req.operations) {
+    for (const op of orderedOperations) {
       try {
-        // Database uniqueness is the final idempotency authority. This lookup is deliberately
-        // tenant + device scoped so the same client key cannot affect another tenant/device.
         const existing = await prisma.syncOperation.findFirst({
           where: {
             tenantId: ctx.tenantId,
@@ -25,12 +26,23 @@ export class PrismaSyncEngine {
           },
         });
         if (existing) {
-          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+          const existingFingerprint = operationFingerprint({
+            operationId: existing.operationId,
+            entityType: existing.entityType as any,
+            entityId: existing.entityId,
+            operationType: existing.operationType as any,
+            payload: existing.payload as any,
+            clientCreatedAt: existing.clientCreatedAt.toISOString(),
+            idempotencyKey: existing.idempotencyKey,
+          });
+          if (existingFingerprint !== operationFingerprint(op)) {
+            results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_IDEMPOTENCY_CONFLICT: operation identity already exists with different content" });
+          } else {
+            results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+          }
           continue;
         }
 
-        // CREATE operations with a stable entity id are also idempotent. This closes the
-        // crash window where the business row commits but the sync-operation audit row does not.
         if (op.entityType === "Product" && op.operationType === "CREATE") {
           const existingProduct = await prisma.product.findUnique({ where: { id: op.entityId } });
           if (existingProduct) {
@@ -41,7 +53,11 @@ export class PrismaSyncEngine {
           }
           await this.productRepo.createProduct(ctx, { ...(op.payload as any), id: op.entityId });
         } else if (op.entityType === "Product" && op.operationType === "UPDATE") {
-          await this.productRepo.updateProduct(ctx, op.entityId, op.payload as any);
+          const existingProduct = await this.productRepo.getProductById(ctx, op.entityId);
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!existingProduct) throw new Error(`Product ${op.entityId} not found`);
+          if (baseUpdatedAt && new Date(existingProduct.updatedAt).getTime() > new Date(baseUpdatedAt).getTime()) throw new Error("STALE_WRITE_CONFLICT: product changed on server after local edit began");
+          await this.productRepo.updateProduct(ctx, op.entityId, stripSyncControlFields(op.payload as any));
         } else if (op.entityType === "ProductVariant" && op.operationType === "CREATE") {
           const payload = op.payload as any;
           const existingVariant = await prisma.productVariant.findUnique({ where: { id: op.entityId } });
@@ -53,9 +69,20 @@ export class PrismaSyncEngine {
           }
           await this.productRepo.addVariant(ctx, payload.productId, { ...payload, id: op.entityId });
         } else if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
-          await this.productRepo.updateVariant(ctx, op.entityId, op.payload as any);
+          const existingVariant = await prisma.productVariant.findUnique({ where: { id: op.entityId } });
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!existingVariant) throw new Error(`Variant ${op.entityId} not found`);
+          if (existingVariant.tenantId !== ctx.tenantId || existingVariant.branchId !== ctx.branchId) throw new Error("Variant entity belongs to another tenant or branch");
+          if (baseUpdatedAt && existingVariant.updatedAt.getTime() > new Date(baseUpdatedAt).getTime()) throw new Error("STALE_WRITE_CONFLICT: variant changed on server after local edit began");
+          await this.productRepo.updateVariant(ctx, op.entityId, stripSyncControlFields(op.payload as any));
         } else if (op.entityType === "ProductVariant" && op.operationType === "DELETE") {
-          await this.productRepo.deleteVariant(ctx, op.entityId);
+          const existingVariant = await prisma.productVariant.findUnique({ where: { id: op.entityId } });
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (existingVariant) {
+            if (existingVariant.tenantId !== ctx.tenantId || existingVariant.branchId !== ctx.branchId) throw new Error("Variant entity belongs to another tenant or branch");
+            if (baseUpdatedAt && existingVariant.updatedAt.getTime() > new Date(baseUpdatedAt).getTime()) throw new Error("STALE_WRITE_CONFLICT: variant changed on server after local delete began");
+            await prisma.productVariant.update({ where: { id: op.entityId }, data: { isActive: false } });
+          }
         } else if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") {
           await this.stockRepo.recordStockAdjustment(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
         } else if (op.entityType === "Sale" && op.operationType === "CREATE") {
@@ -79,7 +106,6 @@ export class PrismaSyncEngine {
             await prisma.supplier.create({ data: { ...payload, id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
           }
         } else {
-          // Never report SUCCESS for a sync operation that was not actually applied.
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
 
@@ -87,8 +113,6 @@ export class PrismaSyncEngine {
         processedCount += 1;
         results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "SUCCESS" });
       } catch (err: any) {
-        // Unique races are safe to retry: another worker/device may have committed the same
-        // operation while this request was executing. Never turn an unrelated conflict into success.
         if (err?.code === "P2002" || err?.code === "23505") {
           const committed = await prisma.syncOperation.findFirst({ where: { tenantId: ctx.tenantId, deviceId: req.deviceId, OR: [{ idempotencyKey: op.idempotencyKey }, { operationId: op.operationId }] } });
           if (committed) {
@@ -104,14 +128,14 @@ export class PrismaSyncEngine {
 
   async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
     const since = req.since ? new Date(req.since) : new Date(0);
+    if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
     const anchor = new Date();
-    const products = (await this.productRepo.getProducts(ctx)).filter((p: any) => new Date(p.updatedAt) >= since && new Date(p.updatedAt) <= anchor);
-    const variants = await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } });
-    const ledger = (await this.stockRepo.getLedger(ctx)).filter((entry: any) => new Date(entry.createdAt) >= since && new Date(entry.createdAt) <= anchor);
-    const adjustments = await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } });
-    const customers = await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } });
-    const suppliers = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } });
-
+    const products = (await this.productRepo.getProducts(ctx)).filter((p: any) => { const t = new Date(p.updatedAt).getTime(); return t >= since.getTime() && t <= anchor.getTime(); }).sort((a: any, b: any) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const variants = await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const ledger = (await this.stockRepo.getLedger(ctx)).filter((entry: any) => { const t = new Date(entry.createdAt).getTime(); return t >= since.getTime() && t <= anchor.getTime(); }).sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
+    const adjustments = await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const customers = await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const suppliers = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
     return {
       serverTimestamp: anchor.toISOString(),
       products,
