@@ -19,7 +19,7 @@
   "dependencies": {
     "@kwakopos2/contracts": "*",
     "@kwakopos2/config": "*",
-    "argon2": "^0.31.2",
+    "@node-rs/argon2": "^2.2.0",
     "jsonwebtoken": "^9.0.2",
     "typescript": "^5.3.3"
   },
