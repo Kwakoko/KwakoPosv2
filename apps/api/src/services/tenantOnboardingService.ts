@@ -47,10 +47,7 @@ function stableFingerprint(value: Record<string, unknown>): string {
 }
 
 function fingerprintRequest(data: any): string {
-  return stableFingerprint({
-    ...data,
-    ownerPassword: createHash("sha256").update(String(data.ownerPassword)).digest("hex"),
-  });
+  return stableFingerprint({ ...data, ownerPassword: createHash("sha256").update(String(data.ownerPassword)).digest("hex") });
 }
 
 function findManifest(value: string): any {
@@ -89,12 +86,11 @@ export class TenantOnboardingService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // Serialize identical idempotency keys so concurrent retries cannot create two tenants.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.idempotencyKey}, 0))`;
         const existing = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE idempotency_key = ${data.idempotencyKey} LIMIT 1`;
         if (existing[0]) {
           if (existing[0].request_fingerprint !== requestFingerprint) throw new TenantOnboardingError("CONFLICT", "Idempotency key was already used with different parameters", 409);
-          return this.toSafeResponse(existing[0]);
+          return { onboardingId: existing[0].id, tenantId: existing[0].tenant_id, branchId: existing[0].branch_id, ownerUserId: existing[0].owner_user_id, status: existing[0].status, nextStep: existing[0].status === "COMPLETED" ? "LOGIN" as const : "LOGIN" as const };
         }
 
         const existingTenant = await tx.tenant.findUnique({ where: { slug } });
@@ -114,9 +110,7 @@ export class TenantOnboardingService {
 
         await tx.$executeRaw`INSERT INTO tenant_onboardings (id, tenant_id, business_name, slug, branch_name, branch_code, status, current_step, industry, modules, country, currency, timezone, locale, owner_user_id, branch_id, idempotency_key, request_fingerprint, created_at, updated_at) VALUES (${onboardingId}::uuid, ${tenantId}::uuid, ${normalized.businessName}, ${slug}, ${normalized.branchName}, ${branchCode}, 'READY', 'COMPLETE', ${industry}, ${Prisma.sql`ARRAY[${Prisma.join(modules)}]`}::text[], ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, ${ownerId}::uuid, ${branchId}::uuid, ${data.idempotencyKey}, ${requestFingerprint}, NOW(), NOW())`;
         await tx.$executeRaw`INSERT INTO tenant_configurations (tenant_id, country, currency, timezone, locale, numbering_policy, branch_code_policy, tax_configuration) VALUES (${tenantId}::uuid, ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, 'SEQUENTIAL', 'TENANT_PREFIXED', '{}'::jsonb)`;
-        for (const moduleKey of modules) {
-          await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
-        }
+        for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
         await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${onboardingId}::uuid, ${tenantId}::uuid, ${actor.userId}::uuid, 'CREATE', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
 
         return { onboardingId, tenantId: tenant.id, branchId: branch.id, ownerUserId: user.id, status: "READY" as const, nextStep: "LOGIN" as const };
@@ -138,29 +132,32 @@ export class TenantOnboardingService {
   async update(tenantId: string, input: unknown, actor: { tenantId: string; isSuperAdmin: boolean }) {
     if (!actor.isSuperAdmin && actor.tenantId !== tenantId) throw new TenantOnboardingError("FORBIDDEN", "Cross-tenant onboarding access denied", 403);
     const data = TenantOnboardingUpdateRequestSchema.parse(input);
-    return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1 FOR UPDATE`;
-      if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
-      if (rows[0].status === "COMPLETED") throw new TenantOnboardingError("CONFLICT", "Completed onboarding cannot be modified", 409);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1 FOR UPDATE`;
+        if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
+        if (rows[0].status === "COMPLETED") throw new TenantOnboardingError("CONFLICT", "Completed onboarding cannot be modified", 409);
 
-      const modules = data.modules ? Array.from(new Set(data.modules.map(canonicalModule))) : undefined;
-      const industry = data.industry ? canonicalIndustry(data.industry) : undefined;
-      const branchId = rows[0].branch_id;
-      if (data.businessName) await tx.tenant.update({ where: { id: tenantId }, data: { name: data.businessName.trim() } });
-      if (branchId && (data.branchName || data.branchCode)) {
-        await tx.branch.update({ where: { id: branchId }, data: { ...(data.branchName ? { name: data.branchName.trim() } : {}), ...(data.branchCode ? { code: data.branchCode } : {}) } });
-      }
-      if (data.country || data.currency || data.timezone || data.locale) {
-        await tx.$executeRaw`UPDATE tenant_configurations SET country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
-      }
-      if (modules) {
-        await tx.$executeRaw`UPDATE tenant_onboardings SET modules=${Prisma.sql`ARRAY[${Prisma.join(modules)}]`}::text[] WHERE tenant_id=${tenantId}::uuid`;
-        await tx.$executeRaw`DELETE FROM tenant_module_entitlements WHERE tenant_id=${tenantId}::uuid`;
-        for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
-      }
-      await tx.$executeRaw`UPDATE tenant_onboardings SET business_name=COALESCE(${data.businessName?.trim() || null}, business_name), branch_name=COALESCE(${data.branchName?.trim() || null}, branch_name), branch_code=COALESCE(${data.branchCode || null}, branch_code), country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), industry=COALESCE(${industry || null}, industry), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
-      return this.getForActor(tenantId, actor);
-    });
+        const modules = data.modules ? Array.from(new Set(data.modules.map(canonicalModule))) : undefined;
+        const industry = data.industry ? canonicalIndustry(data.industry) : undefined;
+        const branchId = rows[0].branch_id;
+        if (data.businessName) await tx.tenant.update({ where: { id: tenantId }, data: { name: data.businessName.trim() } });
+        if (branchId && (data.branchName || data.branchCode)) await tx.branch.update({ where: { id: branchId }, data: { ...(data.branchName ? { name: data.branchName.trim() } : {}), ...(data.branchCode ? { code: data.branchCode } : {}) } });
+        if (data.country || data.currency || data.timezone || data.locale) await tx.$executeRaw`UPDATE tenant_configurations SET country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
+        if (modules) {
+          await tx.$executeRaw`UPDATE tenant_onboardings SET modules=${Prisma.sql`ARRAY[${Prisma.join(modules)}]`}::text[] WHERE tenant_id=${tenantId}::uuid`;
+          await tx.$executeRaw`DELETE FROM tenant_module_entitlements WHERE tenant_id=${tenantId}::uuid`;
+          for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
+        }
+        await tx.$executeRaw`UPDATE tenant_onboardings SET business_name=COALESCE(${data.businessName?.trim() || null}, business_name), branch_name=COALESCE(${data.branchName?.trim() || null}, branch_name), branch_code=COALESCE(${data.branchCode || null}, branch_code), country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), industry=COALESCE(${industry || null}, industry), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
+        await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${rows[0].id}::uuid, ${tenantId}::uuid, ${actor.isSuperAdmin ? null : actor.tenantId}::uuid, 'UPDATE', 'SUCCESS', NULL, NULL, '{}'::jsonb)`;
+      });
+    } catch (error: any) {
+      if (error instanceof TenantOnboardingError) throw error;
+      if (error?.code === "P2002" || error?.code === "23505") throw new TenantOnboardingError("CONFLICT", "Tenant branch code is already in use", 409);
+      throw new TenantOnboardingError("PROVISIONING_FAILED", "Tenant onboarding update failed", 500);
+    }
+    return this.getForActor(tenantId, actor);
   }
 
   async complete(tenantId: string, actor: { tenantId: string; isSuperAdmin: boolean; userId?: string; correlationId?: string; traceId?: string }) {
