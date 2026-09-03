@@ -52,4 +52,4 @@ jobs:
           echo "- npm Version: $(npm --version)"
           echo "- Status: ${{ job.status }}"
 
-# Re-run verification after the release-gate repair on main.
+# Re-run verification after the release-gate repair and database build repair.
