@@ -1,87 +1,63 @@
-name: KwakoPos Continuous Deployment (CD)
+name: KwakoPos Deployment Contract Gate
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       strategy:
-        description: 'Deployment Strategy (Canary, BlueGreen, Rolling)'
+        description: 'Deployment strategy contract check (Canary, BlueGreen, Rolling)'
         required: true
         default: 'Canary'
       target_env:
-        description: 'Target Environment (development, staging, preproduction, production)'
+        description: 'Target environment contract check'
         required: true
         default: 'production'
 
 concurrency:
-  group: cd-pipeline
+  group: deployment-contract-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  deploy-development:
-    name: 1. Deploy to Development
+  deployment-contract:
+    name: Validate Deployment Contract — No Production Mutation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
-      - run: npm ci
-      - run: echo "Deploying candidate to Development environment..."
-
-  deploy-staging:
-    name: 2. Deploy to Staging & Execute Integration Checks
-    needs: deploy-development
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
-      - run: npm ci
-      - run: npm run db:generate
-      - run: npm run build
-      - run: npx tsx scripts/release/database-migration-gate.ts
-
-  deploy-preproduction:
-    name: 3. Deploy to Pre-Production
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
-      - run: npm ci
-      - run: npm run db:generate
-      - run: npm run build
-      - run: npx tsx scripts/release/verify-kwakopos-modules.ts
-
-  deploy-production:
-    name: 4. Production Promotion & Health Verification
-    needs: deploy-preproduction
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: npm }
-      - run: npm ci
-      - run: npm run db:generate
-      - run: npm run build
-
-      - name: Run Release Quality Gates
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Build candidate
+        run: npm run build
+      - name: Validate module contract
+        run: npx tsx scripts/release/verify-kwakopos-modules.ts
+      - name: Validate release quality contract
         run: npx tsx scripts/release/quality-gates.ts
-
-      - name: Execute Post-Deployment Health Check
-        id: health
-        run: npx tsx scripts/release/health-check-gate.ts
-
-      - name: Automatic Rollback on Failure
-        if: failure()
+      - name: Assert deployment authority is production certification pipeline
+        shell: bash
         run: |
-          CURRENT_VER=$(node -p "require('./package.json').version")
-          npx tsx scripts/release/rollback-engine.ts "$CURRENT_VER" "2.4.0" "Deployment health check failed"
-
-      - name: Publish Official GitHub Release
-        if: success()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx tsx scripts/release/publish-github-release.ts
+          set -euo pipefail
+          test -f .github/workflows/production-certification.yml
+          test -f .github/workflows/production-release-certification.yml
+          grep -q "release:deploy-candidate" .github/workflows/production-certification.yml
+          grep -q "release:promote" .github/workflows/production-certification.yml
+          grep -q "release:deploy-candidate" .github/workflows/production-release-certification.yml
+          grep -q "release:promote" .github/workflows/production-release-certification.yml
+          if grep -q "git push origin HEAD:main" .github/workflows/deploy.yml; then
+            echo "DEPLOYMENT_CONTRACT_FAIL: duplicate workflow may mutate main directly."
+            exit 1
+          fi
+          echo "Deployment contract valid: production certification is the only deployment authority."
