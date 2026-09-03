@@ -50,6 +50,7 @@ jobs:
           echo "## CI Quality Gates Summary"
           echo "- Node Version: $(node --version)"
           echo "- npm Version: $(npm --version)"
+          echo "- Commit Under Test: $(git rev-parse HEAD)"
           echo "- Status: ${{ job.status }}"
 
-# Re-run verification after the release-gate repair and database build repair.
+# Verification commit: execute the complete CI matrix against the repaired main.
