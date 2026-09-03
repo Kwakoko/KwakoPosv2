@@ -1,81 +1,59 @@
-name: KwakoPos Automated Release & Semantic Versioning Pipeline
+name: KwakoPos Release Contract Gate
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       bump_type:
-        description: 'Explicit release bump override (optional: patch|minor|major)'
+        description: 'Expected release bump contract (optional: patch|minor|major)'
         required: false
         default: ''
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-contract-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  release:
-    name: Certify, Tag, and Publish GitHub Release
+  release-contract:
+    name: Certify Release Contract — No Tag/Release Mutation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          fetch-tags: true
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-
       - name: Install Dependencies
         run: npm ci
-
-      - name: Validate Conventional Commits
+      - name: Validate Conventional Commit / SemVer Contract
         run: npx tsx scripts/release/validate-semver.ts
-
-      - name: Generate Prisma Engine
-        run: npm run db:generate || echo "Skipping db:generate"
-
+      - name: Generate Prisma Client
+        run: npm run db:generate
       - name: Build All Monorepo Workspaces
         run: npm run build
-
-      - name: Run Complete Quality & System Certification
+      - name: Run Unit and Invariant Tests
         run: npm run test:unit
-
-      - name: Synchronize Workspace Versions
+      - name: Audit Version Alignment
+        run: npx tsx scripts/release/certify-version-sync.ts
+      - name: Generate Release Notes Contract Evidence
+        run: npx tsx scripts/release/generate-release-notes.ts
+      - name: Assert release authority boundaries
+        shell: bash
         run: |
-          npx tsx scripts/release/sync-workspace-versions.ts
-
-      - name: Audit & Certify Workspace Version Alignment
-        run: |
-          npx tsx scripts/release/certify-version-sync.ts
-
-      - name: Generate Automated Release Notes & Changelog
-        run: |
-          npx tsx scripts/release/generate-release-notes.ts
-
-      - name: Read Current Version
-        id: pkg
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ steps.pkg.outputs.version }}"
-          name: "KwakoPos Enterprise Release v${{ steps.pkg.outputs.version }}"
-          body_path: artifacts/release-evidence/RELEASE_NOTES.md
-          files: |
-            artifacts/release-evidence/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          set -euo pipefail
+          test -f .github/workflows/auto-semver.yml
+          test -f .github/workflows/production-release-certification.yml
+          ! grep -q "softprops/action-gh-release" .github/workflows/release.yml
+          echo "Release contract valid: version automation and exact production certification remain authoritative."
