@@ -87,7 +87,25 @@ export class SyncEngine {
           this.productRepo.updateProduct(ctx, op.entityId, op.payload as any);
         } else if (op.entityType === "ProductVariant" && op.operationType === "CREATE") {
           const payload = op.payload as unknown as CreateVariantRequest & { productId: string };
-          this.productRepo.addVariant(ctx, payload.productId, { ...payload, id: op.entityId });
+          const createdVariant = this.productRepo.addVariant(ctx, payload.productId, { ...payload, id: op.entityId });
+
+          // Compatibility cleanup for products created before the fallback-variant
+          // marker was normalized to a string. Explicit variant creation must retire
+          // any remaining system fallback, otherwise multi-device convergence produces
+          // an impossible third variant.
+          for (const variant of Array.from(this.store.variants.values())) {
+            if (
+              variant.id !== createdVariant.id &&
+              variant.productId === payload.productId &&
+              variant.tenantId === ctx.tenantId &&
+              variant.branchId === ctx.branchId &&
+              ((variant.attributes as any)?.__systemDefaultVariant === true ||
+                (variant.attributes as any)?.__systemDefaultVariant === "true")
+            ) {
+              this.store.variants.delete(variant.id);
+            }
+          }
+          this.productRepo.recalculateProductStock(ctx, payload.productId);
         } else if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
           this.productRepo.updateVariant(ctx, op.entityId, op.payload as any);
         } else if (op.entityType === "ProductVariant" && op.operationType === "DELETE") {
