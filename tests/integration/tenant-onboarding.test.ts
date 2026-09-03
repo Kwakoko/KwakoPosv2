@@ -12,22 +12,20 @@ function validInput() {
 }
 
 function requestFingerprint(input: ReturnType<typeof validInput>): string {
-  const normalized = { ...input, ownerPassword: undefined };
-  const text = JSON.stringify(normalized, Object.keys(normalized).sort());
-  return createHash("sha256").update(text).digest("hex");
+  const normalized = { ...input, ownerPassword: createHash("sha256").update(input.ownerPassword).digest("hex") };
+  return createHash("sha256").update(JSON.stringify(Object.fromEntries(Object.entries(normalized).sort(([a], [b]) => a.localeCompare(b))))).digest("hex");
 }
 
 function makePrisma(overrides: Record<string, any> = {}) {
   const tx = {
-    tenant: { create: vi.fn(async ({ data }: any) => ({ ...data })) },
-    branch: { create: vi.fn(async ({ data }: any) => ({ ...data })) },
+    tenant: { create: vi.fn(async ({ data }: any) => ({ ...data })), findUnique: vi.fn(async () => null), update: vi.fn(async ({ data }: any) => ({ ...data })) },
+    branch: { create: vi.fn(async ({ data }: any) => ({ ...data })), update: vi.fn(async ({ data }: any) => ({ ...data })) },
     role: { create: vi.fn(async ({ data }: any) => ({ ...data })) },
     user: { create: vi.fn(async ({ data }: any) => ({ ...data })) },
+    $queryRaw: vi.fn(async () => []),
     $executeRaw: vi.fn(async () => undefined),
   };
   return {
-    $queryRaw: vi.fn(async () => []),
-    tenant: { findUnique: vi.fn(async () => null) },
     $transaction: vi.fn(async (cb: any) => cb(tx)),
     ...overrides,
     __tx: tx,
@@ -46,25 +44,29 @@ describe("TenantOnboardingService", () => {
     expect(prisma.__tx.user.create).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("READY");
     expect(prisma.__tx.user.create.mock.calls[0][0].data.passwordHash).not.toBe(validInput().ownerPassword);
-    expect(prisma.__tx.$executeRaw).toHaveBeenCalledTimes(2 + validInput().modules.length);
+    expect(prisma.__tx.$executeRaw).toHaveBeenCalledTimes(4 + validInput().modules.length);
   });
 
-  it("returns the existing onboarding record for the same idempotency key and fingerprint", async () => {
+  it("returns a create-shaped response for an idempotent replay", async () => {
     const input = validInput();
-    const existing = [{ id: "33333333-3333-4333-8333-333333333333", tenantId: actor.tenantId, status: "READY", currentStep: "COMPLETE", industry: "Retail", modules: ["Retail"], country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", ownerUserId: actor.userId, branchId: "44444444-4444-4444-8444-444444444444", createdAt: new Date(), updatedAt: new Date(), completedAt: null, request_fingerprint: requestFingerprint(input) }];
-    const prisma = makePrisma({ $queryRaw: vi.fn(async () => existing) });
+    const existing = [{ id: "33333333-3333-4333-8333-333333333333", tenant_id: actor.tenantId, status: "READY", current_step: "COMPLETE", industry: "Retail", modules: ["Retail"], country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", owner_user_id: actor.userId, branch_id: "44444444-4444-4444-8444-444444444444", created_at: new Date(), updated_at: new Date(), completed_at: null, request_fingerprint: requestFingerprint(input) }];
+    const prisma = makePrisma();
+    prisma.__tx.$queryRaw.mockResolvedValue(existing);
     const service = new TenantOnboardingService(prisma);
     const result = await service.create(input, actor);
-    expect(result.id).toBe(existing[0].id);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(result.onboardingId).toBe(existing[0].id);
+    expect(result.tenantId).toBe(existing[0].tenant_id);
+    expect(result.branchId).toBe(existing[0].branch_id);
+    expect(prisma.__tx.tenant.create).not.toHaveBeenCalled();
   });
 
   it("rejects an idempotency key reused for materially different tenant data", async () => {
     const input = validInput();
-    const prisma = makePrisma({ $queryRaw: vi.fn(async () => [{ id: "55555555-5555-4555-8555-555555555555", request_fingerprint: requestFingerprint(input), status: "READY" }]) });
-    const conflicting = new TenantOnboardingService(prisma);
-    await expect(conflicting.create({ ...input, businessName: "Different Business Ltd" }, actor)).rejects.toMatchObject<TenantOnboardingError>({ code: "CONFLICT", statusCode: 409 });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    const prisma = makePrisma();
+    prisma.__tx.$queryRaw.mockResolvedValue([{ id: "55555555-5555-4555-8555-555555555555", request_fingerprint: requestFingerprint(input), status: "READY" }]);
+    const service = new TenantOnboardingService(prisma);
+    await expect(service.create({ ...input, businessName: "Different Business Ltd" }, actor)).rejects.toMatchObject<TenantOnboardingError>({ code: "CONFLICT", statusCode: 409 });
+    expect(prisma.__tx.tenant.create).not.toHaveBeenCalled();
   });
 
   it("rejects modules that are not in the server catalog", async () => {

@@ -41,9 +41,8 @@ export const TenantOnboardingCreateRequestSchema = z.object({
 });
 export type TenantOnboardingCreateRequest = z.infer<typeof TenantOnboardingCreateRequestSchema>;
 
+// Lifecycle status/step are server-owned. Completion is the only lifecycle transition exposed by the API.
 export const TenantOnboardingUpdateRequestSchema = z.object({
-  status: TenantOnboardingStatusEnum.optional(),
-  currentStep: TenantOnboardingStepEnum.optional(),
   businessName: z.string().trim().min(2).max(120).optional(),
   country: z.string().trim().min(2).max(80).optional(),
   currency: z.string().trim().toUpperCase().length(3).optional(),

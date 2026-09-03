@@ -16,54 +16,28 @@ export function runWorkflowAutomationCertification(): {
 } {
   const actionCalls: string[] = [];
   const engine = new WorkflowAutomationEngine({
-    NOTIFICATION: ({ action }) => actionCalls.push(action.actionId),
-    CREATE_TASK: ({ action }) => actionCalls.push(action.actionId),
+    NOTIFICATION: ({ action }) => { actionCalls.push(action.actionId); },
+    CREATE_TASK: ({ action }) => { actionCalls.push(action.actionId); },
   });
   const results: PillarVerificationResult[] = [];
   const addResult = (id: string, name: string, passed: boolean, details: string) => results.push({ pillarId: id, pillarName: name, passed, details });
 
   addResult("WF-01", "Logical Bridge Architecture", true, "Workflow engine exposes trigger, condition, action, approval and recovery stages");
-
-  const regRes = engine.registerWorkflow({
-    workflowId: "wf-test-procurement",
-    name: "Procurement Approval Workflow",
-    category: "Purchasing",
-    version: "1.0.0",
-    isActive: true,
-    triggers: [{ triggerId: "trig-1", eventType: "EVENT_SALE", entityType: "Sale", conditions: [{ field: "amount", operator: "GREATER_THAN", value: 1000 }] }],
-    actions: [{ actionId: "act-1", actionType: "NOTIFICATION", payload: { msg: "Procurement trigger" } }],
-    approvalRequirements: [{ stepId: "approval-1", approverRole: "Manager", timeoutHours: 24 }],
-    permissions: ["purchases.manage"],
-  });
+  const regRes = engine.registerWorkflow({ workflowId: "wf-test-procurement", name: "Procurement Approval Workflow", category: "Purchasing", version: "1.0.0", isActive: true, triggers: [{ triggerId: "trig-1", eventType: "EVENT_SALE", entityType: "Sale", conditions: [{ field: "amount", operator: "GREATER_THAN", value: 1000 }] }], actions: [{ actionId: "act-1", actionType: "NOTIFICATION", payload: { msg: "Procurement trigger" } }], approvalRequirements: [{ stepId: "approval-1", approverRole: "Manager", timeoutHours: 24 }], permissions: ["purchases.manage"] });
   addResult("WF-02", "Universal Business Process Automation Pipeline", regRes.success, "Workflow definition validation succeeds and rejects malformed definitions");
-
   const nonMatch = engine.dispatchTrigger("EVENT_SALE", { amount: 500 });
   const trigRes = engine.dispatchTrigger("EVENT_SALE", { amount: 5000 });
   addResult("WF-03", "Event-Driven Workflow Trigger Evaluation Engine", nonMatch.triggeredCount === 0 && trigRes.triggeredCount === 1, "Dispatch honors event type and trigger conditions");
-
   const conditionInstance = trigRes.instances[0];
   addResult("WF-04", "Declarative Condition Matching Engine", conditionInstance.status === "PAUSED_APPROVAL", "GREATER_THAN condition was evaluated before workflow activation");
-
   const pendingInst = conditionInstance;
   const firstTask = engine.getPendingTasks(pendingInst.instanceId)[0];
   addResult("WF-05", "Multi-Step Action Execution Pipeline", Boolean(firstTask) && actionCalls.length === 0, "Approval requirement correctly gates action execution");
-
   addResult("WF-06", "Role-Based Approval Task Assignment", firstTask?.assignedRole === "Manager", "Approval task is assigned to the configured role");
-
   const decided = firstTask ? engine.decideApprovalTask(firstTask.taskId, "APPROVED", "ADM-001") : false;
   addResult("WF-07", "Approval Decision & Step Transition Engine", decided && engine.getInstance(pendingInst.instanceId)?.status === "COMPLETED" && actionCalls.includes("act-1"), "Real task ID approval advances the instance and executes the registered action");
-
   const retryEngine = new WorkflowAutomationEngine({ NOTIFICATION: ({ action }) => { if (action.actionId === "retry-action") throw new Error("simulated transient action failure"); } });
-  retryEngine.registerWorkflow({
-    workflowId: "wf-retry",
-    name: "Retry Workflow",
-    category: "Operations",
-    version: "1.0.0",
-    isActive: true,
-    triggers: [{ triggerId: "trig-retry", eventType: "EVENT_CUSTOM", entityType: "Task", conditions: [] }],
-    actions: [{ actionId: "retry-action", actionType: "NOTIFICATION", payload: {} }],
-    permissions: ["ops.manage"],
-  });
+  retryEngine.registerWorkflow({ workflowId: "wf-retry", name: "Retry Workflow", category: "Operations", version: "1.0.0", isActive: true, triggers: [{ triggerId: "trig-retry", eventType: "EVENT_CUSTOM", entityType: "Task", conditions: [] }], actions: [{ actionId: "retry-action", actionType: "NOTIFICATION", payload: {} }], permissions: ["ops.manage"] });
   const failed = retryEngine.dispatchTrigger("EVENT_CUSTOM", { id: "retry-1" }).instances[0];
   const retried = retryEngine.retryFailedInstance(failed.instanceId);
   addResult("WF-08", "Deterministic Failure Recovery & Manual Retry", failed.status === "FAILED" && retried && retryEngine.getInstance(failed.instanceId)?.status === "FAILED", "Retry actually re-executes the failed instance and preserves failure state when the defect persists");
@@ -130,14 +104,12 @@ export function runWorkflowAutomationCertification(): {
   addResult("WF-68", "Workflow Performance Telemetry", true, "Execution records expose start/completion timestamps");
   addResult("WF-69", "Privacy-Preserving Audit Redaction", true, "Action logs record identifiers/status rather than raw credentials");
   addResult("WF-70", "Cross-Package Type Safety", true, "Engine consumes shared Zod-derived contracts");
-
   const health = engine.getHealthSummary();
   addResult("WF-71", "Automation Center Control Tower Operational", health.automationEngineOperational, "Engine health summary is schema validated");
   addResult("WF-72", "No Unhandled Execution Exceptions Invariant", !engine.getInstance(pendingInst.instanceId)?.status?.includes("UNHANDLED"), "Action exceptions are caught and converted into workflow failure state");
   addResult("WF-73", "One Shell, Universal Automation Architecture", true, "Single engine is exported as the platform global workflow automation engine");
   addResult("WF-74", "Phase 31 Definition of Done Readiness", results.slice(0, 8).every((r) => r.passed), "Core trigger/condition/action/approval/retry runtime checks pass");
   addResult("WF-75", "Final Phase 31 Vision: Universal Process Operating Layer", results.slice(0, 8).every((r) => r.passed), "Core executable workflow path is certified");
-
   const passedPillars = results.filter((r) => r.passed).length;
   const totalPillars = results.length;
   return { totalPillars, passedPillars, failedPillars: totalPillars - passedPillars, successRatePct: Math.round((passedPillars / totalPillars) * 100), results };

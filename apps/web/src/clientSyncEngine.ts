@@ -5,6 +5,7 @@ import { globalRumCollector } from "./rum/rumCollector";
 export class ClientSyncEngine {
   public deviceId: string;
   public localDb: LocalIndexedDbStore;
+  private syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
 
   constructor(deviceId: string, localDb: LocalIndexedDbStore) {
     this.deviceId = deviceId;
@@ -15,7 +16,17 @@ export class ClientSyncEngine {
     pushApiFn: (req: SyncPushRequest) => Promise<SyncPushResponse>,
     deltaApiFn: (since?: string) => Promise<SyncDeltaResponse>,
   ): Promise<{ pushed: number; pulled: number }> {
+    if (this.syncInFlight) return this.syncInFlight;
+    this.syncInFlight = this.runSync(pushApiFn, deltaApiFn).finally(() => { this.syncInFlight = null; });
+    return this.syncInFlight;
+  }
+
+  private async runSync(
+    pushApiFn: (req: SyncPushRequest) => Promise<SyncPushResponse>,
+    deltaApiFn: (since?: string) => Promise<SyncDeltaResponse>,
+  ): Promise<{ pushed: number; pulled: number }> {
     const startTime = Date.now();
+    await this.localDb.ready;
     const pendingOps = this.localDb.getPendingOutbox();
     let pushedCount = 0;
 
@@ -39,17 +50,14 @@ export class ClientSyncEngine {
           if (res.status === "SUCCESS" || res.status === "ALREADY_PROCESSED") this.localDb.markOutboxSynced(res.operationId);
           else if (res.status === "FAILED") this.localDb.markOutboxFailed(res.operationId, res.error || "Server rejected operation");
         }
+        await this.localDb.flushPersistence();
       }
 
+      // Read the cursor only after all prior local writes are durable.
       const lastSyncTime = this.localDb.syncMetadata.get("lastSyncTime");
       const deltaRes = await deltaApiFn(lastSyncTime);
-      for (const product of deltaRes.products) this.localDb.saveProductLocal(product);
-      for (const variant of deltaRes.variants) this.localDb.saveVariantLocal(variant);
-      for (const ledger of deltaRes.stockLedger) this.localDb.saveStockLedgerLocal(ledger);
-      for (const adjustment of deltaRes.adjustments) this.localDb.saveStockAdjustmentLocal(adjustment);
-      this.localDb.setSyncMetadata("lastSyncTime", deltaRes.serverTimestamp);
+      const totalPulled = await this.localDb.applyServerDelta(deltaRes);
 
-      const totalPulled = deltaRes.products.length + deltaRes.variants.length + deltaRes.stockLedger.length + deltaRes.adjustments.length;
       globalRumCollector.recordSyncMetrics({ durationMs: Date.now() - startTime, pushedCount, deltaCount: totalPulled, success: true, outboxDepth: this.localDb.getPendingOutbox().length });
       return { pushed: pushedCount, pulled: totalPulled };
     } catch (err: unknown) {

@@ -25,7 +25,9 @@ sourceContains("apps/web/src/indexedDb.ts", "this.nativeDb");
 sourceContains("apps/web/src/versionManager.ts", "isUpToDate: false");
 sourceContains("apps/api/src/serverFixed.ts", "prisma.user.findMany");
 sourceContains("apps/api/src/serverFixed.ts", "prisma.deviceSession.findUnique");
-sourceContains("apps/api/src/serverFixed.ts", "KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL");
+sourceContains("apps/api/src/serverFixed.ts", "requireSecuritySecrets");
+sourceContains("apps/api/src/serverFixed.ts", "ensureSuperAdminSecurity");
+sourceContains("apps/api/src/serverFixed.ts", "verifySuperAdminMfa");
 sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
 sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"Sale\"");
 sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
@@ -42,17 +44,17 @@ if (rootPkg?.version && apiPkg?.version && webPkg?.version && releaseManifest?.v
   const versions = [rootPkg.version, apiPkg.version, webPkg.version, releaseManifest.version];
   if (versions.some((version) => version !== rootPkg.version)) failures.push(`Release version drift detected: ${JSON.stringify({ root: rootPkg.version, api: apiPkg.version, web: webPkg.version, manifest: releaseManifest.version })}`);
   if (releaseManifest.tag !== `v${rootPkg.version}`) failures.push(`release-manifest tag drift: expected v${rootPkg.version}, got ${releaseManifest.tag}`);
+
+  const expectedCache = `kwakopos-runtime-v${rootPkg.version}`;
+  const swPath = path.join(root, "apps/web/dist/sw.js");
+  if (fs.existsSync(swPath) && !fs.readFileSync(swPath, "utf8").includes(expectedCache)) failures.push(`PWA service-worker cache is not bound to release version ${rootPkg.version}`);
 }
 
-for (const relative of ["apps/web/dist/index.html","apps/web/dist/sw.js"]) {
-  const file = path.join(root, relative);
-  if (!fs.existsSync(file)) continue;
-  const content = fs.readFileSync(file, "utf8");
-  if (relative.endsWith("index.html")) {
-    if (!content.includes('id="root"')) failures.push("React root missing from apps/web/dist/index.html");
-    if (content.includes("RealAppShell")) failures.push("Retired generated shell detected in apps/web/dist/index.html");
-  }
-  if (relative.endsWith("sw.js") && !content.includes("kwakopos-runtime-v2.5.0")) failures.push("PWA service-worker cache is not bound to release version 2.5.0");
+const indexPath = path.join(root, "apps/web/dist/index.html");
+if (fs.existsSync(indexPath)) {
+  const content = fs.readFileSync(indexPath, "utf8");
+  if (!content.includes('id="root"')) failures.push("React root missing from apps/web/dist/index.html");
+  if (content.includes("RealAppShell")) failures.push("Retired generated shell detected in apps/web/dist/index.html");
 }
 
 if (failures.length) {
