@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import argon2 from "argon2";
+import { Algorithm, hash as argon2Hash, verify as argon2Verify } from "@node-rs/argon2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 
@@ -31,12 +31,12 @@ export interface JwtPayload {
 
 export async function hashPassword(password: string): Promise<string> {
   if (!password || password.length < 12) throw new Error("Password must contain at least 12 characters.");
-  return argon2.hash(password, {
-    type: argon2.argon2id,
+  return argon2Hash(password, {
+    algorithm: Algorithm.Argon2id,
     memoryCost: ARGON2_MEMORY_COST,
     timeCost: ARGON2_TIME_COST,
     parallelism: ARGON2_PARALLELISM,
-    hashLength: 32,
+    outputLen: 32,
   });
 }
 
@@ -44,7 +44,7 @@ export async function comparePassword(password: string, storedHash: string): Pro
   if (!storedHash) return false;
   if (storedHash.startsWith("$argon2id$")) {
     try {
-      return await argon2.verify(storedHash, password);
+      return await argon2Verify(storedHash, password);
     } catch {
       return false;
     }
@@ -61,8 +61,14 @@ export async function comparePassword(password: string, storedHash: string): Pro
       return false;
     }
   }
-  const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
-  return timingSafeEqual(Buffer.from(legacyHash), Buffer.from(storedHash));
+  try {
+    const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
+    const expected = Buffer.from(storedHash);
+    const actual = Buffer.from(legacyHash);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 export function passwordNeedsRehash(storedHash: string): boolean {
