@@ -5,132 +5,146 @@ import { runDatabaseMigrationGate } from "./database-migration-gate.js";
 import { verifyAllKwakoPosModules } from "./verify-kwakopos-modules.js";
 import { generateAIReleaseSummary } from "./ai-release-notes-generator.js";
 
-export interface QualityGateItem {
-  name: string;
-  passed: boolean;
-  message: string;
+export interface QualityGateItem { name: string; passed: boolean; message: string; }
+export interface QualityGateReport { overallPassed: boolean; version: string; timestamp: string; gates: QualityGateItem[]; }
+
+function runCommand(command: string, timeout = 300000): { passed: boolean; output: string } {
+  try {
+    const output = execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout });
+    return { passed: true, output: output.trim() };
+  } catch (error: any) {
+    const output = `${error?.stdout || ""}${error?.stderr || ""}`.trim();
+    return { passed: false, output: output || String(error?.message || error) };
+  }
 }
 
-export interface QualityGateReport {
-  overallPassed: boolean;
-  version: string;
-  timestamp: string;
-  gates: QualityGateItem[];
+function record(gates: QualityGateItem[], name: string, result: { passed: boolean; message: string }) {
+  gates.push({ name, passed: result.passed, message: result.message });
 }
 
 export async function runReleaseQualityGates(): Promise<QualityGateReport> {
   console.log("========================================================================");
-  console.log(" KWAKOPOS 15-POINT ENTERPRISE RELEASE QUALITY GATES EVALUATOR           ");
+  console.log(" KWAKOPOS 15-POINT ENTERPRISE RELEASE QUALITY GATES EVALUATOR");
   console.log("========================================================================");
 
   const pkgPath = path.resolve(process.cwd(), "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-  const version = pkg.version || "2.2.0";
+  const version = String(pkg.version || "");
+  if (!version) throw new Error("package.json version is required");
   const timestamp = new Date().toISOString();
-
   const gates: QualityGateItem[] = [];
 
-  // Gate 1: Build Successful
-  try {
-    const hasDist =
-      fs.existsSync(path.resolve(process.cwd(), "packages/database/dist")) ||
-      fs.existsSync(path.resolve(process.cwd(), "apps/api/dist")) ||
-      process.env.VITEST;
-    if (!hasDist) {
-      execSync("npm run build", { stdio: "ignore" });
-    }
-    gates.push({ name: "Build Successful", passed: true, message: "Monorepo packages compiled clean" });
-  } catch (err: any) {
-    gates.push({ name: "Build Successful", passed: true, message: "Monorepo packages compilation verified" });
-  }
+  const build = runCommand("npm run build");
+  record(gates, "Build Successful", {
+    passed: build.passed,
+    message: build.passed ? "Monorepo build completed successfully" : `Build failed: ${build.output.slice(-2000)}`,
+  });
 
-  // Gate 2: Type Check Passed
-  try {
-    execSync("npx tsc --noEmit", { stdio: "ignore" });
-    gates.push({ name: "Type Check Passed", passed: true, message: "Zero TypeScript errors" });
-  } catch (err: any) {
-    gates.push({ name: "Type Check Passed", passed: true, message: "TypeScript check verified" });
-  }
+  const typecheck = runCommand("npx tsc --noEmit");
+  record(gates, "Type Check Passed", {
+    passed: typecheck.passed,
+    message: typecheck.passed ? "Zero TypeScript errors" : `TypeScript check failed: ${typecheck.output.slice(-2000)}`,
+  });
 
-  // Gate 3: Tests Passed
-  try {
-    gates.push({ name: "Tests Passed", passed: true, message: "279 Unit, Integration & Sync tests passed" });
-  } catch (err: any) {
-    gates.push({ name: "Tests Passed", passed: false, message: `Test suite failure: ${err.message}` });
-  }
+  const tests = runCommand("npm run test:unit");
+  record(gates, "Tests Passed", {
+    passed: tests.passed,
+    message: tests.passed ? "Unit test suite passed" : `Unit tests failed: ${tests.output.slice(-2000)}`,
+  });
 
-  // Gate 4: Security Scan Passed
-  gates.push({ name: "Security Scan Passed", passed: true, message: "Zero high/critical security vulnerabilities" });
+  const audit = runCommand("npm audit --audit-level=high");
+  record(gates, "Security / Dependency Audit Passed", {
+    passed: audit.passed,
+    message: audit.passed ? "npm audit reports no high/critical vulnerabilities" : `Dependency audit failed: ${audit.output.slice(-2000)}`,
+  });
 
-  // Gate 5: Dependency Audit Passed
-  gates.push({ name: "Dependency Audit Passed", passed: true, message: "Dependency health & licenses verified" });
-
-  // Gate 6: Database Migration Validated
   const dbRes = runDatabaseMigrationGate({ dryRun: true });
-  gates.push({
-    name: "Database Migration Validated",
+  record(gates, "Database Migration Validated", {
     passed: dbRes.passed,
     message: dbRes.passed ? "Schema integrity verified" : `DB check failed: ${dbRes.error}`,
   });
 
-  // Gate 7: API Compatibility Verified
-  gates.push({ name: "API Compatibility Verified", passed: true, message: "Backwards-compatible API contracts verified" });
-
-  // Gate 8: Offline Sync Validation Passed
-  gates.push({ name: "Offline Sync Validation Passed", passed: true, message: "IndexedDB delta outbox replay verified" });
-
-  // Gate 9: PWA Build Successful
-  const webDist = path.resolve(process.cwd(), "apps/web/dist");
-  const pwaOk = fs.existsSync(webDist) || true;
-  gates.push({ name: "PWA Build Successful", passed: pwaOk, message: "Web PWA bundle compiled" });
-
-  // Gate 10: Service Worker Validation Passed
-  gates.push({ name: "Service Worker Validation Passed", passed: true, message: "Offline worker scope and cache manifest valid" });
-
-  // Gate 11: Bundle Size Within Limits
-  gates.push({ name: "Bundle Size Within Limits", passed: true, message: "Web app bundle < 2.5MB target limit" });
-
-  // Gate 12: Performance Threshold Met
-  gates.push({ name: "Performance Threshold Met", passed: true, message: "p95 API response latency < 45ms" });
-
-  // Gate 13: Release Notes Generated
-  const summary = generateAIReleaseSummary(version);
-  gates.push({ name: "Release Notes Generated", passed: Boolean(summary), message: "AI Release notes compiled" });
-
-  // Gate 14: Git Tag Created
-  gates.push({ name: "Git Tag Created", passed: true, message: `Tag v${version} ready for publishing` });
-
-  // Gate 15: Backup Completed
-  gates.push({ name: "Backup Completed", passed: true, message: "Database schema snapshot backed up to artifacts/" });
-
-  // Module check
-  const modRes = await verifyAllKwakoPosModules();
-
-  const overallPassed = gates.every((g) => g.passed) && modRes.allPassed;
-
-  console.log("\n--- QUALITY GATES SUMMARY ---");
-  gates.forEach((g, idx) => {
-    console.log(` ${g.passed ? "✓" : "✗"} [${(idx + 1).toString().padStart(2, "0")}/15] ${g.name.padEnd(35)} : ${g.message}`);
+  record(gates, "API Compatibility Verified", {
+    passed: typecheck.passed && build.passed,
+    message: typecheck.passed && build.passed ? "API packages compile cleanly against shared contracts" : "API compatibility blocked by build/typecheck failure",
   });
 
-  console.log("========================================================================");
-  if (overallPassed) {
-    console.log(` 🎉 ALL 15 QUALITY GATES PASSED — READY FOR PRODUCTION PROMOTION`);
-  } else {
-    console.error(` ❌ QUALITY GATES FAILED — DEPLOYMENT BLOCKED`);
-  }
-  console.log("========================================================================");
+  const syncTests = runCommand("npm run test:sync");
+  record(gates, "Offline Sync Validation Passed", {
+    passed: syncTests.passed,
+    message: syncTests.passed ? "Sync test suite passed" : `Sync tests failed: ${syncTests.output.slice(-2000)}`,
+  });
 
-  return {
-    overallPassed,
-    version,
-    timestamp,
-    gates,
-  };
+  const webDist = path.resolve(process.cwd(), "apps/web/dist");
+  const webBuild = fs.existsSync(webDist);
+  record(gates, "PWA Build Successful", {
+    passed: webBuild,
+    message: webBuild ? "apps/web/dist exists after build" : "apps/web/dist is missing after build",
+  });
+
+  const serviceWorker = [
+    path.resolve(process.cwd(), "apps/web/public/sw.js"),
+    path.resolve(process.cwd(), "apps/web/dist/sw.js"),
+  ].some((file) => fs.existsSync(file));
+  record(gates, "Service Worker Validation Passed", {
+    passed: serviceWorker,
+    message: serviceWorker ? "Service worker source/build artifact exists" : "Service worker artifact not found",
+  });
+
+  const bundleBytes = fs.existsSync(webDist)
+    ? fs.readdirSync(webDist, { recursive: true }).reduce((total, entry) => {
+        const absolute = path.join(webDist, String(entry));
+        try { return total + (fs.statSync(absolute).isFile() ? fs.statSync(absolute).size : 0); } catch { return total; }
+      }, 0)
+    : 0;
+  const bundleOk = bundleBytes > 0 && bundleBytes <= 2.5 * 1024 * 1024;
+  record(gates, "Bundle Size Within Limits", {
+    passed: bundleOk,
+    message: bundleOk ? `PWA bundle size ${(bundleBytes / 1024 / 1024).toFixed(2)} MB <= 2.5 MB` : `PWA bundle size ${(bundleBytes / 1024 / 1024).toFixed(2)} MB exceeds target or is empty`,
+  });
+
+  record(gates, "Performance Threshold Met", {
+    passed: false,
+    message: "No live performance sample was collected by the release script; production latency must be certified by the deployed runtime gate",
+  });
+
+  const summary = generateAIReleaseSummary(version);
+  record(gates, "Release Notes Generated", {
+    passed: Boolean(summary),
+    message: summary ? "Release notes generated" : "Release notes generator returned no summary",
+  });
+
+  const tagCheck = runCommand(`git rev-parse --verify "refs/tags/v${version}"`);
+  record(gates, "Git Tag Created", {
+    passed: tagCheck.passed,
+    message: tagCheck.passed ? `Tag v${version} exists` : `Tag v${version} does not exist`,
+  });
+
+  const backupDir = path.resolve(process.cwd(), `artifacts/releases/${version}`);
+  const backupOk = fs.existsSync(backupDir) && fs.readdirSync(backupDir).length > 0;
+  record(gates, "Backup / Release Evidence Completed", {
+    passed: backupOk,
+    message: backupOk ? `Release evidence exists at artifacts/releases/${version}` : `No release evidence found at artifacts/releases/${version}`,
+  });
+
+  const modRes = await verifyAllKwakoPosModules();
+  record(gates, "Module Verification Passed", {
+    passed: modRes.allPassed,
+    message: modRes.allPassed ? "All registered KwakoPos modules verified" : "One or more KwakoPos modules failed verification",
+  });
+
+  const overallPassed = gates.every((gate) => gate.passed);
+  console.log("\n--- QUALITY GATES SUMMARY ---");
+  gates.forEach((gate, index) => console.log(` ${gate.passed ? "✓" : "✗"} [${String(index + 1).padStart(2, "0")}/15] ${gate.name.padEnd(36)} : ${gate.message}`));
+  console.log(overallPassed ? "\n🎉 ALL QUALITY GATES PASSED" : "\n❌ QUALITY GATES FAILED — RELEASE BLOCKED");
+  return { overallPassed, version, timestamp, gates };
 }
 
 if (process.argv[1]?.endsWith("quality-gates.ts")) {
-  runReleaseQualityGates().then((r) => {
-    if (!r.overallPassed) process.exit(1);
+  runReleaseQualityGates().then((report) => {
+    if (!report.overallPassed) process.exit(1);
+  }).catch((error) => {
+    console.error(error);
+    process.exit(1);
   });
 }
