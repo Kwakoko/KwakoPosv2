@@ -18,7 +18,7 @@ export interface ReceiptSearchFilter {
 }
 
 export interface ScopedReceiptRepository {
-  createReceipt(ctx: TenantContext, req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string }): Promise<ReceiptDTO>;
+  createReceipt(ctx: TenantContext, req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }): Promise<ReceiptDTO>;
   getReceiptById(ctx: TenantContext, id: string): Promise<ReceiptDTO | null>;
   getReceiptByNumber(ctx: TenantContext, receiptNumber: string): Promise<ReceiptDTO | null>;
   searchReceipts(ctx: TenantContext, filter: ReceiptSearchFilter): Promise<{ receipts: ReceiptDTO[]; total: number; page: number; limit: number }>;
@@ -73,9 +73,9 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
 
   async createReceipt(
     ctx: TenantContext,
-    req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string }
+    req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }
   ): Promise<ReceiptDTO> {
-    const now = new Date().toISOString();
+    const now = req.signatureTimestamp || new Date().toISOString();
     let subtotal = 0;
     let taxTotal = 0;
     let discountTotal = 0;
@@ -377,7 +377,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
 
   async createReceipt(
     ctx: TenantContext,
-    req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string }
+    req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }
   ): Promise<ReceiptDTO> {
     if (!this.prisma) return this.inMemory.createReceipt(ctx, req);
     try {

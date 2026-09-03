@@ -51,6 +51,7 @@ export class ReceiptService {
       digitalSignature,
       qrCodePayload,
       barcodePayload,
+      signatureTimestamp: timestamp,
     });
   }
 

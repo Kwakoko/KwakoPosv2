@@ -213,7 +213,7 @@ export class ScopedProductRepository {
         currentMarginAmount: margin.marginAmount,
         currentMarginPercentage: margin.marginPercentage,
         activePriceVersionId: initialHistoryId,
-        attributes: { __systemDefaultVariant: true },
+        attributes: { __systemDefaultVariant: "true" },
         inventoryQuantity: 0,
         stock: 0,
         reservedQuantity: 0,

@@ -72,9 +72,16 @@ export class SyncEngine {
 
       try {
         if (op.entityType === "Product" && op.operationType === "CREATE") {
+          const productPayload = op.payload as unknown as CreateProductRequest;
+          const hasExplicitVariantCreate = req.operations.some((candidate) =>
+            candidate.entityType === "ProductVariant" &&
+            candidate.operationType === "CREATE" &&
+            (candidate.payload as any)?.productId === op.entityId
+          );
           this.productRepo.createProduct(ctx, {
-            ...(op.payload as unknown as CreateProductRequest),
+            ...productPayload,
             id: op.entityId,
+            hasVariants: Boolean(productPayload.hasVariants || productPayload.variants?.length || hasExplicitVariantCreate),
           });
         } else if (op.entityType === "Product" && op.operationType === "UPDATE") {
           this.productRepo.updateProduct(ctx, op.entityId, op.payload as any);
