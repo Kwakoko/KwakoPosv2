@@ -1,4 +1,4 @@
-const CACHE_NAME = "kwakopos-pwa-v2.2.0";
+const CACHE_NAME = "kwakopos-runtime-v2.12.2";
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(["/", "/manifest.json"])).then(() => self.skipWaiting()));
 });

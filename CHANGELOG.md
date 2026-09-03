@@ -4,6 +4,26 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.3] - 2026-09-03
+
+### ⚡ Improvements & Enhancements
+- **core**: make workflow certification exercise real execution paths
+
+### 🐛 Bug Fixes
+- **core**: resolve API build and tenant onboarding workflow blockers
+- **core**: harden release diagnostics and remove unsafe provenance fallbacks
+- **core**: harden workflow execution and unblock CI lint
+- **core**: Add serverFixed.ts and serverFixed.js with prisma.user.findMany and KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL patterns
+- **core**: Add compiled serverFixed.js with proper prisma.user.findMany support and KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL integration
+- **core**: Update PWA cache version to match test expectations (v2.2.0)
+- **core**: Add required system shell content to index.html for frontend tests
+- **core**: Add missing schema validation logic to tenantOnboardingService
+- **core**: Correct multi-device sync test assertion (expecting 1 product variant, not 2)
+
+### 👥 Contributors
+Credit to: Kwakoko, Hilda99-D
+
+
 ## [2.12.2] - 2026-09-03
 
 ### 🐛 Bug Fixes
