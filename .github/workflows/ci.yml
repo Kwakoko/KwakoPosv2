@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: kwakopos-ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
