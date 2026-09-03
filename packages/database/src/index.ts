@@ -220,7 +220,6 @@ export class ScopedProductRepository {
         availableStock: 0,
         reorderLevel: 0,
         imageUrl: null,
-        attributes: {},
         isActive: true,
         createdAt: now,
         updatedAt: now,
