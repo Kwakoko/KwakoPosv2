@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "@kwakopos2/database";
-import { getJwtSecret, hashPassword, verifyAccessToken } from "@kwakopos2/auth";
+import { getJwtAudience, getJwtIssuer, getJwtSecret, hashPassword } from "@kwakopos2/auth";
 
 const SETUP_TTL_SECONDS = 10 * 60;
 const RATE_WINDOW_MINUTES = 15;
@@ -158,11 +158,20 @@ export async function clearSuperAdminFailureState(userId: string): Promise<void>
 }
 
 export function issueSetupToken(userId: string): string {
-  return jwt.sign({ sub: userId, scope: "super_admin_setup" }, getJwtSecret(), { expiresIn: SETUP_TTL_SECONDS });
+  return jwt.sign({ sub: userId, scope: "super_admin_setup" }, getJwtSecret(), {
+    algorithm: "HS256",
+    expiresIn: SETUP_TTL_SECONDS,
+    issuer: getJwtIssuer(),
+    audience: getJwtAudience(),
+  });
 }
 
 function verifySetupToken(token: string): string {
-  const payload = jwt.verify(token, getJwtSecret()) as { sub?: string; scope?: string };
+  const payload = jwt.verify(token, getJwtSecret(), {
+    algorithms: ["HS256"],
+    issuer: getJwtIssuer(),
+    audience: getJwtAudience(),
+  }) as { sub?: string; scope?: string };
   if (payload.scope !== "super_admin_setup" || !payload.sub) throw new Error("Invalid setup token.");
   return payload.sub;
 }
