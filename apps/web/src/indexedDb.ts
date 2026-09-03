@@ -1,4 +1,4 @@
-import type { Product, ProductVariant, StockLedger, StockAdjustment, ProductBranchStock, ProductPriceHistory, SyncOperationType } from "@kwakopos2/contracts";
+import type { Product, ProductVariant, StockLedger, StockAdjustment, ProductBranchStock, ProductPriceHistory, SyncOperationType, SyncDeltaResponse } from "@kwakopos2/contracts";
 
 export interface OutboxItem {
   id: string;
@@ -30,6 +30,7 @@ export class LocalIndexedDbStore {
   syncMetadata = new Map<string, string>();
   readonly ready: Promise<void>;
   private nativeDb: IDBDatabase | null = null;
+  private persistenceTail: Promise<void> = Promise.resolve();
 
   constructor(requestedSchemaVersion = DEFAULT_SCHEMA_VERSION) {
     this.schemaVersion = Number.isInteger(requestedSchemaVersion) && requestedSchemaVersion > 0 ? requestedSchemaVersion : DEFAULT_SCHEMA_VERSION;
@@ -51,6 +52,7 @@ export class LocalIndexedDbStore {
     const storedSchema = this.syncMetadata.get("schemaVersion");
     if (storedSchema) this.schemaVersion = Math.max(this.schemaVersion, Number(storedSchema) || this.schemaVersion);
     this.setSyncMetadata("schemaVersion", String(this.schemaVersion));
+    await this.flushPersistence();
   }
 
   private getTargetMap(store: NativeStore): Map<string, any> {
@@ -69,7 +71,7 @@ export class LocalIndexedDbStore {
 
   private hydrateMap<T>(store: NativeStore, target: Map<string, T>): Promise<void> {
     if (!this.nativeDb) return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const tx = this.nativeDb!.transaction(store, "readonly");
       const request = tx.objectStore(store).getAll();
       const keyRequest = tx.objectStore(store).getAllKeys();
@@ -82,14 +84,28 @@ export class LocalIndexedDbStore {
       request.onsuccess = () => { values = request.result as T[]; finish(); };
       keyRequest.onsuccess = () => { keys = keyRequest.result as IDBValidKey[]; finish(); };
       tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error(`IndexedDB read failed: ${store}`));
+      tx.onabort = () => reject(tx.error || new Error(`IndexedDB read aborted: ${store}`));
     });
   }
 
   private persist<T>(store: NativeStore, key: string, value: T): void {
     if (!this.nativeDb) return;
-    try { this.nativeDb.transaction(store, "readwrite").objectStore(store).put(value, key); } catch { /* best effort persistence */ }
+    this.persistenceTail = this.persistenceTail.then(() => new Promise<void>((resolve, reject) => {
+      try {
+        const tx = this.nativeDb!.transaction(store, "readwrite");
+        tx.objectStore(store).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error(`IndexedDB write failed: ${store}`));
+        tx.onabort = () => reject(tx.error || new Error(`IndexedDB write aborted: ${store}`));
+      } catch (error) {
+        reject(error);
+      }
+    }));
+  }
+
+  async flushPersistence(): Promise<void> {
+    await this.persistenceTail;
   }
 
   clear(): void {
@@ -107,8 +123,55 @@ export class LocalIndexedDbStore {
   saveProductPriceHistoryLocal(history: ProductPriceHistory): void { this.productPriceHistory.set(history.id, history); this.persist("productPriceHistory", history.id, history); }
   recordOutboxMutation(item: OutboxItem): void { this.syncOutbox.set(item.id, item); this.persist("syncOutbox", item.id, item); }
 
+  /** Apply one server delta as a single IndexedDB transaction. The sync cursor is advanced only after all records commit. */
+  async applyServerDelta(delta: SyncDeltaResponse): Promise<number> {
+    await this.ready;
+    if (!this.nativeDb) {
+      for (const product of delta.products) this.saveProductLocal(product);
+      for (const variant of delta.variants) this.saveVariantLocal(variant);
+      for (const ledger of delta.stockLedger) this.saveStockLedgerLocal(ledger);
+      for (const adjustment of delta.adjustments) this.saveStockAdjustmentLocal(adjustment);
+      await this.flushPersistence();
+      this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
+      await this.flushPersistence();
+      return delta.products.length + delta.variants.length + delta.stockLedger.length + delta.adjustments.length;
+    }
+
+    const tx = this.nativeDb.transaction(["products", "productVariants", "stockLedger", "stockAdjustments", "syncMetadata"], "readwrite");
+    tx.objectStore("products");
+    for (const product of delta.products) {
+      tx.objectStore("products").put(product, product.id);
+      this.products.set(product.id, product);
+      for (const variant of product.variants || []) {
+        tx.objectStore("productVariants").put(variant, variant.id);
+        this.productVariants.set(variant.id, variant);
+      }
+    }
+    for (const variant of delta.variants) {
+      tx.objectStore("productVariants").put(variant, variant.id);
+      this.productVariants.set(variant.id, variant);
+    }
+    for (const ledger of delta.stockLedger) {
+      tx.objectStore("stockLedger").put(ledger, ledger.id);
+      this.stockLedger.set(ledger.id, ledger);
+    }
+    for (const adjustment of delta.adjustments) {
+      tx.objectStore("stockAdjustments").put(adjustment, adjustment.id);
+      this.stockAdjustments.set(adjustment.id, adjustment);
+    }
+    tx.objectStore("syncMetadata").put(delta.serverTimestamp, "lastSyncTime");
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error("IndexedDB sync transaction failed"));
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB sync transaction aborted"));
+    });
+    this.syncMetadata.set("lastSyncTime", delta.serverTimestamp);
+    return delta.products.length + delta.variants.length + delta.stockLedger.length + delta.adjustments.length;
+  }
+
   enqueueOutbox(item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem {
-    const opId = item.id || `OP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const opId = item.id || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `OP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     const entityType = (item.entityType || item.entity || "Product") as OutboxItem["entityType"];
     const outboxItem: OutboxItem = { id: opId, entityType, entityId: item.entityId || opId, operationType: item.operationType || "CREATE", payload: item.payload || item.data || {}, clientCreatedAt: item.clientCreatedAt || new Date().toISOString(), idempotencyKey: item.idempotencyKey || opId, status: "PENDING" };
     this.recordOutboxMutation(outboxItem);
@@ -116,9 +179,31 @@ export class LocalIndexedDbStore {
   }
 
   getPendingOutbox(): OutboxItem[] { return [...this.syncOutbox.values()].filter((item) => item.status === "PENDING"); }
+  getFailedOutbox(): OutboxItem[] { return [...this.syncOutbox.values()].filter((item) => item.status === "FAILED"); }
+  retryOutbox(operationId: string): void {
+    const item = this.syncOutbox.get(operationId);
+    if (!item || item.status !== "FAILED") return;
+    item.status = "PENDING";
+    this.syncMetadata.delete(`error_${operationId}`);
+    this.persist("syncOutbox", operationId, item);
+    if (this.nativeDb) this.persistDelete("syncMetadata", `error_${operationId}`);
+  }
   markOutboxSynced(operationId: string): void { const item = this.syncOutbox.get(operationId); if (!item) return; item.status = "SYNCED"; this.persist("syncOutbox", operationId, item); }
   markOutboxFailed(operationId: string, errorReason: string): void { const item = this.syncOutbox.get(operationId); if (!item) return; item.status = "FAILED"; this.syncMetadata.set(`error_${operationId}`, errorReason); this.persist("syncOutbox", operationId, item); this.persist("syncMetadata", `error_${operationId}`, errorReason); }
   setSyncMetadata(key: string, value: string): void { this.syncMetadata.set(key, value); this.persist("syncMetadata", key, value); }
+
+  private persistDelete(store: NativeStore, key: string): void {
+    if (!this.nativeDb) return;
+    this.persistenceTail = this.persistenceTail.then(() => new Promise<void>((resolve, reject) => {
+      try {
+        const tx = this.nativeDb!.transaction(store, "readwrite");
+        tx.objectStore(store).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error(`IndexedDB delete failed: ${store}`));
+        tx.onabort = () => reject(tx.error || new Error(`IndexedDB delete aborted: ${store}`));
+      } catch (error) { reject(error); }
+    }));
+  }
 
   migrateToVersion(targetVersion: number): { previousVersion: number; newVersion: number; preservedOutboxCount: number } {
     const previousVersion = this.schemaVersion;
