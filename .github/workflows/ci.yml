@@ -1,5 +1,7 @@
 name: CI Quality Gates
 
+# Closed-loop certification contract: every PR/main candidate must pass all gates.
+
 on:
   pull_request:
     branches: [main]
