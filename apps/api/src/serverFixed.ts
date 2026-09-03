@@ -1,12 +1,28 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { loadConfig } from "@kwakopos2/config";
 import { prisma } from "@kwakopos2/database";
-import { comparePassword, generateAccessToken, globalSessionManager } from "@kwakopos2/auth";
+import { comparePassword, generateAccessToken, globalSessionManager, hashPassword, passwordNeedsRehash } from "@kwakopos2/auth";
 import { buildServer } from "./server.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
 import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
 import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
+import {
+  beginSuperAdminSetup,
+  clearLoginFailures,
+  clearSuperAdminFailureState,
+  clientAddress,
+  completeSuperAdminSetup,
+  ensureSuperAdminSecurity,
+  getSuperAdminSecurity,
+  isLoginThrottled,
+  issueSetupToken,
+  recordLoginFailure,
+  recordSuperAdminFailure,
+  requireSecuritySecrets,
+  throttleKeys,
+  verifySuperAdminMfa,
+} from "./services/superAdminSecurityService.js";
 
 function isProduction(config: ReturnType<typeof loadConfig>): boolean {
   return config.NODE_ENV === "production" || config.NODE_ENV === "production-certification";
@@ -15,9 +31,11 @@ function isProduction(config: ReturnType<typeof loadConfig>): boolean {
 const REFRESH_COOKIE = "kwakopos_refresh";
 const COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
-type LoginRequestBody = { email?: unknown; password?: unknown; deviceId?: unknown };
+type LoginRequestBody = { email?: unknown; password?: unknown; deviceId?: unknown; mfaCode?: unknown };
 type RefreshRequestBody = { sessionId?: unknown };
 type LogoutRequestBody = { sessionId?: unknown };
+type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
+type SuperAdminSetupStartBody = { setupToken?: unknown };
 
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
@@ -50,17 +68,65 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
   const deviceId = String(body.deviceId || "").trim();
+  const mfaCode = String(body.mfaCode || "").trim();
+  const ip = clientAddress(req);
   if (!email || !password || !deviceId) {
     reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email, password and deviceId are required" } });
     return;
   }
 
-  const users = await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 });
-  const user = users[0];
-  if (!user || !comparePassword(password, user.passwordHash)) {
+  const keys = throttleKeys(email, ip, deviceId);
+  if (await isLoginThrottled(keys)) {
+    reply.status(429).send({ success: false, error: { code: "LOGIN_THROTTLED", message: "Too many authentication attempts. Try again later." } });
+    return;
+  }
+
+  const user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+  const passwordValid = !!user && await comparePassword(password, user.passwordHash);
+  if (!passwordValid) {
+    await recordLoginFailure(keys);
+    if (user) {
+      const roleName = String(user.role?.name || "").toUpperCase();
+      if (roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN") {
+        await ensureSuperAdminSecurity(user.id);
+        await recordSuperAdminFailure(user.id);
+      }
+    }
     reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
     return;
   }
+
+  const roleName = String(user.role?.name || "ADMIN").toUpperCase();
+  const superAdminState = await getSuperAdminSecurity(user.id);
+  const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN" || !!superAdminState;
+  if (isSuperAdmin) {
+    await ensureSuperAdminSecurity(user.id);
+    const state = await getSuperAdminSecurity(user.id);
+    if (!state) {
+      reply.status(500).send({ success: false, error: { code: "SECURITY_CONFIGURATION_ERROR", message: "Super Admin security state unavailable" } });
+      return;
+    }
+    if (state.lockedUntil && state.lockedUntil > new Date()) {
+      reply.status(429).send({ success: false, error: { code: "SUPER_ADMIN_LOCKED", message: "Super Admin access is temporarily locked." } });
+      return;
+    }
+    if (state.mustChangePassword || !state.mfaEnrolled) {
+      reply.status(428).send({ success: false, error: { code: "SUPER_ADMIN_SETUP_REQUIRED", message: "Super Admin security setup is required before a normal session can be issued." }, data: { setupToken: issueSetupToken(user.id), passwordChangeRequired: state.mustChangePassword, mfaRequired: state.mfaRequired, mfaEnrolled: state.mfaEnrolled } });
+      return;
+    }
+    if (!(await verifySuperAdminMfa(user.id, mfaCode))) {
+      await recordLoginFailure(keys);
+      await recordSuperAdminFailure(user.id);
+      reply.status(401).send({ success: false, error: { code: "MFA_REQUIRED", message: "Valid Super Admin MFA code is required." } });
+      return;
+    }
+  }
+
+  await clearLoginFailures(keys);
+  if (user && passwordNeedsRehash(user.passwordHash)) {
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } });
+  }
+  if (isSuperAdmin) await clearSuperAdminFailureState(user.id);
 
   const roles = [String(user.role?.name || "ADMIN")];
   const permissions = Array.isArray(user.role?.permissions) ? user.role.permissions.map((value) => String(value)) : [];
@@ -74,7 +140,10 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>; productionPersistence?: boolean } = {}) {
   const config = opts.config ?? loadConfig();
   const productionPersistence = opts.productionPersistence ?? isProduction(config);
-  if (productionPersistence) configurePersistentSessions();
+  if (productionPersistence) {
+    configurePersistentSessions();
+    requireSecuritySecrets();
+  }
 
   const server = buildServer({ config, productionPersistence });
   tenantOnboardingRoutes(server);
@@ -91,6 +160,37 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
 
     if (routePath === "/auth/login" && req.method === "POST") {
       await handleProductionLogin(req, reply);
+      return;
+    }
+
+    if (routePath === "/auth/super-admin/setup/start" && req.method === "POST") {
+      const body = (req.body || {}) as SuperAdminSetupStartBody;
+      try {
+        const data = await beginSuperAdminSetup(String(body.setupToken || ""));
+        reply.send({ success: true, data });
+      } catch {
+        reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
+      }
+      return;
+    }
+
+    if (routePath === "/auth/super-admin/setup/complete" && req.method === "POST") {
+      const body = (req.body || {}) as SuperAdminSetupBody;
+      const setupToken = String(body.setupToken || "");
+      const newPassword = String(body.newPassword || "");
+      const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
+      const totpCode = String(body.totpCode || "");
+      if (!setupToken || !newPassword || !totpSecret || !totpCode) {
+        reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
+        return;
+      }
+      try {
+        await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
+        reply.send({ success: true, data: { completed: true } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
+        reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
+      }
       return;
     }
 
