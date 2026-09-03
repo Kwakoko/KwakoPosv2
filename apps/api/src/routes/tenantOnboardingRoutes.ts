@@ -43,7 +43,7 @@ export function tenantOnboardingRoutes(server: FastifyInstance): void {
   server.patch("/api/v1/onboarding/tenants/:tenantId", async (req, reply) => {
     try {
       const ctx = requireContext(req); const tenantId = String((req.params as any)?.tenantId || "");
-      return reply.send({ success: true, data: await service.update(tenantId, req.body, { tenantId: ctx.tenantId, isSuperAdmin: isPlatformProvisioner(ctx) }) });
+      return reply.send({ success: true, data: await service.update(tenantId, req.body, { tenantId: ctx.tenantId, userId: ctx.userId, isSuperAdmin: isPlatformProvisioner(ctx) }));
     } catch (error) { return sendError(reply, error); }
   });
   server.post("/api/v1/onboarding/tenants/:tenantId/complete", async (req, reply) => {
