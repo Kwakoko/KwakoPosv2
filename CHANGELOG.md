@@ -4,6 +4,20 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.1] - 2026-09-03
+
+### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #12 from Kwakoko/fix/footer-release-identity-login
+- **pr**: add PR description for fix/footer-release-identity-login
+
+### 🐛 Bug Fixes
+- **web**: add small mobile footer spacing overrides (auth-footer.css)
+- **web**: show runtime release identity in auth footer (LoginPage.tsx)
+
+### 👥 Contributors
+Credit to: Jack91186
+
+
 ## [2.12.0] - 2026-09-02
 
 ### ✨ New Features
