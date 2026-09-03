@@ -4,6 +4,16 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.12.2] - 2026-09-03
+
+### 🐛 Bug Fixes
+- **phase46**: update SQL query to use unquoted status='ESCALATED' for test compliance
+- **config**: add KWAKOPOS_BOOTSTRAP_ADMIN_EMAIL constant
+
+### 👥 Contributors
+Credit to: Jack91186
+
+
 ## [2.12.1] - 2026-09-03
 
 ### ⚡ Improvements & Enhancements

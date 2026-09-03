@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/api",
-  "version": "2.12.1",
+  "version": "2.12.2",
   "main": "./dist/serverFixed.js",
   "scripts": {
     "build": "tsx ../../scripts/ci/harden-production-finance.ts && tsc -p tsconfig.json",

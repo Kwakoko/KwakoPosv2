@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/config",
-  "version": "2.12.1",
+  "version": "2.12.2",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
