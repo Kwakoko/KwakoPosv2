@@ -15,30 +15,26 @@ permissions:
 
 jobs:
   auto-semver:
-    name: Calculate and publish next SemVer
+    name: Calculate, certify and publish next SemVer
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout full history and tags
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
       - name: Generate Prisma client
         run: npm run db:generate
-
-      - name: Build All Workspaces
+      - name: Build all workspaces
         run: npm run build
-
       - name: Skip release commits
         id: guard
         shell: bash
@@ -51,11 +47,9 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Calculate automatic SemVer bump
         if: steps.guard.outputs.skip != 'true'
         run: npx tsx scripts/release/prepare-release.ts
-
       - name: Resolve authoritative release candidate
         if: steps.guard.outputs.skip != 'true'
         id: candidate
@@ -65,16 +59,12 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
           if [[ "$LATEST_TAG" != "v${VERSION}" ]]; then
             echo "needs_release=true" >> "$GITHUB_OUTPUT"
-            echo "Release candidate required: ${VERSION}; latest tag=${LATEST_TAG:-none}"
           else
             echo "needs_release=false" >> "$GITHUB_OUTPUT"
-            echo "Version ${VERSION} already has authoritative tag ${LATEST_TAG}; no release dispatch required."
           fi
-
-      - name: Commit and tag generated release version
+      - name: Commit and tag release candidate
         if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
         id: commit_release
         shell: bash
@@ -85,41 +75,46 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No package version file changes; using current HEAD as release candidate."
-            echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            RELEASE_SHA="$(git rev-parse HEAD)"
           else
             git commit -m "chore(release): v${VERSION}"
-            git tag -a "v${VERSION}" -m "Release v${VERSION}" || true
+            git tag -a "v${VERSION}" -m "Release v${VERSION}"
             git push origin HEAD:main
-            git push origin "v${VERSION}" || true
-            echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            git push origin "v${VERSION}"
+            RELEASE_SHA="$(git rev-parse HEAD)"
           fi
-
-      - name: Publish official GitHub release & tag
-        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx tsx scripts/release/publish-github-release.ts
-
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
       - name: Dispatch exact production certification
         if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
+        id: dispatch
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           RELEASE_SHA="${{ steps.commit_release.outputs.release_sha }}"
-          if [[ -z "$RELEASE_SHA" ]]; then RELEASE_SHA="$(git rev-parse HEAD)"; fi
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid release SHA $RELEASE_SHA"; exit 1; }
-          gh workflow run production-release-certification.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f release_sha="$RELEASE_SHA"
-          echo "Dispatched exact production certification for $RELEASE_SHA"
-
+          gh workflow run production-release-certification.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_sha="$RELEASE_SHA"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Wait for exact production certification and fail closed
+        if: steps.dispatch.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="${{ steps.dispatch.outputs.release_sha }}"
+          RUN_ID=""
+          for attempt in {1..30}; do
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow production-release-certification.yml --limit 20 --json databaseId,headSha,event,status,createdAt --jq "[.[] | select(.headSha == \"$RELEASE_SHA\" and .event == \"workflow_dispatch\")] | sort_by(.createdAt) | last | .databaseId // empty")"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 10
+          done
+          [[ -n "$RUN_ID" ]] || { echo "RELEASE_BLOCKED: exact production certification run was not observed"; exit 1; }
+          echo "Watching exact production certification run $RUN_ID for $RELEASE_SHA"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
       - name: Verify authoritative SemVer state
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          node -e "const fs=require('fs'); const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) { throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); } if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
+          node -e "const fs=require('fs'); const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
