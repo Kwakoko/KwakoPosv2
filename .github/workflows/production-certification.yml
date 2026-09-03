@@ -33,6 +33,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Repair NPM Lockfile Drift on Pull Requests
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore(deps): synchronize npm lockfile"
+            git push
+          fi
+
       - name: Install Dependencies
         run: npm ci
 
