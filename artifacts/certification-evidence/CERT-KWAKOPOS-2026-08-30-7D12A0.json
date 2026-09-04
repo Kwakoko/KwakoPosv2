@@ -1,0 +1,25 @@
+{
+  "certificationId": "CERT-KWAKOPOS-2026-08-30-7D12A0",
+  "timestamp": "2026-08-30T11:43:17.233Z",
+  "appVersion": "2.2.0",
+  "gitSha": "b2e4b25",
+  "gitBranch": "main",
+  "environment": "production",
+  "overallStatus": "CERTIFIED",
+  "certificationScore": 100,
+  "domainScorecard": {
+    "Security": {
+      "status": "PASS",
+      "details": "Zero vulnerabilities"
+    },
+    "Finance": {
+      "status": "PASS",
+      "details": "Double-entry debit = credit"
+    }
+  },
+  "evidenceArtifacts": {
+    "provenancePath": "C:\\Users\\Administrator\\Desktop\\Projects\\KwakoPos v2.0.0\\artifacts\\releases\\2.2.0\\provenance.json",
+    "sbomPath": "C:\\Users\\Administrator\\Desktop\\Projects\\KwakoPos v2.0.0\\artifacts\\releases\\2.2.0\\sbom.spdx.json"
+  },
+  "digest": "sha256:cc0b0ec5a15c8cac4fe9187060600c71a02e2f00597dcebf12e9ac2336e5227e"
+}

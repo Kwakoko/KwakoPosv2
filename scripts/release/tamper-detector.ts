@@ -73,7 +73,16 @@ export function runTamperDetection(): TamperReport {
 
   const artifactDir = path.resolve(process.cwd(), "artifacts", "release-evidence");
   fs.mkdirSync(artifactDir, { recursive: true });
-  fs.writeFileSync(path.join(artifactDir, "kwakopos-tamper-report.json"), JSON.stringify(report, null, 2), "utf8");
+  const reportPath = path.join(artifactDir, "kwakopos-tamper-report.json");
+  for (let i = 0; i < 5; i++) {
+    try {
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf8");
+      break;
+    } catch (e) {
+      if (i === 4) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
 
   if (isTampered && process.env.CI === "true") {
     throw new Error(auditMessage);

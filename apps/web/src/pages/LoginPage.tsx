@@ -31,9 +31,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail && !password) {
+      setError("Please enter your email and password.");
+      return;
+    }
+    if (!trimmedEmail) {
+      setError("Please enter your email address.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
     setBusy(true);
     try {
-      await login(email.trim(), password);
+      await login(trimmedEmail, password);
       onAuthenticated();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");
@@ -105,7 +118,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           <span className="v2-text-xs v2-text-muted">
             © {new Date().getFullYear()} KwakoPos Platform Systems
             <span className="footer-dot"> · </span>
-            {release?.appVersion ? `v${release.appVersion}` : "v2.0.0"}
+            {release?.appVersion ? `v${release.appVersion}` : "v2.12.5"}
             {release?.gitSha && (
               <>
                 <span className="footer-dot"> · </span>
@@ -158,7 +171,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
             <label htmlFor="password" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">PASSWORD</label>
             <div className="v2-auth-input-wrap">
               <Lock size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" autoComplete="current-password" />
+              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" required autoComplete="current-password" />
               <button type="button" className="v2-auth-password-toggle" onClick={() => setShowPass((current) => !current)} aria-label={showPass ? "Hide password" : "Show password"}>
                 {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>

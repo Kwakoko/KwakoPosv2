@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-09-02T01:59:36.296Z",
-  "rootVersion": "2.5.0",
+  "timestamp": "2026-09-03T12:39:51.546Z",
+  "rootVersion": "2.12.5",
   "totalPackages": 9,
   "syncedPackagesCount": 9,
   "mismatchedPackagesCount": 0,
@@ -8,63 +8,63 @@
     {
       "packagePath": "apps\\api\\package.json",
       "packageName": "@kwakopos2/api",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "apps\\web\\package.json",
       "packageName": "@kwakopos2/web",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\auth\\package.json",
       "packageName": "@kwakopos2/auth",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\config\\package.json",
       "packageName": "@kwakopos2/config",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\contracts\\package.json",
       "packageName": "@kwakopos2/contracts",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\database\\package.json",
       "packageName": "@kwakopos2/database",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\domain\\package.json",
       "packageName": "@kwakopos2/domain",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\observability\\package.json",
       "packageName": "@kwakopos2/observability",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     },
     {
       "packagePath": "packages\\sync\\package.json",
       "packageName": "@kwakopos2/sync",
-      "version": "2.5.0",
+      "version": "2.12.5",
       "isVersionMatch": true,
       "mismatchedDependencies": []
     }

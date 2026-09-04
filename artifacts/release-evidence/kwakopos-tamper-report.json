@@ -1,8 +1,12 @@
 {
-  "isTampered": false,
+  "isTampered": true,
   "protectedFilesChecked": 7,
-  "modifiedProtectedFiles": [],
+  "modifiedProtectedFiles": [
+    "package-lock.json",
+    "package.json",
+    "scripts/release/tamper-detector.ts"
+  ],
   "branchName": "main",
-  "gitSha": "9e2c9ec50916e892e4ee41f4b1cc5737056de648",
-  "auditMessage": "PASS: Release control file integrity verified for commit 9e2c9ec on branch main."
+  "gitSha": "a7ae70aa56d005946d1bf842c6d6b02fa4b30022",
+  "auditMessage": "RELEASE_BLOCKED: Tampering detected in release control files: package-lock.json, package.json, scripts/release/tamper-detector.ts"
 }

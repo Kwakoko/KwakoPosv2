@@ -8,6 +8,8 @@ coverage
 artifacts/*
 !artifacts/release-evidence/
 !artifacts/release-evidence/**
+!artifacts/certification-evidence/
+!artifacts/certification-evidence/**
 *.tsbuildinfo
 *.js.map
 *.d.ts.map

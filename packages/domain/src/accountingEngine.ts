@@ -30,6 +30,8 @@ export const DEFAULT_CHART_OF_ACCOUNTS: DefaultAccountTemplate[] = [
   { accountCode: "2110", name: "Trade Creditors (Accounts Payable)", accountClass: "LIABILITY", accountGroup: "ACCOUNTS_PAYABLE", description: "Supplier liabilities", isSystem: true },
   { accountCode: "2210", name: "VAT Output Payable (18%)", accountClass: "LIABILITY", accountGroup: "TAX_PAYABLE", description: "Tax liability on sales", isSystem: true },
   { accountCode: "2310", name: "Customer Advances & Deposits", accountClass: "LIABILITY", accountGroup: "CURRENT_LIABILITY", description: "Unearned revenue / deposits", isSystem: false },
+  { accountCode: "2410", name: "PAYE & Statutory Payroll Withholding", accountClass: "LIABILITY", accountGroup: "PAYROLL_LIABILITY", description: "Tax and statutory deductions payable", isSystem: true },
+  { accountCode: "2420", name: "Accrued Net Salaries & Wages Payable", accountClass: "LIABILITY", accountGroup: "PAYROLL_LIABILITY", description: "Net wages due to employees", isSystem: true },
 
   // 3000 — Equity
   { accountCode: "3100", name: "Owner Capital / Equity", accountClass: "EQUITY", accountGroup: "EQUITY", description: "Contributed business capital", isSystem: true },

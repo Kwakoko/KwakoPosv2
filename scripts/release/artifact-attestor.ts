@@ -31,7 +31,15 @@ export function generateArtifactAttestation(versionStr?: string, gitShaStr?: str
   const pkgPath = path.resolve(process.cwd(), "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
   const version = versionStr || pkg.version;
-  const gitSha = gitShaStr || process.env.GITHUB_SHA;
+  let gitSha = gitShaStr || process.env.GITHUB_SHA;
+  if (!gitSha) {
+    try {
+      const { execSync } = require("child_process");
+      gitSha = execSync("git rev-parse HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      // Fallback
+    }
+  }
   const repository = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPosv2";
   if (!version) throw new Error("Release version is required for provenance attestation");
   if (!gitSha || !/^[0-9a-f]{7,64}$/i.test(gitSha)) throw new Error("A valid GITHUB_SHA is required for provenance attestation");

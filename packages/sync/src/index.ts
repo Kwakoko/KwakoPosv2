@@ -14,6 +14,7 @@ import type {
   CreatePurchaseOrderRequest,
   CreatePurchaseReceiptRequest,
   CreatePaymentRequest,
+  CreateSaleReturnRequest,
   OpenCashSessionRequest,
 } from "@kwakopos2/contracts";
 import {
@@ -76,7 +77,7 @@ export class SyncEngine {
           entityId: existingOp.entityId,
           operationType: existingOp.operationType as any,
           payload: existingOp.payload as any,
-          clientCreatedAt: existingOp.clientCreatedAt,
+          clientCreatedAt: typeof existingOp.clientCreatedAt === "string" ? existingOp.clientCreatedAt : new Date(existingOp.clientCreatedAt).toISOString(),
           idempotencyKey: existingOp.idempotencyKey,
         });
         if (existingFingerprint !== operationFingerprint(op)) {
@@ -88,6 +89,10 @@ export class SyncEngine {
       }
 
       try {
+        if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
+          throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: Super Admin and Role entities cannot be mutated via sync payloads.");
+        }
+
         if (op.entityType === "Product" && op.operationType === "CREATE") {
           const productPayload = op.payload as unknown as CreateProductRequest;
           const hasExplicitVariantCreate = orderedOperations.some((candidate) =>
@@ -161,6 +166,13 @@ export class SyncEngine {
         } else if (op.entityType === "Payment" && op.operationType === "CREATE") {
           const payload = op.payload as unknown as CreatePaymentRequest;
           void payload;
+        } else if ((op.entityType === "SaleReturn" || op.entityType === "Return") && op.operationType === "CREATE") {
+          this.commercialRepo.createSaleReturn(ctx, {
+            ...(op.payload as unknown as CreateSaleReturnRequest),
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: op.idempotencyKey,
+          });
         } else if (op.entityType === "CashSession" && op.operationType === "CREATE") {
           this.commercialRepo.openCashSession(ctx, op.payload as unknown as OpenCashSessionRequest);
         } else if (op.entityType?.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(op.entityType)) {

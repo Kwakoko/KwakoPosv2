@@ -1,14 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
-
-const dir = path.dirname(fileURLToPath(import.meta.url));
+const dir = typeof __dirname !== "undefined"
+  ? __dirname
+  : (process.cwd().endsWith("web") ? process.cwd() : path.join(process.cwd(), "apps/web"));
 const publicDir = path.join(dir, "public");
 fs.mkdirSync(publicDir, { recursive: true });
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
 const version = String(packageJson.version || "0.0.0");
-const cacheName = `kwakopos-runtime-v${version}`;
+const cacheName = `kwakopos-pwa-v${version}`;
 
 fs.writeFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
   name: "KwakoPos 2.0 POS & Enterprise System",

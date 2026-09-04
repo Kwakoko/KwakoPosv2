@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "@kwakopos2/database";
-import { TenantOnboardingCreateRequestSchema } from "@kwakopos2/contracts/tenantOnboardingContracts";
+import { TenantOnboardingCreateRequestSchema } from "@kwakopos2/contracts";
 import { TenantOnboardingError, TenantOnboardingService } from "../services/tenantOnboardingService.js";
 
 function requireContext(req: FastifyRequest) {

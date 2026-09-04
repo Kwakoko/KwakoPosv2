@@ -111,6 +111,9 @@ export class ScopedFinanceRepository {
     cogsAccountId: string;
     expenseDefaultAccountId: string;
     cashVarianceAccountId: string;
+    salariesExpenseAccountId: string;
+    payrollTaxesPayableAccountId: string;
+    netSalariesPayableAccountId: string;
   } {
     this.ensureDefaultAccounts(ctx);
     const getCodeId = (code: string) => this.getAccountByCode(ctx, code)?.id || randomUUID();
@@ -126,6 +129,9 @@ export class ScopedFinanceRepository {
       cogsAccountId: getCodeId("5100"),
       expenseDefaultAccountId: getCodeId("6900"),
       cashVarianceAccountId: getCodeId("8100"),
+      salariesExpenseAccountId: getCodeId("6300"),
+      payrollTaxesPayableAccountId: getCodeId("2410"),
+      netSalariesPayableAccountId: getCodeId("2420"),
     };
   }
 

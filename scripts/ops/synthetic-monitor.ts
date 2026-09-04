@@ -1236,7 +1236,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     laborHours: 4,
     laborRate: 35000,
     laborCostTotal: laborCostP08,
-    grandTotal: grandP08,
+    grandTotal: grandP08.grandTotal,
     qaPassed: false,
     qaInspectorId: null,
   });
@@ -1290,7 +1290,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   });
   const priceP10 = wholesaleEngine.calculateUnitPrice(10000, 150, wholesaleRuleP10.tiers as any);
   const palletP10 = wholesaleEngine.calculatePalletBreakdown(1250, 12, 50);
-  const passP10 = priceP10 === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;
+  const passP10 = priceP10.unitPrice === 8000 && palletP10.pallets === 2 && palletP10.pieces === 2;
   results.push({
     testSuite: "SYNTHETIC_TEST_P10_WHOLESALE_TIER_PRICING_PALLET_MATH",
     syntheticTenantId,

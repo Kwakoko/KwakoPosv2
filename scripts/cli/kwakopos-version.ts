@@ -18,6 +18,7 @@ async function main() {
   const isDryRun = args.includes("--dry-run");
   const isJson = args.includes("--json");
   const isEvidence = args.includes("--evidence");
+  const isSkipProcessCheck = isForce || args.includes("--skip-process-check");
   const modeArgIndex = args.indexOf("--mode");
   const mode = modeArgIndex !== -1 && args[modeArgIndex + 1] === "B" ? "MODE_B_RELEASE_PROMOTION" : "MODE_A";
 
@@ -84,8 +85,16 @@ async function main() {
     }
     case "sync": {
       console.log("Triggering Local Semantic Version Folder Synchronization Engine...");
-      const result = await synchronizeLocalVersionFolder({ cwd, force: isForce, dryRun: isDryRun, mode, allowOfflineMock: true });
-      if (isEvidence && result.success) {
+      const result = await synchronizeLocalVersionFolder({
+        cwd,
+        force: isForce,
+        dryRun: isDryRun,
+        skipProcessCheck: isSkipProcessCheck,
+        mode,
+        allowOfflineMock: true,
+      });
+
+      if (isEvidence && result.success && (!result.evidencePath || !result.evidenceSha256)) {
         const metadata = readSyncMetadata(result.targetPath) || {
           project: localRepo.projectName,
           repository: "Kwakoko/KwakoPosv2",
@@ -94,12 +103,23 @@ async function main() {
           folder: localRepo.folderName,
           previous_folder: localRepo.folderName,
           synced_at: new Date().toISOString(),
-          status: "SYNCHRONIZED",
-          transactionPhase: "COMPLETED" as const,
+          status: "SYNCHRONIZED" as const,
           machine: "local",
           mode,
+          transactionPhase: "COMPLETED" as const,
         };
-        const evidence = generateSyncEvidenceBundle(metadata, localRepo.commitSha, result.targetPath);
+        const targetSha = result.certifiedSha || result.localHeadSha || localRepo.commitSha;
+        const evidence = generateSyncEvidenceBundle(
+          metadata,
+          {
+            githubReleaseTag: `v${result.targetVersion}`,
+            githubResolvedCommitSha: result.githubResolvedCommitSha || targetSha,
+            localHeadSha: result.localHeadSha || targetSha,
+            certificationSha: targetSha,
+            containerSourceSha: result.containerSourceSha || targetSha,
+          },
+          result.targetPath
+        );
         result.evidencePath = evidence.evidencePath;
         result.evidenceSha256 = evidence.evidenceSha256;
       }

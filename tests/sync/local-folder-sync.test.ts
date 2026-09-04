@@ -19,6 +19,8 @@ import {
   assertValid40CharGitSha,
   isValid40CharGitSha,
   verifyPostRenameGitIntegrity,
+  detectVersionFromFolderName,
+  isProcessAlive,
 } from "../../scripts/release/localVersionFolderSyncEngine.js";
 
 describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrity)", () => {
@@ -59,6 +61,13 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
     it("should evaluate alphanumeric precedence correctly (alpha < beta < rc)", () => {
       expect(compareSemVer("3.0.0-alpha.1", "3.0.0-beta.1")).toBeLessThan(0);
       expect(compareSemVer("3.0.0-beta.1", "3.0.0-rc.1")).toBeLessThan(0);
+    });
+
+    it("should correctly detect versions with build metadata and prereleases from folder names", () => {
+      expect(detectVersionFromFolderName("KwakoPos-v2.0.0")).toBe("2.0.0");
+      expect(detectVersionFromFolderName("KwakoPos-v2.12.5-rc.1")).toBe("2.12.5-rc.1");
+      expect(detectVersionFromFolderName("KwakoPos-v2.0.0+build.123")).toBe("2.0.0+build.123");
+      expect(detectVersionFromFolderName("KwakoPos-v2.0.0-beta.1+exp.sha.5114f85")).toBe("2.0.0-beta.1+exp.sha.5114f85");
     });
   });
 
@@ -111,6 +120,11 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
       expect(typeof procCheck.active).toBe("boolean");
       expect(Array.isArray(procCheck.processes)).toBe(true);
     });
+
+    it("should correctly identify current PID as alive", () => {
+      expect(isProcessAlive(process.pid)).toBe(true);
+      expect(isProcessAlive(99999999)).toBe(false);
+    });
   });
 
   describe("4. Mode B Release Promotion & Directory Pointer", () => {
@@ -153,6 +167,54 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
       expect(fs.existsSync(pointerFile)).toBe(true);
       const pointerData = JSON.parse(fs.readFileSync(pointerFile, "utf8"));
       expect(pointerData.currentRelease).toBe("KwakoPos-v2.8.0");
+    });
+
+    it("should atomically roll back Mode B promotion folder back to project root and update pointer", async () => {
+      const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
+      fs.mkdirSync(mockProjectDir, { recursive: true });
+      fs.mkdirSync(path.join(mockProjectDir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+
+      const localHead = inspectLocalRepository(mockProjectDir).commitSha;
+      const targetSha = isValid40CharGitSha(localHead) ? localHead : valid40CharSha;
+
+      const syncRes = await synchronizeLocalVersionFolder({
+        cwd: mockProjectDir,
+        mockRelease: {
+          repo: "Kwakoko/KwakoPosv2",
+          tag: "v2.8.0",
+          version: "2.8.0",
+          commitSha: targetSha,
+          publishedAt: new Date().toISOString(),
+          draft: false,
+          prerelease: false,
+          certified: true,
+          htmlUrl: "",
+        },
+        expectedCommitSha: targetSha,
+        containerSourceSha: targetSha,
+        mode: "MODE_B_RELEASE_PROMOTION",
+        force: true,
+        skipProcessCheck: true,
+      });
+
+      expect(syncRes.success).toBe(true);
+      const promotedDir = syncRes.targetPath;
+      expect(fs.existsSync(promotedDir)).toBe(true);
+
+      const rollbackRes = await performRollback(promotedDir);
+      expect(rollbackRes.success).toBe(true);
+      expect(rollbackRes.rolledBackTo).toBe("KwakoPos-v2.7.0");
+
+      // Verify folder was restored to root parent (tempDir), NOT left inside tempDir/releases
+      const restoredPath = path.join(tempDir, "KwakoPos-v2.7.0");
+      expect(fs.existsSync(restoredPath)).toBe(true);
+      expect(fs.existsSync(promotedDir)).toBe(false);
+
+      const pointerFile = path.join(tempDir, "current.ptr");
+      expect(fs.existsSync(pointerFile)).toBe(true);
+      const pointerData = JSON.parse(fs.readFileSync(pointerFile, "utf8"));
+      expect(pointerData.currentRelease).toBe("KwakoPos-v2.7.0");
     });
   });
 

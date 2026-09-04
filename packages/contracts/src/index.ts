@@ -1048,10 +1048,13 @@ export const CommercialEntityTypeEnum = z.enum([
   "Customer",
   "Supplier",
   "Sale",
+  "Return",
+  "SaleReturn",
   "PurchaseOrder",
   "PurchaseReceipt",
   "Payment",
   "CashSession",
+  "Expense",
 ]);
 export type CommercialEntityType = z.infer<typeof CommercialEntityTypeEnum>;
 
@@ -1293,6 +1296,7 @@ export const JournalEntrySchema = z.object({
     "RETURN",
     "TRANSFER",
     "CASH_SESSION",
+    "PAYROLL",
     "MANUAL",
     "REVERSAL",
   ]),
@@ -1328,6 +1332,7 @@ export const CreateJournalEntryRequestSchema = z.object({
     "RETURN",
     "TRANSFER",
     "CASH_SESSION",
+    "PAYROLL",
     "MANUAL",
     "REVERSAL",
   ]).default("MANUAL"),
@@ -2657,6 +2662,8 @@ export const CreateReceiptRequestSchema = z.object({
   notes: z.string().optional(),
 });
 export type CreateReceiptRequest = z.infer<typeof CreateReceiptRequestSchema>;
+
+export * from "./tenantOnboardingContracts.js";
 
 
 

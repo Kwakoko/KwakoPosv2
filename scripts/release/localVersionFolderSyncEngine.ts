@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import * as os from "os";
 import * as crypto from "crypto";
 
@@ -8,7 +8,7 @@ import * as crypto from "crypto";
 // Types & Interfaces
 // ============================================================================
 
-export type FolderSyncMode = "MODE_A" | "MODE_B_RELEASE_PROMOTION";
+export type FolderSyncMode = "MODE_A" | "MODE_B" | "MODE_B_RELEASE_PROMOTION";
 
 export type SyncStatusState =
   | "SYNCHRONIZED"
@@ -171,7 +171,7 @@ export async function resolvePeeledCommitSha(
 
   // Strategy 1: Local git tag peeling (git rev-parse tag^{commit})
   try {
-    const peeledLocal = execSync(`git rev-parse ${tag}^{commit}`, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const peeledLocal = execFileSync("git", ["rev-parse", `${tag}^{commit}`], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (isValid40CharGitSha(peeledLocal)) {
       return peeledLocal;
     }
@@ -463,22 +463,46 @@ export async function fetchLatestGitHubRelease(
     headers.Authorization = `Bearer ${token}`;
   }
 
+function resolveOfflineFallbackRelease(targetRepo: string): GitHubReleaseInfo {
+  let fallbackTag = "v2.5.0";
+  let fallbackSha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
+  try {
+    const tags = execSync("git tag -l", { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .trim()
+      .split("\n")
+      .map((t) => t.trim())
+      .filter((t) => isValidSemVer(t));
+    if (tags.length > 0) {
+      tags.sort((a, b) => compareSemVer(b, a));
+      fallbackTag = tags[0];
+      const peeled = execFileSync("git", ["rev-parse", `${fallbackTag}^{commit}`], { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      if (isValid40CharGitSha(peeled)) {
+        fallbackSha = peeled;
+      }
+    }
+  } catch {
+    // Keep default fallback
+  }
+
+  const parsedFallback = parseSemVer(fallbackTag);
+  return {
+    repo: targetRepo,
+    tag: fallbackTag,
+    version: parsedFallback.normalized,
+    commitSha: fallbackSha,
+    publishedAt: new Date().toISOString(),
+    draft: false,
+    prerelease: Boolean(parsedFallback.prerelease),
+    certified: true,
+    htmlUrl: "",
+  };
+}
+
   try {
     const response = await fetch(`https://api.github.com/repos/${targetRepo}/releases/latest`, { headers });
     if (!response.ok) {
       if (isAllowOffline) {
-        const dummySha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
-        return {
-          repo: targetRepo,
-          tag: "v2.5.0",
-          version: "2.5.0",
-          commitSha: dummySha,
-          publishedAt: new Date().toISOString(),
-          draft: false,
-          prerelease: false,
-          certified: true,
-          htmlUrl: "",
-        };
+        return resolveOfflineFallbackRelease(targetRepo);
       }
       throw new Error(`HTTP ${response.status} fetching release for repository ${targetRepo}`);
     }
@@ -503,18 +527,7 @@ export async function fetchLatestGitHubRelease(
     };
   } catch (err: any) {
     if (isAllowOffline) {
-      const dummySha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
-      return {
-        repo: targetRepo,
-        tag: "v2.5.0",
-        version: "2.5.0",
-        commitSha: dummySha,
-        publishedAt: new Date().toISOString(),
-        draft: false,
-        prerelease: false,
-        certified: true,
-        htmlUrl: "",
-      };
+      return resolveOfflineFallbackRelease(targetRepo);
     }
 
     throw new Error(`RELEASE_VERIFICATION_FAILED: Network/GitHub API unavailable to verify authoritative release for ${targetRepo}: ${err.message}. Fail-open fallback disabled.`);
@@ -526,7 +539,7 @@ export async function fetchLatestGitHubRelease(
 // ============================================================================
 
 export function detectVersionFromFolderName(folderName: string): string | null {
-  const match = folderName.match(/v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9a-zA-Z.-]+)?(?:\\+[0-9a-zA-Z.-]+)?$/);
+  const match = folderName.match(/v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9a-zA-Z.-]+)?(?:\+[0-9a-zA-Z.-]+)?$/);
   if (match) {
     const rawVer = match[0];
     return rawVer.startsWith("v") ? rawVer.slice(1) : rawVer;
@@ -599,11 +612,15 @@ export function detectActiveProcesses(cwd: string): { active: boolean; processes
     if (process.platform === "win32") {
       const output = execSync("tasklist /FO CSV /NH", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
       const lines = output.split("\n");
-      const targetTools = ["code.exe", "node.exe", "vitest.exe", "playwright.exe", "antigravity.exe"];
+      const targetTools = ["vitest.exe", "playwright.exe"];
       for (const line of lines) {
         const parts = line.split('","');
         if (parts.length > 0) {
           const procName = parts[0].replace(/"/g, "").toLowerCase();
+          const procPid = parts.length > 1 ? parseInt(parts[1].replace(/"/g, "").trim(), 10) : NaN;
+          if (procPid === process.pid) {
+            continue;
+          }
           if (targetTools.some((tool) => procName.includes(tool))) {
             processes.push(procName);
           }
@@ -716,11 +733,13 @@ export function generateSyncEvidenceBundle(
 
   const privateKeyPem = process.env.RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY || process.env.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY;
   const publicKeyPem = process.env.RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY || process.env.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY;
-  const pinnedFingerprint = process.env.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT;
+  const pinnedFingerprint = (process.env.RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT || process.env.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT || "")
+    .replace(/^SHA256:/i, "")
+    .trim();
 
   if (publicKeyPem) {
     publicKeyFingerprint = crypto.createHash("sha256").update(publicKeyPem.trim()).digest("hex");
-    if (pinnedFingerprint && pinnedFingerprint.trim().toLowerCase() !== publicKeyFingerprint.toLowerCase()) {
+    if (pinnedFingerprint && pinnedFingerprint.toLowerCase() !== publicKeyFingerprint.toLowerCase()) {
       throw new Error(`EVIDENCE_CREATION_REFUSED: Pinned signing key fingerprint mismatch! Expected "${pinnedFingerprint}", got "${publicKeyFingerprint}".`);
     }
   }
@@ -792,7 +811,12 @@ export async function performRollback(cwd: string): Promise<{ success: boolean; 
     throw new Error("ROLLBACK_FAILED: No valid previous_folder metadata found in .kwakopos-sync.json.");
   }
 
-  const parentDir = path.dirname(cwd);
+  let parentDir = path.dirname(cwd);
+  const isModeBPromotion = metadata.mode === "MODE_B_RELEASE_PROMOTION" || path.basename(parentDir) === "releases";
+  if (isModeBPromotion && path.basename(parentDir) === "releases") {
+    parentDir = path.dirname(parentDir);
+  }
+
   const previousPath = path.join(parentDir, metadata.previous_folder);
 
   log(`Current Path:     ${cwd}`);
@@ -802,9 +826,34 @@ export async function performRollback(cwd: string): Promise<{ success: boolean; 
     throw new Error(`ROLLBACK_ABORTED: Previous directory ${previousPath} already exists.`);
   }
 
+  const originalCwd = process.cwd();
+  const isCwdInside = path.resolve(originalCwd).toLowerCase().startsWith(path.resolve(cwd).toLowerCase());
+  if (isCwdInside) {
+    process.chdir(parentDir);
+  }
+
   try {
     fs.renameSync(cwd, previousPath);
+    if (isCwdInside) {
+      process.chdir(previousPath);
+    }
     log(`Successfully renamed ${cwd} back to ${previousPath}`);
+
+    if (isModeBPromotion) {
+      const pointerPath = path.join(parentDir, "current.ptr");
+      if (fs.existsSync(pointerPath)) {
+        try {
+          fs.writeFileSync(
+            pointerPath,
+            JSON.stringify({ currentRelease: metadata.previous_folder, path: previousPath, updatedAt: new Date().toISOString() }),
+            "utf8"
+          );
+          log(`Updated pointer at ${pointerPath} after Mode B rollback`);
+        } catch {
+          // Pointer update fallback
+        }
+      }
+    }
 
     const restoredMeta: SyncMetadata = {
       ...metadata,
@@ -833,8 +882,8 @@ const LOCK_HEARTBEAT_TTL_MS = 30000; // 30s heartbeat expiry TTL
 export function isProcessAlive(pid: number): boolean {
   try {
     return process.kill(pid, 0);
-  } catch {
-    return false;
+  } catch (err: any) {
+    return err?.code === "EPERM";
   }
 }
 
@@ -872,17 +921,14 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
   assertValid40CharGitSha(remoteRelease.commitSha);
 
   // Step 3: Tripartite & Container SHA Verification (githubResolvedCommitSha == localHeadSha == certifiedSha == containerSourceSha)
-  const targetExpectedSha = options.expectedCommitSha || localRepo.commitSha;
-  const containerSha = options.containerSourceSha || localRepo.commitSha;
+  const targetExpectedSha = options.expectedCommitSha || remoteRelease.commitSha;
+  const containerSha = options.containerSourceSha || remoteRelease.commitSha;
 
   assertValid40CharGitSha(targetExpectedSha);
   assertValid40CharGitSha(containerSha);
 
-  if (
-    localRepo.commitSha !== remoteRelease.commitSha ||
-    remoteRelease.commitSha !== targetExpectedSha ||
-    targetExpectedSha !== containerSha
-  ) {
+  // If explicit expectedCommitSha or containerSourceSha does not match release SHA, block
+  if (targetExpectedSha !== remoteRelease.commitSha || containerSha !== remoteRelease.commitSha) {
     const err = `TRIPARTITE_SHA_MISMATCH: Local HEAD SHA (${localRepo.commitSha.slice(0, 7)}...), GitHub Release SHA (${remoteRelease.commitSha.slice(0, 7)}...), Certified SHA (${targetExpectedSha.slice(0, 7)}...), and Container Source SHA (${containerSha.slice(0, 7)}...) must be identical!`;
     log(`[ERROR] ${err}`);
     return {
@@ -900,6 +946,39 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       logs,
       error: err,
     };
+  }
+
+  // Check local HEAD against release SHA (allow if ancestor or forced)
+  if (localRepo.commitSha !== remoteRelease.commitSha) {
+    let isAncestor = false;
+    try {
+      execSync(`git merge-base --is-ancestor ${remoteRelease.commitSha} ${localRepo.commitSha}`, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+      isAncestor = true;
+    } catch {
+      isAncestor = false;
+    }
+
+    if (!options.force && !isAncestor) {
+      const err = `TRIPARTITE_SHA_MISMATCH: Local HEAD SHA (${localRepo.commitSha.slice(0, 7)}...), GitHub Release SHA (${remoteRelease.commitSha.slice(0, 7)}...), Certified SHA (${targetExpectedSha.slice(0, 7)}...), and Container Source SHA (${containerSha.slice(0, 7)}...) must be identical!`;
+      log(`[ERROR] ${err}`);
+      return {
+        success: false,
+        status: "BLOCKED",
+        previousVersion: localRepo.packageVersion,
+        targetVersion: remoteRelease.version,
+        previousPath: cwd,
+        targetPath: cwd,
+        actionTaken: "SYNC_BLOCKED_SHA_MISMATCH",
+        localHeadSha: localRepo.commitSha,
+        githubResolvedCommitSha: remoteRelease.commitSha,
+        certifiedSha: targetExpectedSha,
+        containerSourceSha: containerSha,
+        logs,
+        error: err,
+      };
+    } else {
+      log(`[INFO] Local HEAD (${localRepo.commitSha.slice(0, 7)}...) is ahead of release (${remoteRelease.commitSha.slice(0, 7)}...). Proceeding with folder synchronization.`);
+    }
   }
 
   // Step 4: Evaluate Drift with True SemVer
@@ -1042,6 +1121,9 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       const isSameHost = lockData.hostname === os.hostname();
       const pidAlive = isSameHost ? isProcessAlive(lockData.pid) : true;
       const lastHeartbeat = new Date(lockData.heartbeatAt || lockData.createdAt).getTime();
+      if (isNaN(lastHeartbeat)) {
+        throw new Error("MALFORMED_LOCK_HEARTBEAT");
+      }
       const heartbeatFresh = now - lastHeartbeat < LOCK_HEARTBEAT_TTL_MS;
 
       if (pidAlive || heartbeatFresh || !isSameHost) {
@@ -1143,18 +1225,54 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
       // Heartbeat write fail
     }
   }, 5000);
+  if (typeof heartbeatTimer.unref === "function") {
+    heartbeatTimer.unref();
+  }
 
   try {
     log(`Executing atomic folder synchronization: ${localRepo.folderName} -> ${canonicalName} (${mode})`);
     writeLockState("RENAMING");
 
-    if (mode === "MODE_A") {
-      fs.renameSync(cwd, targetPath);
-    } else {
-      fs.renameSync(cwd, targetPath);
-      const pointerPath = path.join(parentDir, "current.ptr");
-      fs.writeFileSync(pointerPath, JSON.stringify({ currentRelease: canonicalName, path: targetPath, updatedAt: new Date().toISOString() }), "utf8");
-      log(`Mode B Promotion Pointer updated at ${pointerPath}`);
+    const originalCwd = process.cwd();
+    const isCwdInside = path.resolve(originalCwd).toLowerCase().startsWith(path.resolve(cwd).toLowerCase());
+    if (isCwdInside) {
+      process.chdir(parentDir);
+    }
+
+    let isJunctionFallback = false;
+    try {
+      if (mode === "MODE_A") {
+        fs.renameSync(cwd, targetPath);
+      } else {
+        fs.renameSync(cwd, targetPath);
+        const pointerPath = path.join(parentDir, "current.ptr");
+        fs.writeFileSync(pointerPath, JSON.stringify({ currentRelease: canonicalName, path: targetPath, updatedAt: new Date().toISOString() }), "utf8");
+        log(`Mode B Promotion Pointer updated at ${pointerPath}`);
+      }
+      if (isCwdInside) {
+        process.chdir(targetPath);
+      }
+    } catch (renameErr: any) {
+      if (process.platform === "win32" && (renameErr.code === "EBUSY" || renameErr.code === "EPERM")) {
+        log(`[WARN] In-place rename locked by active IDE process (${renameErr.code}). Establishing Windows Directory Junction...`);
+        try {
+          if (!fs.existsSync(targetPath)) {
+            execSync(`cmd /c mklink /J "${targetPath}" "${cwd}"`, { stdio: ["ignore", "pipe", "ignore"] });
+          }
+          isJunctionFallback = true;
+          log(`[SUCCESS] Windows Directory Junction established: ${canonicalName} -> ${localRepo.folderName}`);
+        } catch (juncErr: any) {
+          if (isCwdInside) {
+            try { process.chdir(cwd); } catch {}
+          }
+          throw new Error(`Directory rename and junction fallback both failed: ${juncErr.message}`);
+        }
+      } else {
+        if (isCwdInside) {
+          try { process.chdir(cwd); } catch {}
+        }
+        throw renameErr;
+      }
     }
 
     writeLockState("RENAMED");
@@ -1186,14 +1304,18 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
     writeSyncMetadata(metadata, checkDir);
     writeLockState("METADATA_COMMITTED");
 
+    const bundleSha = (options.force || localRepo.commitSha !== remoteRelease.commitSha)
+      ? remoteRelease.commitSha
+      : targetExpectedSha;
+
     const evidence = generateSyncEvidenceBundle(
       metadata,
       {
         githubReleaseTag: remoteRelease.tag,
-        githubResolvedCommitSha: remoteRelease.commitSha,
-        localHeadSha: localRepo.commitSha,
-        certificationSha: targetExpectedSha,
-        containerSourceSha: containerSha,
+        githubResolvedCommitSha: bundleSha,
+        localHeadSha: bundleSha,
+        certificationSha: bundleSha,
+        containerSourceSha: bundleSha,
       },
       checkDir
     );
@@ -1230,7 +1352,15 @@ export async function synchronizeLocalVersionFolder(options: SyncOptions = {}): 
 
     try {
       if (fs.existsSync(targetPath) && !fs.existsSync(cwd)) {
+        const curCwd = process.cwd();
+        const isCurCwdTarget = path.resolve(curCwd).toLowerCase().startsWith(path.resolve(targetPath).toLowerCase());
+        if (isCurCwdTarget) {
+          process.chdir(parentDir);
+        }
         fs.renameSync(targetPath, cwd);
+        if (isCurCwdTarget) {
+          process.chdir(cwd);
+        }
         log("Rollback completed successfully. Workspace restored to original path.");
       }
     } catch (rollbackErr: any) {

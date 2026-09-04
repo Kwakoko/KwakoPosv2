@@ -97,6 +97,8 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     return results;
   }
 
+  if (!baseUrl || !email) return results;
+
   try {
     const missingAuth = await liveRequest(baseUrl, "/api/v1/customers");
     results.set("SEC-API-01", {

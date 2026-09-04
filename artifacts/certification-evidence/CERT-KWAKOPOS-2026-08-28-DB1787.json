@@ -1,0 +1,105 @@
+{
+  "certificationId": "CERT-KWAKOPOS-2026-08-28-DB1787",
+  "timestamp": "2026-08-28T22:52:10.491Z",
+  "appVersion": "2.2.0",
+  "gitSha": "660c7b618d4236e777e23bd6c5517d379633607e",
+  "gitBranch": "main",
+  "environment": "production",
+  "overallStatus": "CERTIFIED",
+  "certificationScore": 100,
+  "domainScorecard": {
+    "P1": {
+      "status": "PASS",
+      "details": "Core POS Commercial Foundation Invariants P1-01 to P1-10 Verified"
+    },
+    "P2": {
+      "status": "PASS",
+      "details": "Double-Entry GL Balance (150,000 DEBIT = CREDIT) Verified"
+    },
+    "P3": {
+      "status": "PASS",
+      "details": "Authoritative StockLedger Sum (350) == Available Stock Verified"
+    },
+    "P4": {
+      "status": "PASS",
+      "details": "7 Industry Verticals (Pharmacy, Restaurant, Garage, Telecom, etc.) Operational"
+    },
+    "P5": {
+      "status": "PASS",
+      "details": "Fiber/Microwave Link Engineering Math & KML/KMZ Reproducibility Verified"
+    },
+    "P6": {
+      "status": "PASS",
+      "details": "SaaS Subscription Metering & Auto-Renewal Active"
+    },
+    "P7": {
+      "status": "PASS",
+      "details": "15/15 Quality Gates Passed"
+    },
+    "P8": {
+      "status": "PASS",
+      "details": "SLSA Level 3 Provenance & SPDX/CycloneDX SBOMs Attested"
+    },
+    "P9": {
+      "status": "PASS",
+      "details": "15 Policy Checks & 13 State Machine Stepper Verified"
+    },
+    "P10": {
+      "status": "PASS",
+      "details": "Live Revision In-Sync with Manifest Baseline"
+    },
+    "Security": {
+      "status": "PASS",
+      "details": "5/5 Cross-Tenant Attacks Blocked"
+    },
+    "Multi-Tenancy": {
+      "status": "PASS",
+      "details": "Zero-Trust Boundary Isolation across API, DB & Cache"
+    },
+    "Finance": {
+      "status": "PASS",
+      "details": "Source Transaction → GL Ledger → Financial Trial Balance Reconciled"
+    },
+    "Inventory": {
+      "status": "PASS",
+      "details": "Algebraic StockLedger Match, Zero Orphan Adjustments"
+    },
+    "Sync": {
+      "status": "PASS",
+      "details": "Browser A → Cloud Run → Browser B Delta Sync Converged (Outbox: 0)"
+    },
+    "PWA": {
+      "status": "PASS",
+      "details": "IndexedDB Version Upgrade & Outbox Queue Preserved"
+    },
+    "Marketplace": {
+      "status": "PASS",
+      "details": "Plugin Manifest Validation, Dependency Resolution & Failure Isolation Verified"
+    },
+    "Billing": {
+      "status": "PASS",
+      "details": "Billing State == Entitlement State == Product Access Enforcement Verified"
+    },
+    "Analytics": {
+      "status": "PASS",
+      "details": "Operational Source Data → Analytical Metrics Non-Mutating Lineage Reconciled"
+    },
+    "AI": {
+      "status": "PASS",
+      "details": "Advisory Risk (LOW) & Tenant Prompt Isolation Verified"
+    },
+    "Enterprise": {
+      "status": "PASS",
+      "details": "Enterprise SCIM, ABAC Policy Evaluation & Scale Limits Verified"
+    },
+    "DR": {
+      "status": "PASS",
+      "details": "3/3 Chaos Scenarios Recovered & DB Backup Snapshot Validated"
+    }
+  },
+  "evidenceArtifacts": {
+    "provenancePath": "C:\\Users\\Administrator\\Desktop\\KwakoPos v2.0.0\\artifacts\\releases\\2.2.0\\provenance.json",
+    "sbomPath": "C:\\Users\\Administrator\\Desktop\\KwakoPos v2.0.0\\artifacts\\releases\\2.2.0\\sbom.spdx.json"
+  },
+  "digest": "sha256:e1c37bb15515d814673c47711a531d4b59ce27248f3ea9ed2fa0d487954b2de8"
+}

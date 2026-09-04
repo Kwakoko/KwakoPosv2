@@ -597,7 +597,7 @@ async function runProductionCertification() {
       operationId: "op-1",
       idempotencyKey: "key-1",
       createdAt: new Date().toISOString(),
-    },
+    } as any,
   ]);
   console.log("       ✓ INVARIANT T006 (Site Stock Issue Ledger Provenance) PASS");
 

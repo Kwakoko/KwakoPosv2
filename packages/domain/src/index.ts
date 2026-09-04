@@ -691,4 +691,5 @@ export function createTraceContext(opts: any): TraceContext {
 }
 
 export * from "./receiptEngine.js";
+export * from "./payrollPostingBridge.js";
 

@@ -18,6 +18,9 @@ export class PrismaSyncEngine {
 
     for (const op of orderedOperations) {
       try {
+        if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
+          throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: Super Admin and Role entities cannot be mutated via sync payloads.");
+        }
         const existing = await prisma.syncOperation.findFirst({
           where: {
             tenantId: ctx.tenantId,

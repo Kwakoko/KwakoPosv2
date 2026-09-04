@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { hashPassword } from "@kwakopos2/auth";
 import { StandardPluginCatalog } from "@kwakopos2/domain";
-import { TenantOnboardingCreateRequestSchema, TenantOnboardingUpdateRequestSchema } from "@kwakopos2/contracts/tenantOnboardingContracts";
+import { TenantOnboardingCreateRequestSchema, TenantOnboardingUpdateRequestSchema } from "@kwakopos2/contracts";
 
 const OWNER_PERMISSIONS = [
   "PRODUCT_VIEW", "PRODUCT_CREATE", "PRODUCT_EDIT", "PRODUCT_ARCHIVE", "INVENTORY_VIEW", "INVENTORY_ADJUST", "INVENTORY_TRANSFER", "INVENTORY_COUNT",

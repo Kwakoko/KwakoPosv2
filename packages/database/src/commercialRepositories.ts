@@ -43,11 +43,17 @@ import {
   TransactionNumbering,
   calculateAvailableStock,
 } from "@kwakopos2/domain";
-import { InMemoryStore, ScopedStockRepository } from "./index.js";
+import { InMemoryStore } from "./inMemoryStore.js";
 import { randomUUID } from "crypto";
+
+let _StockRepositoryClass: any = null;
+export function registerStockRepositoryClass(cls: any) {
+  _StockRepositoryClass = cls;
+}
 
 export class ScopedCommercialRepository {
   private store: InMemoryStore;
+  private stockRepo?: any;
 
   // Commercial store collections
   customers: Map<string, Customer> = new Map();
@@ -61,8 +67,15 @@ export class ScopedCommercialRepository {
   cashSessions: Map<string, CashSession> = new Map();
   expenses: Map<string, Expense> = new Map();
 
-  constructor(store: InMemoryStore) {
+  constructor(store: InMemoryStore, stockRepo?: any) {
     this.store = store;
+    this.stockRepo = stockRepo;
+  }
+
+  private getStockRepo(): any {
+    if (this.stockRepo) return this.stockRepo;
+    if (_StockRepositoryClass) return new _StockRepositoryClass(this.store);
+    throw new Error("Stock repository class not registered");
   }
 
   // ==========================================
@@ -280,8 +293,26 @@ export class ScopedCommercialRepository {
     // Update Supplier Payable Balance
     supplier.outstandingBalance = (supplier.outstandingBalance || 0) + totalReceiptCost;
 
+    // Update parent Purchase Order progress if linked
+    if (req.purchaseOrderId) {
+      const po = this.purchaseOrders.get(req.purchaseOrderId);
+      if (po && po.items) {
+        assertTenantIsolation(ctx, po.tenantId, po.branchId);
+        for (const item of req.items) {
+          const poItem = po.items.find((poi) => poi.variantId === item.variantId);
+          if (poItem) {
+            poItem.quantityReceived = (poItem.quantityReceived || 0) + item.quantityReceived;
+          }
+        }
+        const allReceived = po.items.every((poi) => poi.quantityReceived >= poi.quantityOrdered);
+        const anyReceived = po.items.some((poi) => (poi.quantityReceived || 0) > 0);
+        po.status = allReceived ? "RECEIVED" : anyReceived ? "PARTIALLY_RECEIVED" : po.status;
+        po.updatedAt = now;
+      }
+    }
+
     // Generate StockLedger additions (movementType: "PURCHASE")
-    const stockRepo = new ScopedStockRepository(this.store);
+    const stockRepo = this.getStockRepo();
     const ledgers: StockLedger[] = req.items.map((item) => {
       const variant = this.store.variants.get(item.variantId);
       return stockRepo.recordMovement(ctx, {
@@ -454,7 +485,7 @@ export class ScopedCommercialRepository {
     }
 
     // Generate StockLedger deductions (movementType: "SALE")
-    const stockRepo = new ScopedStockRepository(this.store);
+    const stockRepo = this.getStockRepo();
     const ledgers: StockLedger[] = lines.map((line) => {
       return stockRepo.recordMovement(ctx, {
         productId: line.productId,
@@ -493,6 +524,12 @@ export class ScopedCommercialRepository {
     if (req.originalSaleId) {
       const originalSale = this.sales.get(req.originalSaleId);
       assertReturnReferencesOriginalSale({ originalSaleId: req.originalSaleId }, !!originalSale);
+      if (originalSale) {
+        assertTenantIsolation(ctx, originalSale.tenantId, originalSale.branchId);
+        if (originalSale.status === "REFUNDED") {
+          throw new Error(`SALE_ALREADY_REFUNDED: Sale ${originalSale.saleNumber} has already been fully refunded`);
+        }
+      }
     }
 
     let totalRefundAmount = 0;
@@ -536,7 +573,7 @@ export class ScopedCommercialRepository {
     }
 
     // Generate StockLedger additions (movementType: "CUSTOMER_RETURN") for items in GOOD condition
-    const stockRepo = new ScopedStockRepository(this.store);
+    const stockRepo = this.getStockRepo();
     const ledgers: StockLedger[] = returnLines
       .filter((item) => item.condition === "GOOD")
       .map((item) => {
@@ -558,7 +595,28 @@ export class ScopedCommercialRepository {
       });
 
     this.returns.set(returnId, returnRecord);
+
+    if (req.originalSaleId) {
+      const originalSale = this.sales.get(req.originalSaleId);
+      if (originalSale) {
+        const pastReturns = Array.from(this.returns.values()).filter(
+          (r) => r.originalSaleId === originalSale.id
+        );
+        const totalRefunded = pastReturns.reduce((sum, r) => sum + r.totalRefundAmount, 0);
+        if (totalRefunded >= originalSale.grandTotal) {
+          originalSale.status = "REFUNDED";
+          originalSale.updatedAt = now;
+        }
+      }
+    }
+
     return { returnRecord, ledgers };
+  }
+
+  getReturns(ctx: TenantContext): Return[] {
+    return Array.from(this.returns.values()).filter(
+      (r) => r.tenantId === ctx.tenantId && r.branchId === ctx.branchId
+    );
   }
 
   // ==========================================
@@ -566,6 +624,13 @@ export class ScopedCommercialRepository {
   // ==========================================
 
   openCashSession(ctx: TenantContext, req: OpenCashSessionRequest): CashSession {
+    const existingOpen = Array.from(this.cashSessions.values()).find(
+      (s) => s.tenantId === ctx.tenantId && s.cashierId === ctx.userId && s.status === "OPEN"
+    );
+    if (existingOpen) {
+      throw new Error(`CASH_SESSION_ALREADY_OPEN: Cashier already has an active open session (${existingOpen.sessionNumber})`);
+    }
+
     const id = randomUUID();
     const now = new Date().toISOString();
     const sessionNumber = TransactionNumbering.formatNumber("SES", "MAIN", this.cashSessions.size + 1);

@@ -46,7 +46,7 @@ export async function runFrontendDeploymentCertification() {
     if (rootRes.statusCode !== 200) {
       throw new Error(`RELEASE_BLOCKED: FRONTEND_DEPLOYMENT_INVALID: Root GET / returned status ${rootRes.statusCode}`);
     }
-    const contentType = rootRes.headers["content-type"] || "";
+    const contentType = String(rootRes.headers["content-type"] || "");
     if (!contentType.includes("text/html")) {
       throw new Error(`RELEASE_BLOCKED: FRONTEND_DEPLOYMENT_INVALID: Root GET / returned content-type ${contentType} instead of text/html`);
     }
@@ -58,7 +58,7 @@ export async function runFrontendDeploymentCertification() {
     // Test 2: SPA Fallback Routes (/login, /dashboard, /inventory) return HTML
     for (const spaRoute of ["/login", "/dashboard", "/inventory", "/pos", "/settings"]) {
       const res = await server.inject({ method: "GET", url: spaRoute });
-      if (res.statusCode !== 200 || !res.headers["content-type"]?.includes("text/html")) {
+      if (res.statusCode !== 200 || !String(res.headers["content-type"] || "").includes("text/html")) {
         throw new Error(`RELEASE_BLOCKED: FRONTEND_DEPLOYMENT_INVALID: SPA route ${spaRoute} failed to serve index.html shell.`);
       }
     }
@@ -66,7 +66,7 @@ export async function runFrontendDeploymentCertification() {
 
     // Test 3: API endpoints (/health, /version) remain dedicated JSON handlers
     const healthRes = await server.inject({ method: "GET", url: "/health" });
-    if (healthRes.statusCode !== 200 || !healthRes.headers["content-type"]?.includes("application/json")) {
+    if (healthRes.statusCode !== 200 || !String(healthRes.headers["content-type"] || "").includes("application/json")) {
       throw new Error("RELEASE_BLOCKED: FRONTEND_DEPLOYMENT_INVALID: /health endpoint failed to return JSON.");
     }
     console.log(" ✓ [PASS] GATE-06: Dedicated API endpoints (/health, /version) return application/json.");

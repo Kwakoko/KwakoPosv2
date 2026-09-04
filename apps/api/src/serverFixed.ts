@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { loadConfig } from "@kwakopos2/config";
 import { prisma } from "@kwakopos2/database";
-import { comparePassword, generateAccessToken, globalSessionManager, hashPassword, passwordNeedsRehash } from "@kwakopos2/auth";
+import { comparePassword, generateAccessToken, globalSessionManager, hashPassword, passwordNeedsRehash, verifyAccessToken } from "@kwakopos2/auth";
 import { buildServer } from "./server.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
@@ -17,10 +17,14 @@ import {
   getSuperAdminSecurity,
   isLoginThrottled,
   issueSetupToken,
+  issueStepUpToken,
+  logSuperAdminAuditEvent,
   recordLoginFailure,
   recordSuperAdminFailure,
   requireSecuritySecrets,
+  revokeAllSuperAdminSessions,
   throttleKeys,
+  verifyStepUpToken,
   verifySuperAdminMfa,
 } from "./services/superAdminSecurityService.js";
 
@@ -36,6 +40,7 @@ type RefreshRequestBody = { sessionId?: unknown };
 type LogoutRequestBody = { sessionId?: unknown };
 type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
 type SuperAdminSetupStartBody = { setupToken?: unknown };
+type StepUpRequestBody = { password?: unknown; mfaCode?: unknown; action?: unknown; deviceId?: unknown };
 
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
@@ -90,6 +95,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
       if (roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN") {
         await ensureSuperAdminSecurity(user.id);
         await recordSuperAdminFailure(user.id);
+        await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOGIN_FAILURE", outcome: "FAILURE", metadata: { ip, reason: "INVALID_PASSWORD" } });
       }
     }
     reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
@@ -107,6 +113,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
       return;
     }
     if (state.lockedUntil && state.lockedUntil > new Date()) {
+      await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOCKED_ACCESS_ATTEMPT", outcome: "DENIED", metadata: { ip } });
       reply.status(429).send({ success: false, error: { code: "SUPER_ADMIN_LOCKED", message: "Super Admin access is temporarily locked." } });
       return;
     }
@@ -117,6 +124,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
     if (!(await verifySuperAdminMfa(user.id, mfaCode))) {
       await recordLoginFailure(keys);
       await recordSuperAdminFailure(user.id);
+      await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_MFA_FAILURE", outcome: "FAILURE", metadata: { ip } });
       reply.status(401).send({ success: false, error: { code: "MFA_REQUIRED", message: "Valid Super Admin MFA code is required." } });
       return;
     }
@@ -126,7 +134,10 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   if (user && passwordNeedsRehash(user.passwordHash)) {
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } });
   }
-  if (isSuperAdmin) await clearSuperAdminFailureState(user.id);
+  if (isSuperAdmin) {
+    await clearSuperAdminFailureState(user.id);
+    await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOGIN_SUCCESS", outcome: "SUCCESS", metadata: { ip } });
+  }
 
   const roles = [String(user.role?.name || "ADMIN")];
   const permissions = Array.isArray(user.role?.permissions) ? user.role.permissions.map((value) => String(value)) : [];
@@ -194,6 +205,61 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
       return;
     }
 
+    if (routePath === "/auth/super-admin/step-up" && req.method === "POST") {
+      const body = (req.body || {}) as StepUpRequestBody;
+      const password = String(body.password || "");
+      const mfaCode = String(body.mfaCode || "");
+      const action = String(body.action || "DESTRUCTIVE_OPERATION");
+      const deviceId = String(body.deviceId || "system");
+      
+      const authHeader = String(req.headers.authorization || "");
+      const token = authHeader.replace(/^Bearer\s+/i, "");
+      if (!token) {
+        reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Bearer token required for step-up authentication" } });
+        return;
+      }
+
+      try {
+        const ctx = verifyAccessToken(token);
+        const userId = (ctx as any).userId || ctx.sub;
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !(await comparePassword(password, user.passwordHash))) {
+          await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
+          reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
+          return;
+        }
+
+        const mfaValid = await verifySuperAdminMfa(userId, mfaCode);
+        if (!mfaValid) {
+          await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_MFA_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
+          reply.status(401).send({ success: false, error: { code: "MFA_REQUIRED", message: "Valid MFA code required for step-up authentication" } });
+          return;
+        }
+
+        const stepUpToken = issueStepUpToken(userId, action);
+        await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_SUCCESS", outcome: "SUCCESS", metadata: { targetAction: action } });
+        reply.send({ success: true, data: { stepUpToken, expiresAt: new Date(Date.now() + 300 * 1000).toISOString() } });
+      } catch {
+        reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid access token" } });
+      }
+      return;
+    }
+
+    if (routePath === "/auth/super-admin/revoke-sessions" && req.method === "POST") {
+      const authHeader = String(req.headers.authorization || "");
+      const token = authHeader.replace(/^Bearer\s+/i, "");
+      try {
+        const ctx = verifyAccessToken(token);
+        const userId = (ctx as any).userId || ctx.sub;
+        const count = await revokeAllSuperAdminSessions(userId);
+        await logSuperAdminAuditEvent({ userId, action: "SESSIONS_REVOKED", outcome: "SUCCESS", metadata: { revokedCount: count } });
+        reply.send({ success: true, data: { revokedCount: count } });
+      } catch {
+        reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid access token" } });
+      }
+      return;
+    }
+
     if (routePath === "/auth/refresh" && req.method === "POST") {
       const body = (req.body || {}) as RefreshRequestBody;
       const sessionId = String(body.sessionId || "");
@@ -246,3 +312,4 @@ export async function startFixedServer(): Promise<FastifyInstance> {
 }
 
 if (typeof require !== "undefined" && require.main === module) void startFixedServer();
+

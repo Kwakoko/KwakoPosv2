@@ -6,6 +6,7 @@ import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
+import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -4518,6 +4519,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const candidate = await globalReleaseService.createReleaseCandidate(body.version || "2.2.0", body.gitSha || "HEAD", body.artifactDigest || "sha256:e3b0c442");
     return reply.status(201).send({ success: true, data: candidate });
   });
+
+  tenantOnboardingRoutes(server);
 
   return server;
 }
