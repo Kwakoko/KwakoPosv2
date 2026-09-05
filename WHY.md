@@ -1,0 +1,1 @@
+Prevent future npm lockfile and SemVer drift.
