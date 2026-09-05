@@ -41,6 +41,8 @@ jobs:
         run: npm run db:generate
       - name: Build all workspaces
         run: npm run build
+      - name: Verify release recovery invariant
+        run: npx tsx scripts/release/verify-release-recovery.ts
       - name: Skip release commits
         id: guard
         shell: bash
