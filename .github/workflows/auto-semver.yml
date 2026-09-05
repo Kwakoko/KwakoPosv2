@@ -29,12 +29,36 @@ jobs:
         with:
           node-version: '20'
           cache: npm
+      - name: Repair npm lockfile drift before release
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          echo "NPM lockfile synchronized in the release workspace."
       - name: Install dependencies
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
       - name: Build all workspaces
         run: npm run build
+      - name: Verify release recovery invariant
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const l = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          if (p.version !== l.version) throw new Error(`VERSION_DRIFT: package.json=${p.version} package-lock.json=${l.version}`);
+          const tags = execSync('git tag --merged HEAD --sort=-v:refname', { encoding: 'utf8' }).split(/\r?\n/).map(v => v.trim()).filter(v => /^v\d+\.\d+\.\d+$/.test(v));
+          if (!tags.length) throw new Error('RELEASE_RECOVERY_FAIL: no SemVer tag found on current history');
+          const latest = tags[0];
+          if (p.version === latest.slice(1)) {
+            const commits = Number(execSync(`git rev-list ${latest}..HEAD --count`, { encoding: 'utf8' }).trim());
+            if (commits > 0) throw new Error(`RELEASE_RECOVERY_FAIL: repository is ahead of ${latest} but package.json remains at ${p.version}`);
+          }
+          console.log(`RELEASE_RECOVERY_OK: version=${p.version}, latestTag=${latest}`);
+          NODE
       - name: Skip release commits
         id: guard
         shell: bash
@@ -71,18 +95,20 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
+          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          [[ -n "$LATEST_TAG" ]] || { echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag"; exit 1; }
+          [[ "$VERSION" != "${LATEST_TAG#v}" ]] || { echo "RELEASE_BLOCKED: release candidate did not advance beyond $LATEST_TAG"; exit 1; }
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "RELEASE_BLOCKED: tag v${VERSION} already exists; refusing duplicate release tag"; exit 1;
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          if git diff --cached --quiet; then
-            RELEASE_SHA="$(git rev-parse HEAD)"
-          else
-            git commit -m "chore(release): v${VERSION}"
-            git tag -a "v${VERSION}" -m "Release v${VERSION}"
-            git push origin HEAD:main
-            git push origin "v${VERSION}"
-            RELEASE_SHA="$(git rev-parse HEAD)"
-          fi
+          git commit -m "chore(release): v${VERSION}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin HEAD:main
+          git push origin "v${VERSION}"
+          RELEASE_SHA="$(git rev-parse HEAD)"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
       - name: Dispatch exact production certification
         if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
@@ -106,7 +132,7 @@ jobs:
           RELEASE_SHA="${{ steps.dispatch.outputs.release_sha }}"
           RUN_ID=""
           for attempt in {1..30}; do
-            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow production-release-certification.yml --limit 20 --json databaseId,headSha,event,status,createdAt --jq "[.[] | select(.headSha == \"$RELEASE_SHA\" and .event == \"workflow_dispatch\")] | sort_by(.createdAt) | last | .databaseId // empty")"
+            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow production-release-certification.yml --limit 20 --json databaseId,headSha,event,createdAt --jq "[.[] | select(.headSha == \"$RELEASE_SHA\" and .event == \"workflow_dispatch\")] | sort_by(.createdAt) | last | .databaseId // empty")"
             [[ -n "$RUN_ID" ]] && break
             sleep 10
           done
@@ -117,4 +143,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node -e "const fs=require('fs'); const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
+          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
