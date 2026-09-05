@@ -1,0 +1,1 @@
+Release lock policy: committed package.json and package-lock.json must be synchronized; npm ci must succeed without changing package-lock.json; package version must never regress below the latest merged SemVer tag; release publication remains centralized and production certification is required for the exact release SHA.
