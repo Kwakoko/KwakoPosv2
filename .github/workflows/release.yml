@@ -35,8 +35,26 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - name: Install Dependencies
-        run: npm ci
+      - name: Enforce committed npm lockfile integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package.json
+          test -f package-lock.json
+          cp package-lock.json /tmp/package-lock.before.json
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          diff -u /tmp/package-lock.before.json package-lock.json
+          npm ci
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          if (pkg.version !== lock.version || pkg.version !== lock.packages?.['']?.version) {
+            throw new Error(`VERSION_DRIFT: package=${pkg.version} lock=${lock.version} root-lock=${lock.packages?.['']?.version}`);
+          }
+          if (!/^\d+\.\d+\.\d+([-.+].*)?$/.test(pkg.version)) throw new Error(`INVALID_SEMVER: ${pkg.version}`);
+          console.log(`Immutable release metadata verified: ${pkg.version}`);
+          NODE
       - name: Validate Conventional Commit / SemVer Contract
         run: npx tsx scripts/release/validate-semver.ts
       - name: Generate Prisma Client
@@ -55,5 +73,6 @@ jobs:
           set -euo pipefail
           test -f .github/workflows/auto-semver.yml
           test -f .github/workflows/production-release-certification.yml
+          test -f .github/workflows/release-integrity.yml
           ! grep -q "softprops/action-gh-release" .github/workflows/release.yml
-          echo "Release contract valid: version automation and exact production certification remain authoritative."
+          echo "Release contract valid: immutable lockfile, version automation and exact production certification remain authoritative."
