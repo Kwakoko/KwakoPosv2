@@ -1,0 +1,1 @@
+Release integrity lock is enforced by CI.
