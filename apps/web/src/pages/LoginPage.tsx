@@ -15,6 +15,12 @@ import {
 import "../auth.css";
 import { login } from "../services/apiClient.js";
 
+// Fallback to release-manifest.json when runtime /api/system/version is unreachable
+// This file is generated at release-time by the release pipeline and committed to the repo root.
+// Importing the JSON here allows the built web bundle to display the correct release version
+// even when the runtime version endpoint cannot be reached (e.g. during static hosting or CDN cache).
+import releaseManifest from "../../../../release-manifest.json";
+
 interface LoginPageProps {
   onAuthenticated: () => void;
   provisioningRequested?: boolean;
@@ -76,10 +82,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
         });
       })
       .catch(() => {
-        // ignore; fallback will be used
+        // ignore; fallback will be used (releaseManifest imported at build-time)
       });
     return () => { alive = false; };
   }, []);
+
+  const manifestVersion = (releaseManifest as any)?.version;
 
   return (
     <main className="v2-auth-page">
@@ -118,7 +126,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           <span className="v2-text-xs v2-text-muted">
             © {new Date().getFullYear()} KwakoPos Platform Systems
             <span className="footer-dot"> · </span>
-            {release?.appVersion ? `v${release.appVersion}` : "v2.12.5"}
+            {release?.appVersion ? `v${release.appVersion}` : manifestVersion ? `v${manifestVersion}` : "v2.2.0"}
             {release?.gitSha && (
               <>
                 <span className="footer-dot"> · </span>
@@ -163,7 +171,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
             <label htmlFor="email" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">EMAIL / USERNAME</label>
             <div className="v2-auth-input-wrap">
               <Mail size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input id="email" className="v2-input v2-auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@business.co.tz" required autoComplete="username" />
+              <input id="email" className="v2-input v2-auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@business.co.tz" required autoCom[...]
             </div>
           </div>
 
@@ -171,7 +179,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
             <label htmlFor="password" className="v2-text-xs v2-font-black v2-text-muted v2-auth-label">PASSWORD</label>
             <div className="v2-auth-input-wrap">
               <Lock size={15} className="v2-auth-input-icon" aria-hidden="true" />
-              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" required autoComplete="current-password" />
+              <input id="password" className="v2-input v2-auth-input v2-auth-password" type={showPass ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)}[...]
               <button type="button" className="v2-auth-password-toggle" onClick={() => setShowPass((current) => !current)} aria-label={showPass ? "Hide password" : "Show password"}>
                 {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
