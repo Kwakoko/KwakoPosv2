@@ -72,11 +72,11 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   const body = (req.body || {}) as LoginRequestBody;
   const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
-  const deviceId = String(body.deviceId || "").trim();
+  const deviceId = String(body.deviceId || "device-client").trim();
   const mfaCode = String(body.mfaCode || "").trim();
   const ip = clientAddress(req);
-  if (!email || !password || !deviceId) {
-    reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email, password and deviceId are required" } });
+  if (!email || !password) {
+    reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email and password are required" } });
     return;
   }
 
@@ -141,23 +141,22 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 
   const roles = [String(user.role?.name || "ADMIN")];
   const permissions = Array.isArray(user.role?.permissions) ? user.role.permissions.map((value) => String(value)) : [];
-  const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId };
-  const accessToken = generateAccessToken(payload);
   const session = await globalSessionManager.createSession(user.tenantId, user.id, deviceId);
+  const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId, sessionId: session.sessionId };
+  const accessToken = generateAccessToken(payload);
   setRefreshCookie(reply, session.refreshToken, true);
   reply.send({ success: true, data: { accessToken, sessionId: session.sessionId, user: { id: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, name: user.name, role: roles[0] } } });
 }
 
 export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>; productionPersistence?: boolean } = {}) {
   const config = opts.config ?? loadConfig();
-  const productionPersistence = opts.productionPersistence ?? isProduction(config);
+  const productionPersistence = opts.productionPersistence ?? (process.env.KWAKOPOS_MOCK_AUTH === "true" ? false : true);
   if (productionPersistence) {
     configurePersistentSessions();
     requireSecuritySecrets();
   }
 
   const server = buildServer({ config, productionPersistence });
-  tenantOnboardingRoutes(server);
   supportOperationsRoutes(server);
   supportControlTowerRoutes(server);
 

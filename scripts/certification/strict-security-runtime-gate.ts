@@ -80,9 +80,16 @@ async function main(): Promise<void> {
   const violations = scanProductionSource("apps");
   requirePass(violations.length === 0, `Prohibited production-auth/demo tokens found: ${violations.join(" | ")}`);
 
+  process.env.KWAKOPOS_SECURITY_TARGET_URL = process.env.KWAKOPOS_SECURITY_TARGET_URL || "http://127.0.0.1:3000";
+  process.env.KWAKOPOS_SECURITY_TEST_EMAIL = process.env.KWAKOPOS_SECURITY_TEST_EMAIL || "security.tester@kwakopos.net";
+  process.env.KWAKOPOS_SECURITY_TEST_PASSWORD = process.env.KWAKOPOS_SECURITY_TEST_PASSWORD || "KwakoSecure2026!#";
+  const { ensureSecurityTestUser } = await import("./seed-security-user.js");
+  await ensureSecurityTestUser();
+
   const report = await runSecurityAcceptanceTestSuite();
   requirePass(report.gitSha === sha, `Security suite SHA ${report.gitSha} does not match current SHA ${sha}`);
-  requirePass(report.summary.p0.failed === 0, `Security suite has ${report.summary.p0.failed} P0 failures`);
+  const failedP0 = report.testResults.filter((t) => t.priority === "P0" && !t.passed);
+  requirePass(report.summary.p0.failed === 0, `Security suite has ${report.summary.p0.failed} P0 failures: ${JSON.stringify(failedP0, null, 2)}`);
   requirePass(report.summary.p1.failed === 0, `Security suite has ${report.summary.p1.failed} P1 failures`);
   requirePass(report.summary.p2.failed === 0, `Security suite has ${report.summary.p2.failed} P2 failures`);
 

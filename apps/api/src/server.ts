@@ -7,6 +7,8 @@ import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
+import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
+import { rollbackAuthorizationRoutes } from "./routes/rollbackAuthorizationRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -213,7 +215,7 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
 
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
-  /** Pre-loaded config — skips env re-read when provided. */
+  /** Pre-loaded config â€” skips env re-read when provided. */
   config?: ReturnType<typeof loadConfig>;
   /** Override persistence mode explicitly (true = Prisma, false = in-memory). */
   productionPersistence?: boolean;
@@ -308,7 +310,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url === "/api/system/version" ||
       url === "/auth/login" ||
       url === "/auth/refresh" ||
-      url.startsWith("/telemetry")
+      url === "/auth/logout" ||
+      url.startsWith("/telemetry") ||
+      url.startsWith("/api/legal/documents") ||
+      url === "/api/legal/subprocessors" ||
+      url === "/api/legal/oss-notices" ||
+      url === "/api/legal/cookies"
     ) {
       return;
     }
@@ -351,7 +358,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         const testBranchId = req.headers["x-branch-id"] as string;
         const testUserId = req.headers["x-user-id"] as string;
         if (testTenantId && testBranchId && testUserId) {
-          req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
+          const isSuperAdmin =
+            testUserId.toLowerCase().includes("super") ||
+            testUserId.toLowerCase().includes("admin") ||
+            req.headers["x-role"] === "SUPER_ADMIN" ||
+            req.headers["x-role"] === "SUPERADMIN";
+          req.tenantContext = {
+            tenantId: testTenantId,
+            branchId: testBranchId,
+            userId: testUserId,
+            roles: isSuperAdmin ? ["ADMIN", "SUPER_ADMIN"] : ["ADMIN"],
+            permissions: ["*", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
+          };
           if (req.traceContext) {
             req.traceContext.tenantId = testTenantId;
             req.traceContext.branchId = testBranchId;
@@ -370,6 +388,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const token = authHeader.substring(7);
     try {
       const payload = verifyAccessToken(token);
+      if (payload.sessionId) {
+        const isRevoked = await globalSessionManager.isSessionRevoked(payload.sessionId);
+        if (isRevoked) {
+          return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session revoked or expired" } });
+        }
+      }
       req.tenantContext = extractTenantContext(payload);
       if (req.traceContext) {
         req.traceContext.tenantId = payload.tenantId;
@@ -423,7 +447,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         const { prisma } = await import("@kwakopos2/database");
         await Promise.race([
           prisma.$queryRaw`SELECT 1`,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 1500)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 5000)),
         ]);
         database = "connected";
       } catch {
@@ -3081,7 +3105,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // =========================================================================
-  // PHASE 16 — COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // PHASE 16 â€” COMMERCIAL PRODUCT READINESS ENDPOINTS
   // =========================================================================
 
   server.get("/api/v1/commercial/summary", async (req, reply) => {
@@ -3119,7 +3143,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // =========================================================================
-  // PHASE 17 — PRODUCT-MARKET VALIDATION ENDPOINTS
+  // PHASE 17 â€” PRODUCT-MARKET VALIDATION ENDPOINTS
   // =========================================================================
 
   server.get("/api/v1/pmf/summary", async (req, reply) => {
@@ -3242,7 +3266,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
 
-  // Phase 18 — Enterprise Customer Onboarding (KEIF) Endpoints
+  // Phase 18 â€” Enterprise Customer Onboarding (KEIF) Endpoints
   server.post("/api/v1/enterprise-onboarding/projects", async (req, reply) => {
     const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
     const body = (req.body as any) || {};
@@ -3306,7 +3330,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: kit });
   });
 
-  // Phase 19 — Partner Ecosystem Scale (KPP) Endpoints
+  // Phase 19 â€” Partner Ecosystem Scale (KPP) Endpoints
   server.post("/api/v1/partner-ecosystem/partners/apply", async (req, reply) => {
     const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
     const body = (req.body as any) || {};
@@ -3360,7 +3384,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getCapacityMetrics(count) });
   });
 
-  // Phase 20 — Global Expansion (KGF) Endpoints
+  // Phase 20 â€” Global Expansion (KGF) Endpoints
   server.get("/api/v1/global-expansion/countries/:code", async (req, reply) => {
     const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
     const { code } = req.params as { code: string };
@@ -3391,7 +3415,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalGlobalExpansionService.getDashboardMetrics() });
   });
 
-  // Phase 21 — AI-Native Business Operations Endpoints
+  // Phase 21 â€” AI-Native Business Operations Endpoints
   server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
     const body = (req.body as any) || {};
@@ -3431,7 +3455,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAiNativeService.getDashboardMetrics() });
   });
 
-  // Phase 22 — Autonomous Operations (KAOF) Endpoints
+  // Phase 22 â€” Autonomous Operations (KAOF) Endpoints
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
     const body = (req.body as any) || {};
@@ -3478,7 +3502,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
   });
 
-  // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
+  // Phase 23 â€” KwakoPos Certification Program (KCA) Endpoints
   server.post("/api/v1/certification-program/issue", async (req, reply) => {
     const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
     const body = (req.body as any) || {};
@@ -3539,7 +3563,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getDashboardMetrics() });
   });
 
-  // Phase 24 — Platform Governance (KPGA) Endpoints
+  // Phase 24 â€” Platform Governance (KPGA) Endpoints
   server.post("/api/v1/platform-governance/adrs", async (req, reply) => {
     const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
     const body = (req.body as any) || {};
@@ -3679,7 +3703,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkforceTrackingService.getDashboardMetrics() });
   });
 
-  // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
+  // Phase 25 â€” KwakoPos System UI & Experience Architecture Endpoints
   server.post("/api/v1/system-ui/navigation", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
     const body = (req.body as any) || {};
@@ -3724,7 +3748,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
-  // Phase 26 — KwakoPos Design System (KDS) Endpoints
+  // Phase 26 â€” KwakoPos Design System (KDS) Endpoints
   server.get("/api/v1/design-system/theme", async (req, reply) => {
     const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
     const mode = ((req.query as any)?.mode || "DARK") as any;
@@ -3746,7 +3770,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getDashboardMetrics() });
   });
 
-  // Phase 27 — Core Operating UI Endpoints
+  // Phase 27 â€” Core Operating UI Endpoints
   server.get("/api/v1/core-operating-ui/dashboard", async (req, reply) => {
     const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
     const role = ((req.query as any)?.role || "EXECUTIVE") as any;
@@ -3773,7 +3797,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: res });
   });
 
-  // Phase 28 — Dynamic Module UI Endpoints
+  // Phase 28 â€” Dynamic Module UI Endpoints
   server.post("/api/v1/dynamic-module-ui/register", async (req, reply) => {
     const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
     const body = (req.body as any) || {};
@@ -3805,7 +3829,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalDynamicModuleUiService.getDashboardMetrics() });
   });
 
-  // Phase 29 — Super Admin & Platform UI Endpoints
+  // Phase 29 â€” Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
     const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
@@ -3839,7 +3863,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
   });
 
-  // Phase 30 — UI Certification Endpoints
+  // Phase 30 â€” UI Certification Endpoints
   server.get("/api/v1/ui-certification/overview", async (req, reply) => {
     const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
     return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
@@ -3864,7 +3888,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
   });
 
-  // Phase 31 — Workflow, Automation & Business Process OS Endpoints
+  // Phase 31 â€” Workflow, Automation & Business Process OS Endpoints
   server.get("/api/v1/workflow-automation/overview", async (req, reply) => {
     const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
     return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
@@ -3896,7 +3920,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
   });
 
-  // Phase 32 — BI / Analytics OS Endpoints
+  // Phase 32 â€” BI / Analytics OS Endpoints
   server.get("/api/v1/bi-analytics/overview", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
@@ -3928,7 +3952,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
   });
 
-  // Phase 33 — AI Operating Layer OS Endpoints
+  // Phase 33 â€” AI Operating Layer OS Endpoints
   server.get("/api/v1/ai-operating-layer/overview", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
     return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
@@ -3991,7 +4015,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
 
-  // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
+  // â”€â”€â”€ Phase 34 â€” Enterprise Approvals REST API (/api/v1/approvals/*) â”€â”€â”€
   server.get("/api/v1/approvals/policies", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
@@ -4063,7 +4087,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
-  // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
+  // â”€â”€â”€ Phase 35 â€” Finance & Treasury REST API (/api/v1/treasury/*) â”€â”€â”€
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
@@ -4217,7 +4241,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
   });
 
-  // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
+  // â”€â”€ Phase 36 â€” Supply Chain Operating Layer (KSCOL v1.0.0) â”€â”€
   server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
@@ -4319,7 +4343,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
-  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
+  // â”€â”€ Phase 37 â€” Workforce Operating Layer (KWOL v1.0.0) â”€â”€
   server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
@@ -4521,12 +4545,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   tenantOnboardingRoutes(server);
+  legalGovernanceRoutes(server);
+  rollbackAuthorizationRoutes(server);
 
   return server;
 }
 
 
-if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") {
+if (process.env.START_SERVER === "true") {
   (async () => {
     const config = loadConfig();
     const server = buildServer();

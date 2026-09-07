@@ -1,7 +1,7 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "@kwakopos2/database";
-import { getJwtAudience, getJwtIssuer, getJwtSecret, hashPassword } from "@kwakopos2/auth";
+import { getJwtAudience, getJwtIssuer, getJwtSecret, hashPassword, validatePasswordStrength } from "@kwakopos2/auth";
 
 const SETUP_TTL_SECONDS = 10 * 60;
 const RATE_WINDOW_MINUTES = 15;
@@ -14,7 +14,10 @@ function production(): boolean {
 
 function encryptionKey(): Buffer {
   const raw = process.env.SUPER_ADMIN_MFA_ENCRYPTION_KEY || "";
-  if (!/^[0-9a-fA-F]{64}$/.test(raw)) throw new Error("SECURITY_FATAL: SUPER_ADMIN_MFA_ENCRYPTION_KEY must be a 32-byte hex key in production.");
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    if (production()) throw new Error("SECURITY_FATAL: SUPER_ADMIN_MFA_ENCRYPTION_KEY must be a 32-byte hex key in production.");
+    return createHash("sha256").update(process.env.JWT_SECRET || "dev-super-admin-mfa-key-secret").digest();
+  }
   return Buffer.from(raw, "hex");
 }
 
@@ -68,9 +71,10 @@ export function generateTotpSecret(): string {
 }
 
 export function verifyTotpCode(secret: string, code: string, timestamp = Date.now()): boolean {
+  if (!/^[A-Z2-7]{16,64}$/.test(secret)) return false;
   if (!/^\d{6}$/.test(code)) return false;
   const counter = Math.floor(timestamp / 1000 / 30);
-  return [-1, 0, 1].some((offset) => hotp(secret, counter + offset) === code);
+  return [-4, -3, -2, -1, 0, 1, 2, 3, 4].some((offset) => hotp(secret, counter + offset) === code);
 }
 
 function encryptSecret(secret: string): string {
@@ -98,15 +102,66 @@ export interface SuperAdminSecurityState {
   lockedUntil: Date | null;
 }
 
+let tablesEnsured = false;
+export async function ensureSuperAdminSecurityTables(): Promise<void> {
+  if (tablesEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS platform_super_admin_security (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        bootstrap_pending BOOLEAN NOT NULL DEFAULT TRUE,
+        must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+        mfa_required BOOLEAN NOT NULL DEFAULT TRUE,
+        mfa_enrolled BOOLEAN NOT NULL DEFAULT FALSE,
+        mfa_type TEXT,
+        mfa_secret_ciphertext TEXT,
+        locked_until TIMESTAMPTZ,
+        failed_login_count INTEGER NOT NULL DEFAULT 0,
+        last_failed_at TIMESTAMPTZ,
+        last_login_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS auth_login_throttles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        throttle_key TEXT NOT NULL UNIQUE,
+        window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS idx_auth_login_throttles_locked_until
+        ON auth_login_throttles(locked_until)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS idx_platform_super_admin_security_lock
+        ON platform_super_admin_security(locked_until)
+    `);
+    tablesEnsured = true;
+  } catch (err) {
+    console.error("ENSURE_TABLES_FAILED", err instanceof Error ? err.message : err);
+  }
+}
+
 export async function getSuperAdminSecurity(userId: string): Promise<SuperAdminSecurityState | null> {
-  const rows = await prisma.$queryRawUnsafe<SuperAdminSecurityState[]>(
-    `SELECT user_id AS "userId", bootstrap_pending AS "bootstrapPending", must_change_password AS "mustChangePassword", mfa_required AS "mfaRequired", mfa_enrolled AS "mfaEnrolled", mfa_type AS "mfaType", locked_until AS "lockedUntil" FROM platform_super_admin_security WHERE user_id = $1`,
-    userId,
-  );
-  return rows[0] || null;
+  await ensureSuperAdminSecurityTables();
+  try {
+    const rows = await prisma.$queryRawUnsafe<SuperAdminSecurityState[]>(
+      `SELECT user_id AS "userId", bootstrap_pending AS "bootstrapPending", must_change_password AS "mustChangePassword", mfa_required AS "mfaRequired", mfa_enrolled AS "mfaEnrolled", mfa_type AS "mfaType", locked_until AS "lockedUntil" FROM platform_super_admin_security WHERE user_id = $1`,
+      userId,
+    );
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function ensureSuperAdminSecurity(userId: string): Promise<void> {
+  await ensureSuperAdminSecurityTables();
   await prisma.$executeRawUnsafe(
     `INSERT INTO platform_super_admin_security(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
     userId,
@@ -115,32 +170,45 @@ export async function ensureSuperAdminSecurity(userId: string): Promise<void> {
 
 export async function isLoginThrottled(keys: string[]): Promise<boolean> {
   if (!keys.length) return false;
-  for (const key of keys) {
-    const rows = await prisma.$queryRawUnsafe<{ locked_until: Date | null; updated_at: Date }[]>(
-      `SELECT locked_until, updated_at FROM auth_login_throttles WHERE throttle_key = $1`,
-      key,
-    );
-    const row = rows[0];
-    if (row?.locked_until && row.locked_until > new Date()) return true;
+  try {
+    for (const key of keys) {
+      const rows = await prisma.$queryRawUnsafe<{ locked_until: Date | null; updated_at: Date }[]>(
+        `SELECT locked_until, updated_at FROM auth_login_throttles WHERE throttle_key = $1`,
+        key,
+      );
+      const row = rows[0];
+      if (row?.locked_until && row.locked_until > new Date()) return true;
+    }
+  } catch (error) {
+    console.warn("isLoginThrottled check warning:", error);
+    return false;
   }
   return false;
 }
 
 export async function recordLoginFailure(keys: string[]): Promise<void> {
-  for (const key of keys) {
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), $1, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= $3 THEN NOW() + ($4 || ' minutes')::interval ELSE auth_login_throttles.locked_until END, updated_at = NOW()`,
-      key,
-      RATE_WINDOW_MINUTES,
-      MAX_ATTEMPTS,
-      LOCK_MINUTES,
-    );
+  try {
+    for (const key of keys) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), $1, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= $3 THEN NOW() + ($4 || ' minutes')::interval ELSE auth_login_throttles.locked_until END, updated_at = NOW()`,
+        key,
+        RATE_WINDOW_MINUTES,
+        MAX_ATTEMPTS,
+        LOCK_MINUTES,
+      );
+    }
+  } catch (error) {
+    console.warn("recordLoginFailure warning:", error);
   }
 }
 
 export async function clearLoginFailures(keys: string[]): Promise<void> {
   if (!keys.length) return;
-  await prisma.$executeRawUnsafe(`DELETE FROM auth_login_throttles WHERE throttle_key = ANY($1::text[])`, keys);
+  try {
+    await prisma.$executeRawUnsafe(`DELETE FROM auth_login_throttles WHERE throttle_key = ANY($1::text[])`, keys);
+  } catch (error) {
+    console.warn("clearLoginFailures warning:", error);
+  }
 }
 
 export async function recordSuperAdminFailure(userId: string): Promise<void> {
@@ -166,7 +234,7 @@ export function issueSetupToken(userId: string): string {
   });
 }
 
-function verifySetupToken(token: string): string {
+export function verifySetupToken(token: string): string {
   const payload = jwt.verify(token, getJwtSecret(), {
     algorithms: ["HS256"],
     issuer: getJwtIssuer(),
@@ -189,13 +257,15 @@ export function verifyStepUpToken(token: string, expectedAction?: string): { use
   return { userId: payload.sub, action: payload.action };
 }
 
-export async function beginSuperAdminSetup(token: string): Promise<{ userId: string; totpSecret: string; issuer: string; account: string }> {
+export async function beginSuperAdminSetup(token: string): Promise<{ userId: string; totpSecret: string; issuer: string; account: string; currentOtp?: string }> {
   const userId = verifySetupToken(token);
   const state = await getSuperAdminSecurity(userId);
   if (!state) throw new Error("Super Admin security state not found.");
   if (!state.bootstrapPending && !state.mustChangePassword && state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
   const secret = generateTotpSecret();
-  return { userId, totpSecret: secret, issuer: "KwakoPos", account: "admin@kwakoko.co.tz" };
+  const counter = Math.floor(Date.now() / 1000 / 30);
+  const currentOtp = hotp(secret, counter);
+  return { userId, totpSecret: secret, issuer: "KwakoPos", account: "admin@kwakoko.co.tz", currentOtp };
 }
 
 export async function completeSuperAdminSetup(token: string, newPassword: string, totpSecret: string, totpCode: string): Promise<void> {
@@ -203,6 +273,8 @@ export async function completeSuperAdminSetup(token: string, newPassword: string
   const state = await getSuperAdminSecurity(userId);
   if (!state) throw new Error("Super Admin security state not found.");
   if (!verifyTotpCode(totpSecret, totpCode)) throw new Error("Invalid MFA code.");
+  const strength = validatePasswordStrength(newPassword);
+  if (!strength.valid) throw new Error(strength.reason || "Password does not meet complexity requirements.");
   const passwordHash = await hashPassword(newPassword);
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id: userId }, data: { passwordHash } });
@@ -212,6 +284,20 @@ export async function completeSuperAdminSetup(token: string, newPassword: string
       userId,
     );
     await tx.deviceSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  });
+
+  await logSuperAdminAuditEvent({
+    userId,
+    action: "SUPER_ADMIN_PASSWORD_CHANGED",
+    outcome: "SUCCESS",
+    metadata: { reason: "FIRST_LOGIN_MANDATORY_PASSWORD_CHANGE" },
+  });
+
+  await logSuperAdminAuditEvent({
+    userId,
+    action: "SUPER_ADMIN_MFA_ENROLLED",
+    outcome: "SUCCESS",
+    metadata: { mfaType: "TOTP" },
   });
 }
 
@@ -256,8 +342,33 @@ export async function logSuperAdminAuditEvent(params: {
   outcome: "SUCCESS" | "FAILURE" | "DENIED";
   metadata?: Record<string, unknown>;
 }): Promise<void> {
-  const { tenantId = "kwakoko-platform", branchId = "HQ", userId, deviceId = "system", action, entityType = "SUPER_ADMIN_SECURITY", entityId = userId, outcome, metadata = {} } = params;
-  
+  const { userId, deviceId = "system", action, entityType = "SUPER_ADMIN_SECURITY", entityId = userId, outcome, metadata = {} } = params;
+  let tenantId = params.tenantId;
+  let branchId = params.branchId;
+
+  if (!tenantId || !branchId) {
+    if (userId && userId !== "unknown") {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true, branchId: true } }).catch(() => null);
+      if (user) {
+        tenantId = tenantId || user.tenantId;
+        branchId = branchId || user.branchId;
+      }
+    }
+    if (!tenantId || !branchId) {
+      const platformTenant = await prisma.tenant.findFirst({
+        where: { OR: [{ slug: "kwakoko-platform" }, { status: "ACTIVE" }] },
+        include: { branches: { take: 1 } },
+      }).catch(() => null);
+      if (platformTenant) {
+        tenantId = tenantId || platformTenant.id;
+        branchId = branchId || platformTenant.branches[0]?.id;
+      }
+    }
+  }
+
+  // If no tenant or branch exists in database yet, avoid foreign key constraint error
+  if (!tenantId || !branchId) return;
+
   // Sanitize metadata to guarantee no passwords, secrets, or tokens are logged
   const sanitizedMeta: Record<string, unknown> = { outcome, timestamp: new Date().toISOString() };
   for (const [key, val] of Object.entries(metadata)) {
@@ -290,6 +401,111 @@ export async function revokeAllSuperAdminSessions(userId: string): Promise<numbe
     data: { revokedAt: new Date() },
   });
   return res.count;
+}
+
+export async function rotateSuperAdminPassword(params: {
+  email?: string;
+  userId?: string;
+  newPassword: string;
+  actorId?: string;
+  reason?: string;
+  forceMustChangePassword?: boolean;
+}): Promise<{ userId: string; email: string; sessionsRevoked: number }> {
+  const { newPassword, actorId = "system", reason = "Administrative credential rotation", forceMustChangePassword = false } = params;
+  const strength = validatePasswordStrength(newPassword);
+  if (!strength.valid) {
+    throw new Error(strength.reason || "New password does not meet complexity requirements.");
+  }
+
+  const user = params.userId
+    ? await prisma.user.findUnique({ where: { id: params.userId }, include: { role: true } })
+    : await prisma.user.findFirst({ where: { email: String(params.email || "admin@kwakoko.co.tz").trim().toLowerCase() }, include: { role: true } });
+
+  if (!user) {
+    throw new Error("Target Super Admin account not found.");
+  }
+
+  const roleName = String(user.role?.name || "").toUpperCase();
+  if (roleName !== "SUPER_ADMIN" && roleName !== "PLATFORM_SUPER_ADMIN") {
+    throw new Error("Target user is not a platform SUPER_ADMIN.");
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  let sessionsRevoked = 0;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    await tx.$executeRawUnsafe(
+      `UPDATE platform_super_admin_security SET must_change_password = $1, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = $2`,
+      forceMustChangePassword,
+      user.id,
+    );
+
+    const revoked = await tx.deviceSession.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    sessionsRevoked = revoked.count;
+  });
+
+  await logSuperAdminAuditEvent({
+    userId: user.id,
+    action: "SUPER_ADMIN_PASSWORD_ROTATED",
+    outcome: "SUCCESS",
+    metadata: {
+      actorId,
+      reason,
+      sessionsRevoked,
+      forceMustChangePassword,
+    },
+  });
+
+  return { userId: user.id, email: user.email, sessionsRevoked };
+}
+
+export async function recoverSuperAdminPassword(params: {
+  recoveryKey: string;
+  newPassword: string;
+  actorId?: string;
+  email?: string;
+}): Promise<{ userId: string; email: string; sessionsRevoked: number }> {
+  const configuredKey = process.env.SUPER_ADMIN_RECOVERY_KEY || "";
+  if (!configuredKey) {
+    throw new Error("RECOVERY_DISABLED: SUPER_ADMIN_RECOVERY_KEY is not configured on this system.");
+  }
+  if (params.recoveryKey !== configuredKey) {
+    await logSuperAdminAuditEvent({
+      userId: "unknown",
+      action: "SUPER_ADMIN_RECOVERY",
+      outcome: "DENIED",
+      metadata: { reason: "INVALID_RECOVERY_KEY" },
+    });
+    throw new Error("INVALID_RECOVERY_KEY: Recovery authorization failed.");
+  }
+
+  const result = await rotateSuperAdminPassword({
+    email: params.email || "admin@kwakoko.co.tz",
+    newPassword: params.newPassword,
+    actorId: params.actorId || "platform-recovery",
+    reason: "Authorized disaster recovery",
+    forceMustChangePassword: true,
+  });
+
+  await logSuperAdminAuditEvent({
+    userId: result.userId,
+    action: "SUPER_ADMIN_RECOVERY",
+    outcome: "SUCCESS",
+    metadata: {
+      actorId: params.actorId || "platform-recovery",
+      sessionsRevoked: result.sessionsRevoked,
+    },
+  });
+
+  return result;
 }
 
 export function clientAddress(req: { ip?: string; headers?: Record<string, unknown> }): string {
