@@ -1,4 +1,5 @@
-import { getReleaseIdentity, loadConfig } from "../../packages/config/src/index.js";
+import { loadConfig } from "../../packages/config/src/index.js";
+import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -28,21 +29,29 @@ export function generateReleaseManifest(options?: {
   evidencePath?: string;
 }): ReleaseManifest {
   const config = loadConfig();
-  const identity = getReleaseIdentity(config);
-  const targetVersion = options?.version || identity.appVersion;
+  const targetVersion = options?.version || config.APP_VERSION;
+  if (!targetVersion) throw new Error("RELEASE_BLOCKED: application version is missing");
+  const gitSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
   const targetTag = `v${targetVersion}`;
 
   const manifest: ReleaseManifest = {
     version: targetVersion,
     tag: targetTag,
-    gitSha: identity.gitSha,
-    containerDigest: identity.containerDigest,
-    cloudRunRevision: identity.cloudRunRevision,
-    environment: identity.environment,
-    releaseChannel: identity.releaseChannel,
-    releasedAt: identity.releaseTimestamp,
+    gitSha,
+    containerDigest: process.env.CONTAINER_DIGEST || null,
+    cloudRunRevision: process.env.CLOUD_RUN_REVISION || null,
+    environment: process.env.RELEASE_ENVIRONMENT || "release-candidate",
+    releaseChannel: process.env.RELEASE_CHANNEL || "stable",
+    releasedAt: new Date().toISOString(),
     certification: options?.certification || "PASS",
-    compatibility: identity.compatibility,
+    compatibility: {
+      databaseSchemaVersion: 4,
+      syncProtocolVersion: 2,
+      pwaSchemaVersion: 4,
+      minSupportedClientVersion: "2.0.0",
+      recommendedClientVersion: targetVersion,
+    },
     evidencePath: options?.evidencePath,
   };
 
