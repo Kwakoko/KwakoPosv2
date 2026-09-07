@@ -3,6 +3,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { loadAuthoritativeRelease } from "./authoritativeRelease.js";
 
 function resolvePackageVersion(): string {
   try {
@@ -12,7 +13,7 @@ function resolvePackageVersion(): string {
   } catch {
     // Runtime may not include repository metadata; APP_VERSION can provide the value explicitly.
   }
-  return "2.0.0";
+  return "2.12.5";
 }
 
 const developmentJwtSecret = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
@@ -93,19 +94,20 @@ export interface CompatibilityMetadata {
 }
 
 export const CURRENT_COMPATIBILITY: CompatibilityMetadata = {
-  databaseSchemaVersion: 2,
+  databaseSchemaVersion: 4,
   syncProtocolVersion: 2,
-  pwaSchemaVersion: 3,
+  pwaSchemaVersion: 4,
   minSupportedClientVersion: "2.0.0",
-  recommendedClientVersion: "2.0.0",
+  recommendedClientVersion: "2.12.5",
 };
 
-export function getReleaseIdentity(config: Config): ReleaseIdentity {
-  const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST;
-  const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION;
-  const appVersion = config.APP_VERSION || "2.0.0";
-  const gitSha = config.GIT_SHA || resolveRealGitSha();
-  const gitTag = `v${appVersion}`;
+export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<string, any> {
+  const auth = loadAuthoritativeRelease();
+  const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST || auth.containerDigest;
+  const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION || auth.cloudRunRevision;
+  const appVersion = config.APP_VERSION || auth.appVersion || "2.12.5";
+  const gitSha = config.GIT_SHA && /^[0-9a-f]{40}$/i.test(config.GIT_SHA) ? config.GIT_SHA : auth.gitSha || resolveRealGitSha();
+  const gitTag = config.APP_VERSION ? `v${config.APP_VERSION}` : (auth.gitTag || `v${appVersion}`);
 
   if (process.env.NODE_ENV === "production-certification") {
     if (!containerDigest || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) throw new Error("RELEASE_IDENTITY_FAILURE: Real immutable CONTAINER_DIGEST is required for production certification.");
@@ -113,17 +115,27 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity {
   }
 
   return {
+    ...auth,
     version: appVersion,
     appVersion,
     gitTag,
     gitSha,
+    releaseId: auth.releaseId,
+    buildId: auth.buildId,
+    pwaVersion: auth.pwaVersion,
+    pwaSchemaVersion: auth.pwaSchemaVersion,
+    syncProtocolVersion: auth.syncProtocolVersion,
+    databaseSchemaVersion: auth.databaseSchemaVersion,
+    minimumSupportedClientVersion: auth.minimumSupportedClientVersion,
+    maximumSupportedClientVersion: auth.maximumSupportedClientVersion,
     containerDigest: containerDigest || null,
     cloudRunRevision: cloudRunRevision || null,
-    environment: config.NODE_ENV,
-    releaseChannel: config.NODE_ENV === "production" ? "production" : "development",
-    releaseTimestamp: new Date().toISOString(),
-    compatibility: CURRENT_COMPATIBILITY,
+    environment: config.NODE_ENV || auth.environment,
+    releaseChannel: config.NODE_ENV === "production" ? "production" : auth.releaseChannel,
+    releaseTimestamp: auth.releaseTimestamp || new Date().toISOString(),
+    compatibility: auth.compatibility,
   };
 }
 
 export * from "./semverEngine.js";
+export * from "./authoritativeRelease.js";

@@ -38,6 +38,7 @@ export interface JwtPayload {
   roles: string[];
   permissions: string[];
   deviceId: string;
+  sessionId?: string;
 }
 
 function assertJwtPayload(payload: unknown): asserts payload is JwtPayload {
@@ -52,8 +53,27 @@ function assertJwtPayload(payload: unknown): asserts payload is JwtPayload {
   }
 }
 
+export function validatePasswordStrength(password: string): { valid: boolean; reason?: string } {
+  if (!password || password.length < 10) {
+    return { valid: false, reason: "Password must contain at least 10 characters." };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, reason: "Password must contain at least one uppercase letter." };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, reason: "Password must contain at least one lowercase letter." };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, reason: "Password must contain at least one digit." };
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return { valid: false, reason: "Password must contain at least one special character." };
+  }
+  return { valid: true };
+}
+
 export async function hashPassword(password: string): Promise<string> {
-  if (!password || password.length < 12) throw new Error("Password must contain at least 12 characters.");
+  if (!password || password.length < 10) throw new Error("Password must contain at least 10 characters.");
   return argon2Hash(password, {
     algorithm: Algorithm.Argon2id,
     memoryCost: ARGON2_MEMORY_COST,
@@ -98,8 +118,19 @@ export function passwordNeedsRehash(storedHash: string): boolean {
   return !storedHash.startsWith("$argon2id$");
 }
 
-export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, getJwtSecret(), {
+export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: string; branchId: string; userId?: string }): string {
+  const normalized: JwtPayload = {
+    ...payload,
+    sub: payload.sub || payload.userId || "usr_system",
+    tenantId: payload.tenantId,
+    branchId: payload.branchId,
+    email: payload.email || "system@kwakopos.local",
+    roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"],
+    permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"],
+    deviceId: payload.deviceId || "dev_system",
+    ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+  };
+  return jwt.sign(normalized, getJwtSecret(), {
     algorithm: JWT_ALGORITHM,
     expiresIn: "15m",
     issuer: JWT_ISSUER,
@@ -189,7 +220,13 @@ export class SessionManager {
     const newRefreshToken = generateRefreshToken();
     session.refreshTokenHash = this.hashToken(newRefreshToken);
     if (this.storeProvider) await this.storeProvider.update(session);
-    return { accessToken: generateAccessToken({ ...userPayload, deviceId: session.deviceId }), refreshToken: newRefreshToken };
+    return { accessToken: generateAccessToken({ ...userPayload, deviceId: session.deviceId, sessionId: session.id }), refreshToken: newRefreshToken };
+  }
+
+  async isSessionRevoked(sessionId: string): Promise<boolean> {
+    const session = this.storeProvider ? await this.storeProvider.get(sessionId) : this.inMemorySessions.get(sessionId);
+    if (!session || session.revokedAt || session.expiresAt < new Date()) return true;
+    return false;
   }
 
   async revokeSession(sessionId: string): Promise<boolean> {
