@@ -14,7 +14,7 @@ export function renderReleaseCenterDashboard(): string {
       </div>
       <div style="text-align: right;">
         <span style="background: #0284c7; color: white; padding: 0.35rem 0.85rem; border-radius: 20px; font-weight: 600; font-size: 0.9rem;">
-          ACTIVE VERSION: v2.2.0
+          ACTIVE VERSION: v2 (live identity shown by Release API)
         </span>
         <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #34d399; font-weight: 600;">QUALITY SCORE: 96 / 100 (GRADE A+)</div>
       </div>
@@ -23,7 +23,7 @@ export function renderReleaseCenterDashboard(): string {
     <!-- Drift & Reconciliation Alert Bar -->
     <div style="background: #064e3b; border: 1px solid #10b981; padding: 0.75rem 1.25rem; border-radius: 8px; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
       <div style="display: flex; align-items: center; gap: 0.75rem; color: #a7f3d0; font-size: 0.9rem;">
-        <span>✅ <strong>RELEASE RECONCILIATION IN SYNC:</strong> Cloud Run Revision <code>kwakopos-prod-001</code> matches Release Manifest SHA <code>ba66335</code></span>
+        <span>✅ <strong>RELEASE RECONCILIATION:</strong> Live Cloud Run identity is verified by the production release API.</span>
       </div>
       <button onclick="fetch('/api/admin/releases/v2/drift-reconciliation').then(r=>r.json()).then(d=>alert('Drift Status: ' + JSON.stringify(d)))" style="background: #059669; color: white; border: none; padding: 0.35rem 0.75rem; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">
         Reconcile Now

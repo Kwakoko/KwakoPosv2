@@ -105,6 +105,7 @@
     "certify:hardware": "tsx scripts/certification/runHardwareCertification.ts",
     "certify:electronics": "tsx scripts/certification/runElectronicsCertification.ts",
     "certify:production": "tsx scripts/certification/runProductionCertification.ts",
+    "certify:repository-forensic": "tsx scripts/certification/repository-forensic-integrity.ts",
     "certify:prove": "tsx scripts/release/prove-production-release.ts",
     "db:generate": "npm run db:generate --workspace=@kwakopos2/database",
     "db:migrate": "npm run db:migrate --workspace=@kwakopos2/database",

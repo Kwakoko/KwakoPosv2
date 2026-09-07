@@ -1074,8 +1074,8 @@ export class ReleaseRepository {
     const dep: DeploymentHistoryRecord = {
       ...data,
       id,
-      revision: data.revision || "kwakopos-prod-001",
-      artifactDigest: data.artifactDigest || "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      revision: data.revision,
+      artifactDigest: data.artifactDigest,
       deploymentStrategy: data.deploymentStrategy || "CANARY",
       canaryPercentage: data.canaryPercentage ?? 100,
       healthResult: data.healthResult || "100% HEALTHY",

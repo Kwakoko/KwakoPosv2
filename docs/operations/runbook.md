@@ -19,20 +19,20 @@ pm run test:sync\)
    - Real Playwright Chromium Certification (Browser A -> Candidate -> Browser B)
    - 100% Traffic Promotion to Certified Revision
    - Post-Promotion Live Readiness Verification
-   - Release Evidence Persistence in \rtifacts/release-evidence/\
+   - Release Evidence Persistence in \rtifacts/release-evidence/\
 
 ### Zero-Downtime Rollback Procedure
 If a production incident occurs on the active revision:
 1. Identify the last known certified revision:
-   \\\ash
+   \\\ash
    gcloud run revisions list --service=kwakopos-production-service --region=us-central1 --project=kwakoposv2
    \\\
 2. Instantly route 100% traffic to the target previous revision:
-   \\\ash
+   \\\ash
    gcloud run services update-traffic kwakopos-production-service --to-revisions=<PREVIOUS_REVISION_NAME>=100 --region=us-central1 --project=kwakoposv2
    \\\
 3. Verify production health:
-   \\\ash
+   \\\ash
    curl -s https://kwakokov2--kwakoposv2.us-east4.hosted.app/health
    \\\
 
@@ -55,7 +55,7 @@ If a production incident occurs on the active revision:
 - **Connection Pool Tuning**: Neon PostgreSQL connection pooling is managed via Prisma with automated reconnection retries on transient connection timeouts (timeout: 5000ms).
 - **Periodic Data Integrity Reconciliation**:
   Run the automated data integrity scanner:
-  \\\ash
+  \\\ash
   npx tsx scripts/ops/reconcile-data.ts
   \\\
   The scanner asserts:

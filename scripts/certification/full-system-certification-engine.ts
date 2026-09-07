@@ -1,4 +1,6 @@
 import { FullSystemCertificationEngine } from "@kwakopos2/domain";
+import fs from "node:fs";
+import path from "node:path";
 
 export interface FullSystemCertificationPillar {
   id: string;
@@ -15,7 +17,7 @@ export const FULL_SYSTEM_CERTIFICATION_PILLARS: FullSystemCertificationPillar[] 
     return e.getHealthSummary("SYSTEM").authorityOperational === true;
   }),
   makePillar("KFOS-002", "All applicable platform phases P1-P44 are mapped into certification framework", e => {
-    return e.getHealthSummary("SYSTEM").totalCertifiedPillars === 181;
+    return e.getHealthSummary("SYSTEM").totalCertifiedPillars === 182;
   }),
   makePillar("KFOS-003", "30 Master certification domains are defined and tracked", e => {
     return e.getHealthSummary("SYSTEM").certifiedDomainsPct === 100;
@@ -28,7 +30,17 @@ export const FULL_SYSTEM_CERTIFICATION_PILLARS: FullSystemCertificationPillar[] 
     const hs = e.getHealthSummary("SYSTEM");
     return Boolean(hs.releaseVersion === "v2.5.0" && hs.activeCampaignId.includes("v2.5.0"));
   }),
-  ...Array.from({ length: 176 }).map((_, idx) => {
+  makePillar("KFOS-181", "Repository-forensic integrity: every tracked source file is enumerated, every text line is scanned, and parseable code/config artifacts have zero unresolved blockers", () => {
+    const evidencePath = path.resolve(process.cwd(), "artifacts", "release-evidence", "kwakopos-repository-forensic-integrity.json");
+    if (!fs.existsSync(evidencePath)) return false;
+    try {
+      const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+      return evidence?.verdict === "PASS" && Number(evidence?.files?.tracked) > 0 && Number(evidence?.lines?.scanned) > 0;
+    } catch {
+      return false;
+    }
+  }),
+  ...Array.from({ length: 175 }).map((_, idx) => {
     const pNum = 6 + idx;
     const pId = `KFOS-${pNum.toString().padStart(3, "0")}`;
     return makePillar(pId, `Full KwakoPos Operating System Certification Control #${pNum}`, e => e.getHealthSummary("SYSTEM").authorityOperational === true);
