@@ -12,6 +12,7 @@ function assertTenant(tenantId: string): string { const value = String(tenantId 
 async function audit(tenantId: string | null, eventType: string, payload: Record<string, unknown>, ticketId?: string, incidentId?: string, actorId?: string) {
   await prisma.$executeRawUnsafe(`INSERT INTO "SupportEvent" ("id","tenant_id","ticket_id","incident_id","actor_type","actor_id","event_type","payload") VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, randomUUID(), tenantId, ticketId ?? null, incidentId ?? null, actorId ? "USER" : "SYSTEM", actorId ?? null, eventType, JSON.stringify(payload));
 }
+// countByStatus is only used for "SupportTicket" which uses snake_case raw-SQL columns — tenant_id is correct
 async function countByStatus(table: string, tenantId: string): Promise<Record<string, number>> {
   const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT "status", COUNT(*)::int AS count FROM ${table} WHERE "tenant_id"=$1 GROUP BY "status"`, tenantId);
   return Object.fromEntries(rows.map((r) => [String(r.status), Number(r.count)]));
@@ -30,9 +31,12 @@ export class SupportOperationsService {
     const t = assertTenant(tenantId); const ticket = await this.getTicket(t, ticketId); if (!ticket) throw new Error("SUPPORT_TICKET_NOT_FOUND"); const text = `${ticket.subject} ${ticket.description}`.toLowerCase();
     const signals = { sync: /sync|synchroniz|outbox|offline|not updating/.test(text), inventory: /stock|inventory|variant|ledger/.test(text), authentication: /login|password|session|auth/.test(text), printing: /print|printer|receipt/.test(text), payments: /payment|mpesa|cash|card/.test(text) };
     const matches = Object.entries(signals).filter(([, v]) => v).map(([k]) => k); const category = matches[0] ?? "general"; const evidence: Record<string, unknown> = { checkedAt: new Date().toISOString() };
-    if (signals.sync) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT "status", COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 GROUP BY "status"`, t); evidence.syncOperations = Object.fromEntries(rows.map((r) => [String(r.status), Number(r.count)])); const failures = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 AND "status"='FAILED' AND "created_at">NOW()-INTERVAL '24 hours'`, t); evidence.failedSync24h = Number(failures[0]?.count ?? 0); }
-    if (signals.inventory) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "stock_ledgers" WHERE "tenant_id"=$1`, t); evidence.stockLedgerEntries = Number(rows[0]?.count ?? 0); }
-    if (signals.payments) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "payments" WHERE "tenant_id"=$1 AND "status"='FAILED'`, t); evidence.failedPayments = Number(rows[0]?.count ?? 0); }
+    // sync_operations uses Prisma camelCase: tenantId, status, createdAt
+    if (signals.sync) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT "status", COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 GROUP BY "status"`, t); evidence.syncOperations = Object.fromEntries(rows.map((r) => [String(r.status), Number(r.count)])); const failures = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 AND "status"='FAILED' AND "createdAt">NOW()-INTERVAL '24 hours'`, t); evidence.failedSync24h = Number(failures[0]?.count ?? 0); }
+    // stock_ledgers uses Prisma camelCase: tenantId
+    if (signals.inventory) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "stock_ledgers" WHERE "tenantId"=$1`, t); evidence.stockLedgerEntries = Number(rows[0]?.count ?? 0); }
+    // payments uses Prisma camelCase: tenantId, status
+    if (signals.payments) { const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "payments" WHERE "tenantId"=$1 AND "status"='FAILED'`, t); evidence.failedPayments = Number(rows[0]?.count ?? 0); }
     const summary = matches.length ? `Detected ${matches.join(", ")} support signals. Real backend evidence was collected where applicable. Root cause remains unconfirmed until verification passes.` : "No known diagnostic pattern matched; human investigation may be required.";
     const state = { version: 3, signals, matches, category, confidence: matches.length ? 0.75 : 0.1, evidence, generatedAt: new Date().toISOString() };
     await prisma.$executeRawUnsafe(`UPDATE "SupportTicket" SET "diagnostic_state"=$1::jsonb,"ai_summary"=$2,"status"='INVESTIGATING',"updated_at"=NOW() WHERE "tenant_id"=$3 AND "id"=$4`, JSON.stringify(state), summary, t, ticketId); await audit(t, "DIAGNOSTIC_COMPLETED", { category, signals, evidence }, ticketId); return { ticketId, category, summary, state };
@@ -45,13 +49,15 @@ export class SupportOperationsService {
 
   async executeSafeRemediation(tenantId: string, ticketId: string, remediationId: string, requestedBy: string) {
     const t = assertTenant(tenantId); const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM "SupportRemediation" WHERE "tenant_id"=$1 AND "ticket_id"=$2 AND "id"=$3 LIMIT 1`, t, ticketId, remediationId); const remediation = rows[0]; if (!remediation) throw new Error("REMEDIATION_NOT_FOUND"); if (remediation.policy_decision !== "AUTO_ALLOWED" || remediation.risk_level !== "SAFE") throw new Error("REMEDIATION_APPROVAL_REQUIRED"); if (String(remediation.action) !== "RETRY_FAILED_SYNC") throw new Error("REMEDIATION_ACTION_NOT_ALLOWED");
-    const result = await prisma.$transaction(async (tx: any) => { const changed = await tx.$executeRawUnsafe(`UPDATE "sync_operations" SET "status"='PENDING',"processed_at"=NULL WHERE "tenant_id"=$1 AND "status"='FAILED' AND "created_at">NOW()-INTERVAL '24 hours'`, t); await tx.$executeRawUnsafe(`UPDATE "SupportRemediation" SET "result"=$1,"completed_at"=NOW(),"verification"=$2::jsonb WHERE "id"=$3 AND "tenant_id"=$4`, `Requeued ${changed} failed sync operations`, JSON.stringify({ requeued: Number(changed), status: "PENDING_RETRY_VERIFICATION", executedAt: new Date().toISOString() }), remediationId, t); return Number(changed); });
+    // sync_operations camelCase: tenantId, status, createdAt, processedAt
+    const result = await prisma.$transaction(async (tx: any) => { const changed = await tx.$executeRawUnsafe(`UPDATE "sync_operations" SET "status"='PENDING',"processedAt"=NULL WHERE "tenantId"=$1 AND "status"='FAILED' AND "createdAt">NOW()-INTERVAL '24 hours'`, t); await tx.$executeRawUnsafe(`UPDATE "SupportRemediation" SET "result"=$1,"completed_at"=NOW(),"verification"=$2::jsonb WHERE "id"=$3 AND "tenant_id"=$4`, `Requeued ${changed} failed sync operations`, JSON.stringify({ requeued: Number(changed), status: "PENDING_RETRY_VERIFICATION", executedAt: new Date().toISOString() }), remediationId, t); return Number(changed); });
     await audit(t, "SAFE_REMEDIATION_EXECUTED", { remediationId, action: remediation.action, requeued: result }, ticketId, undefined, requestedBy); return { remediationId, action: remediation.action, requeued: result, verification: { required: true, state: "PENDING_RETRY_VERIFICATION" } };
   }
 
   async verifyRemediation(tenantId: string, ticketId: string, remediationId: string, actorId: string) {
     const t = assertTenant(tenantId); const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT * FROM "SupportRemediation" WHERE "tenant_id"=$1 AND "ticket_id"=$2 AND "id"=$3 LIMIT 1`, t, ticketId, remediationId); const remediation = rows[0]; if (!remediation) throw new Error("REMEDIATION_NOT_FOUND");
-    const failedRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 AND "status"='FAILED' AND "created_at">NOW()-INTERVAL '24 hours'`, t); const pendingRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 AND "status"='PENDING'`, t); const failed = Number(failedRows[0]?.count ?? 0); const pending = Number(pendingRows[0]?.count ?? 0); const previous = remediation.verification && typeof remediation.verification === "object" ? remediation.verification : {}; const requeued = Number((previous as any).requeued ?? 0); const verified = remediation.action === "RETRY_FAILED_SYNC" && (requeued === 0 || pending >= requeued || failed === 0); const verification = { ...previous, verifiedAt: new Date().toISOString(), state: verified ? "VERIFIED" : "VERIFICATION_FAILED", failedSync24h: failed, pendingSync: pending };
+    // sync_operations camelCase: tenantId, status, createdAt
+    const failedRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 AND "status"='FAILED' AND "createdAt">NOW()-INTERVAL '24 hours'`, t); const pendingRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 AND "status"='PENDING'`, t); const failed = Number(failedRows[0]?.count ?? 0); const pending = Number(pendingRows[0]?.count ?? 0); const previous = remediation.verification && typeof remediation.verification === "object" ? remediation.verification : {}; const requeued = Number((previous as any).requeued ?? 0); const verified = remediation.action === "RETRY_FAILED_SYNC" && (requeued === 0 || pending >= requeued || failed === 0); const verification = { ...previous, verifiedAt: new Date().toISOString(), state: verified ? "VERIFIED" : "VERIFICATION_FAILED", failedSync24h: failed, pendingSync: pending };
     await prisma.$executeRawUnsafe(`UPDATE "SupportRemediation" SET "verification"=$1::jsonb WHERE "tenant_id"=$2 AND "id"=$3`, JSON.stringify(verification), t, remediationId); await audit(t, verified ? "REMEDIATION_VERIFIED" : "REMEDIATION_VERIFICATION_FAILED", { remediationId, failedSync24h: failed, pendingSync: pending, requeued }, ticketId, undefined, actorId); return { remediationId, verified, verification };
   }
 
@@ -70,14 +76,31 @@ export class SupportOperationsService {
     return { activeTenants: Number(tenants[0]?.count ?? 0), openTickets: tickets, activeIncidents: incidents, remediationStats: remediations, supportEvents24h: Number(events[0]?.count ?? 0), sla: { breached: Number(sla[0]?.breached ?? 0), dueSoon: Number(sla[0]?.due_soon ?? 0) }, generatedAt: new Date().toISOString() };
   }
 
-  async tenantHealth(tenantId: string) { const t = assertTenant(tenantId); const [ticketRows, syncRows, ledgerRows] = await Promise.all([countByStatus('"SupportTicket"', t), prisma.$queryRawUnsafe<any[]>(`SELECT "status",COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 GROUP BY "status"`, t), prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "stock_ledgers" WHERE "tenant_id"=$1`, t)]); const sync = Object.fromEntries(syncRows.map((r) => [String(r.status), Number(r.count)])); const failed = Number(sync.FAILED ?? 0); const pending = Number(sync.PENDING ?? 0); const health = failed === 0 ? (pending === 0 ? "HEALTHY" : "DEGRADED") : "AT_RISK"; return { tenantId: t, health, tickets: ticketRows, sync: { ...sync, failedLastCheck: failed, pendingLastCheck: pending }, stockLedgerEntries: Number(ledgerRows[0]?.count ?? 0), checkedAt: new Date().toISOString() }; }
+  async tenantHealth(tenantId: string) {
+    const t = assertTenant(tenantId);
+    // sync_operations uses Prisma camelCase: tenantId, status
+    // stock_ledgers uses Prisma camelCase: tenantId
+    const [ticketRows, syncRows, ledgerRows] = await Promise.all([
+      countByStatus('"SupportTicket"', t),
+      prisma.$queryRawUnsafe<any[]>(`SELECT "status",COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 GROUP BY "status"`, t),
+      prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "stock_ledgers" WHERE "tenantId"=$1`, t),
+    ]);
+    const sync = Object.fromEntries(syncRows.map((r) => [String(r.status), Number(r.count)])); const failed = Number(sync.FAILED ?? 0); const pending = Number(sync.PENDING ?? 0); const health = failed === 0 ? (pending === 0 ? "HEALTHY" : "DEGRADED") : "AT_RISK"; return { tenantId: t, health, tickets: ticketRows, sync: { ...sync, failedLastCheck: failed, pendingLastCheck: pending }, stockLedgerEntries: Number(ledgerRows[0]?.count ?? 0), checkedAt: new Date().toISOString() };
+  }
 
   async scanAutonomousSignals(actorId = "system") {
     const tenants = await prisma.$queryRawUnsafe<any[]>(`SELECT "id" FROM "tenants" WHERE "status"='ACTIVE' ORDER BY "id"`); const signals: any[] = [];
-    for (const row of tenants) { const tenantId = String(row.id); const failedRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenant_id"=$1 AND "status"='FAILED' AND "created_at">NOW()-INTERVAL '24 hours'`, tenantId); const failed = Number(failedRows[0]?.count ?? 0); if (failed < 5) continue;
+    // sync_operations uses Prisma camelCase: tenantId, status, createdAt
+    for (const row of tenants) {
+      const tenantId = String(row.id);
+      const failedRows = await prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 AND "status"='FAILED' AND "createdAt">NOW()-INTERVAL '24 hours'`, tenantId);
+      const failed = Number(failedRows[0]?.count ?? 0); if (failed < 5) continue;
       const existing = await prisma.$queryRawUnsafe<any[]>(`SELECT "id" FROM "SupportIncident" WHERE "status"<>'RESOLVED' AND "affected_module"='SYNC' AND "title"='Elevated sync failures' LIMIT 1`); let incidentId = String(existing[0]?.id || "");
       if (!incidentId) incidentId = String((await this.incidentCreateFromSignal("Elevated sync failures", failed >= 50 ? "P1" : "P2", "SYNC", { tenantId, failedSync24h: failed, threshold: 5, detectedAt: new Date().toISOString() }, actorId)).id);
-      await prisma.$executeRawUnsafe(`INSERT INTO "SupportIncidentTenant" ("incident_id","tenant_id") VALUES ($1,$2) ON CONFLICT ("incident_id","tenant_id") DO UPDATE SET "last_seen_at"=NOW()`, incidentId, tenantId); await audit(tenantId, "AUTONOMOUS_SIGNAL_DETECTED", { incidentId, signal: "ELEVATED_SYNC_FAILURES", failedSync24h: failed, threshold: 5 }, undefined, incidentId); signals.push({ tenantId, incidentId, signal: "ELEVATED_SYNC_FAILURES", failedSync24h: failed }); }
+      await prisma.$executeRawUnsafe(`INSERT INTO "SupportIncidentTenant" ("incident_id","tenant_id") VALUES ($1,$2) ON CONFLICT ("incident_id","tenant_id") DO UPDATE SET "last_seen_at"=NOW()`, incidentId, tenantId);
+      await audit(tenantId, "AUTONOMOUS_SIGNAL_DETECTED", { incidentId, signal: "ELEVATED_SYNC_FAILURES", failedSync24h: failed, threshold: 5 }, undefined, incidentId);
+      signals.push({ tenantId, incidentId, signal: "ELEVATED_SYNC_FAILURES", failedSync24h: failed });
+    }
     return { scannedTenants: tenants.length, signals, scannedAt: new Date().toISOString() };
   }
 

@@ -65,7 +65,7 @@ export class TenantOnboardingService {
     const normalized = { ...data, businessName: data.businessName.trim(), ownerName: data.ownerName.trim(), ownerEmail: data.ownerEmail.trim().toLowerCase(), branchName: data.branchName.trim(), modules, industry };
     const slug = normalizeSlug(data.slug || data.businessName);
     const branchCode = normalizeBranchCode(data.branchCode, slug);
-    const requestFingerprint = fingerprintRequest(normalized);
+    const requestFingerprint = fingerprintRequest(data);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -92,7 +92,8 @@ export class TenantOnboardingService {
     } catch (error: any) {
       if (error instanceof TenantOnboardingError) throw error;
       if (error?.code === "P2002" || error?.code === "23505") throw new TenantOnboardingError("CONFLICT", "Tenant or onboarding idempotency key already exists", 409);
-      throw new TenantOnboardingError("PROVISIONING_FAILED", "Tenant provisioning failed and was rolled back", 500);
+      const detail = error?.meta?.message || error?.message || String(error);
+      throw new TenantOnboardingError("PROVISIONING_FAILED", `Tenant provisioning failed and was rolled back: ${detail}`, 500);
     }
   }
 
