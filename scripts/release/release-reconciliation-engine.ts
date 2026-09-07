@@ -50,7 +50,7 @@ export function detectReleaseDrift(
     gitSha: runningEnvironment.gitSha || expectedManifest.gitSha,
     artifactDigest: runningEnvironment.artifactDigest || expectedManifest.artifactDigest,
     schemaVersion: runningEnvironment.schemaVersion || expectedManifest.schemaVersion,
-    cloudRunRevision: runningEnvironment.cloudRunRevision || expectedManifest.cloudRunRevision || "kwakopos-prod-001",
+    cloudRunRevision: runningEnvironment.cloudRunRevision || expectedManifest.cloudRunRevision || "",
   };
 
   const expectedState = {
@@ -58,7 +58,7 @@ export function detectReleaseDrift(
     gitSha: expectedManifest.gitSha,
     artifactDigest: expectedManifest.artifactDigest,
     schemaVersion: expectedManifest.schemaVersion,
-    cloudRunRevision: expectedManifest.cloudRunRevision || "kwakopos-prod-001",
+    cloudRunRevision: expectedManifest.cloudRunRevision || "",
   };
 
   if (runningState.artifactDigest !== expectedState.artifactDigest) {

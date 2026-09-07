@@ -161,7 +161,8 @@ export async function executeAutomatedRollback(req: RollbackRequest): Promise<Ro
 
 if (process.argv[1] && (process.argv[1].endsWith("rollback-engine.ts") || process.argv[1].includes("rollback-engine"))) {
   const rootPkgPath = path.resolve(process.cwd(), "package.json");
-  const currentVer = fs.existsSync(rootPkgPath) ? JSON.parse(fs.readFileSync(rootPkgPath, "utf8")).version || "2.5.0" : "2.5.0";
+  const currentVer = fs.existsSync(rootPkgPath) ? JSON.parse(fs.readFileSync(rootPkgPath, "utf8")).version : "";
+  if (!currentVer) throw new Error("ROLLBACK_BLOCKED: current release version is not available");
   const failedVersion = process.argv[2] || currentVer;
   const targetStableVersion = process.argv[3] || "2.4.0";
   const reason = process.argv[4] || "Synthetic health check failure on deployment";

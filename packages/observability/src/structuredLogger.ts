@@ -19,7 +19,7 @@ export class StructuredLogger {
   private serviceName: string;
   private gcpProjectId?: string;
 
-  constructor(serviceName = "kwakopos-api", gcpProjectId = process.env.GCP_PROJECT_ID || "kwakoposv2") {
+  constructor(serviceName = "kwakopos-api", gcpProjectId = process.env.GCP_PROJECT_ID || "") {
     this.serviceName = serviceName;
     this.gcpProjectId = gcpProjectId;
   }

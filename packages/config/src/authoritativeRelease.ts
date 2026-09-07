@@ -40,9 +40,9 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   version: "2.12.5",
   tag: "v2.12.5",
   gitTag: "v2.12.5",
-  gitSha: "c3bdddf91744816ff0ad8156cc9435589a0fe6b7",
-  buildId: "kwakopos-build-20260906-2125",
-  releaseId: "kwakopos-rel-2.12.5-c3bdddf",
+  gitSha: "",
+  buildId: "",
+  releaseId: "",
   containerDigest: null,
   cloudRunRevision: null,
   environment: "development",
@@ -55,7 +55,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   databaseSchemaVersion: 4,
   minimumSupportedClientVersion: "2.0.0",
   maximumSupportedClientVersion: "3.0.0",
-  certification: "PASS",
+  certification: "PENDING",
   compatibility: {
     databaseSchemaVersion: 4,
     syncProtocolVersion: 2,
@@ -93,7 +93,19 @@ export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIden
     if (parent === currentDir) break;
     currentDir = parent;
   }
-  return FALLBACK_AUTHORITATIVE_RELEASE;
+  const packagePath = path.join(root, "package.json");
+  let version = FALLBACK_AUTHORITATIVE_RELEASE.version;
+  if (fs.existsSync(packagePath)) {
+    try { version = JSON.parse(fs.readFileSync(packagePath, "utf8")).version || version; } catch {}
+  }
+  return {
+    ...FALLBACK_AUTHORITATIVE_RELEASE,
+    appVersion: version,
+    version,
+    tag: `v${version}`,
+    gitTag: `v${version}`,
+    compatibility: { ...FALLBACK_AUTHORITATIVE_RELEASE.compatibility, recommendedClientVersion: version },
+  };
 }
 
 export const AUTHORITATIVE_RELEASE = loadAuthoritativeRelease();

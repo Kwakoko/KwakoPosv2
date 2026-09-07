@@ -60,8 +60,10 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     candidate = JSON.parse(fs.readFileSync(candidateFile, "utf8"));
   }
 
-  const project = process.env.GCP_PROJECT || "kwakoposv2";
-  const region = process.env.GCP_REGION || "us-central1";
+  const project = process.env.GCP_PROJECT || String(execSync("gcloud config get-value project", { encoding: "utf8" })).trim();
+  const region = process.env.GCP_REGION || String(execSync("gcloud config get-value compute/region", { encoding: "utf8" })).trim();
+  if (!project || project === "(unset)") throw new Error("RELEASE_BLOCKED: GCP project is not configured");
+  if (!region || region === "(unset)") throw new Error("RELEASE_BLOCKED: GCP region is not configured");
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
   const digest = candidate.containerDigest || candidate.imageDigest;
 

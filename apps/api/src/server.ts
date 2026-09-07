@@ -201,6 +201,15 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
   return ctx.tenantId;
 }
 
+function requireSuperAdminContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")) {
+    throw new Error("FORBIDDEN: Super Admin privileges required for platform release controls");
+  }
+  return ctx;
+}
+
 function requireAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
@@ -228,7 +237,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Fastify CORS setup - locked in production
   const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://kwakokov2--kwakoposv2.us-east4.hosted.app", "https://app.kwakopos.com", "https://admin.kwakopos.com"])
+    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
     : "*";
   server.register(cors, { origin: corsOrigin });
 
@@ -404,6 +413,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const authenticatedPath = req.url.split("?")[0];
       if (authenticatedPath.startsWith("/admin/")) {
         requireAdminContext(req);
+      }
+      const platformReleasePath =
+        authenticatedPath.startsWith("/api/admin/releases/") ||
+        authenticatedPath.startsWith("/admin/operations/production") ||
+        authenticatedPath.startsWith("/admin/operations/releases") ||
+        authenticatedPath.startsWith("/admin/operations/canary/") ||
+        authenticatedPath.startsWith("/admin/operations/rollback");
+      if (platformReleasePath) {
+        requireSuperAdminContext(req);
       }
     } catch (err: any) {
       const message = err?.message || "Invalid token";
@@ -2421,10 +2439,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/admin/releases/rollback", async (req, reply) => {
     const { failedVersion, targetStableVersion, reason } = (req.body as any) || {};
+    if (!failedVersion || !targetStableVersion || !reason) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "failedVersion, targetStableVersion and reason are required" } });
+    }
     const result = await globalReleaseService.triggerRollback({
-      failedVersion: failedVersion || "2.3.0",
-      targetStableVersion: targetStableVersion || "2.2.0",
-      reason: reason || "Super Admin manual rollback trigger",
+      failedVersion: String(failedVersion).trim(),
+      targetStableVersion: String(targetStableVersion).trim(),
+      reason: String(reason).trim(),
     });
     return reply.status(200).send({ success: true, data: result });
   });
@@ -2436,7 +2457,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/admin/releases/v2/policy-decision", async (req, reply) => {
-    const version = (req.query as any)?.version || "2.2.0";
+    const version = String((req.query as any)?.version || "").trim();
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
     const decision = await globalReleaseService.evaluateReleasePolicies(version);
     return reply.status(200).send({ success: true, data: decision });
   });
@@ -2452,14 +2474,17 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/admin/releases/v2/compare", async (req, reply) => {
-    const from = (req.query as any)?.from || "2.1.0";
-    const to = (req.query as any)?.to || "2.2.0";
+    const from = String((req.query as any)?.from || "").trim();
+    const to = String((req.query as any)?.to || "").trim();
+    if (!from || !to) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "from and to versions are required" } });
     const comparison = await globalReleaseService.compareReleases(from, to);
     return reply.status(200).send({ success: true, data: comparison });
   });
 
   server.get("/api/admin/releases/v2/evidence-package", async (req, reply) => {
-    const version = (req.query as any)?.version || "2.2.0";
+    const version = String((req.query as any)?.version || "").trim();
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
     const pkg = await globalReleaseService.getEvidencePackage(version);
     return reply.status(200).send({ success: true, data: pkg });
   });

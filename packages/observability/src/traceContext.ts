@@ -39,7 +39,7 @@ export function createTraceContext(partial: Partial<TraceContext>): TraceContext
     sessionId: partial.sessionId,
     operationId: partial.operationId,
     idempotencyKey: partial.idempotencyKey,
-    appVersion: partial.appVersion || "2.5.0",
+    appVersion: partial.appVersion || "unknown",
     gitSha: partial.gitSha,
     cloudRunRevision: partial.cloudRunRevision,
     environment: partial.environment || process.env.NODE_ENV || "production",

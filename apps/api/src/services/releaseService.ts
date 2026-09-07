@@ -1,5 +1,6 @@
 import { globalReleaseRepository } from "@kwakopos2/database";
 import { globalReleaseNotificationService } from "./releaseNotificationService.js";
+import { getReleaseIdentity, loadConfig } from "@kwakopos2/config";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -9,7 +10,7 @@ export class ReleaseService {
   private async getProgressiveController() {
     if (!this.progressiveController) {
       const { ProgressiveDeliveryController } = await import("../../../../scripts/release/progressive-delivery-controller.js");
-      this.progressiveController = new ProgressiveDeliveryController("2.5.0");
+      this.progressiveController = new ProgressiveDeliveryController(getReleaseIdentity(loadConfig()).version);
     }
     return this.progressiveController;
   }
@@ -17,7 +18,7 @@ export class ReleaseService {
     const rootPkg = JSON.parse(
       fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
     );
-    const currentVersion = rootPkg.version || "2.5.0";
+    const currentVersion = getReleaseIdentity(loadConfig()).version || rootPkg.version;
 
     const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
     const { generateSBOM } = await import("../../../../scripts/release/sbom-generator.js");
@@ -71,43 +72,8 @@ export class ReleaseService {
         leadTimeHours: dora.leadTimeForChangesHours,
         mttrMinutes: dora.meanTimeToRecoveryMinutes,
       },
-      releaseTimeline: versions.length > 0 ? versions : [
-        {
-          id: `VER-${currentVersion}`,
-          version: currentVersion,
-          major: 2,
-          minor: 5,
-          patch: 0,
-          releaseType: "MINOR",
-          gitTag: `v${currentVersion}`,
-          commitHash: manifest.gitSha,
-          artifactDigest: attestation.digest,
-          releaseState: "RELEASED",
-          releaseRisk: risk.riskLevel,
-          releaseNotes: generateAIReleaseSummary(currentVersion),
-          releaseDate: new Date().toISOString(),
-          deploymentStatus: "DEPLOYED",
-          buildNumber: 15,
-          createdBy: "AUTOMATED_CI_CD",
-        },
-      ],
-      deploymentHistory: deployments.length > 0 ? deployments : [
-        {
-          id: "DEP-001",
-          appVersionId: `VER-${currentVersion}`,
-          environment: "production",
-          revision: "kwakopos-prod-001",
-          artifactDigest: attestation.digest,
-          deploymentStrategy: "CANARY",
-          canaryPercentage: progressive.trafficPercentage,
-          deploymentStart: new Date(Date.now() - 3600000).toISOString(),
-          deploymentEnd: new Date(Date.now() - 3540000).toISOString(),
-          durationSeconds: 42,
-          status: "SUCCESSFUL",
-          healthResult: "100% HEALTHY",
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      releaseTimeline: versions,
+      deploymentHistory: deployments,
       rollbackHistory: deployments.filter((d) => d.status === "ROLLED_BACK"),
     };
   }
@@ -133,7 +99,7 @@ export class ReleaseService {
     sm.transitionTo("SECURITY_PASSED", "Zero high/critical vulnerabilities");
 
     const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8"));
-    const version = pkg.version || "2.5.0";
+    const version = getReleaseIdentity(loadConfig()).version || pkg.version;
 
     const manifest = generateReleaseManifest({ version });
     const sbom = generateSBOM(version);
@@ -171,7 +137,7 @@ export class ReleaseService {
     const depRecord = globalReleaseRepository.recordDeployment({
       appVersionId: verRecord.id,
       environment: "production",
-      revision: "kwakopos-prod-001",
+      revision: process.env.CLOUD_RUN_REVISION || "UNKNOWN_PENDING_DEPLOYMENT",
       artifactDigest: att.digest,
       deploymentStrategy: "CANARY",
       canaryPercentage: 100,
@@ -224,12 +190,12 @@ export class ReleaseService {
   }
 
   // V2 Extensions
-  async evaluateReleasePolicies(version: string = "2.2.0", evidence: any = {}) {
+  async evaluateReleasePolicies(version: string, evidence: any = {}) {
     const { evaluateReleasePolicies } = await import("../../../../scripts/release/release-policy-engine.js");
     return evaluateReleasePolicies(`rel_${Date.now()}`, version, evidence);
   }
 
-  async createReleaseCandidate(version: string = "2.2.0", gitSha: string = "HEAD", artifactDigest: string = "sha256:e3b0c442") {
+  async createReleaseCandidate(version: string, gitSha: string, artifactDigest: string) {
     const { createReleaseCandidateEntity } = await import("../../../../scripts/release/release-candidate-engine.js");
     const rc = createReleaseCandidateEntity(version, gitSha, artifactDigest);
     globalReleaseRepository.createReleaseCandidate(rc);
@@ -244,18 +210,19 @@ export class ReleaseService {
   async detectDrift(runningState: any = {}) {
     const { detectReleaseDrift } = await import("../../../../scripts/release/release-reconciliation-engine.js");
     const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
-    const manifest = generateReleaseManifest({ version: "2.5.0" });
+    const identity = getReleaseIdentity(loadConfig());
+    const manifest = generateReleaseManifest({ version: identity.version, gitSha: identity.gitSha });
     return detectReleaseDrift(manifest, runningState);
   }
 
-  async getEvidencePackage(version: string = "2.5.0") {
+  async getEvidencePackage(version: string) {
     const { buildReleaseEvidencePackage } = await import("../../../../scripts/release/release-evidence-package-builder.js");
     const { generateReleaseManifest } = await import("../../../../scripts/release/release-manifest-generator.js");
     const manifest = generateReleaseManifest({ version });
-    return buildReleaseEvidencePackage(`rel_${version}`, version, manifest.gitSha, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    return buildReleaseEvidencePackage(`rel_${version}`, version, manifest.gitSha, manifest.artifactDigest);
   }
 
-  async compareReleases(v1: string = "2.1.0", v2: string = "2.2.0") {
+  async compareReleases(v1: string, v2: string) {
     return {
       comparison: `${v1} vs ${v2}`,
       fromVersion: v1,
