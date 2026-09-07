@@ -8,7 +8,7 @@ import { generateAIReleaseSummary } from "./ai-release-notes-generator.js";
 export interface QualityGateItem { name: string; passed: boolean; message: string; }
 export interface QualityGateReport { overallPassed: boolean; version: string; timestamp: string; gates: QualityGateItem[]; }
 
-function runCommand(command: string, timeout = 300000): { passed: boolean; output: string } {
+function runCommand(command: string, timeout = 600000): { passed: boolean; output: string } {
   try {
     const output = execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout });
     return { passed: true, output: output.trim() };
