@@ -19,3 +19,5 @@ test-results/
 /Microsoft/
 
 /apps/web/public/sw.js
+# Generated release manifest at repository root
+/release-manifest.json
