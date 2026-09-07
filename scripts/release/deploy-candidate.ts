@@ -31,21 +31,45 @@ function quoteCliValue(value: string): string {
   return value;
 }
 
-function validateContainerProvenance(imageRef: string, expectedSha: string): string {
+async function validateContainerProvenance(imageRef: string, expectedSha: string): Promise<string> {
   try {
-    run(`docker pull ${quoteCliValue(imageRef)}`);
-    const raw = String(run(`docker inspect ${quoteCliValue(imageRef)} --format='{{json .Config.Labels}}'`, "utf8")).trim();
-    const labels = JSON.parse(raw || "{}");
-    const sourceSha = String(labels["org.opencontainers.image.revision"] || "").trim();
+    const at = imageRef.lastIndexOf("@");
+    const digestRef = imageRef.slice(at + 1);
+    const imagePath = imageRef.slice(0, at);
+    const firstSlash = imagePath.indexOf("/");
+    const lastSlash = imagePath.lastIndexOf("/");
+    if (at < 0 || firstSlash <= 0 || lastSlash <= firstSlash || !/^sha256:[0-9a-f]{64}$/i.test(digestRef)) {
+      throw new Error(`invalid immutable image reference: ${imageRef}`);
+    }
+    const registry = imagePath.slice(0, firstSlash);
+    const repository = imagePath.slice(firstSlash + 1, lastSlash);
+    const imageName = imagePath.slice(lastSlash + 1);
+    const digest = digestRef.slice("sha256:".length);
+    const token = String(run("gcloud auth print-access-token", "utf8")).trim();
+    if (!token) throw new Error("unable to obtain Artifact Registry access token");
+    const baseUrl = `https://${registry}/v2/${repository}/${imageName}`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json",
+    };
+    const manifestRes = await fetch(`${baseUrl}/manifests/sha256:${digest}`, { headers });
+    if (!manifestRes.ok) throw new Error(`registry manifest lookup failed: HTTP ${manifestRes.status}`);
+    const manifest: any = await manifestRes.json();
+    const configDigest = String(manifest?.config?.digest || "").trim();
+    if (!/^sha256:[0-9a-f]{64}$/i.test(configDigest)) throw new Error(`registry manifest has invalid config digest: ${configDigest || "missing"}`);
+    const configRes = await fetch(`${baseUrl}/blobs/${configDigest}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!configRes.ok) throw new Error(`registry config lookup failed: HTTP ${configRes.status}`);
+    const config: any = await configRes.json();
+    const sourceSha = String(config?.config?.Labels?.["org.opencontainers.image.revision"] || "").trim();
     assertValidGitSha(sourceSha);
     if (sourceSha !== expectedSha) throw new Error(`container source provenance mismatch: expected=${expectedSha} actual=${sourceSha}`);
     return sourceSha;
   } catch (err: any) {
-    throw new Error(`RELEASE_BLOCKED: unable to independently verify container source provenance: ${err?.message || err}`);
+    throw new Error(`RELEASE_BLOCKED: unable to independently verify registry container source provenance: ${err?.message || err}`);
   }
 }
 
-export function deployCandidateRevision(): CandidateDeploymentEvidence {
+export async function deployCandidateRevision(): Promise<CandidateDeploymentEvidence> {
   console.log("----------------------------------------------------------------");
   console.log(" STEP 2 — Real Cloud Run Zero-Traffic Candidate Deployment     ");
   console.log("----------------------------------------------------------------");
@@ -105,7 +129,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     assertValidContainerDigest(imageDigest);
 
     const fullImageRef = `${imageRepository}@${imageDigest}`;
-    const containerSourceSha = validateContainerProvenance(fullImageRef, gitSha);
+    const containerSourceSha = await validateContainerProvenance(fullImageRef, gitSha);
     const tagArg = `rc-${gitSha.substring(0, 7)}`;
 
     let serviceExists = false;
@@ -118,8 +142,8 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     deploymentMode = serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP";
 
     // Secrets are injected from Secret Manager; secret values are never placed in shell arguments.
-    const secretRefs = "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest";
-    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteCliValue(gitSha)},CONTAINER_DIGEST=${quoteCliValue(imageDigest)} --update-secrets=${secretRefs}`;
+    const secretRefs = "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SUPER_ADMIN_MFA_ENCRYPTION_KEY=SUPER_ADMIN_MFA_ENCRYPTION_KEY:latest";
+    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteCliValue(gitSha)},CONTAINER_DIGEST=${quoteCliValue(imageDigest)} --remove-env-vars=DATABASE_URL,JWT_SECRET --update-secrets=${secretRefs}`;
 
     let deployStdout = "";
     if (deploymentMode === "EXISTING_SERVICE") {
@@ -159,4 +183,9 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   }
 }
 
-if (process.argv[1] && process.argv[1].endsWith("deploy-candidate.ts")) deployCandidateRevision();
+if (process.argv[1] && process.argv[1].endsWith("deploy-candidate.ts")) {
+  deployCandidateRevision().catch((err) => {
+    console.error(`RELEASE_BLOCKED: ${err?.message || err}`);
+    process.exit(1);
+  });
+}
