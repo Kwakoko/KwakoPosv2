@@ -1,7 +1,7 @@
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService } from "@kwakopos2/database";
+import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, globalRollbackRepository } from "@kwakopos2/database";
 import { prisma } from "@kwakopos2/database";
-import { getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
+import { getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest, validateSyncEpoch, checkRollbackBarrier } from "./syncIntegrity.js";
 
 export class PrismaSyncEngine {
   private readonly atomicCommercialFinance: PrismaAtomicCommercialFinanceService;
@@ -12,6 +12,16 @@ export class PrismaSyncEngine {
 
   async processPush(ctx: TenantContext, req: SyncPushRequest): Promise<SyncPushResponse> {
     validateSyncRequest(req);
+
+    // 1. Rollback Barrier Check: Freeze mutations during active rollback
+    const isBarrierActive = await globalRollbackRepository.isSyncBarrierActive(ctx.tenantId, ctx.branchId);
+    checkRollbackBarrier(isBarrierActive);
+
+    // 2. Stale Device Replay Protection: Validate client sync epoch
+    const currentEpoch = await globalRollbackRepository.getCurrentSyncEpoch(ctx.tenantId, ctx.branchId);
+    const clientEpoch = (req as any).syncEpoch;
+    validateSyncEpoch(clientEpoch, currentEpoch);
+
     const results: SyncPushResponse["results"] = [];
     let processedCount = 0;
     const orderedOperations = orderSyncOperations(req.operations);

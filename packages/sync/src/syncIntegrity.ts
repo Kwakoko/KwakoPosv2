@@ -109,3 +109,19 @@ export function stripSyncControlFields<T extends Record<string, unknown>>(payloa
   const { _baseUpdatedAt, ...businessPayload } = payload;
   return businessPayload as T;
 }
+
+export function validateSyncEpoch(clientEpoch: number | undefined, currentRollbackEpoch: number): void {
+  if (clientEpoch !== undefined && clientEpoch < currentRollbackEpoch) {
+    throw new Error(
+      `STALE_ROLLBACK_EPOCH_CONFLICT: client sync epoch ${clientEpoch} is obsolete (current rollback epoch: ${currentRollbackEpoch}). Client must reconcile local state before submitting mutations.`
+    );
+  }
+}
+
+export function checkRollbackBarrier(isBarrierActive: boolean): void {
+  if (isBarrierActive) {
+    throw new Error(
+      `MUTATIONS_FROZEN_ROLLBACK_IN_PROGRESS: A governed rollback barrier is active. Mutations are temporarily frozen.`
+    );
+  }
+}

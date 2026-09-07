@@ -32,6 +32,8 @@ import {
   orderSyncOperations,
   stripSyncControlFields,
   validateSyncRequest,
+  validateSyncEpoch,
+  checkRollbackBarrier,
 } from "./syncIntegrity.js";
 
 export class SyncEngine {
@@ -59,6 +61,20 @@ export class SyncEngine {
 
   processPush(ctx: TenantContext, req: SyncPushRequest): SyncPushResponse {
     validateSyncRequest(req);
+
+    // 1. Rollback Barrier Check: Freeze mutations during rollback
+    const isBarrierActive = Boolean(
+      this.store.rollbackSyncBarriers?.has(ctx.tenantId) ||
+      (ctx.branchId && this.store.rollbackSyncBarriers?.has(`${ctx.tenantId}:${ctx.branchId}`))
+    );
+    checkRollbackBarrier(isBarrierActive);
+
+    // 2. Stale Device Replay Protection: Validate sync epoch
+    const currentEpoch = (ctx.branchId ? this.store.syncEpochs?.get(`${ctx.tenantId}:${ctx.branchId}`) : undefined) ||
+      this.store.syncEpochs?.get(ctx.tenantId) || 1000;
+    const clientEpoch = (req as any).syncEpoch;
+    validateSyncEpoch(clientEpoch, currentEpoch);
+
     const results: SyncPushResponse["results"] = [];
     let processedCount = 0;
     const orderedOperations = orderSyncOperations(req.operations);
@@ -221,23 +237,25 @@ export class SyncEngine {
     const sinceDate = req.since ? new Date(req.since) : new Date(0);
     if (Number.isNaN(sinceDate.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
     const anchor = new Date();
+    const maxTime = anchor.getTime() + 5000;
     return {
       serverTimestamp: anchor.toISOString(),
       products: this.productRepo.getProducts(ctx).filter((p) => {
         const t = new Date(p.updatedAt).getTime();
-        return t >= sinceDate.getTime() && t <= anchor.getTime();
+        return t >= sinceDate.getTime() && t <= maxTime;
       }).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
       variants: Array.from(this.store.variants.values()).filter(
-        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= anchor.getTime()
+        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= maxTime
       ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id)),
+      stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= maxTime).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id)),
       adjustments: Array.from(this.store.stockAdjustments.values()).filter(
-        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= anchor.getTime()
+        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= maxTime
       ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= anchor.getTime()).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
     };
   }
 }
 
 export { PrismaSyncEngine } from "./prismaSyncEngine.js";
+export { checkRollbackBarrier, validateSyncEpoch } from "./syncIntegrity.js";
