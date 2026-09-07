@@ -111,7 +111,7 @@ jobs:
           gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectId)' | grep -Fx "$GCP_PROJECT_ID"
 
       - name: Configure Artifact Registry authentication
-        run: gcloud auth configure-docker africa-south1-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Install Chromium
         run: npm run production:browser:install
@@ -125,7 +125,7 @@ jobs:
         env:
           NODE_ENV: production-certification
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-          GCP_REGION: africa-south1
+          GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -212,7 +212,7 @@ jobs:
           NODE_ENV: production-certification
           STRICT_HTTPS: 'true'
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
-          GCP_REGION: africa-south1
+          GCP_REGION: us-central1
           CLOUD_RUN_SERVICE: kwakopos-production-service
           EXECUTE_GCLOUD: 'true'
         run: npm run release:promote

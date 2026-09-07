@@ -2184,9 +2184,9 @@ model AppVersion {
   releaseType         String               @default("PATCH") // MAJOR, MINOR, PATCH
   gitTag              String
   commitHash          String
-  artifactDigest      String?              @default("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  artifactDigest      String?
   imageDigest         String?
-  schemaVersion       String               @default("2.2.0")
+  schemaVersion       String?
   sbomReference       String?
   provenanceReference String?
   releaseState        String               @default("RELEASED") // DRAFT, VALIDATING, QUALITY_PASSED, SECURITY_PASSED, BUILT, ATTESTED, STAGING, STAGING_CERTIFIED, PRODUCTION_READY, CANARY, PROMOTING, PRODUCTION, VERIFIED, RELEASED, FAILED, BLOCKED, ROLLED_BACK
@@ -2231,8 +2231,8 @@ model DeploymentHistory {
   id                  String            @id @default(uuid())
   appVersionId        String
   environment         String            @default("production") // development, staging, preproduction, production
-  revision            String            @default("kwakopos-prod-001")
-  artifactDigest      String            @default("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  revision            String?
+  artifactDigest      String?
   deploymentStrategy  String            @default("CANARY") // CANARY, BLUE_GREEN, ROLLING, IMMEDIATE
   canaryPercentage    Int               @default(100)
   deploymentStart     DateTime          @default(now())
