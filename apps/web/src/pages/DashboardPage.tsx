@@ -22,7 +22,7 @@ import {
   CheckCircle, Zap, Star, ArrowRight, Calendar, ShoppingBag, FileText,
   Activity, RefreshCw
 } from "lucide-react";
-import { useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 
 const money = (v: number) =>
@@ -65,6 +65,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { currentBranchName } = useBranch();
   const { activeModule } = useModule();
   const { isOnline, pendingOutboxCount, db } = useSync();
+  const { t } = useTranslation();
+  const { formatMoneyCompact: money, formatNumber: fmtNum } = useFormatters();
 
   const [isLoading, setIsLoading] = useState(true);
   const [salesRecords, setSalesRecords] = useState<TransactionRecord[]>([]);
@@ -211,21 +213,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       <div className="v2-flex v2-items-center v2-justify-between">
         <div>
           <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>
-            {currentTenantName} — Executive Dashboard
+            {currentTenantName || "KwakoPos"} — {t("dashboard.title")}
           </h1>
           <p className="v2-text-xs v2-text-muted">
-            {currentBranchName} · Module: <span className="v2-font-bold" style={{ color: "var(--accent)" }}>{activeModule || "Retail / General"}</span>
+            {currentBranchName} · {t("nav.modules")}: <span className="v2-font-bold" style={{ color: "var(--accent)" }}>{activeModule || "Retail / General"}</span>
           </p>
         </div>
         <div className="v2-flex v2-items-center v2-gap-2">
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadDashboardData()} disabled={isLoading} type="button">
-            <RefreshCw size={13} className={isLoading ? "v2-spin" : ""} /> Refresh
+            <RefreshCw size={13} className={isLoading ? "v2-spin" : ""} /> {t("dashboard.refreshData")}
           </button>
           <span className={`badge ${isOnline ? "v2-badge-success" : "v2-badge-warning"}`}>
-            {isOnline ? "LIVE SYNCED" : "OFFLINE QUEUED"}
+            {isOnline ? t("sync.onlineStatus") : t("sync.offlineStatus")}
           </span>
           {pendingOutboxCount > 0 && (
-            <span className="badge v2-badge-warning">{pendingOutboxCount} Outbox Items</span>
+            <span className="badge v2-badge-warning">{pendingOutboxCount} {t("nav.queued")}</span>
           )}
         </div>
       </div>
@@ -235,24 +237,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         {/* KPI 1: Sales Revenue */}
         <div className="kpi-card">
           <div className="v2-flex v2-items-center v2-justify-between">
-            <div className="kpi-card-label">7-Day Gross Sales Revenue</div>
+            <div className="kpi-card-label">{t("dashboard.todaySales")}</div>
             <TrendingUp size={16} style={{ color: "var(--success)" }} />
           </div>
           <div className="kpi-card-value" style={{ color: "var(--accent)" }}>{money(totalRevenue7d)}</div>
           <div className="kpi-card-desc">
-            <span className="v2-font-bold">{totalOrders7d} completed sales</span> in 7 days
+            <span className="v2-font-bold">{totalOrders7d} {t("dashboard.totalOrders")}</span>
           </div>
         </div>
 
         {/* KPI 2: Est Net Profit */}
         <div className="kpi-card">
           <div className="v2-flex v2-items-center v2-justify-between">
-            <div className="kpi-card-label">Est Net Gross Profit</div>
+            <div className="kpi-card-label">{t("dashboard.todayProfit")}</div>
             <DollarSign size={16} style={{ color: "var(--success)" }} />
           </div>
           <div className="kpi-card-value" style={{ color: "var(--success)" }}>{money(totalProfit7d)}</div>
           <div className="kpi-card-desc">
-            Gross Margin: <span className="v2-font-bold">{totalRevenue7d > 0 ? Math.round((totalProfit7d / totalRevenue7d) * 100) : 0}%</span>
+            {t("dashboard.grossMargin")}: <span className="v2-font-bold">{totalRevenue7d > 0 ? Math.round((totalProfit7d / totalRevenue7d) * 100) : 0}%</span>
           </div>
         </div>
 
@@ -316,7 +318,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       <div className="v2-grid v2-grid-2 v2-gap-4">
         {/* Revenue & Profit Area Chart */}
         <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">7-Day Sales & Profit Margin Trend</div></div>
+          <div className="v2-card-header"><div className="v2-card-title">{t("dashboard.salesAndProfitTrend")}</div></div>
           <div style={{ height: 260, width: "100%" }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={salesTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -334,12 +336,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 <XAxis dataKey="day" stroke="var(--muted)" fontSize={11} />
                 <YAxis stroke="var(--muted)" fontSize={11} />
                 <Tooltip
-                  formatter={(val: any) => [money(Number(val)), "Amount"]}
+                  formatter={(val: any) => [money(Number(val)), t("common.amount")]}
                   contentStyle={{ background: "var(--surface)", border: "1px solid var(--surface-border)", borderRadius: 8, fontSize: 12 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="var(--accent)" fillOpacity={1} fill="url(#colorRev)" />
-                <Area type="monotone" dataKey="profit" name="Gross Profit" stroke="var(--success)" fillOpacity={1} fill="url(#colorProfit)" />
+                <Area type="monotone" dataKey="revenue" name={t("dashboard.revenue")} stroke="var(--accent)" fillOpacity={1} fill="url(#colorRev)" />
+                <Area type="monotone" dataKey="profit" name={t("dashboard.profit")} stroke="var(--success)" fillOpacity={1} fill="url(#colorProfit)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -347,7 +349,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
         {/* Category Revenue Distribution Bar Chart */}
         <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">Category Revenue Performance</div></div>
+          <div className="v2-card-header"><div className="v2-card-title">{t("dashboard.salesByPaymentMethod")}</div></div>
           <div style={{ height: 260, width: "100%" }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={categoryBreakdown} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -355,10 +357,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 <XAxis dataKey="name" stroke="var(--muted)" fontSize={10} />
                 <YAxis stroke="var(--muted)" fontSize={11} />
                 <Tooltip
-                  formatter={(val: any) => [money(Number(val)), "Valuation / Sales"]}
+                  formatter={(val: any) => [money(Number(val)), t("dashboard.revenue")]}
                   contentStyle={{ background: "var(--surface)", border: "1px solid var(--surface-border)", borderRadius: 8, fontSize: 12 }}
                 />
-                <Bar dataKey="value" name="Valuation / Sales" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="value" name={t("dashboard.revenue")} radius={[6, 6, 0, 0]}>
                   {categoryBreakdown.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
@@ -372,27 +374,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       {/* ─── BOTTOM SECTION: RECENT TRANSACTIONS STREAM ───────────────────────── */}
       <div className="v2-card">
         <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
-          <div className="v2-card-title">Recent Real-Time Transaction Stream</div>
+          <div className="v2-card-title">{t("dashboard.recentTransactions")}</div>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadDashboardData()} type="button">
-            <Activity size={13} /> Refresh Stream
+            <Activity size={13} /> {t("dashboard.refreshData")}
           </button>
         </div>
         {recentTransactions.length === 0 ? (
           <div className="v2-empty v2-p-6">
-            <p className="v2-text-sm v2-text-muted">No sales transactions recorded yet for this branch.</p>
-            <p className="v2-text-xs v2-text-muted v2-mt-1">Completed checkout sessions will stream here live in real time.</p>
+            <p className="v2-text-sm v2-text-muted">{t("common.empty")}</p>
           </div>
         ) : (
           <table className="v2-table">
             <thead>
               <tr>
-                <th>Receipt #</th>
-                <th>Time</th>
-                <th>Customer / Account</th>
-                <th>Line Items</th>
-                <th>Payment Method</th>
-                <th>Total Amount</th>
-                <th>Status</th>
+                <th>{t("pos.receiptNumber")}</th>
+                <th>{t("common.time")}</th>
+                <th>{t("dashboard.customer")}</th>
+                <th>{t("dashboard.items")}</th>
+                <th>{t("dashboard.paymentMethod")}</th>
+                <th>{t("common.total")}</th>
+                <th>{t("common.status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -401,7 +402,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   <td className="v2-mono v2-font-bold v2-text-xs">{tx.id}</td>
                   <td className="v2-text-xs v2-text-muted">{tx.time}</td>
                   <td className="v2-font-bold">{tx.customer}</td>
-                  <td className="v2-mono">{tx.items} items</td>
+                  <td className="v2-mono">{tx.items} {t("pos.items")}</td>
                   <td><span className="badge v2-badge-muted">{tx.method}</span></td>
                   <td className="v2-mono v2-font-black">{money(tx.total)}</td>
                   <td>

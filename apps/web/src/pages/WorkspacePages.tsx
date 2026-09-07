@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import {
   useAuth, useSync, useTenant, useBranch, useRbac, useModule,
+  useTranslation, useFormatters,
 } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/apiClient.js";
 
@@ -220,28 +221,29 @@ export { UsersPage };
 // ─── DIAGNOSTICS PAGE ─────────────────────────────────────────────────────────
 
 export const DiagnosticsPage: React.FC = () => {
+  const { t } = useTranslation();
   const { db, syncOutbox, syncError, isOnline, pendingOutboxCount } = useSync();
   const outbox = db.getPendingOutbox();
   return (
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Client Sync Inspector</h1>
+        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("nav.diagnostics")}</h1>
         <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={!isOnline} onClick={() => void syncOutbox().catch(() => undefined)} type="button">
-          <RefreshCw size={13} /> Force Sync
+          <RefreshCw size={13} /> {t("sync.forceSync")}
         </button>
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Network Status"    value={isOnline ? "Online" : "Offline"} icon={isOnline ? <Wifi size={18} /> : <WifiOff size={18} />} accent={isOnline ? "#4ade80" : "#fbbf24"} />
-        <KpiCard label="Outbox Queue"      value={pendingOutboxCount} desc="Pending operations"        icon={<Upload size={18} />}    accent="#38bdf8" />
+        <KpiCard label="Network Status"    value={isOnline ? t("sync.networkOnline") : t("sync.networkOffline")} icon={isOnline ? <Wifi size={18} /> : <WifiOff size={18} />} accent={isOnline ? "#4ade80" : "#fbbf24"} />
+        <KpiCard label={t("sync.syncOutbox")} value={pendingOutboxCount} desc={t("sync.pendingTransactions")}        icon={<Upload size={18} />}    accent="#38bdf8" />
         <KpiCard label="Stock Ledger"      value={db.stockLedger.size} desc="Local IDB entries"        icon={<Activity size={18} />}  accent="#818cf8" />
-        <KpiCard label="Sync Errors"       value={syncError ? "1 Error" : "None"} icon={<AlertTriangle size={18} />} accent={syncError ? "#f87171" : "#4ade80"} />
+        <KpiCard label="Sync Status"       value={syncError ? t("sync.syncError") : t("sync.syncSuccess")} icon={<AlertTriangle size={18} />} accent={syncError ? "#f87171" : "#4ade80"} />
       </div>
       {syncError && <div className="badge v2-badge-danger v2-mb-4">{syncError}</div>}
       <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">Pending Outbox Operations ({outbox.length})</div></div>
+        <div className="v2-card-header"><div className="v2-card-title">{t("sync.syncOutbox")} ({outbox.length})</div></div>
         <div className="v2-card-body">
           <pre style={{ background: "var(--bg)", padding: "1rem", borderRadius: "var(--radius-lg)", overflow: "auto", fontSize: ".75rem", lineHeight: 1.6, maxHeight: 400, color: "var(--text-secondary)" }}>
-            {outbox.length ? JSON.stringify(outbox, null, 2) : "// Outbox is empty — all operations synchronized."}
+            {outbox.length ? JSON.stringify(outbox, null, 2) : `// ${t("sync.noPending")}`}
           </pre>
         </div>
       </div>
@@ -260,40 +262,42 @@ const DEMO_EXPENSES = [
 ];
 
 export const ExpensesPage: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatCurrency, formatMoneyCompact } = useFormatters();
   const totalExpenses = DEMO_EXPENSES.reduce((s, e) => s + e.amount, 0);
   const pending       = DEMO_EXPENSES.filter((e) => e.status === "PENDING").reduce((s, e) => s + e.amount, 0);
 
   return (
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Expenses & Outgoings Ledger</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Record Expense</button>
+        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("expenses.title")}</h1>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> {t("expenses.recordExpense")}</button>
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Monthly Expenses"  value={money(totalExpenses)} desc="All categories"       icon={<DollarSign size={18} />} accent="#f87171" />
-        <KpiCard label="Petty Cash Bal."   value={money(650000)}        desc="Available float"      icon={<Coins size={18} />}      accent="#38bdf8" />
-        <KpiCard label="Pending Approval"  value={`${DEMO_EXPENSES.filter((e) => e.status === "PENDING").length} Vouchers`} desc={money(pending)} icon={<Clock size={18} />} accent="#fbbf24" />
-        <KpiCard label="Paid This Month"   value={`${DEMO_EXPENSES.filter((e) => e.status === "PAID").length} Vouchers`} desc="Processed" icon={<CheckCircle size={18} />} accent="#4ade80" />
+        <KpiCard label={t("expenses.monthlyExpenses")}  value={formatMoneyCompact(totalExpenses)} desc="All categories"       icon={<DollarSign size={18} />} accent="#f87171" />
+        <KpiCard label={t("expenses.pettyCashBalance")} value={formatMoneyCompact(650000)}        desc="Available float"      icon={<Coins size={18} />}      accent="#38bdf8" />
+        <KpiCard label={t("expenses.pendingApproval")}  value={`${DEMO_EXPENSES.filter((e) => e.status === "PENDING").length} Vouchers`} desc={formatMoneyCompact(pending)} icon={<Clock size={18} />} accent="#fbbf24" />
+        <KpiCard label={t("expenses.paidThisMonth")}    value={`${DEMO_EXPENSES.filter((e) => e.status === "PAID").length} Vouchers`} desc="Processed" icon={<CheckCircle size={18} />} accent="#4ade80" />
       </div>
       <div className="v2-card">
         <div className="v2-card-header">
-          <div className="v2-card-title">Expense Vouchers</div>
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Export</button>
+          <div className="v2-card-title">{t("expenses.outgoingsLedger")}</div>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> {t("expenses.exportVouchers")}</button>
         </div>
         <table className="v2-table">
-          <thead><tr><th>Voucher #</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>{t("expenses.voucherNumber")}</th><th>{t("expenses.expenseCategory")}</th><th>{t("expenses.expenseDescription")}</th><th>{t("expenses.expenseAmount")}</th><th>{t("expenses.voucherStatus")}</th><th>{t("common.actions")}</th></tr></thead>
           <tbody>
             {DEMO_EXPENSES.map((e) => (
               <tr key={e.id}>
                 <td className="v2-mono v2-text-xs">{e.id}</td>
                 <td><span className="badge v2-badge-muted">{e.category}</span></td>
                 <td>{e.desc}</td>
-                <td className="v2-font-black">{money(e.amount)}</td>
+                <td className="v2-font-black">{formatCurrency(e.amount)}</td>
                 <td><span className={`badge ${e.status === "PAID" ? "v2-badge-success" : "v2-badge-warning"}`}>{e.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
                     <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    {e.status === "PENDING" && <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title="Approve"><Check size={13} style={{ color: "var(--success)" }} /></button>}
+                    {e.status === "PENDING" && <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title={t("expenses.approveVoucher")}><Check size={13} style={{ color: "var(--success)" }} /></button>}
                   </div>
                 </td>
               </tr>
@@ -361,35 +365,37 @@ export const AiPage: React.FC = () => {
 // ─── FINANCE PAGE ─────────────────────────────────────────────────────────────
 
 export const FinancePage: React.FC = () => {
+  const { t } = useTranslation();
+  const { formatCurrency, formatMoneyCompact } = useFormatters();
   const { data: sales, error } = useApiList<Sale>("/api/v1/pos/sales");
   const total = sales.reduce((s, x) => s + Number(x.grandTotal || 0), 0);
   return (
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>Finance & General Ledger</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Download size={13} /> Trial Balance</button>
+        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("finance.title")}</h1>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Download size={13} /> {t("finance.trialBalance")}</button>
       </div>
       {error && <div className="badge v2-badge-danger v2-mb-4">{error}</div>}
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Recorded Revenue"   value={money(total || 42850000)} icon={<DollarSign size={18} />} accent="#38bdf8" />
-        <KpiCard label="Total Transactions" value={sales.length || 842}      icon={<Receipt size={18} />}    accent="#4ade80" />
-        <KpiCard label="Trial Balance"      value="BALANCED"                  icon={<Scale size={18} />}      accent="#818cf8" />
-        <KpiCard label="Open Receivables"   value={money(3200000)}            icon={<Coins size={18} />}      accent="#fbbf24" />
+        <KpiCard label={t("finance.recordedRevenue")}   value={formatMoneyCompact(total || 42850000)} icon={<DollarSign size={18} />} accent="#38bdf8" />
+        <KpiCard label={t("finance.totalTransactions")} value={sales.length || 842}      icon={<Receipt size={18} />}    accent="#4ade80" />
+        <KpiCard label={t("finance.trialBalance")}      value="BALANCED"                  icon={<Scale size={18} />}      accent="#818cf8" />
+        <KpiCard label={t("finance.openReceivables")}   value={formatMoneyCompact(3200000)}            icon={<Coins size={18} />}      accent="#fbbf24" />
       </div>
       <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">Chart of Accounts</div></div>
+        <div className="v2-card-header"><div className="v2-card-title">{t("finance.chartOfAccounts")}</div></div>
         <table className="v2-table">
-          <thead><tr><th>Account</th><th>Type</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
+          <thead><tr><th>{t("finance.accountName")}</th><th>{t("finance.accountType")}</th><th>{t("finance.debit")}</th><th>{t("finance.credit")}</th><th>{t("finance.balance")}</th></tr></thead>
           <tbody>
             {[
-              { account: "1100 — Cash in Hand",         type: "Asset",     debit: money(4820000), credit: money(300000),  balance: money(4520000) },
-              { account: "1200 — Accounts Receivable",  type: "Asset",     debit: money(3200000), credit: money(0),       balance: money(3200000) },
-              { account: "2100 — Accounts Payable",     type: "Liability", debit: money(0),       credit: money(8400000), balance: money(8400000) },
-              { account: "4100 — Sales Revenue",        type: "Revenue",   debit: money(0),       credit: money(total || 42850000), balance: money(total || 42850000) },
+              { account: `1100 — Cash in Hand`,         type: t("finance.typeAsset"),     debit: formatCurrency(4820000), credit: formatCurrency(300000),  balance: formatCurrency(4520000) },
+              { account: `1200 — Accounts Receivable`,  type: t("finance.typeAsset"),     debit: formatCurrency(3200000), credit: formatCurrency(0),       balance: formatCurrency(3200000) },
+              { account: `2100 — Accounts Payable`,     type: t("finance.typeLiability"), debit: formatCurrency(0),       credit: formatCurrency(8400000), balance: formatCurrency(8400000) },
+              { account: `4100 — Sales Revenue`,        type: t("finance.typeRevenue"),   debit: formatCurrency(0),       credit: formatCurrency(total || 42850000), balance: formatCurrency(total || 42850000) },
             ].map((row, i) => (
               <tr key={i}>
                 <td className="v2-font-bold">{row.account}</td>
-                <td><span className={`badge ${row.type === "Revenue" ? "v2-badge-success" : row.type === "Liability" ? "v2-badge-danger" : "v2-badge-accent"}`}>{row.type}</span></td>
+                <td><span className={`badge ${row.type === t("finance.typeRevenue") ? "v2-badge-success" : row.type === t("finance.typeLiability") ? "v2-badge-danger" : "v2-badge-accent"}`}>{row.type}</span></td>
                 <td className="v2-mono v2-text-xs">{row.debit}</td>
                 <td className="v2-mono v2-text-xs">{row.credit}</td>
                 <td className="v2-font-black">{row.balance}</td>

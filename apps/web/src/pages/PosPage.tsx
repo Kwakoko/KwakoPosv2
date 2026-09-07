@@ -22,7 +22,7 @@ import {
   Building, PauseCircle, PlayCircle, Printer, CheckCircle, AlertTriangle,
   RefreshCw, Lock, Unlock, Eye, Sparkles, Tag, Scale, QrCode, Command
 } from "lucide-react";
-import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/apiClient.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -46,6 +46,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
   const { currentBranchName } = useBranch();
   const { user } = useAuth();
   const { isOnline, syncOutbox, db } = useSync();
+  const { t } = useTranslation();
+  const { formatMoneyCompact: money, formatNumber: fmtNum } = useFormatters();
 
   // Search & Filters
   const searchRef = useRef<HTMLInputElement>(null);
@@ -328,38 +330,35 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
           </div>
           <div>
             <h1 className="v2-text-lg v2-font-black" style={{ letterSpacing: "-.02em" }}>
-              Point of Sale Checkout Terminal
+              {t("pos.title")}
             </h1>
             <div className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-text-muted">
-              <span>{currentTenantName}</span> · <span>{currentBranchName}</span> ·
-              <span className={`badge ${shiftOpen ? "v2-badge-success" : "v2-badge-danger"}`}>
-                Shift: {shiftOpen ? "OPEN" : "CLOSED"}
-              </span>
+              <span>{currentTenantName}</span> · <span>{currentBranchName}</span>
             </div>
           </div>
         </div>
 
         {/* Function Keys Shortcut Bar */}
         <div className="v2-flex v2-gap-1">
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setCart([])} type="button" title="F1: New Sale">
-            [F1] New
+          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setCart([])} type="button" title="F1">
+            [F1] {t("pos.newSale")}
           </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => searchRef.current?.focus()} type="button" title="F3: Search">
-            [F3] Search
+          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => searchRef.current?.focus()} type="button" title="F3">
+            [F3] {t("common.search")}
           </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setHoldCartModal(true)} disabled={cart.length === 0} type="button" title="F4: Hold">
-            [F4] Hold ({heldCarts.length})
+          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setHoldCartModal(true)} disabled={cart.length === 0} type="button" title="F4">
+            [F4] {t("pos.holdOrder")} ({heldCarts.length})
           </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setResumeCartModal(true)} type="button" title="F5: Resume">
-            [F5] Resume
+          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setResumeCartModal(true)} type="button" title="F5">
+            [F5] {t("pos.resumeOrder")}
           </button>
           <button
             className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
             onClick={() => setDiscountPercent((prev) => (prev === 0 ? 5 : prev === 5 ? 10 : prev === 10 ? 15 : 0))}
             type="button"
-            title="F6: Cycle Discount"
+            title="F6"
           >
-            [F6] Disc: {discountPercent}%
+            [F6] {t("pos.applyDiscount")}: {discountPercent}%
           </button>
           <button
             className="v2-btn v2-btn-primary v2-btn-sm v2-mono"
@@ -369,9 +368,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             }}
             disabled={cart.length === 0}
             type="button"
-            title="F7: Checkout"
+            title="F7"
           >
-            [F7] Checkout
+            [F7] {t("pos.payNow")}
           </button>
         </div>
       </div>
@@ -389,7 +388,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
                   ref={searchRef}
                   className="v2-input"
                   style={{ paddingLeft: "2.4rem" }}
-                  placeholder="Scan barcode or search product name, SKU, category... [F3]"
+                  placeholder={t("pos.searchProductPlaceholder")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -453,17 +452,17 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
         <div className="v2-card" style={{ padding: "1.25rem", display: "flex", flexDirection: "column", minHeight: 620 }}>
           <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
             <div className="v2-font-black v2-text-base v2-flex v2-items-center v2-gap-2">
-              <ShoppingCart size={18} /> Active Cart ({cart.reduce((s, i) => s + i.qty, 0)})
+              <ShoppingCart size={18} /> {t("pos.cart")} ({cart.reduce((s, i) => s + i.qty, 0)})
             </div>
             <button className="v2-btn v2-btn-ghost v2-btn-sm" style={{ color: "var(--danger)" }} onClick={handleVoidCart} disabled={cart.length === 0} type="button">
-              <Trash2 size={13} /> Void Cart
+              <Trash2 size={13} /> {t("pos.clearCart")}
             </button>
           </div>
 
           {/* Customer Selector */}
           <div className="v2-mb-3">
             <select className="v2-input v2-input-sm" value={selectedCustomer} onChange={(e) => setSelectedCustomer(e.target.value)}>
-              <option value="Walk-In Customer">Walk-In Customer</option>
+              <option value="Walk-In Customer">{t("pos.walkInCustomer")}</option>
               <option value="Amani Mwakalundwa">Amani Mwakalundwa (VIP Customer)</option>
               <option value="Baraka Juma Msimbe">Baraka Juma Msimbe</option>
             </select>
@@ -474,8 +473,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             {cart.length === 0 ? (
               <div className="v2-empty" style={{ padding: "3rem 1rem" }}>
                 <div className="v2-empty-icon"><ShoppingCart size={24} /></div>
-                <p className="v2-empty-title">Cart is empty</p>
-                <span className="v2-text-xs v2-text-muted">Click or scan products to add items</span>
+                <p className="v2-empty-title">{t("pos.emptyCartMessage")}</p>
+                <span className="v2-text-xs v2-text-muted">{t("pos.addItemPrompt")}</span>
               </div>
             ) : (
               cart.map((item, idx) => (
@@ -513,23 +512,23 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
           <div className="v2-pt-3 v2-mt-3" style={{ borderTop: "1px solid var(--surface-border)" }}>
             <div className="v2-space-y-1 v2-text-xs v2-mb-3">
               <div className="v2-flex v2-justify-between">
-                <span className="v2-text-muted">Subtotal</span>
+                <span className="v2-text-muted">{t("pos.subtotal")}</span>
                 <span className="v2-mono v2-font-bold">{money(cartSubtotal)}</span>
               </div>
               {discountPercent > 0 && (
                 <div className="v2-flex v2-justify-between" style={{ color: "var(--success)" }}>
-                  <span>Discount ({discountPercent}%)</span>
+                  <span>{t("pos.applyDiscount")} ({discountPercent}%)</span>
                   <span className="v2-mono v2-font-bold">−{money(discountAmount)}</span>
                 </div>
               )}
               <div className="v2-flex v2-justify-between">
-                <span className="v2-text-muted">VAT Tax (18%)</span>
+                <span className="v2-text-muted">{t("pos.taxTotal")}</span>
                 <span className="v2-mono v2-font-bold">{money(taxAmount)}</span>
               </div>
             </div>
 
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4" style={{ background: "var(--surface-3)", padding: ".75rem 1rem", borderRadius: "var(--radius-lg)" }}>
-              <span className="v2-text-sm v2-font-black">GRAND TOTAL</span>
+              <span className="v2-text-sm v2-font-black">{t("pos.grandTotal")}</span>
               <span className="v2-mono v2-text-xl v2-font-black" style={{ color: "var(--accent)" }}>{money(cartGrandTotal)}</span>
             </div>
 
@@ -543,7 +542,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
               disabled={cart.length === 0}
               type="button"
             >
-              Checkout & Pay [F7]
+              {t("pos.payNow")}
             </button>
           </div>
         </div>
@@ -554,27 +553,37 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 480, padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-              <h2 className="v2-text-lg v2-font-black">Select Payment Method</h2>
+              <h2 className="v2-text-lg v2-font-black">{t("pos.checkoutTitle")}</h2>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setCheckoutModal(false)} type="button">✕</button>
             </div>
 
             <div className="v2-grid v2-grid-3 v2-gap-2 v2-mb-4">
-              {(["Cash", "M-Pesa", "Card", "Bank", "Credit", "Split"] as const).map((method) => (
-                <button
-                  key={method}
-                  className={`v2-btn v2-btn-sm ${paymentMethod === method ? "v2-btn-primary" : "v2-btn-secondary"}`}
-                  onClick={() => setPaymentMethod(method)}
-                  type="button"
-                >
-                  {method}
-                </button>
-              ))}
+              {(["Cash", "M-Pesa", "Card", "Bank", "Credit", "Split"] as const).map((method) => {
+                const labelMap: Record<string, string> = {
+                  Cash: t("pos.paymentMethodCash"),
+                  "M-Pesa": t("pos.paymentMethodMpesa"),
+                  Card: t("pos.paymentMethodCard"),
+                  Bank: t("pos.paymentMethodBank"),
+                  Credit: t("pos.paymentMethodCredit"),
+                  Split: t("pos.paymentMethodSplit"),
+                };
+                return (
+                  <button
+                    key={method}
+                    className={`v2-btn v2-btn-sm ${paymentMethod === method ? "v2-btn-primary" : "v2-btn-secondary"}`}
+                    onClick={() => setPaymentMethod(method)}
+                    type="button"
+                  >
+                    {labelMap[method] || method}
+                  </button>
+                );
+              })}
             </div>
 
             {paymentMethod === "Cash" && (
               <div className="v2-space-y-3 v2-mb-4">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">CASH RECEIVED (TSH)</label>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">{t("pos.amountTendered")}</label>
                   <input
                     className="v2-input"
                     type="number"
@@ -584,7 +593,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
                   />
                 </div>
                 <div className="v2-flex v2-justify-between v2-items-center v2-p-2" style={{ background: "var(--surface-3)", borderRadius: "var(--radius-md)" }}>
-                  <span className="v2-text-xs v2-font-bold">CHANGE DUE</span>
+                  <span className="v2-text-xs v2-font-bold">{t("pos.changeDue")}</span>
                   <span className="v2-mono v2-text-lg v2-font-black" style={{ color: "var(--success)" }}>{money(changeDue)}</span>
                 </div>
               </div>
@@ -593,7 +602,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             {paymentMethod === "M-Pesa" && (
               <div className="v2-space-y-3 v2-mb-4">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">M-PESA TRANSACTION CODE / PAYBILL REF</label>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">{t("pos.mpesaRefCode")}</label>
                   <input className="v2-input" placeholder="e.g. QKH9928172" value={mpesaRef} onChange={(e) => setMpesaRef(e.target.value)} autoFocus />
                 </div>
               </div>
@@ -605,7 +614,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
               onClick={handleCompleteSale}
               type="button"
             >
-              Complete Transaction & Print Receipt [F9]
+              {t("pos.completeSale")}
             </button>
           </div>
         </div>
@@ -622,9 +631,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             </div>
 
             <div style={{ fontSize: ".75rem", marginBottom: "1rem" }}>
-              <div>Receipt: {lastSale.saleNumber}</div>
-              <div>Date: {new Date(lastSale.soldAt).toLocaleString()}</div>
-              <div>Customer: {lastSale.customer}</div>
+              <div>{t("pos.receiptNumber")}: {lastSale.saleNumber}</div>
+              <div>{t("common.date")}: {new Date(lastSale.soldAt).toLocaleString()}</div>
+              <div>{t("dashboard.customer")}: {lastSale.customer}</div>
             </div>
 
             <div style={{ borderBottom: "1px dashed #000", paddingBottom: ".5rem", marginBottom: ".5rem" }}>
@@ -637,12 +646,12 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             </div>
 
             <div style={{ fontSize: ".85rem", fontWeight: 800, textAlign: "right" }}>
-              <div>TOTAL: {money(lastSale.grandTotal)}</div>
-              <div style={{ fontSize: ".75rem", fontWeight: 400 }}>VAT INCLUDED: {money(lastSale.tax)}</div>
+              <div>{t("common.total")}: {money(lastSale.grandTotal)}</div>
+              <div style={{ fontSize: ".75rem", fontWeight: 400 }}>{t("pos.taxTotal")}: {money(lastSale.tax)}</div>
             </div>
 
             <div className="v2-text-center" style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px dashed #000" }}>
-              <div style={{ fontSize: ".7rem" }}>TRA VFD CODE</div>
+              <div style={{ fontSize: ".7rem" }}>{t("pos.traVfdReceipt")}</div>
               <div style={{ fontSize: ".75rem", fontWeight: 800 }}>{lastSale.rctv}</div>
               <div className="v2-flex v2-justify-center" style={{ marginTop: ".5rem" }}>
                 <QrCode size={48} />
@@ -650,7 +659,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
             </div>
 
             <button className="v2-btn v2-btn-primary" style={{ width: "100%", marginTop: "1rem" }} onClick={() => setReceiptModal(false)} type="button">
-              Close & Start New Sale
+              {t("pos.newSale")}
             </button>
           </div>
         </div>
@@ -660,7 +669,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
       {holdCartModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 400, padding: "1.5rem" }}>
-            <h2 className="v2-text-lg v2-font-black v2-mb-2">Hold Current Cart</h2>
+            <h2 className="v2-text-lg v2-font-black v2-mb-2">{t("pos.holdOrder")}</h2>
             <p className="v2-text-xs v2-text-muted v2-mb-4">Assign a reference name to suspend this cart session.</p>
             <input
               className="v2-input v2-mb-4"
