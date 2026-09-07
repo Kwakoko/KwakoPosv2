@@ -34,6 +34,26 @@ export class InMemoryStore {
   billingPayments: Map<string, BillingPayment> = new Map();
   coupons: Map<string, Coupon> = new Map();
   pluginCustomEntities: Map<string, any> = new Map();
+  legalDocuments: Map<string, any> = new Map();
+  legalDocumentVersions: Map<string, any> = new Map();
+  legalAcceptances: Map<string, any> = new Map();
+  dataSubjectRequests: Map<string, any> = new Map();
+  dataExportJobs: Map<string, any> = new Map();
+  legalHolds: Map<string, any> = new Map();
+  retentionPolicies: Map<string, any> = new Map();
+  retentionExecutions: Map<string, any> = new Map();
+  securityPrivacyIncidents: Map<string, any> = new Map();
+  subprocessors: Map<string, any> = new Map();
+  ossLicenseNotices: Map<string, any> = new Map();
+  tenantLegalDocuments: Map<string, any> = new Map();
+  rollbackRequests: Map<string, any> = new Map();
+  rollbackApprovals: Map<string, any> = new Map();
+  rollbackRecoveryPoints: Map<string, any> = new Map();
+  rollbackLocks: Map<string, any> = new Map();
+  rollbackAuditEvents: Map<string, any> = new Map();
+  rollbackSyncBarriers: Map<string, any> = new Map();
+  rollbackIncidents: Map<string, any> = new Map();
+  syncEpochs: Map<string, number> = new Map();
 
   clear() {
     this.tenants.clear();
@@ -54,5 +74,27 @@ export class InMemoryStore {
     this.billingPayments.clear();
     this.coupons.clear();
     this.pluginCustomEntities.clear();
+    this.legalDocuments.clear();
+    this.legalDocumentVersions.clear();
+    this.legalAcceptances.clear();
+    this.dataSubjectRequests.clear();
+    this.dataExportJobs.clear();
+    this.legalHolds.clear();
+    this.retentionPolicies.clear();
+    this.retentionExecutions.clear();
+    this.securityPrivacyIncidents.clear();
+    this.subprocessors.clear();
+    this.ossLicenseNotices.clear();
+    this.tenantLegalDocuments.clear();
+    this.rollbackRequests.clear();
+    this.rollbackApprovals.clear();
+    this.rollbackRecoveryPoints.clear();
+    this.rollbackLocks.clear();
+    this.rollbackAuditEvents.clear();
+    this.rollbackSyncBarriers.clear();
+    this.rollbackIncidents.clear();
+    this.syncEpochs.clear();
   }
 }
+
+export const globalInMemoryStore = new InMemoryStore();

@@ -2556,5 +2556,208 @@ model ReceiptAuditLog {
   @@map("receipt_audit_logs")
 }
 
+model LegalDocument {
+  id                  String                 @id @default(uuid())
+  slug                String                 @unique
+  documentType        String
+  canonicalTitle      String
+  description         String
+  currentVersion      String
+  isMandatory         Boolean                @default(true)
+  applicableAudiences String[]               @default(["TENANT_OWNER", "USER", "SUPER_ADMIN", "PUBLIC"])
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  versions            LegalDocumentVersion[]
+  acceptances         LegalAcceptance[]
+
+  @@map("legal_documents")
+}
+
+model LegalDocumentVersion {
+  id                         String        @id @default(uuid())
+  documentId                 String
+  version                    String
+  status                     String        @default("DRAFT")
+  language                   String        @default("en")
+  title                      String
+  content                    String
+  summaryOfChanges           String        @default("Initial published version")
+  jurisdiction               String        @default("Tanzania (Data Protection Act 2022) / East Africa & Global")
+  effectiveAt                DateTime
+  publishedAt                DateTime?
+  supersedesVersion          String?
+  isMandatoryAcceptance      Boolean       @default(true)
+  cryptographicIntegrityHash String
+  createdBy                  String
+  approvedBy                 String?
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
+
+  document                   LegalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version, language])
+  @@map("legal_document_versions")
+}
+
+model LegalAcceptance {
+  id               String        @id @default(uuid())
+  userId           String
+  tenantId         String
+  documentId       String
+  documentType     String
+  documentVersion  String
+  language         String        @default("en")
+  acceptedAt       DateTime      @default(now())
+  acceptanceMethod String        @default("CLICK_WRAP")
+  ipAddress        String?
+  userAgent        String?
+  sessionDeviceRef String?
+  locale           String        @default("en-TZ")
+  consentStatus    String        @default("ACCEPTED")
+  consentSource    String        @default("KWAKOPOS_WEB_PORTAL")
+  evidenceHash     String
+  withdrawnAt      DateTime?
+  withdrawalReason String?
+
+  document         LegalDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tenantId])
+  @@index([documentId, documentVersion])
+  @@map("legal_acceptances")
+}
+
+model DataSubjectRequest {
+  id                String    @id @default(uuid())
+  tenantId          String
+  requesterUserId   String
+  requesterEmail    String
+  requestType       String
+  status            String    @default("SUBMITTED")
+  details           String    @default("")
+  submittedAt       DateTime  @default(now())
+  verificationState String    @default("PENDING")
+  assignedTo        String?
+  dueAt             DateTime
+  completedAt       DateTime?
+  resolution        String?
+  exportDownloadUrl String?
+  exportExpiresAt   DateTime?
+  auditTrail        Json      @default("[]")
+
+  @@index([tenantId])
+  @@map("data_subject_requests")
+}
+
+model DataExportJob {
+  id              String    @id @default(uuid())
+  tenantId        String
+  requesterUserId String
+  scope           String    @default("TENANT_WIDE")
+  targetId        String
+  format          String    @default("JSON")
+  status          String    @default("PENDING")
+  checksumSha256  String?
+  fileSizeBytes   Int       @default(0)
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  downloadToken   String?
+
+  @@index([tenantId])
+  @@map("data_export_jobs")
+}
+
+model LegalHold {
+  id               String    @id @default(uuid())
+  tenantId         String
+  reason           String
+  authority        String
+  targetEntityType String
+  targetEntityId   String
+  status           String    @default("ACTIVE")
+  placedBy         String
+  placedAt         DateTime  @default(now())
+  releasedAt       DateTime?
+  releaseNotes     String?
+
+  @@index([tenantId])
+  @@map("legal_holds")
+}
+
+model DataRetentionPolicy {
+  id                  String   @id @default(uuid())
+  tenantId            String   @default("GLOBAL")
+  dataType            String
+  retentionDays       Int
+  retentionBasis      String
+  archivePeriodDays   Int      @default(0)
+  deletionAction      String   @default("ANONYMIZATION")
+  overrideByLegalHold Boolean  @default(true)
+  jurisdiction        String   @default("TZ_EAST_AFRICA")
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("data_retention_policies")
+}
+
+model SecurityPrivacyIncident {
+  id                   String    @id @default(uuid())
+  incidentNumber       String    @unique
+  incidentType         String
+  severity             String
+  status               String    @default("DETECTED")
+  title                String
+  summary              String
+  affectedTenantId     String?
+  affectedRecordsCount Int       @default(0)
+  affectedUsersCount   Int       @default(0)
+  detectionSource      String
+  detectedAt           DateTime  @default(now())
+  containedAt          DateTime?
+  remediatedAt         DateTime?
+  closedAt             DateTime?
+  containmentStrategy  String    @default("")
+  remediationActions   String    @default("")
+  notificationRequired Boolean   @default(false)
+  notificationSentAt   DateTime?
+  evidenceArtifactHash String?
+  auditLog             Json      @default("[]")
+
+  @@map("security_privacy_incidents")
+}
+
+model Subprocessor {
+  id                     String   @id @default(uuid())
+  provider               String
+  serviceName            String
+  purpose                String
+  dataCategories         String[]
+  dataRegion             String
+  dpaStatus              String   @default("EXECUTED")
+  privacyPolicyUrl       String
+  securityCertifications String[] @default(["SOC 2", "ISO 27001"])
+  isActive               Boolean  @default(true)
+  notes                  String   @default("")
+
+  @@map("subprocessors")
+}
+
+model TenantLegalDocument {
+  id           String   @id @default(uuid())
+  tenantId     String
+  documentType String
+  title        String
+  content      String
+  version      String   @default("1.0.0")
+  isActive     Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+  updatedBy    String
+
+  @@unique([tenantId, documentType])
+  @@map("tenant_legal_documents")
+}
+
+
 
 
