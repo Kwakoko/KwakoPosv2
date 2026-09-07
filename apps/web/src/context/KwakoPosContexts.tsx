@@ -20,8 +20,15 @@ import {
   searchModules as registrySearchModules,
   getDefaultTab,
 } from "../modules/moduleRegistry.js";
+import {
+  I18nProvider,
+  useTranslation,
+  useLocale,
+  useFormatters,
+} from "../i18n/I18nContext.js";
 
 export type { IndustryModule, ModuleManifest, SidebarItem };
+export { I18nProvider, useTranslation, useLocale, useFormatters };
 
 export interface AuthUser {
   id: string;
@@ -51,13 +58,24 @@ function decodeClaims(token: string | null): JwtClaims {
   }
 }
 
+export interface ImpersonatedTenant {
+  tenantId: string;
+  tenantName: string;
+  branchId: string;
+  branchName: string;
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
   error: string | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
+  dismissLoading: () => void;
+  impersonatedTenant: ImpersonatedTenant | null;
+  startImpersonation: (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => Promise<void>;
+  stopImpersonation: () => Promise<void>;
 }
 const AuthContext = createContext<AuthContextType | null>(null);
 export const useAuth = () => {
@@ -71,6 +89,7 @@ interface TenantContextType {
   currentTenantName: string | null;
   availableTenants: { id: string; name: string }[];
   switchTenant: (id: string) => Promise<void>;
+  isImpersonating: boolean;
 }
 const TenantContext = createContext<TenantContextType | null>(null);
 export const useTenant = () => {
@@ -190,11 +209,38 @@ function tabExists(manifest: ModuleManifest, tab: string): boolean {
 }
 
 export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [db] = useState(() => new LocalIndexedDbStore(3));
+  const [db] = useState(() => new LocalIndexedDbStore(4));
   const [syncEngine] = useState(
     () => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db),
   );
-  useState(() => new PwaVersionManager("2.5.0", 3, db));
+  const [pwaVersionManager] = useState(() => new PwaVersionManager("2.12.5", 4, db));
+
+  // Safe Shutdown and Storage Persistence Flush Handlers
+  useEffect(() => {
+    const handleFlush = () => {
+      db.flushPersistence().catch(() => {});
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", handleFlush);
+      window.addEventListener("pagehide", handleFlush);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") handleFlush();
+      });
+      return () => {
+        window.removeEventListener("beforeunload", handleFlush);
+        window.removeEventListener("pagehide", handleFlush);
+      };
+    }
+  }, [db]);
+
+  // Safe PWA Service Worker Registration
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator && typeof window !== "undefined" && window.location?.protocol.startsWith("http")) {
+      navigator.serviceWorker.register("/sw.js").catch((err) => {
+        console.warn("[PWA] Service worker registration deferred:", err);
+      });
+    }
+  }, []);
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -222,22 +268,77 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return "Dashboard";
   });
 
+  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(() => {
+    try {
+      const saved = sessionStorage.getItem("kwakopos:v2:impersonation");
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return null;
+  });
+
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  const dismissLoading = useCallback(() => {
+    setIsInitializing(false);
+  }, []);
+
   useEffect(() => {
-    let mounted = true;
-    db.ready
-      .then(() => restoreSession())
-      .then((restored) => {
-        if (mounted && restored) {
-          setUser({ id: restored.id, name: restored.name, email: restored.email, role: restored.role, tenantId: restored.tenantId, branchId: restored.branchId });
+    let active = true;
+
+    // Hard ceiling: the UI should NEVER stay in initializing state for more than 2500ms
+    const safetyTimer = setTimeout(() => {
+      if (active) {
+        setIsInitializing(false);
+      }
+    }, 2500);
+
+    const initSequence = async () => {
+      try {
+        // Step 1: Wait for local database with a 1500ms race ceiling
+        await Promise.race([
+          db.ready.catch((err) => {
+            console.warn("IndexedDB ready signal warned:", err);
+          }),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ]);
+
+        // Step 2: Attempt session restoration with a 1500ms race ceiling
+        const restored = await Promise.race([
+          restoreSession().catch((err) => {
+            console.warn("Session restore attempt warned:", err);
+            return null;
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
+
+        if (active && restored) {
+          setUser({
+            id: restored.id,
+            name: restored.name,
+            email: restored.email,
+            role: restored.role,
+            tenantId: restored.tenantId,
+            branchId: restored.branchId,
+          });
         }
-      })
-      .catch((error) => {
-        if (mounted) setAuthError(error instanceof Error ? error.message : "Session restore failed");
-      })
-      .finally(() => { if (mounted) setIsInitializing(false); });
-    return () => { mounted = false; };
+      } catch (error) {
+        if (active) {
+          setAuthError(error instanceof Error ? error.message : "Session restore failed");
+        }
+      } finally {
+        clearTimeout(safetyTimer);
+        if (active) {
+          setIsInitializing(false);
+        }
+      }
+    };
+
+    void initSequence();
+
+    return () => {
+      active = false;
+      clearTimeout(safetyTimer);
+    };
   }, [db]);
 
   useEffect(() => {
@@ -251,41 +352,61 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     void db.ready.then(() => setPendingOutboxCount(db.getPendingOutbox().length));
   }, [db]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, mfaCode?: string): Promise<AuthUser> => {
     setAuthError(null);
-    const loggedIn = await apiLogin(email, password);
-    setUser({ id: loggedIn.id, name: loggedIn.name, email: loggedIn.email, role: loggedIn.role, tenantId: loggedIn.tenantId, branchId: loggedIn.branchId });
+    const loggedIn = await apiLogin(email, password, mfaCode);
+    const authUser: AuthUser = {
+      id: loggedIn.id,
+      name: loggedIn.name,
+      email: loggedIn.email,
+      role: loggedIn.role,
+      tenantId: loggedIn.tenantId,
+      branchId: loggedIn.branchId,
+    };
+    setUser(authUser);
+    return authUser;
   };
 
   const logout = async () => {
-    await apiLogout();
-    setUser(null);
-    setActiveModuleState("Retail");
-    setActiveTabState("Dashboard");
     try {
-      localStorage.removeItem("kwakopos:v2:active-module");
-      localStorage.removeItem("kwakopos:v2:active-tab");
-    } catch { /* ignore */ }
-    setAuthError(null);
+      await apiLogout();
+    } catch (err) {
+      console.warn("apiLogout error:", err);
+    } finally {
+      setUser(null);
+      setImpersonatedTenant(null);
+      try {
+        sessionStorage.removeItem("kwakopos:v2:impersonation");
+        localStorage.removeItem("kwakopos:v2:active-module");
+        localStorage.removeItem("kwakopos:v2:active-tab");
+      } catch { /* ignore */ }
+      setActiveModuleState("Retail");
+      setActiveTabState("Dashboard");
+      setAuthError(null);
+    }
   };
 
   // These claims are UX hints only. All protected operations remain server-authorized.
   const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
-  const currentTenantId = user?.tenantId || null;
-  const currentBranchId = user?.branchId || null;
-  const isSuperAdmin = Boolean(user && permissions.includes("*"));
+  const isSuperAdmin = Boolean(
+    user && (user.role === "SUPER_ADMIN" || permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS"))
+  );
+  const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
+  const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
 
   const canAccessModule = useCallback((module: IndustryModule): boolean => {
     if (!user) return false;
     const manifest = MODULE_MANIFESTS[module];
     if (!manifest) return false;
-    if (isSuperAdmin) return true;
+    // Super Admin in platform mode should NOT see tenant store modules unless actively impersonating
+    if (isSuperAdmin && !impersonatedTenant) return false;
+    if (isSuperAdmin && impersonatedTenant) return true;
     if (manifest.requiresSubscription && !moduleEntitlements.includes(module)) return false;
     if (manifest.requiredPermission && !permissions.includes(manifest.requiredPermission)) return false;
     return true;
-  }, [user, isSuperAdmin, permissions, moduleEntitlements]);
+  }, [user, isSuperAdmin, impersonatedTenant, permissions, moduleEntitlements]);
 
   const isModuleEnabled = useCallback((module: IndustryModule) => canAccessModule(module), [canAccessModule]);
   const isModuleSubscribed = useCallback((module: IndustryModule): boolean => {
@@ -313,11 +434,32 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const canAccessTab = useCallback((tab: string): boolean => {
     if (!user) return false;
+    if (isSuperAdmin && !impersonatedTenant) {
+      const superAdminTabs = [
+        "Super Admin",
+        "Support Control Tower",
+        "Compliance Tower",
+        "Diagnostics",
+        "Tenant Onboarding",
+        "Legal",
+        "Privacy",
+        "Help",
+      ];
+      return superAdminTabs.includes(tab);
+    }
+    if (!isSuperAdmin) {
+      const forbiddenForTenants = [
+        "Super Admin",
+        "Support Control Tower",
+        "Compliance Tower",
+      ];
+      if (forbiddenForTenants.includes(tab)) return false;
+    }
     if (!canAccessModule(activeModule)) return false;
     if (!tabExists(manifest, tab)) return false;
     const requiredPermission = TAB_PERMISSION_REQUIREMENTS[tab];
     return !requiredPermission || permissions.includes("*") || permissions.includes(requiredPermission);
-  }, [user, canAccessModule, activeModule, manifest, permissions]);
+  }, [user, isSuperAdmin, impersonatedTenant, canAccessModule, activeModule, manifest, permissions]);
 
   const setActiveModule = useCallback((module: IndustryModule) => {
     if (!canAccessModule(module)) return;
@@ -340,6 +482,47 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const searchModules = useCallback((query: string) => {
     return registrySearchModules(query).filter(canAccessModule);
   }, [canAccessModule]);
+
+  // Keep Super Admin defaulted to Super Admin tab when not impersonating
+  useEffect(() => {
+    if (isSuperAdmin && !impersonatedTenant && (activeTab === "Dashboard" || activeTab === "POS")) {
+      setActiveTabState("Super Admin");
+    }
+  }, [isSuperAdmin, impersonatedTenant, activeTab]);
+
+  const startImpersonation = useCallback(async (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => {
+    if (!isSuperAdmin) {
+      throw new Error("Only Super Admin can activate tenant inspection mode.");
+    }
+    const result = await apiSwitchContext(tenantId, branchId);
+    const resolved: ImpersonatedTenant = {
+      tenantId: result.tenantId,
+      tenantName: result.tenantName || tenantName || result.tenantId,
+      branchId: result.branchId,
+      branchName: result.branchName || branchName || result.branchId,
+    };
+    setImpersonatedTenant(resolved);
+    try {
+      sessionStorage.setItem("kwakopos:v2:impersonation", JSON.stringify(resolved));
+    } catch { /* ignore */ }
+    setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
+    setActiveModuleState("Retail");
+    setActiveTabState("Dashboard");
+  }, [isSuperAdmin]);
+
+  const stopImpersonation = useCallback(async () => {
+    setImpersonatedTenant(null);
+    try {
+      sessionStorage.removeItem("kwakopos:v2:impersonation");
+    } catch { /* ignore */ }
+    try {
+      const result = await apiSwitchContext("PLATFORM_SUPER_ADMIN");
+      setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
+    } catch {
+      /* ignore */
+    }
+    setActiveTabState("Super Admin");
+  }, []);
 
   const switchTenant = async (id: string) => {
     if (!id || id === currentTenantId) return;
@@ -404,12 +587,27 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return [{ id: user.branchId, name: `${user.branchId} (Active)` }];
   }, [user]);
 
-  const authValue: AuthContextType = { user, isAuthenticated: Boolean(user), isInitializing, error: authError, login, logout };
+  const currentTenantName = impersonatedTenant?.tenantName || (isSuperAdmin ? "Platform Super Admin" : availableTenantsList.find((t) => t.id === currentTenantId)?.name || currentTenantId);
+  const currentBranchName = impersonatedTenant?.branchName || (isSuperAdmin ? "Global Control Plane" : availableBranchesList.find((b) => b.id === currentBranchId)?.name || currentBranchId);
+
+  const authValue: AuthContextType = {
+    user,
+    isAuthenticated: Boolean(user),
+    isInitializing,
+    error: authError,
+    login,
+    logout,
+    dismissLoading,
+    impersonatedTenant,
+    startImpersonation,
+    stopImpersonation,
+  };
   const tenantValue: TenantContextType = {
     currentTenantId,
-    currentTenantName: availableTenantsList.find((t) => t.id === currentTenantId)?.name || currentTenantId,
+    currentTenantName,
     availableTenants: availableTenantsList,
     switchTenant,
+    isImpersonating: Boolean(impersonatedTenant),
   };
   const branchValue: BranchContextType = {
     currentBranchId,
@@ -461,7 +659,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           <RbacContext.Provider value={rbacValue}>
             <ModuleContext.Provider value={moduleValue}>
               <SyncContext.Provider value={syncValue}>
-                <ThemeContext.Provider value={themeValue}>{children}</ThemeContext.Provider>
+                <ThemeContext.Provider value={themeValue}>
+                  <I18nProvider userLocale={(user as any)?.locale} tenantLocale={null}>
+                    {children}
+                  </I18nProvider>
+                </ThemeContext.Provider>
               </SyncContext.Provider>
             </ModuleContext.Provider>
           </RbacContext.Provider>
