@@ -692,4 +692,24 @@ export function createTraceContext(opts: any): TraceContext {
 
 export * from "./receiptEngine.js";
 export * from "./payrollPostingBridge.js";
+export * from "./legalGovernanceEngine.js";
+export * from "./rollbackInvariants.js";
+export * from "./rollbackAuthorizationEngine.js";
+
+// ==========================================
+// Platform Core Business Engine Layer
+// ==========================================
+export * from "./engineRegistry/coreEngineRegistry.js";
+export * from "./foundation/eventBusEngine.js";
+export * from "./foundation/auditComplianceEngine.js";
+export * from "./foundation/tenantOrganizationEngine.js";
+export * from "./business/partyContactEngine.js";
+export * from "./business/productCatalogEngine.js";
+export * from "./business/stockLedgerEngine.js";
+export * from "./business/inventoryEngine.js";
+export * from "./business/universalPaymentEngine.js";
+export * from "./business/salesProcessingEngine.js";
+export * from "./business/posCheckoutEngine.js";
+export * from "./engineRegistry/bootstrapEngines.js";
+
 

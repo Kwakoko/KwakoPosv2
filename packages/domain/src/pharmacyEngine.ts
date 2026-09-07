@@ -128,7 +128,7 @@ export class PharmacyOperatingEngine {
     const now = new Date().toISOString();
 
     // 1. Duplicate Active Ingredient Check
-    for (const ing of medicine.activeIngredients) {
+    for (const ing of (medicine.activeIngredients || [])) {
       if (activeDispensingIngredients.includes(ing.name)) {
         alerts.push({
           id: `ALERT-ING-${randomUUID().slice(0, 6)}`,

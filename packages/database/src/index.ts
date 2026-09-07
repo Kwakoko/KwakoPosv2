@@ -36,11 +36,8 @@ import { randomUUID } from "crypto";
 
 export const prisma = new PrismaClient();
 
-import { InMemoryStore } from "./inMemoryStore.js";
-export { InMemoryStore };
-
-
-export const globalInMemoryStore = new InMemoryStore();
+import { InMemoryStore, globalInMemoryStore } from "./inMemoryStore.js";
+export { InMemoryStore, globalInMemoryStore };
 
 export class ScopedProductRepository {
   private store: InMemoryStore;
@@ -73,12 +70,22 @@ export class ScopedProductRepository {
       if (vStock <= vReorder) lowStockCount++;
     }
 
+    const stockChanged =
+      product.totalStock !== totalStock ||
+      product.reservedStock !== reservedStock ||
+      product.availableStock !== availableStock ||
+      product.lowStockVariantsCount !== lowStockCount ||
+      product.hasVariants !== (variants.length > 0);
+
     product.totalStock = totalStock;
     product.reservedStock = reservedStock;
     product.availableStock = availableStock;
     product.lowStockVariantsCount = lowStockCount;
     product.hasVariants = variants.length > 0;
-    product.updatedAt = new Date().toISOString();
+    if (stockChanged) {
+      const existingTime = product.updatedAt ? new Date(product.updatedAt).getTime() : 0;
+      product.updatedAt = new Date(Math.max(Date.now(), existingTime + 1)).toISOString();
+    }
 
     this.store.products.set(productId, product);
   }
@@ -422,7 +429,7 @@ export class ScopedProductRepository {
       images: req.images !== undefined ? req.images : existing.images,
       hasVariants: req.hasVariants !== undefined ? req.hasVariants : existing.hasVariants,
       isActive: req.isActive ?? existing.isActive,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(Math.max(Date.now(), (existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0) + 1)).toISOString(),
     };
 
     this.store.products.set(id, updated);
@@ -549,21 +556,11 @@ export class ScopedProductRepository {
     if (!existing) return false;
     assertTenantIsolation(ctx, existing.tenantId, existing.branchId);
 
-    // Safeguard check for transaction history
-    const hasLedgerHistory = Array.from(this.store.stockLedgers.values()).some(
-      (l) => l.variantId === variantId && l.tenantId === ctx.tenantId
-    );
-
-    if (hasLedgerHistory) {
-      // Soft-delete / Archive variant if transaction history exists
-      existing.isActive = false;
-      existing.updatedAt = new Date().toISOString();
-      this.store.variants.set(variantId, existing);
-      this.recalculateProductStock(ctx, existing.productId);
-      return true;
-    }
-
-    this.store.variants.delete(variantId);
+    // Soft-delete / Archive variant so deletion is a durable tombstone for sync propagation
+    existing.isActive = false;
+    const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+    existing.updatedAt = new Date(Math.max(Date.now(), existingTime + 1)).toISOString();
+    this.store.variants.set(variantId, existing);
     this.recalculateProductStock(ctx, existing.productId);
     return true;
   }
@@ -1352,6 +1349,8 @@ export * from "./workforceRepositories.js";
 export * from "./atomicCommercialFinance.js";
 export * from "./financeHardening.js";
 export * from "./receiptRepositories.js";
+export * from "./legalRepositories.js";
+export * from "./rollbackRepositories.js";
 
 
 

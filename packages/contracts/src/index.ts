@@ -107,6 +107,16 @@ export const CommercialPermissionEnum = z.enum([
   "RECEIPT_VERIFY",
   "RECEIPT_ARCHIVE",
   "RECEIPT_MANAGE_TEMPLATES",
+  "ROLLBACK_VIEW",
+  "ROLLBACK_REQUEST",
+  "ROLLBACK_APPROVE",
+  "ROLLBACK_EXECUTE",
+  "ROLLBACK_CANCEL",
+  "ROLLBACK_VERIFY",
+  "ROLLBACK_RECOVER",
+  "ROLLBACK_EMERGENCY",
+  "ROLLBACK_PLATFORM",
+  "ROLLBACK_AUDIT",
 ]);
 export type CommercialPermission = z.infer<typeof CommercialPermissionEnum>;
 
@@ -2664,6 +2674,9 @@ export const CreateReceiptRequestSchema = z.object({
 export type CreateReceiptRequest = z.infer<typeof CreateReceiptRequestSchema>;
 
 export * from "./tenantOnboardingContracts.js";
+export * from "./legalComplianceContracts.js";
+export * from "./rollbackContracts.js";
+export * from "./coreEngineContracts.js";
 
 
 
