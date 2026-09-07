@@ -54,4 +54,7 @@ COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "if [ -f apps/api/dist/server.js ]; then node apps/api/dist/server.js; elif [ -f apps/api/dist/src/server.js ]; then node apps/api/dist/src/server.js; else node apps/api/dist/apps/api/src/server.js; fi"]
+# The TypeScript project emits the API beneath its source-root path.  Always
+# launch the hardened production wrapper; the base server contains development
+# authentication handlers and must never be used as the production entrypoint.
+CMD ["node", "apps/api/dist/apps/api/src/serverFixed.js"]

@@ -38,16 +38,41 @@ export function syncWorkspaceVersions(targetVersion?: string): VersionSyncResult
   const updated: string[] = [];
   const skipped: string[] = [];
 
-  // Resolve target version from root package.json
+  // Resolve target version from authoritative release-manifest.json, falling back to root package.json
   let version = targetVersion;
   try {
+    const releaseManifestPath = path.resolve(process.cwd(), "release-manifest.json");
+    let releaseManifest: any = null;
+    if (fs.existsSync(releaseManifestPath)) {
+      try {
+        releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
+        version = version || releaseManifest?.appVersion || releaseManifest?.version;
+      } catch { /* ignore */ }
+    }
+
     const rootPkgPath = path.resolve(process.cwd(), "package.json");
     const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
     version = version || rootPkg.version;
 
     if (!version) {
-      errors.push("No version found in root package.json and no target version provided.");
+      errors.push("No version found in release-manifest.json or root package.json and no target version provided.");
       return { status: "FAILED", targetVersion: version || "unknown", totalFiles: 0, updated, skipped, errors, timestamp: new Date().toISOString() };
+    }
+
+    if (rootPkg.version !== version) {
+      const prev = rootPkg.version;
+      rootPkg.version = version;
+      fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + "\n", "utf8");
+      updated.push(`package.json (${prev} → ${version})`);
+      console.log(` ✓ [UPDATE] package.json: ${prev} → ${version}`);
+    }
+
+    if (releaseManifest && releaseManifest.version !== version) {
+      releaseManifest.version = version;
+      releaseManifest.tag = `v${version}`;
+      fs.writeFileSync(releaseManifestPath, JSON.stringify(releaseManifest, null, 2) + "\n", "utf8");
+      updated.push(`release-manifest.json (${releaseManifest.version} → ${version})`);
+      console.log(` ✓ [UPDATE] release-manifest.json: ${version}`);
     }
 
     console.log(`[TARGET] Target Version: ${version}`);
@@ -165,5 +190,9 @@ export function syncWorkspaceVersions(targetVersion?: string): VersionSyncResult
 if (process.argv[1]?.endsWith("sync-workspace-versions.ts")) {
   const targetVersion = process.argv[2];
   const result = syncWorkspaceVersions(targetVersion);
-  process.exit(result.status === "SUCCESS" ? 0 : 1);
+  if (result.status !== "SUCCESS") {
+    console.error("Release version synchronization failed; refusing to continue.");
+    process.exit(1);
+  }
+  process.exit(0);
 }

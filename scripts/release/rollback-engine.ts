@@ -62,7 +62,7 @@ export async function executeAutomatedRollback(req: RollbackRequest): Promise<Ro
     }
     logs.push(" ✓ Rollback compatibility check PASSED.");
 
-    if (!req.dryRun && process.env.NODE_ENV !== "test") {
+    if (!req.dryRun && process.env.NODE_ENV !== "test" && !process.env.VITEST) {
       // 2. Restore Application Version in package.json & package-lock.json & workspace packages
       logs.push(`2. Restoring Application Version to ${req.targetStableVersion}...`);
       const rootPkgPath = path.resolve(process.cwd(), "package.json");

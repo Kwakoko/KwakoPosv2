@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildServer } from '../../apps/api/src/server.js';
 import { loadConfig } from '../../packages/config/src/index.js';
+import { runPwaZeroDataLossCertification } from './runPwaZeroDataLossCertification.js';
 
 export async function runFrontendDeploymentCertification() {
   console.log("========================================================================");
@@ -75,8 +76,12 @@ export async function runFrontendDeploymentCertification() {
     await server.close();
   }
 
+  // 7. Verify PWA Zero-Data-Loss & Durable Upgrade/Downgrade Lifecycle Engine
+  await runPwaZeroDataLossCertification();
+  console.log(" ✓ [PASS] GATE-07: Enterprise PWA Zero-Data-Loss, Durable Migration & Isolation Engine certified.");
+
   console.log("========================================================================");
-  console.log(" 🏆 FRONTEND PWA & ROUTING CERTIFICATION RESULT: PASSED (6/6 GATES)    ");
+  console.log(" 🏆 FRONTEND PWA & ROUTING CERTIFICATION RESULT: PASSED (7/7 GATES)    ");
   console.log("========================================================================");
   return true;
 }

@@ -172,8 +172,9 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
   });
 
   // P1-008 Offline sale
-  it("P1-008: Offline sale is captured in local Outbox and syncs upstream cleanly", () => {
-    const localDb = new LocalIndexedDbStore();
+  it("P1-008: Offline sale is captured in local Outbox and syncs upstream cleanly", async () => {
+    const localDb = new LocalIndexedDbStore(4, `kwakopos-p1-008-${randomUUID()}`);
+    await localDb.ready;
 
     const offlineOpId = `op-off-${randomUUID()}`;
     localDb.recordOutboxMutation({
@@ -211,9 +212,11 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
   });
 
   // P1-009 Browser A -> Browser B
-  it("P1-009: Multi-device sync propagates mutations from Browser A to Browser B", () => {
-    const browserADb = new LocalIndexedDbStore();
-    const browserBDb = new LocalIndexedDbStore();
+  it("P1-009: Multi-device sync propagates mutations from Browser A to Browser B", async () => {
+    const browserADb = new LocalIndexedDbStore(4, `kwakopos-p1-009-a-${randomUUID()}`);
+    const browserBDb = new LocalIndexedDbStore(4, `kwakopos-p1-009-b-${randomUUID()}`);
+    await browserADb.ready;
+    await browserBDb.ready;
 
     const crossItemId = randomUUID();
 
@@ -250,6 +253,8 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
       deviceId: "device-B",
     });
 
+
+
     for (const p of deltaForB.products) {
       browserBDb.saveProductLocal(p);
     }
@@ -258,8 +263,9 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
   });
 
   // P1-010 PWA upgrade/recovery
-  it("P1-010: PWA local storage schema upgrade preserves pending outbox queue", () => {
-    const db = new LocalIndexedDbStore();
+  it("P1-010: PWA local storage schema upgrade preserves pending outbox queue", async () => {
+    const db = new LocalIndexedDbStore(4, `kwakopos-p1-010-${randomUUID()}`);
+    await db.ready;
     db.recordOutboxMutation({
       id: "OP-UPGRADE-1",
       entityType: "Product",
@@ -272,7 +278,7 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
     });
 
     // Simulate schema upgrade from v1 to v2
-    const migration = db.migrateToVersion(2);
+    const migration = await db.migrateToVersion(2);
     expect(migration.newVersion).toBe(2);
     expect(migration.preservedOutboxCount).toBe(1);
     expect(db.getPendingOutbox().length).toBe(1);

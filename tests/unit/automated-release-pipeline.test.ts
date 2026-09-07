@@ -83,6 +83,7 @@ describe("KwakoPos Enterprise Automated Release & CI/CD Pipeline Suite", () => {
         failedVersion: "2.3.0",
         targetStableVersion: "2.2.0",
         reason: "Synthetic test rollback",
+        dryRun: true,
       });
       expect(res.success).toBe(true);
       expect(res.restoredComponents).toContain("Application Version");

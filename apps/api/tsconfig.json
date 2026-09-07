@@ -1,7 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "baseUrl": ".",
+    "paths": {
+      "@kwakopos2/config": ["../../packages/config/src/index.ts"],
+      "@kwakopos2/contracts": ["../../packages/contracts/src/index.ts"],
+      "@kwakopos2/domain": ["../../packages/domain/src/index.ts"],
+      "@kwakopos2/database": ["../../packages/database/src/index.ts"],
+      "@kwakopos2/auth": ["../../packages/auth/src/index.ts"],
+      "@kwakopos2/sync": ["../../packages/sync/src/index.ts"]
+    }
   },
   "include": ["src/**/*"]
 }
+

@@ -294,7 +294,7 @@ async function runProductionCertification() {
   console.log("       ✓ INVARIANT 011 (Zero orphan adjustments bijection) PASS");
 
   // STEP 4: Verify Schema Version Upgrade Protection
-  const migrationResult = browserADb.migrateToVersion(2);
+  const migrationResult = await browserADb.migrateToVersion(2);
   if (migrationResult.newVersion !== 2 || migrationResult.preservedOutboxCount !== 0) {
     throw new Error("SCHEMA_MIGRATION_VIOLATION: Migration failed to transition versions cleanly!");
   }

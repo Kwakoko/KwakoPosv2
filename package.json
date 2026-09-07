@@ -1,6 +1,6 @@
 {
   "name": "kwakopos2-monorepo",
-  "version": "2.2.0",
+  "version": "2.12.5",
   "private": true,
   "main": "index.js",
   "type": "module",
@@ -17,12 +17,18 @@
   ],
   "scripts": {
     "start": "node index.js",
+    "dev": "npm run dev:web",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test:unit && npm run test:integration && npm run test:sync",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:sync": "vitest run tests/sync",
+    "superadmin:bootstrap": "tsx scripts/security/bootstrap-super-admin.ts",
+    "superadmin:rotate": "tsx scripts/security/rotate-super-admin.ts",
+    "superadmin:recover": "tsx scripts/security/recover-super-admin.ts",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
+    "version:check": "tsx scripts/release/version-drift-gate.ts",
+    "version:sync": "tsx scripts/release/sync-workspace-versions.ts",
     "release:sync-versions": "tsx scripts/release/sync-workspace-versions.ts",
     "release:validate-commits": "tsx scripts/release/validate-semver.ts",
     "release:certify-sync": "tsx scripts/release/certify-version-sync.ts",
@@ -34,7 +40,8 @@
     "generate:changelog": "tsx scripts/release/generate-release-notes.ts",
     "certify:version-sync": "tsx scripts/release/certify-version-sync.ts",
     "certify:frontend": "tsx scripts/certification/runFrontendDeploymentCertification.ts",
-    "test:browser": "playwright test",
+    "certify:pwa-durability": "tsx scripts/certification/runPwaZeroDataLossCertification.ts",
+    "test:browser": "playwright test --config=playwright.production.config.mjs",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:campaign": "tsx scripts/certification/fullSystemCertificationCampaign.ts",
     "certify:security": "tsx scripts/certification/strict-security-runtime-gate.ts",
@@ -116,11 +123,12 @@
     "@playwright/test": "^1.42.0",
     "@types/node": "^20.11.24",
     "eslint": "^8.57.0",
+    "fake-indexeddb": "^6.2.5",
     "tsx": "^4.7.1",
     "typescript": "^5.3.3",
     "vitest": "^1.3.1"
   },
   "engines": {
-    "node": ">=20.0.0 <25.0.0"
+    "node": ">=20.0.0 <27.0.0"
   }
 }

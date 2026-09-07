@@ -1,11 +1,11 @@
 {
   "name": "@kwakopos2/api",
-  "version": "2.2.0",
-  "main": "./dist/serverFixed.js",
+  "version": "2.12.5",
+  "main": "./dist/apps/api/src/serverFixed.js",
   "scripts": {
     "build": "tsx ../../scripts/ci/harden-production-finance.ts && tsc -p tsconfig.json",
     "dev": "tsx watch src/serverFixed.ts",
-    "start": "node dist/serverFixed.js",
+    "start": "node dist/apps/api/src/serverFixed.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

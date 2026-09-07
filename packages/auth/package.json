@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/auth",
-  "version": "2.2.0",
+  "version": "2.12.5",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

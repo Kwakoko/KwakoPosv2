@@ -1,7 +1,8 @@
 {
   "name": "@kwakopos2/web",
-  "version": "2.2.0",
+  "version": "2.12.5",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "tsx buildPwaAssets.ts && vite build && tsc -p tsconfig.json --noEmit",
     "dev": "vite",
@@ -17,5 +18,8 @@
     "react-dom": "^18.2.0",
     "recharts": "^3.10.1",
     "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21"
   }
 }
