@@ -49,9 +49,9 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
               </button>
               <button
                 style={{ background: "transparent", color: "#94a3b8", border: "1px solid #334155", borderRadius: "0.45rem", padding: "0.6rem 1rem", fontWeight: 700, cursor: "pointer" }}
-                onClick={() => { localStorage.clear(); sessionStorage.clear(); window.location.reload(); }}
+                onClick={() => { sessionStorage.clear(); window.location.reload(); }}
               >
-                🧹 Clear Session Cache & Reset
+                🧹 Clear Session & Reload
               </button>
             </div>
           </div>
