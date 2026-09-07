@@ -21,14 +21,20 @@ function run(command: string, encoding?: "utf8") {
   return execSync(command, encoding ? { encoding } : { stdio: "inherit" });
 }
 
-function quoteForPosixShell(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
+function quoteCliValue(value: string): string {
+  if (!value || /[\r\n]/.test(value)) {
+    throw new Error("RELEASE_BLOCKED: invalid CLI value contains control characters");
+  }
+  if (!/^[A-Za-z0-9._:/@=+,-]+$/.test(value)) {
+    throw new Error(`RELEASE_BLOCKED: unsafe CLI value: ${value}`);
+  }
+  return value;
 }
 
 function validateContainerProvenance(imageRef: string, expectedSha: string): string {
   try {
-    run(`docker pull ${quoteForPosixShell(imageRef)}`);
-    const raw = String(run(`docker inspect ${quoteForPosixShell(imageRef)} --format='{{json .Config.Labels}}'`, "utf8")).trim();
+    run(`docker pull ${quoteCliValue(imageRef)}`);
+    const raw = String(run(`docker inspect ${quoteCliValue(imageRef)} --format='{{json .Config.Labels}}'`, "utf8")).trim();
     const labels = JSON.parse(raw || "{}");
     const sourceSha = String(labels["org.opencontainers.image.revision"] || "").trim();
     assertValidGitSha(sourceSha);
@@ -80,7 +86,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     const tag = `${imageRepository}:${gitSha}`;
     let existingDigest = "";
     try {
-      existingDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteForPosixShell(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
+      existingDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteCliValue(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
     } catch {
       existingDigest = "";
     }
@@ -89,12 +95,12 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       imageDigest = existingDigest;
     } else {
       try {
-        run(`docker build --build-arg RELEASE_GIT_SHA=${quoteForPosixShell(gitSha)} --build-arg RELEASE_VERSION=${quoteForPosixShell(releaseVersion)} -t ${quoteForPosixShell(tag)} .`);
-        run(`docker push ${quoteForPosixShell(tag)}`);
+        run(`docker build --build-arg RELEASE_GIT_SHA=${quoteCliValue(gitSha)} --build-arg RELEASE_VERSION=${quoteCliValue(releaseVersion)} -t ${quoteCliValue(tag)} .`);
+        run(`docker push ${quoteCliValue(tag)}`);
       } catch {
-        run(`gcloud builds submit --config=cloudbuild.yaml --substitutions=_RELEASE_GIT_SHA=${gitSha},_RELEASE_VERSION=${releaseVersion},_IMAGE=${tag} . --project=${quoteForPosixShell(project)}`);
+        run(`gcloud builds submit --config=cloudbuild.yaml --substitutions=_RELEASE_GIT_SHA=${gitSha},_RELEASE_VERSION=${releaseVersion},_IMAGE=${tag} . --project=${quoteCliValue(project)}`);
       }
-      imageDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteForPosixShell(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
+      imageDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteCliValue(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
     }
     assertValidContainerDigest(imageDigest);
 
@@ -104,7 +110,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
 
     let serviceExists = false;
     try {
-      const serviceDescribe = String(run(`gcloud run services describe ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8"));
+      const serviceDescribe = String(run(`gcloud run services describe ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8"));
       serviceExists = Boolean(JSON.parse(serviceDescribe)?.metadata?.name);
     } catch {
       serviceExists = false;
@@ -113,18 +119,18 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
 
     // Secrets are injected from Secret Manager; secret values are never placed in shell arguments.
     const secretRefs = "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest";
-    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteForPosixShell(gitSha)},CONTAINER_DIGEST=${quoteForPosixShell(imageDigest)} --update-secrets=${secretRefs}`;
+    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteCliValue(gitSha)},CONTAINER_DIGEST=${quoteCliValue(imageDigest)} --update-secrets=${secretRefs}`;
 
     let deployStdout = "";
     if (deploymentMode === "EXISTING_SERVICE") {
-      deployStdout = String(run(`gcloud run deploy ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --image=${quoteForPosixShell(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --no-traffic --allow-unauthenticated ${envFlags} --tag=${quoteForPosixShell(tagArg)} --format="json"`, "utf8"));
+      deployStdout = String(run(`gcloud run deploy ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --image=${quoteCliValue(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --no-traffic --allow-unauthenticated ${envFlags} --tag=${quoteCliValue(tagArg)} --format="json"`, "utf8"));
     } else {
-      deployStdout = String(run(`gcloud run deploy ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --image=${quoteForPosixShell(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --allow-unauthenticated ${envFlags} --tag=${quoteForPosixShell(tagArg)} --format="json"`, "utf8"));
+      deployStdout = String(run(`gcloud run deploy ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --image=${quoteCliValue(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --allow-unauthenticated ${envFlags} --tag=${quoteCliValue(tagArg)} --format="json"`, "utf8"));
     }
 
     const deployJson = JSON.parse(deployStdout);
     candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
-    const serviceJson = JSON.parse(String(run(`gcloud run services describe ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8")));
+    const serviceJson = JSON.parse(String(run(`gcloud run services describe ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8")));
     if (!candidateRevision) candidateRevision = serviceJson?.status?.latestCreatedRevisionName || "";
     const taggedTraffic = Array.isArray(serviceJson?.status?.traffic) ? serviceJson.status.traffic.find((entry: any) => entry.tag === tagArg || entry.revisionName === candidateRevision) : undefined;
     const baseServiceUrl = serviceJson?.status?.url || "";
@@ -135,7 +141,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     if (!/^https:\/\//i.test(candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidateUrl)) throw new Error(`RELEASE_BLOCKED: invalid candidate URL returned: ${candidateUrl}`);
     assertValidCloudRunRevision(candidateRevision);
 
-    const revisionJson = JSON.parse(String(run(`gcloud run revisions describe ${quoteForPosixShell(candidateRevision)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8")));
+    const revisionJson = JSON.parse(String(run(`gcloud run revisions describe ${quoteCliValue(candidateRevision)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8")));
     const isReady = Array.isArray(revisionJson?.status?.conditions) ? revisionJson.status.conditions.some((c: any) => c.type === "Ready" && c.status === "True") : false;
     if (!isReady) throw new Error(`RELEASE_BLOCKED: Cloud Run revision ${candidateRevision} is not Ready`);
     const deployedImage = revisionJson?.spec?.containers?.[0]?.image || "";
