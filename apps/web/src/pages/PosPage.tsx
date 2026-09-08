@@ -45,6 +45,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
   const { currentTenantName } = useTenant();
   const { currentBranchName } = useBranch();
   const { user } = useAuth();
+  const { hasPermission } = useRbac();
   const { isOnline, syncOutbox, db } = useSync();
   const { t } = useTranslation();
   const { formatMoneyCompact: money, formatNumber: fmtNum } = useFormatters();
@@ -54,17 +55,46 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
-  // Sample Product Catalog
-  const [products] = useState<PosProduct[]>([
-    { id: "prod-001", name: "Azam Wheat Flour 2kg", sku: "AZM-FLR-2K", category: "Grains & Flour", price: 7900, stock: 45 },
-    { id: "prod-002", name: "Coca Cola 500ml Pet", sku: "COK-500ML", category: "Beverages", price: 1500, stock: 120 },
-    { id: "prod-003", name: "Unga wa Ngano 10kg", sku: "UNG-10KG", category: "Grains & Flour", price: 28000, stock: 18 },
-    { id: "prod-004", name: "Fresh Cow Milk 1L", sku: "MLK-1L", category: "Dairy", price: 3000, stock: 32 },
-    { id: "prod-005", name: "Cooking Oil 5L Refined", sku: "OIL-5L", category: "Edible Oils", price: 43000, stock: 14 },
-    { id: "prod-006", name: "Amoxicillin 500mg (21 Caps)", sku: "AMX-500", category: "Pharmacy", price: 12000, stock: 85, variants: [{ id: "var-01", name: "Box of 21", sku: "AMX-500-B", price: 12000, stock: 50 }, { id: "var-02", name: "Strip of 10", sku: "AMX-500-S", price: 6000, stock: 35 }] },
-    { id: "prod-007", name: "Paracetamol 500mg Tablets", sku: "PCM-500", category: "Pharmacy", price: 2500, stock: 200 },
-    { id: "prod-008", name: "Safari Lager 500ml Bottle", sku: "SAF-500", category: "Bar & Lounge", price: 3500, stock: 64 },
-  ]);
+  // Authoritative local catalog projection. Production POS must never invent demo products.
+  const [products, setProducts] = useState<PosProduct[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    const hydrateCatalog = async () => {
+      try {
+        await db.ready;
+        const variantsByProduct = new Map<string, PosProduct["variants"]>();
+        for (const variant of db.productVariants.values()) {
+          const list = variantsByProduct.get(variant.productId) || [];
+          list.push({
+            id: variant.id,
+            name: variant.name,
+            sku: variant.sku,
+            price: Number(variant.price || 0),
+            stock: Number(variant.inventoryQuantity || 0),
+          });
+          variantsByProduct.set(variant.productId, list);
+        }
+        const mapped = Array.from(db.products.values()).map((product: any) => ({
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          category: product.category || "General",
+          price: Number(product.sellingPrice || 0),
+          stock: Number(product.availableStock ?? product.totalStock ?? 0),
+          variants: variantsByProduct.get(product.id),
+        }));
+        if (active) setProducts(mapped);
+      } catch (error) {
+        console.error("[POS] Failed to hydrate authoritative catalog", error);
+        if (active) setProducts([]);
+      }
+    };
+    void hydrateCatalog();
+    return () => {
+      active = false;
+    };
+  }, [db]);
 
   // Cart State
   const [cart, setCart] = useState<Array<{ product: PosProduct; variantId?: string; variantName?: string; price: number; qty: number }>>([]);
@@ -98,7 +128,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
 
   // Supervisor PIN Modal
   const [supervisorModal, setSupervisorModal] = useState(false);
-  const [supervisorPin, setSupervisorPin] = useState("");
   const [supervisorReason, setSupervisorReason] = useState("");
   const [pendingCallback, setPendingCallback] = useState<(() => void) | null>(null);
 
@@ -182,19 +211,23 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
   // Supervisor PIN Request Gate
   const requestSupervisor = (reason: string, onApprove: () => void) => {
     setSupervisorReason(reason);
-    setSupervisorPin("");
     setPendingCallback(() => onApprove);
     setSupervisorModal(true);
   };
 
-  const handleVerifySupervisor = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (supervisorPin === "1234" || supervisorPin === "1911") {
-      setSupervisorModal(false);
-      if (pendingCallback) pendingCallback();
-    } else {
-      alert("Invalid Supervisor PIN.");
+  const handleVerifySupervisor = () => {
+    const canVoidCart =
+      hasPermission("sales.void") ||
+      hasPermission("pos.supervisor") ||
+      hasPermission("*");
+    setSupervisorModal(false);
+    if (canVoidCart) {
+      pendingCallback?.();
+      setPendingCallback(null);
+      return;
     }
+    setPendingCallback(null);
+    alert("Supervisor authorization denied. Your account is not permitted to void this cart.");
   };
 
   const handleVoidCart = () => {
@@ -718,31 +751,19 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* --- Supervisor PIN Modal --- */}
+      {/* --- Supervisor Authorization Modal --- */}
       {supervisorModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 380, padding: "1.5rem" }}>
             <h2 className="v2-text-lg v2-font-black v2-mb-1">Supervisor Authorization</h2>
             <div className="v2-text-xs v2-text-muted v2-mb-4">{supervisorReason}</div>
-
-            <form onSubmit={handleVerifySupervisor} className="v2-space-y-3">
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">ENTER SUPERVISOR PIN</label>
-                <input
-                  className="v2-input"
-                  type="password"
-                  value={supervisorPin}
-                  onChange={(e) => setSupervisorPin(e.target.value)}
-                  placeholder="****"
-                  autoFocus
-                  required
-                />
-              </div>
-              <div className="v2-flex v2-justify-end v2-gap-2">
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setSupervisorModal(false)} type="button">Cancel</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Verify PIN</button>
-              </div>
-            </form>
+            <p className="v2-text-xs v2-text-muted v2-mb-4">
+              This protected action is authorized only by the signed-in account&apos;s server-issued permissions. No static PIN is accepted.
+            </p>
+            <div className="v2-flex v2-justify-end v2-gap-2">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setSupervisorModal(false)} type="button">Cancel</button>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => handleVerifySupervisor({ preventDefault: () => undefined } as React.FormEvent)} type="button">Authorize</button>
+            </div>
           </div>
         </div>
       )}

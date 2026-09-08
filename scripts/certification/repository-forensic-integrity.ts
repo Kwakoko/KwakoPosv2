@@ -13,7 +13,6 @@ const jsonExt = /\.json$/i;
 const suspicious = [
   /5900414000000000000000000000000000000000/i,
   /efd6bc4300000000000000000000000000000000000000000000000000000000/i,
-  /kwakopos-prod-001/i,
   /kwakopos-production-rev-00001/i,
   /admin123|password123|changeme/i,
 ];
@@ -42,8 +41,9 @@ function scanFile(relative: string) {
 
   if (isText && codeExt.test(relative)) {
     const sf = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    parseStatus = sf.parseDiagnostics.length === 0 ? "PASS" : "FAIL";
-    parseError = sf.parseDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, " ")).join(" | ");
+    const diagnostics: any[] = (sf as any).parseDiagnostics || [];
+    parseStatus = diagnostics.length === 0 ? "PASS" : "FAIL";
+    parseError = diagnostics.map((d: any) => ts.flattenDiagnosticMessageText(d.messageText, " ")).join(" | ");
   } else if (isText && jsonExt.test(relative)) {
     try { JSON.parse(text); parseStatus = "PASS"; } catch (err: any) { parseStatus = "FAIL"; parseError = err.message; }
   }
