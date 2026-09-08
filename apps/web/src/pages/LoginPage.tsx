@@ -20,6 +20,12 @@ import { SuperAdminSetupModal } from "../components/SuperAdminSetupModal.js";
 import { useTranslation, useAuth } from "../context/KwakoPosContexts.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 
+// Fallback to release-manifest.json when runtime /api/system/version is unreachable
+// This file is generated at release-time by the release pipeline and committed to the repo root.
+// Importing the JSON here allows the built web bundle to display the correct release version
+// even when the runtime version endpoint cannot be reached (e.g. during static hosting or CDN cache).
+import releaseManifest from "../../../../release-manifest.json";
+
 interface LoginPageProps {
   onAuthenticated: () => void;
   provisioningRequested?: boolean;
@@ -104,10 +110,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
         });
       })
       .catch(() => {
-        // ignore; fallback will be used
+        // ignore; fallback will be used (releaseManifest imported at build-time)
       });
     return () => { alive = false; };
   }, []);
+
+  const manifestVersion = (releaseManifest as any)?.version;
 
   return (
     <main className="v2-auth-page">
@@ -146,7 +154,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           <span className="v2-text-xs v2-text-muted">
             {t("auth.copyrightNotice", { year: new Date().getFullYear() })}
             <span className="footer-dot"> · </span>
-            {release?.appVersion ? `v${release.appVersion}` : "v2.12.5"}
+            {release?.appVersion ? `v${release.appVersion}` : manifestVersion ? `v${manifestVersion}` : "v2.2.0"}
             {release?.gitSha && (
               <>
                 <span className="footer-dot"> · </span>

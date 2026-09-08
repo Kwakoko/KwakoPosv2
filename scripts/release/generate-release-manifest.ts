@@ -27,6 +27,11 @@ export function generateReleaseManifest(options?: {
   version?: string;
   certification?: "PASS" | "FAIL";
   evidencePath?: string;
+  gitSha?: string;
+  containerDigest?: string | null;
+  cloudRunRevision?: string | null;
+  environment?: string;
+  releaseChannel?: string;
 }): ReleaseManifest {
   const config = loadConfig();
   const targetVersion = options?.version || config.APP_VERSION;
@@ -34,6 +39,11 @@ export function generateReleaseManifest(options?: {
   const gitSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
   if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
   const targetTag = `v${targetVersion}`;
+  const gitSha = options?.gitSha || identity.gitSha;
+  const containerDigest = options?.containerDigest ?? identity.containerDigest ?? null;
+  const cloudRunRevision = options?.cloudRunRevision ?? identity.cloudRunRevision ?? null;
+  const environment = options?.environment || identity.environment || "production";
+  const releaseChannel = options?.releaseChannel || identity.releaseChannel || (environment === "production" ? "production" : "development");
 
   const manifest: ReleaseManifest = {
     version: targetVersion,
@@ -63,13 +73,54 @@ export function generateReleaseManifest(options?: {
   const manifestPath = path.join(outDir, "release-manifest.json");
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
-  // Also write to root for fast lookup
+  // Also write to root for fast lookup (this is the manifest the web bundle imports as a static fallback)
   fs.writeFileSync(path.resolve(process.cwd(), "release-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
 
-  console.log(`✓ Release Manifest Generated: version=${manifest.version}, tag=${manifest.tag}, sha=${manifest.gitSha.slice(0, 8)}`);
+  console.log(`✓ Release Manifest Generated: version=${manifest.version}, tag=${manifest.tag}, sha=${String(manifest.gitSha).slice(0, 8)}, env=${manifest.environment}`);
   return manifest;
 }
 
-if (process.argv[1]?.endsWith("generate-release-manifest.ts")) {
-  generateReleaseManifest();
+// Simple CLI allowing CI to call this script directly with overrides.
+if (process.argv[1]?.endsWith("generate-release-manifest.ts") || process.argv[1]?.endsWith("generate-release-manifest.js")) {
+  const args = process.argv.slice(2);
+  const opts: any = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    switch (a) {
+      case "--version":
+        opts.version = args[++i];
+        break;
+      case "--gitSha":
+        opts.gitSha = args[++i];
+        break;
+      case "--containerDigest":
+        opts.containerDigest = args[++i];
+        break;
+      case "--cloudRunRevision":
+        opts.cloudRunRevision = args[++i];
+        break;
+      case "--environment":
+        opts.environment = args[++i];
+        break;
+      case "--releaseChannel":
+        opts.releaseChannel = args[++i];
+        break;
+      case "--certification":
+        opts.certification = args[++i] === "FAIL" ? "FAIL" : "PASS";
+        break;
+      case "--evidencePath":
+        opts.evidencePath = args[++i];
+        break;
+      default:
+        // ignore unknown
+        break;
+    }
+  }
+
+  try {
+    generateReleaseManifest(opts);
+  } catch (err: any) {
+    console.error("Failed to generate release manifest:", err?.message || err);
+    process.exit(1);
+  }
 }

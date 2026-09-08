@@ -5,6 +5,35 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { loadAuthoritativeRelease } from "./authoritativeRelease.js";
 
+function normalizeDatabaseUrlValue(raw: string): string {
+  let value = raw.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+
+  if (!/^postgres(?:ql)?:\/\//i.test(value)) {
+    throw new Error("SECURITY_FATAL: DATABASE_URL must use the PostgreSQL protocol (postgresql:// or postgres://).");
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (!/^postgres(?:ql):$/i.test(parsed.protocol) || !parsed.hostname) {
+      throw new Error("database hostname is missing or the PostgreSQL URL is invalid");
+    }
+  } catch (error) {
+    throw new Error(`SECURITY_FATAL: DATABASE_URL is not a valid PostgreSQL connection URL: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  return value;
+}
+
+// Normalize deployment-provided Secret Manager values before downstream modules
+// (including Prisma) are evaluated. This safely fixes whitespace or one pair of
+// accidental surrounding quotes without changing connection credentials.
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = normalizeDatabaseUrlValue(process.env.DATABASE_URL);
+}
+
 function resolvePackageVersion(): string {
   try {
     const pkgPath = path.resolve(process.cwd(), "package.json");
@@ -22,7 +51,7 @@ export const ConfigSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production-certification", "production"]).default("development"),
   PORT: z.coerce.number().default(3000),
   HOST: z.string().default("0.0.0.0"),
-  DATABASE_URL: z.string().default("postgresql://postgres:postgres@localhost:5432/kwakopos2?schema=public"),
+  DATABASE_URL: z.string().default("postgresql://postgres:postgres@localhost:5432/kwakopos2?schema=public").transform(normalizeDatabaseUrlValue),
   JWT_SECRET: z.string().min(32).default(developmentJwtSecret),
   JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default("7d"),
