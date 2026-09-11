@@ -21,12 +21,16 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Wallet, DollarSign, Clock, ArrowDownRight, ArrowUpRight, Lock, Unlock,
   CheckCircle, AlertTriangle, RefreshCw, Plus, FileText, Shield, Eye, EyeOff,
-  Printer, Key, ShieldAlert, Cpu, Calculator, Send, Building, Activity, X
+  Printer, Key, ShieldAlert, Cpu, Calculator, Send, Building, Activity, X,
+  RotateCcw, Copy, Check, Sparkles
 } from "lucide-react";
 import { useAuth, useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { useToast } from "../context/ToastContext.js";
+import { useAudioFeedback } from "../utils/useAudioFeedback.js";
+import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
+import { DEMO_DATA_EVENT, loadSampleData } from "../services/sampleDataService.js";
 
-type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "safe" | "nosale" | "ledger" | "history" | "hardware";
+type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -55,26 +59,78 @@ export interface DenominationState {
   coin50: number;
 }
 
-export const CashDrawerPage: React.FC = () => {
+export interface ShiftRecord {
+  id: string;
+  shiftNumber: string;
+  cashier: string;
+  terminal: string;
+  openedAt: string;
+  closedAt?: string;
+  openingFloat: number;
+  cashSales: number;
+  mpesaSales: number;
+  airtelSales: number;
+  cardSales: number;
+  cashIn: number;
+  cashOut: number;
+  safeDrops: number;
+  expectedCash: number;
+  declaredCash?: number;
+  variance?: number;
+  status: "OPEN" | "CLOSED";
+  closedBy?: string;
+  managerSignOff?: string;
+}
+
+export interface CashDrawerPageProps {
+  activeTab?: string;
+}
+
+export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantName } = useTenant();
   const { currentBranchName } = useBranch();
   const { user: currentUser } = useAuth();
   const { permissions, hasPermission } = useRbac();
   const { isOnline, db } = useSync();
+  const toast = useToast();
+  const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
 
   const [activeTab, setActiveTab] = useState<DrawerTab>("active");
-  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "LOCKED" | "CLOSED">("OPEN");
-  const [shiftId, setShiftId] = useState("SFT-2026-0901-01");
+  const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!propActiveTab) return;
+    const map: Record<string, DrawerTab> = {
+      "Shift & Active Register": "active",
+      "Cash Movement Ledger": "ledger",
+      "Reconciliation & Variances": "reconciliation",
+      "Safe & Bank Deposits": "safe",
+      "No Sale & Event Logs": "nosale",
+      "15 Financial Reports": "reports",
+      "Security & RBAC Rules": "hardware",
+      "AI Cash Advisor": "reports",
+    };
+    if (map[propActiveTab]) {
+      setActiveTab(map[propActiveTab]);
+    }
+  }, [propActiveTab]);
+
+  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "LOCKED" | "CLOSED">("CLOSED");
+  const [shiftId, setShiftId] = useState("");
   const [terminalId] = useState("POS-TERM-01");
 
-  // Operational Cash Metrics
-  const [openingFloat, setOpeningFloat] = useState(350000);
-  const [cashSales, setCashSales] = useState(1480000);
-  const [cashIn, setCashIn] = useState(50000);
-  const [cashRefunds, setCashRefunds] = useState(25000);
-  const [cashExpenses, setCashExpenses] = useState(35000);
-  const [cashOut, setCashOut] = useState(100000);
-  const [safeDrops, setSafeDrops] = useState(500000);
+  // Operational Cash Metrics (100% Dynamic)
+  const [openingFloat, setOpeningFloat] = useState(0);
+  const [cashSales, setCashSales] = useState(0);
+  const [mpesaSales, setMpesaSales] = useState(0);
+  const [airtelSales, setAirtelSales] = useState(0);
+  const [cardSales, setCardSales] = useState(0);
+  const [cashIn, setCashIn] = useState(0);
+  const [cashRefunds, setCashRefunds] = useState(0);
+  const [cashExpenses, setCashExpenses] = useState(0);
+  const [cashOut, setCashOut] = useState(0);
+  const [safeDrops, setSafeDrops] = useState(0);
+  const [openedAtTime, setOpenedAtTime] = useState("");
 
   // Calculated Expected Cash
   // Formula: Expected = Float + Sales + CashIn - Refunds - Expenses - CashOut - SafeDrops
@@ -82,31 +138,46 @@ export const CashDrawerPage: React.FC = () => {
     return openingFloat + cashSales + cashIn - cashRefunds - cashExpenses - cashOut - safeDrops;
   }, [openingFloat, cashSales, cashIn, cashRefunds, cashExpenses, cashOut, safeDrops]);
 
-  // Denominations State
+  const totalGrossRevenue = useMemo(() => {
+    return cashSales + mpesaSales + airtelSales + cardSales;
+  }, [cashSales, mpesaSales, airtelSales, cardSales]);
+
+  // Denominations State (Starts at 0)
   const [denominations, setDenominations] = useState<DenominationState>({
-    note10000: 80, // 800,000
-    note5000: 60,  // 300,000
-    note2000: 40,  // 80,000
-    note1000: 30,  // 30,000
-    coin500: 16,   // 8,000
-    coin200: 10,   // 2,000
+    note10000: 0,
+    note5000: 0,
+    note2000: 0,
+    note1000: 0,
+    coin500: 0,
+    coin200: 0,
     coin100: 0,
     coin50: 0,
   });
 
-  // Calculate Total from Denominations
-  const denominationTotal = useMemo(() => {
+  // Calculate Banknotes Subtotal
+  const notesSubtotal = useMemo(() => {
     return (
       denominations.note10000 * 10000 +
       denominations.note5000 * 5000 +
       denominations.note2000 * 2000 +
-      denominations.note1000 * 1000 +
+      denominations.note1000 * 1000
+    );
+  }, [denominations]);
+
+  // Calculate Coins Subtotal
+  const coinsSubtotal = useMemo(() => {
+    return (
       denominations.coin500 * 500 +
       denominations.coin200 * 200 +
       denominations.coin100 * 100 +
       denominations.coin50 * 50
     );
   }, [denominations]);
+
+  // Calculate Total from Denominations
+  const denominationTotal = useMemo(() => {
+    return notesSubtotal + coinsSubtotal;
+  }, [notesSubtotal, coinsSubtotal]);
 
   // Blind Count State
   const [blindDeclaredCash, setBlindDeclaredCash] = useState(0);
@@ -120,19 +191,128 @@ export const CashDrawerPage: React.FC = () => {
   const requiresManagerApproval = Math.abs(discrepancy) > 5000;
 
   // Cash Movement Audit Ledger
-  const [ledger, setLedger] = useState<CashMovementRecord[]>([
-    { id: "CSH-101", time: "2026-09-01 08:00", type: "OPENING_FLOAT", amount: 350000, balance: 350000, reason: "Opening Shift Cash Float", user: currentUser?.name || "Cashier", terminal: terminalId, approvalStatus: "APPROVED" },
-    { id: "CSH-102", time: "2026-09-01 09:15", type: "CASH_SALE", amount: 450000, balance: 800000, reason: "POS Sale #SALE-2026-9912", user: currentUser?.name || "Cashier", terminal: terminalId },
-    { id: "CSH-103", time: "2026-09-01 10:30", type: "PETTY_CASH", amount: -35000, balance: 765000, reason: "Cleaning supplies & water expense", user: currentUser?.name || "Cashier", terminal: terminalId, approvalStatus: "APPROVED" },
-    { id: "CSH-104", time: "2026-09-01 12:00", type: "SAFE_DROP", amount: -500000, balance: 265000, reason: "Mid-day excess cash transfer to Branch Safe", user: currentUser?.name || "Cashier", terminal: terminalId, witness: "Baraka Juma (Manager)", approvalStatus: "APPROVED" },
-    { id: "CSH-105", time: "2026-09-01 14:20", type: "NO_SALE", amount: 0, balance: 265000, reason: "Customer change request", user: currentUser?.name || "Cashier", terminal: terminalId },
-  ]);
+  const [ledger, setLedger] = useState<CashMovementRecord[]>([]);
 
-  // Safe Drop & Cash In/Out Modals
-  const [modalType, setModalType] = useState<"CASH_IN" | "CASH_OUT" | "SAFE_DROP" | "NO_SALE" | null>(null);
+  // Shift History
+  const [shiftHistory, setShiftHistory] = useState<ShiftRecord[]>([]);
+
+  // ─── Hydrate Drawer Session & Operational Cash Movements from Local DB ──────
+  const loadDrawerData = useCallback(async () => {
+    try {
+      await db.ready;
+      const activeShift = db.getConfigurationLocal?.("active_shift_session");
+      if (activeShift && activeShift.status === "OPEN") {
+        setShiftStatus("OPEN");
+        setShiftId(activeShift.shiftNumber || activeShift.id || `SFT-${Date.now()}`);
+        setOpeningFloat(Number(activeShift.openingFloat || 0));
+        setOpenedAtTime(activeShift.openedAt ? new Date(activeShift.openedAt).toISOString().slice(0, 16).replace("T", " ") : "Today");
+
+        const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
+        let cSales = 0;
+        let mSales = 0;
+        let aSales = 0;
+        let crdSales = 0;
+        let cIn = 0;
+        let cOut = 0;
+        let sDrops = 0;
+        let cExp = 0;
+
+        for (const s of db.sales.values()) {
+          const sAny = s as any;
+          const sTime = new Date(sAny.createdAt || sAny.soldAt || 0).getTime();
+          if (shiftStartMs > 0 && sTime < shiftStartMs) continue;
+          if (sAny.status === "Voided" || sAny.status === "Cancelled") continue;
+          const method = (sAny.paymentMethod || "Cash").toLowerCase();
+          const amt = Number(sAny.grandTotal || sAny.totalAmount || 0);
+          if (method.includes("mpesa") || method.includes("m-pesa")) mSales += amt;
+          else if (method.includes("airtel")) aSales += amt;
+          else if (method.includes("card")) crdSales += amt;
+          else cSales += amt;
+        }
+
+        if (Array.isArray(activeShift.movements)) {
+          setLedger(activeShift.movements);
+          for (const m of activeShift.movements) {
+            if (m.type === "CASH_IN") cIn += Math.abs(m.amount);
+            if (m.type === "CASH_OUT") cOut += Math.abs(m.amount);
+            if (m.type === "SAFE_DROP") sDrops += Math.abs(m.amount);
+            if (m.type === "PETTY_CASH") cExp += Math.abs(m.amount);
+          }
+        } else {
+          setLedger([]);
+        }
+
+        setCashSales(cSales);
+        setMpesaSales(mSales);
+        setAirtelSales(aSales);
+        setCardSales(crdSales);
+        setCashIn(cIn);
+        setCashOut(cOut);
+        setSafeDrops(sDrops);
+        setCashExpenses(cExp);
+      } else {
+        setShiftStatus("CLOSED");
+        setShiftId("");
+        setOpeningFloat(0);
+        setCashSales(0);
+        setMpesaSales(0);
+        setAirtelSales(0);
+        setCardSales(0);
+        setCashIn(0);
+        setCashOut(0);
+        setSafeDrops(0);
+        setCashExpenses(0);
+        setLedger([]);
+      }
+
+      const savedHist = db.getConfigurationLocal?.("shift_history");
+      if (Array.isArray(savedHist)) {
+        setShiftHistory(savedHist);
+      } else {
+        setShiftHistory([]);
+      }
+    } catch (err) {
+      console.error("[CashDrawer] Failed to hydrate drawer:", err);
+    }
+  }, [db]);
+
+  useEffect(() => {
+    void loadDrawerData();
+    const handleSync = () => { void loadDrawerData(); };
+    window.addEventListener(DEMO_DATA_EVENT, handleSync);
+    return () => window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+  }, [loadDrawerData]);
+
+  // Modals State
+  const [modalType, setModalType] = useState<"CASH_IN" | "CASH_OUT" | "SAFE_DROP" | "NO_SALE" | "OPEN_SHIFT" | "CLOSE_SHIFT" | null>(null);
   const [amountInput, setAmountInput] = useState("");
   const [reasonInput, setReasonInput] = useState("");
   const [witnessInput, setWitnessInput] = useState("");
+  const [openFloatInput, setOpenFloatInput] = useState("350000");
+
+  // Report Modal (Thermal Slip View)
+  const [activeReportSlip, setActiveReportSlip] = useState<{
+    type: "X_REPORT" | "Z_REPORT";
+    title: string;
+    timestamp: string;
+    shiftNumber: string;
+    cashier: string;
+    openingFloat: number;
+    cashSales: number;
+    mpesaSales: number;
+    airtelSales: number;
+    cardSales: number;
+    cashIn: number;
+    cashOut: number;
+    safeDrops: number;
+    expectedCash: number;
+    declaredCash: number;
+    variance: number;
+    denominations: DenominationState;
+    managerSignOff?: string;
+  } | null>(null);
+
+  const [copiedSlip, setCopiedSlip] = useState(false);
 
   // Hardware HAL Status State
   const [halStatus, setHalStatus] = useState({
@@ -145,7 +325,8 @@ export const CashDrawerPage: React.FC = () => {
 
   // Action Handlers
   const handleOpenDrawerSignal = async (reason: string) => {
-    alert(`[HAL] Cash Drawer open trigger signal sent to ${halStatus.interface} (${reason})`);
+    playBeep(880, 100);
+    toast.info("[HAL] Cash Drawer Signal", `Trigger signal sent to ${halStatus.interface} (${reason})`);
     setHalStatus((prev) => ({ ...prev, lastTriggered: new Date().toLocaleTimeString() }));
 
     const noSaleRecord: CashMovementRecord = {
@@ -162,9 +343,196 @@ export const CashDrawerPage: React.FC = () => {
     setLedger((prev) => [noSaleRecord, ...prev]);
   };
 
+  const handleAdjustDenomination = (key: keyof DenominationState, delta: number) => {
+    setDenominations((prev) => ({
+      ...prev,
+      [key]: Math.max(0, (prev[key] || 0) + delta),
+    }));
+  };
+
+  const handleClearDenominations = () => {
+    setDenominations({
+      note10000: 0,
+      note5000: 0,
+      note2000: 0,
+      note1000: 0,
+      coin500: 0,
+      coin200: 0,
+      coin100: 0,
+      coin50: 0,
+    });
+  };
+
+  const handleGenerateXReport = () => {
+    setActiveReportSlip({
+      type: "X_REPORT",
+      title: "MID-SHIFT X-READING AUDIT",
+      timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
+      shiftNumber: shiftId,
+      cashier: currentUser?.name || "Cashier",
+      openingFloat,
+      cashSales,
+      mpesaSales,
+      airtelSales,
+      cardSales,
+      cashIn,
+      cashOut,
+      safeDrops,
+      expectedCash,
+      declaredCash,
+      variance: discrepancy,
+      denominations,
+    });
+  };
+
+  const handleGenerateZReport = () => {
+    setActiveReportSlip({
+      type: "Z_REPORT",
+      title: "END-OF-DAY Z-READING SETTLEMENT",
+      timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
+      shiftNumber: shiftId,
+      cashier: currentUser?.name || "Cashier",
+      openingFloat,
+      cashSales,
+      mpesaSales,
+      airtelSales,
+      cardSales,
+      cashIn,
+      cashOut,
+      safeDrops,
+      expectedCash,
+      declaredCash,
+      variance: discrepancy,
+      denominations,
+      managerSignOff: witnessInput || "Branch Manager",
+    });
+  };
+
+  const handlePrintSlip = () => {
+    if (typeof window !== "undefined") {
+      window.print();
+    }
+  };
+
+  const handleCopySlipText = () => {
+    if (!activeReportSlip) return;
+    const slipText = `
+========================================
+       KWAKOPOS REGISTER REPORT
+          ${activeReportSlip.title}
+========================================
+Business: ${currentTenantName}
+Branch:   ${currentBranchName}
+Terminal: ${terminalId}
+Shift:    ${activeReportSlip.shiftNumber}
+Cashier:  ${activeReportSlip.cashier}
+Date:     ${activeReportSlip.timestamp}
+----------------------------------------
+FINANCIAL SUMMARY:
+----------------------------------------
+(+) Opening Float:      ${money(activeReportSlip.openingFloat)}
+(+) Gross Cash Sales:   ${money(activeReportSlip.cashSales)}
+(+) Digital - M-Pesa:   ${money(activeReportSlip.mpesaSales)}
+(+) Digital - Airtel:   ${money(activeReportSlip.airtelSales)}
+(+) Digital - Card:     ${money(activeReportSlip.cardSales)}
+(+) Manual Cash In:     ${money(activeReportSlip.cashIn)}
+(-) Manual Cash Out:    ${money(activeReportSlip.cashOut)}
+(-) Safe Transfers:     ${money(activeReportSlip.safeDrops)}
+----------------------------------------
+SYSTEM EXPECTED CASH:   ${money(activeReportSlip.expectedCash)}
+DECLARED CASH COUNT:    ${money(activeReportSlip.declaredCash)}
+DISCREPANCY / VARIANCE: ${money(activeReportSlip.variance)}
+STATUS: ${activeReportSlip.variance === 0 ? "BALANCED" : activeReportSlip.variance > 0 ? "OVER" : "SHORT"}
+========================================
+Cashier Signature: _____________________
+Manager Sign-off:  _____________________
+========================================
+    `.trim();
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(slipText).then(() => {
+        setCopiedSlip(true);
+        setTimeout(() => setCopiedSlip(false), 2500);
+      });
+    }
+  };
+
   const handlePostCashMovement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!modalType) return;
+
+    if (modalType === "OPEN_SHIFT") {
+      const flt = Number(openFloatInput) || 0;
+      setOpeningFloat(flt);
+      setShiftStatus("OPEN");
+      const newShiftNum = `SFT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-01`;
+      setShiftId(newShiftNum);
+      const openTime = new Date().toISOString().replace("T", " ").slice(0, 16);
+      setOpenedAtTime(openTime);
+      const openRecord: CashMovementRecord = {
+        id: `CSH-${Date.now()}`,
+        time: openTime,
+        type: "OPENING_FLOAT",
+        amount: flt,
+        balance: flt,
+        reason: "Register Shift Opened with Float",
+        user: currentUser?.name || "Cashier",
+        terminal: terminalId,
+        approvalStatus: "APPROVED",
+      };
+      const updatedMovements = [openRecord, ...ledger];
+      setLedger(updatedMovements);
+      db.saveConfigurationLocal("active_shift_session", {
+        id: newShiftNum,
+        shiftNumber: newShiftNum,
+        status: "OPEN",
+        openedAt: new Date().toISOString(),
+        openingFloat: flt,
+        terminalId,
+        cashierName: currentUser?.name || "Cashier",
+        movements: updatedMovements,
+      });
+      setModalType(null);
+      toast.success("Shift Opened", `Active register opened with float ${money(flt)}`);
+      playSuccessChime();
+      return;
+    }
+
+    if (modalType === "CLOSE_SHIFT") {
+      setShiftStatus("CLOSED");
+      const closeRecord: ShiftRecord = {
+        id: `SFT-${Date.now()}`,
+        shiftNumber: shiftId,
+        cashier: currentUser?.name || "Cashier",
+        terminal: terminalId,
+        openedAt: openedAtTime,
+        closedAt: new Date().toISOString().replace("T", " ").slice(0, 16),
+        openingFloat,
+        cashSales,
+        mpesaSales,
+        airtelSales,
+        cardSales,
+        cashIn,
+        cashOut,
+        safeDrops,
+        expectedCash,
+        declaredCash,
+        variance: discrepancy,
+        status: "CLOSED",
+        closedBy: currentUser?.name || "Cashier",
+        managerSignOff: witnessInput.trim() || undefined,
+      };
+      const updatedHistory = [closeRecord, ...shiftHistory];
+      setShiftHistory(updatedHistory);
+      db.saveConfigurationLocal("shift_history", updatedHistory);
+      db.saveConfigurationLocal("active_shift_session", null);
+      setModalType(null);
+      handleGenerateZReport();
+      toast.info("Shift Closed", "Register reconciled and Z-Report compiled.");
+      playBeep(440, 120);
+      return;
+    }
+
     const amt = Number(amountInput);
     if (modalType !== "NO_SALE" && (!amt || amt <= 0)) return;
 
@@ -203,7 +571,9 @@ export const CashDrawerPage: React.FC = () => {
     };
 
     setLedger((prev) => [record, ...prev]);
-    db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: record as unknown as Record<string, unknown> });
+    if (db && typeof db.enqueueOutbox === "function") {
+      db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: record as unknown as Record<string, unknown> });
+    }
 
     setModalType(null);
     setAmountInput("");
@@ -224,15 +594,31 @@ export const CashDrawerPage: React.FC = () => {
           </p>
         </div>
         <div className="v2-flex v2-items-center v2-gap-2">
+          <button
+            className="v2-btn v2-btn-outline v2-btn-sm"
+            onClick={() => setIsCalculatorModalOpen(true)}
+            type="button"
+            title="Open Banknote & Coin Tally Counter"
+          >
+            <Calculator size={13} /> Cash Calculator
+          </button>
+          <button
+            className="v2-btn v2-btn-outline v2-btn-sm"
+            onClick={handleGenerateXReport}
+            type="button"
+            title="Generate current mid-shift reading without closing"
+          >
+            <Printer size={13} /> X-Reading
+          </button>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void handleOpenDrawerSignal("No Sale Manual Trigger")} type="button">
             <Key size={13} /> Open Drawer (No Sale)
           </button>
           {shiftStatus === "OPEN" ? (
-            <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setShiftStatus("CLOSED")} type="button">
-              <Lock size={13} /> Close Shift & Reconcile
+            <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} type="button">
+              <Lock size={13} /> Close Shift &amp; Z-Report
             </button>
           ) : (
-            <button className="v2-btn v2-btn-success v2-btn-sm" onClick={() => setShiftStatus("OPEN")} type="button">
+            <button className="v2-btn v2-btn-success v2-btn-sm" onClick={() => setModalType("OPEN_SHIFT")} type="button">
               <Unlock size={13} /> Open Register Shift
             </button>
           )}
@@ -253,7 +639,7 @@ export const CashDrawerPage: React.FC = () => {
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Expected Drawer Cash</div>
-          <div className="kpi-card-value" style={{ color: "var(--text-color)" }}>{money(expectedCash)}</div>
+          <div className="kpi-card-value" style={{ color: "var(--text)" }}>{money(expectedCash)}</div>
           <div className="kpi-card-desc">Float + Sales − Out − Drops</div>
         </div>
         <div className="kpi-card">
@@ -267,13 +653,14 @@ export const CashDrawerPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 9-Tab Navigation */}
+      {/* 10-Tab Navigation */}
       <div className="v2-flex v2-gap-1" style={{ borderBottom: "1px solid var(--surface-border)", paddingBottom: ".4rem", overflowX: "auto" }}>
         {[
           { id: "active", label: "Active Shift Controls", icon: Wallet },
           { id: "denominations", label: "Denomination Counter", icon: Calculator },
           { id: "blind", label: "Blind Cash Count", icon: EyeOff },
           { id: "reconciliation", label: "Shift Reconciliation", icon: CheckCircle },
+          { id: "reports", label: "X & Z Financial Reports", icon: FileText },
           { id: "safe", label: "Safe & Bank Drops", icon: Building },
           { id: "nosale", label: "No-Sale Openings", icon: Key },
           { id: "ledger", label: "Cash Movement Ledger", icon: ArrowUpRight },
@@ -296,22 +683,50 @@ export const CashDrawerPage: React.FC = () => {
       {/* ─── TAB 1: ACTIVE SHIFT CONTROLS ──────────────────────────────────────── */}
       {activeTab === "active" && (
         <div className="v2-space-y-4">
+          {shiftStatus !== "OPEN" && (
+            <div className="v2-card v2-p-6 v2-text-center" style={{ border: "1px dashed var(--accent)", background: "rgba(56,189,248,0.03)" }}>
+              <div className="v2-flex v2-flex-col v2-items-center v2-gap-2">
+                <Lock size={32} style={{ color: "var(--accent)" }} />
+                <h3 className="v2-font-bold v2-text-base">Register Shift is Currently Closed</h3>
+                <p className="v2-text-xs v2-text-muted" style={{ maxWidth: 440 }}>
+                  No cash transactions or drawer movements are active on this terminal. Enter your opening cash float to begin cashier operations.
+                </p>
+                <div className="v2-flex v2-gap-2 v2-mt-2">
+                  <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setModalType("OPEN_SHIFT")} type="button">
+                    <Unlock size={13} /> Open Shift Now
+                  </button>
+                  <button
+                    className="v2-btn v2-btn-outline v2-btn-sm"
+                    onClick={async () => {
+                      const res = await loadSampleData(db, currentTenantName || undefined);
+                      toast.success("Sample Shift Loaded", `Loaded ${res.sales} sales and active register shift.`);
+                      playSuccessChime();
+                    }}
+                    type="button"
+                  >
+                    <Sparkles size={13} /> Load Sample Shift
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="v2-grid v2-grid-3 v2-gap-4">
             <div className="v2-card v2-p-4">
               <div className="v2-flex v2-items-center v2-justify-between v2-mb-2">
                 <span className="v2-text-xs v2-font-bold v2-text-muted">Register Shift Status</span>
                 <span className={`badge ${shiftStatus === "OPEN" ? "v2-badge-success" : "v2-badge-danger"}`}>{shiftStatus}</span>
               </div>
-              <div className="v2-text-lg v2-font-black v2-mb-1">{shiftId}</div>
+              <div className="v2-text-lg v2-font-black v2-mb-1">{shiftId || "No Active Shift"}</div>
               <div className="v2-text-xs v2-text-muted">Cashier: {currentUser?.name || "Active Cashier"} · {currentBranchName}</div>
             </div>
 
             <div className="v2-card v2-p-4">
               <div className="v2-text-xs v2-font-bold v2-text-muted v2-mb-2">Quick Cash Actions</div>
               <div className="v2-grid v2-grid-3 v2-gap-2">
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_IN")} type="button">+ Cash In</button>
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_OUT")} type="button">- Cash Out</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setModalType("SAFE_DROP")} type="button">Safe Drop</button>
+                <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("CASH_IN")} type="button">+ Cash In</button>
+                <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("CASH_OUT")} type="button">- Cash Out</button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("SAFE_DROP")} type="button">Safe Drop</button>
               </div>
             </div>
 
@@ -336,22 +751,30 @@ export const CashDrawerPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {ledger.slice(0, 6).map((m) => (
-                  <tr key={m.id}>
-                    <td className="v2-text-xs v2-text-muted">{m.time}</td>
-                    <td>
-                      <span className={`badge ${m.amount >= 0 ? "v2-badge-success" : "v2-badge-warning"}`}>
-                        {m.type}
-                      </span>
+                {ledger.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="v2-text-center v2-text-muted v2-py-4">
+                      No cash movements recorded yet for this register shift.
                     </td>
-                    <td className={`v2-mono v2-font-bold ${m.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
-                      {m.amount > 0 ? `+${money(m.amount)}` : money(m.amount)}
-                    </td>
-                    <td className="v2-mono">{money(m.balance)}</td>
-                    <td className="v2-text-xs">{m.reason}</td>
-                    <td className="v2-text-xs v2-text-muted">{m.user}</td>
                   </tr>
-                ))}
+                ) : (
+                  ledger.slice(0, 6).map((m) => (
+                    <tr key={m.id}>
+                      <td className="v2-text-xs v2-text-muted">{m.time}</td>
+                      <td>
+                        <span className={`badge ${m.amount >= 0 ? "v2-badge-success" : "v2-badge-warning"}`}>
+                          {m.type}
+                        </span>
+                      </td>
+                      <td className={`v2-mono v2-font-bold ${m.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
+                        {m.amount > 0 ? `+${money(m.amount)}` : money(m.amount)}
+                      </td>
+                      <td className="v2-mono">{money(m.balance)}</td>
+                      <td className="v2-text-xs">{m.reason}</td>
+                      <td className="v2-text-xs v2-text-muted">{m.user}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -361,66 +784,104 @@ export const CashDrawerPage: React.FC = () => {
       {/* ─── TAB 2: DENOMINATION COUNTER ────────────────────────────────────────── */}
       {activeTab === "denominations" && (
         <div className="v2-card">
-          <div className="v2-card-header">
+          <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
             <div>
               <div className="v2-card-title">TZS Physical Cash Denomination Calculator</div>
-              <div className="v2-text-xs v2-text-muted">Enter physical count per Tanzanian Shilling banknote and coin denomination</div>
+              <div className="v2-text-xs v2-text-muted">Enter or increment physical count per Tanzanian Shilling banknote and coin</div>
             </div>
-            <div className="v2-mono v2-text-lg v2-font-black" style={{ color: "var(--accent)" }}>
-              Total Counted: {money(denominationTotal)}
+            <div className="v2-flex v2-items-center v2-gap-3">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={handleClearDenominations} type="button">
+                <RotateCcw size={13} /> Reset Count
+              </button>
+              <div className="v2-mono v2-text-lg v2-font-black" style={{ color: "var(--accent)" }}>
+                Total Counted: {money(denominationTotal)}
+              </div>
             </div>
           </div>
 
           <div className="v2-grid v2-grid-2 v2-gap-4 v2-p-4">
+            {/* Banknotes Column */}
             <div className="v2-space-y-3">
-              <h4 className="v2-font-bold v2-text-xs v2-text-muted">BANKNOTES</h4>
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <h4 className="v2-font-bold v2-text-xs v2-text-muted">BANKNOTES</h4>
+                <span className="v2-mono v2-text-xs v2-font-bold" style={{ color: "var(--accent)" }}>Subtotal: {money(notesSubtotal)}</span>
+              </div>
               {[
-                { label: "10,000 TZS Note", key: "note10000", value: 10000 },
-                { label: "5,000 TZS Note", key: "note5000", value: 5000 },
-                { label: "2,000 TZS Note", key: "note2000", value: 2000 },
-                { label: "1,000 TZS Note", key: "note1000", value: 1000 },
+                { label: "10,000 TZS Note", key: "note10000" as const, value: 10000 },
+                { label: "5,000 TZS Note", key: "note5000" as const, value: 5000 },
+                { label: "2,000 TZS Note", key: "note2000" as const, value: 2000 },
+                { label: "1,000 TZS Note", key: "note1000" as const, value: 1000 },
               ].map((d) => (
-                <div key={d.key} className="v2-flex v2-items-center v2-justify-between v2-gap-4">
-                  <span className="v2-text-xs v2-font-bold" style={{ width: 140 }}>{d.label}</span>
-                  <input
-                    className="v2-input v2-input-sm"
-                    type="number"
-                    min="0"
-                    style={{ width: 100 }}
-                    value={denominations[d.key as keyof DenominationState]}
-                    onChange={(e) => setDenominations({ ...denominations, [d.key]: Number(e.target.value) })}
-                  />
-                  <span className="v2-mono v2-text-xs v2-font-bold" style={{ width: 120, textAlign: "right" }}>
-                    {money(denominations[d.key as keyof DenominationState] * d.value)}
+                <div key={d.key} className="v2-card v2-p-2 v2-flex v2-items-center v2-justify-between v2-gap-2" style={{ background: "var(--surface-2)" }}>
+                  <span className="v2-text-xs v2-font-bold" style={{ width: 120 }}>{d.label}</span>
+                  <div className="v2-flex v2-items-center v2-gap-1">
+                    <button type="button" className="v2-btn v2-btn-outline v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, -1)}>-</button>
+                    <input
+                      className="v2-input v2-input-sm v2-mono"
+                      type="number"
+                      min="0"
+                      style={{ width: 65, textAlign: "center" }}
+                      value={denominations[d.key]}
+                      onChange={(e) => setDenominations({ ...denominations, [d.key]: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                    <button type="button" className="v2-btn v2-btn-outline v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 1)}>+1</button>
+                    <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 5)}>+5</button>
+                    <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 10)}>+10</button>
+                  </div>
+                  <span className="v2-mono v2-text-xs v2-font-bold" style={{ width: 100, textAlign: "right" }}>
+                    {money(denominations[d.key] * d.value)}
                   </span>
                 </div>
               ))}
             </div>
 
+            {/* Coins Column */}
             <div className="v2-space-y-3">
-              <h4 className="v2-font-bold v2-text-xs v2-text-muted">COINS</h4>
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <h4 className="v2-font-bold v2-text-xs v2-text-muted">COINS</h4>
+                <span className="v2-mono v2-text-xs v2-font-bold" style={{ color: "var(--accent)" }}>Subtotal: {money(coinsSubtotal)}</span>
+              </div>
               {[
-                { label: "500 TZS Coin", key: "coin500", value: 500 },
-                { label: "200 TZS Coin", key: "coin200", value: 200 },
-                { label: "100 TZS Coin", key: "coin100", value: 100 },
-                { label: "50 TZS Coin", key: "coin50", value: 50 },
+                { label: "500 TZS Coin", key: "coin500" as const, value: 500 },
+                { label: "200 TZS Coin", key: "coin200" as const, value: 200 },
+                { label: "100 TZS Coin", key: "coin100" as const, value: 100 },
+                { label: "50 TZS Coin", key: "coin50" as const, value: 50 },
               ].map((d) => (
-                <div key={d.key} className="v2-flex v2-items-center v2-justify-between v2-gap-4">
-                  <span className="v2-text-xs v2-font-bold" style={{ width: 140 }}>{d.label}</span>
-                  <input
-                    className="v2-input v2-input-sm"
-                    type="number"
-                    min="0"
-                    style={{ width: 100 }}
-                    value={denominations[d.key as keyof DenominationState]}
-                    onChange={(e) => setDenominations({ ...denominations, [d.key]: Number(e.target.value) })}
-                  />
-                  <span className="v2-mono v2-text-xs v2-font-bold" style={{ width: 120, textAlign: "right" }}>
-                    {money(denominations[d.key as keyof DenominationState] * d.value)}
+                <div key={d.key} className="v2-card v2-p-2 v2-flex v2-items-center v2-justify-between v2-gap-2" style={{ background: "var(--surface-2)" }}>
+                  <span className="v2-text-xs v2-font-bold" style={{ width: 120 }}>{d.label}</span>
+                  <div className="v2-flex v2-items-center v2-gap-1">
+                    <button type="button" className="v2-btn v2-btn-outline v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, -1)}>-</button>
+                    <input
+                      className="v2-input v2-input-sm v2-mono"
+                      type="number"
+                      min="0"
+                      style={{ width: 65, textAlign: "center" }}
+                      value={denominations[d.key]}
+                      onChange={(e) => setDenominations({ ...denominations, [d.key]: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                    <button type="button" className="v2-btn v2-btn-outline v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 1)}>+1</button>
+                    <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 5)}>+5</button>
+                    <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ padding: "0.2rem 0.4rem" }} onClick={() => handleAdjustDenomination(d.key, 10)}>+10</button>
+                  </div>
+                  <span className="v2-mono v2-text-xs v2-font-bold" style={{ width: 100, textAlign: "right" }}>
+                    {money(denominations[d.key] * d.value)}
                   </span>
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="v2-flex v2-justify-end v2-gap-2 v2-p-4" style={{ borderTop: "1px solid var(--surface-border)" }}>
+            <button
+              className="v2-btn v2-btn-primary"
+              type="button"
+              onClick={() => {
+                setBlindCountDone(false);
+                setActiveTab("reconciliation");
+              }}
+            >
+              <CheckCircle size={14} /> Apply Count to Shift Reconciliation ({money(denominationTotal)})
+            </button>
           </div>
         </div>
       )}
@@ -524,11 +985,110 @@ export const CashDrawerPage: React.FC = () => {
         </div>
       )}
 
-      {/* ─── TAB 5: SAFE & BANK DROPS ──────────────────────────────────────────── */}
+      {/* ─── TAB 5: FINANCIAL REPORTS (X & Z) ──────────────────────────────────── */}
+      {activeTab === "reports" && (
+        <div className="v2-space-y-4">
+          <div className="v2-grid v2-grid-2 v2-gap-4">
+            <div className="v2-card v2-p-4 v2-space-y-3">
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div>
+                  <h3 className="v2-text-sm v2-font-bold">X-Report (Mid-Shift Reading)</h3>
+                  <p className="v2-text-xs v2-text-muted">Instantaneous register audit snapshot without resetting or closing the active shift.</p>
+                </div>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={handleGenerateXReport} type="button">
+                  <Printer size={13} /> Run X-Reading
+                </button>
+              </div>
+            </div>
+
+            <div className="v2-card v2-p-4 v2-space-y-3">
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div>
+                  <h3 className="v2-text-sm v2-font-bold">Z-Report (Shift Closing Settlement)</h3>
+                  <p className="v2-text-xs v2-text-muted">Official end-of-day register closure, zeros registers, and settles daily books.</p>
+                </div>
+                <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} type="button">
+                  <Lock size={13} /> Close &amp; Run Z-Reading
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="v2-card">
+            <div className="v2-card-header"><div className="v2-card-title">Completed Shift Reports Journal</div></div>
+            <table className="v2-table">
+              <thead>
+                <tr>
+                  <th>Shift Ref</th>
+                  <th>Cashier</th>
+                  <th>Opened</th>
+                  <th>Closed</th>
+                  <th>Gross Sales</th>
+                  <th>Expected</th>
+                  <th>Declared</th>
+                  <th>Variance</th>
+                  <th>Z-Report</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shiftHistory.map((s) => (
+                  <tr key={s.id}>
+                    <td className="v2-mono v2-text-xs v2-font-bold">{s.shiftNumber}</td>
+                    <td className="v2-text-xs">{s.cashier}</td>
+                    <td className="v2-text-xs v2-text-muted">{s.openedAt}</td>
+                    <td className="v2-text-xs v2-text-muted">{s.closedAt || "Active"}</td>
+                    <td className="v2-mono v2-font-bold">{money(s.cashSales + s.mpesaSales + s.airtelSales + s.cardSales)}</td>
+                    <td className="v2-mono">{money(s.expectedCash)}</td>
+                    <td className="v2-mono">{money(s.declaredCash || 0)}</td>
+                    <td>
+                      <span className={`badge ${(s.variance || 0) === 0 ? "v2-badge-success" : "v2-badge-danger"}`}>
+                        {money(s.variance || 0)}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="v2-btn v2-btn-outline v2-btn-sm"
+                        style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem" }}
+                        onClick={() => {
+                          setActiveReportSlip({
+                            type: "Z_REPORT",
+                            title: `Z-REPORT SETTLEMENT (${s.shiftNumber})`,
+                            timestamp: s.closedAt || s.openedAt,
+                            shiftNumber: s.shiftNumber,
+                            cashier: s.cashier,
+                            openingFloat: s.openingFloat,
+                            cashSales: s.cashSales,
+                            mpesaSales: s.mpesaSales,
+                            airtelSales: s.airtelSales,
+                            cardSales: s.cardSales,
+                            cashIn: s.cashIn,
+                            cashOut: s.cashOut,
+                            safeDrops: s.safeDrops,
+                            expectedCash: s.expectedCash,
+                            declaredCash: s.declaredCash || s.expectedCash,
+                            variance: s.variance || 0,
+                            denominations,
+                            managerSignOff: s.managerSignOff || "Manager Verified",
+                          });
+                        }}
+                        type="button"
+                      >
+                        <Printer size={12} /> Reprint Z-Slip
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 6: SAFE & BANK DROPS ──────────────────────────────────────────── */}
       {activeTab === "safe" && (
         <div className="v2-card">
           <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
-            <div className="v2-card-title">Branch Safe & Bank Transfer Drops</div>
+            <div className="v2-card-title">Branch Safe &amp; Bank Transfer Drops</div>
             <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setModalType("SAFE_DROP")} type="button">
               <Plus size={13} /> Record Safe Drop
             </button>
@@ -560,7 +1120,136 @@ export const CashDrawerPage: React.FC = () => {
         </div>
       )}
 
-      {/* ─── TAB 9: HAL DEVICE STATUS ─────────────────────────────────────────── */}
+      {/* ─── TAB 7: NO-SALE OPENINGS ───────────────────────────────────────────── */}
+      {activeTab === "nosale" && (
+        <div className="v2-card">
+          <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+            <div>
+              <div className="v2-card-title">No-Sale Drawer Kick Audit Trail</div>
+              <div className="v2-text-xs v2-text-muted">All manual drawer openings without a sale transaction are audited for loss prevention</div>
+            </div>
+            <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void handleOpenDrawerSignal("Manual Audit Kick")} type="button">
+              <Key size={13} /> Trigger No-Sale Opening
+            </button>
+          </div>
+          <table className="v2-table">
+            <thead>
+              <tr>
+                <th>Event Ref</th>
+                <th>Timestamp</th>
+                <th>Cashier / Operator</th>
+                <th>Terminal</th>
+                <th>Audit Reason</th>
+                <th>Security Tag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.filter((l) => l.type === "NO_SALE").map((l) => (
+                <tr key={l.id}>
+                  <td className="v2-mono v2-text-xs">{l.id}</td>
+                  <td className="v2-text-xs v2-text-muted">{l.time}</td>
+                  <td className="v2-font-bold">{l.user}</td>
+                  <td className="v2-mono v2-text-xs">{l.terminal}</td>
+                  <td className="v2-text-xs">{l.reason}</td>
+                  <td><span className="badge v2-badge-warning">AUDITED</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ─── TAB 8: CASH MOVEMENT LEDGER ───────────────────────────────────────── */}
+      {activeTab === "ledger" && (
+        <div className="v2-card">
+          <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+            <div className="v2-card-title">Immutable Cash Movement Ledger ({ledger.length} entries)</div>
+            <div className="v2-flex v2-gap-2">
+              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_IN")} type="button">+ In</button>
+              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_OUT")} type="button">- Out</button>
+            </div>
+          </div>
+          <table className="v2-table">
+            <thead>
+              <tr>
+                <th>Ref ID</th>
+                <th>Timestamp</th>
+                <th>Movement Type</th>
+                <th>Amount</th>
+                <th>Balance After</th>
+                <th>Reason / Purpose</th>
+                <th>Cashier</th>
+                <th>Approval</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((l) => (
+                <tr key={l.id}>
+                  <td className="v2-mono v2-text-xs">{l.id}</td>
+                  <td className="v2-text-xs v2-text-muted">{l.time}</td>
+                  <td>
+                    <span className={`badge ${l.amount >= 0 ? "v2-badge-success" : "v2-badge-warning"}`}>
+                      {l.type}
+                    </span>
+                  </td>
+                  <td className={`v2-mono v2-font-bold ${l.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
+                    {l.amount > 0 ? `+${money(l.amount)}` : money(l.amount)}
+                  </td>
+                  <td className="v2-mono">{money(l.balance)}</td>
+                  <td className="v2-text-xs">{l.reason}</td>
+                  <td className="v2-text-xs v2-text-muted">{l.user}</td>
+                  <td>
+                    <span className="badge v2-badge-success">{l.approvalStatus || "APPROVED"}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ─── TAB 9: SHIFT RECORDS HISTORY ──────────────────────────────────────── */}
+      {activeTab === "history" && (
+        <div className="v2-card">
+          <div className="v2-card-header"><div className="v2-card-title">Historical Register Shifts</div></div>
+          <table className="v2-table">
+            <thead>
+              <tr>
+                <th>Shift ID</th>
+                <th>Cashier</th>
+                <th>Opened At</th>
+                <th>Closed At</th>
+                <th>Opening Float</th>
+                <th>Expected Cash</th>
+                <th>Declared Cash</th>
+                <th>Variance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shiftHistory.map((s) => (
+                <tr key={s.id}>
+                  <td className="v2-mono v2-text-xs v2-font-bold">{s.shiftNumber}</td>
+                  <td className="v2-text-xs">{s.cashier}</td>
+                  <td className="v2-text-xs v2-text-muted">{s.openedAt}</td>
+                  <td className="v2-text-xs v2-text-muted">{s.closedAt}</td>
+                  <td className="v2-mono">{money(s.openingFloat)}</td>
+                  <td className="v2-mono">{money(s.expectedCash)}</td>
+                  <td className="v2-mono">{money(s.declaredCash || 0)}</td>
+                  <td>
+                    <span className={`badge ${(s.variance || 0) === 0 ? "v2-badge-success" : "v2-badge-danger"}`}>
+                      {money(s.variance || 0)}
+                    </span>
+                  </td>
+                  <td><span className="badge v2-badge-info">{s.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ─── TAB 10: HAL DEVICE STATUS ─────────────────────────────────────────── */}
       {activeTab === "hardware" && (
         <div className="v2-card v2-p-4 v2-space-y-4">
           <div className="v2-card-header"><div className="v2-card-title">Hardware Abstraction Layer (HAL) Device Controller</div></div>
@@ -589,39 +1278,233 @@ export const CashDrawerPage: React.FC = () => {
         </div>
       )}
 
-      {/* ─── MODAL DIALOG: CASH MOVEMENT / SAFE DROP ──────────────────────────── */}
+      {/* ─── MODAL DIALOG: CASH MOVEMENT / SAFE DROP / OPEN / CLOSE ───────────── */}
       {modalType && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 460, padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-              <h2 className="v2-text-lg v2-font-black">Record {modalType.replace("_", " ")}</h2>
+              <h2 className="v2-text-lg v2-font-black">
+                {modalType === "OPEN_SHIFT"
+                  ? "Open Register Shift"
+                  : modalType === "CLOSE_SHIFT"
+                  ? "Close Shift & Z-Report Settlement"
+                  : `Record ${modalType.replace("_", " ")}`}
+              </h2>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setModalType(null)} type="button"><X size={15} /></button>
             </div>
             <form onSubmit={handlePostCashMovement} className="v2-space-y-3">
-              {modalType !== "NO_SALE" && (
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">AMOUNT (TSH) *</label>
-                  <input className="v2-input" type="number" min="1" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} required autoFocus />
-                </div>
-              )}
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">REASON & AUDIT NOTES *</label>
-                <input className="v2-input" placeholder="e.g. Mid-day safe transfer" value={reasonInput} onChange={(e) => setReasonInput(e.target.value)} required />
-              </div>
-              {modalType === "SAFE_DROP" && (
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">MANAGER / WITNESS NAME</label>
-                  <input className="v2-input" placeholder="e.g. Baraka Juma" value={witnessInput} onChange={(e) => setWitnessInput(e.target.value)} />
-                </div>
+              {modalType === "OPEN_SHIFT" ? (
+                <>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">OPENING CASH FLOAT (TSH) *</label>
+                    <input
+                      className="v2-input"
+                      type="number"
+                      min="0"
+                      value={openFloatInput}
+                      onChange={(e) => setOpenFloatInput(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">REGISTER TERMINAL</label>
+                    <input className="v2-input" value={terminalId} disabled />
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">ASSIGNED CASHIER</label>
+                    <input className="v2-input" value={currentUser?.name || "Cashier"} disabled />
+                  </div>
+                </>
+              ) : modalType === "CLOSE_SHIFT" ? (
+                <>
+                  <div className="v2-card v2-p-3 v2-space-y-1" style={{ background: "var(--surface-2)" }}>
+                    <div className="v2-flex v2-justify-between v2-text-xs">
+                      <span>Declared Cash:</span>
+                      <span className="v2-mono v2-font-bold">{money(declaredCash)}</span>
+                    </div>
+                    <div className="v2-flex v2-justify-between v2-text-xs">
+                      <span>Expected Cash:</span>
+                      <span className="v2-mono v2-font-bold">{money(expectedCash)}</span>
+                    </div>
+                    <div className="v2-flex v2-justify-between v2-text-xs v2-font-bold v2-pt-1" style={{ borderTop: "1px solid var(--surface-border)" }}>
+                      <span>Discrepancy:</span>
+                      <span className="v2-mono" style={{ color: discrepancy === 0 ? "var(--success)" : "var(--danger)" }}>
+                        {money(discrepancy)}
+                      </span>
+                    </div>
+                  </div>
+                  {Math.abs(discrepancy) > 500 && (
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">MANAGER OVERRIDE / WITNESS NAME *</label>
+                      <input
+                        className="v2-input"
+                        placeholder="e.g. Amani Mwangi (Manager)"
+                        value={witnessInput}
+                        onChange={(e) => setWitnessInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">SHIFT CLOSING NOTES</label>
+                    <input
+                      className="v2-input"
+                      placeholder="e.g. End of evening shift"
+                      value={reasonInput}
+                      onChange={(e) => setReasonInput(e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {modalType !== "NO_SALE" && (
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">AMOUNT (TSH) *</label>
+                      <input className="v2-input" type="number" min="1" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} required autoFocus />
+                    </div>
+                  )}
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">REASON &amp; AUDIT NOTES *</label>
+                    <input className="v2-input" placeholder="e.g. Mid-day safe transfer" value={reasonInput} onChange={(e) => setReasonInput(e.target.value)} required />
+                  </div>
+                  {modalType === "SAFE_DROP" && (
+                    <div>
+                      <label className="v2-text-xs v2-font-bold v2-text-muted">MANAGER / WITNESS NAME</label>
+                      <input className="v2-input" placeholder="e.g. Baraka Juma" value={witnessInput} onChange={(e) => setWitnessInput(e.target.value)} />
+                    </div>
+                  )}
+                </>
               )}
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-3">
                 <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setModalType(null)} type="button">Cancel</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Submit Entry</button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
+                  {modalType === "OPEN_SHIFT" ? "Confirm & Open" : modalType === "CLOSE_SHIFT" ? "Finalize & Settle Shift" : "Submit Entry"}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* ─── MODAL DIALOG: 80MM THERMAL REPORT SLIP (X/Z-REPORT) ──────────────── */}
+      {activeReportSlip && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000, padding: "1rem" }}>
+          <div
+            className="v2-card"
+            style={{
+              width: "100%",
+              maxWidth: 380,
+              background: "#ffffff",
+              color: "#0f172a",
+              padding: "1.5rem 1.25rem",
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.76rem",
+              lineHeight: 1.4,
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+              borderRadius: "4px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            {/* Thermal Slip Content */}
+            <div className="v2-text-center v2-space-y-1" style={{ borderBottom: "1px dashed #94a3b8", paddingBottom: "0.75rem", marginBottom: "0.75rem" }}>
+              <div style={{ fontSize: "1.1rem", fontWeight: 900, letterSpacing: "-0.02em" }}>KWAKOPOS ENTERPRISE</div>
+              <div style={{ fontSize: "0.85rem", fontWeight: 800 }}>{activeReportSlip.title}</div>
+              <div style={{ color: "#64748b", fontSize: "0.7rem" }}>{currentTenantName} · {currentBranchName}</div>
+              <div style={{ color: "#64748b", fontSize: "0.7rem" }}>Terminal: {terminalId} · Shift: {activeReportSlip.shiftNumber}</div>
+              <div style={{ color: "#64748b", fontSize: "0.7rem" }}>Date: {activeReportSlip.timestamp}</div>
+              <div style={{ color: "#64748b", fontSize: "0.7rem" }}>Cashier: {activeReportSlip.cashier}</div>
+            </div>
+
+            {/* Sales Summary */}
+            <div style={{ borderBottom: "1px dashed #94a3b8", paddingBottom: "0.6rem", marginBottom: "0.6rem" }}>
+              <div style={{ fontWeight: 800, marginBottom: "0.3rem" }}>GROSS SALES BREAKDOWN:</div>
+              <div className="v2-flex v2-justify-between"><span>Gross Cash Sales:</span><span style={{ fontWeight: 700 }}>{money(activeReportSlip.cashSales)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>M-Pesa Mobile:</span><span>{money(activeReportSlip.mpesaSales)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>Airtel Money:</span><span>{money(activeReportSlip.airtelSales)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>Card (POS):</span><span>{money(activeReportSlip.cardSales)}</span></div>
+              <div className="v2-flex v2-justify-between" style={{ fontWeight: 800, paddingTop: "0.3rem", borderTop: "1px dotted #cbd5e1" }}>
+                <span>TOTAL REVENUE:</span>
+                <span>{money(activeReportSlip.cashSales + activeReportSlip.mpesaSales + activeReportSlip.airtelSales + activeReportSlip.cardSales)}</span>
+              </div>
+            </div>
+
+            {/* Drawer Cash Movement */}
+            <div style={{ borderBottom: "1px dashed #94a3b8", paddingBottom: "0.6rem", marginBottom: "0.6rem" }}>
+              <div style={{ fontWeight: 800, marginBottom: "0.3rem" }}>DRAWER CASH MOVEMENTS:</div>
+              <div className="v2-flex v2-justify-between"><span>(+) Opening Float:</span><span>{money(activeReportSlip.openingFloat)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(+) Cash Sales:</span><span>{money(activeReportSlip.cashSales)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(+) Manual Cash In:</span><span>{money(activeReportSlip.cashIn)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(−) Manual Cash Out:</span><span>−{money(activeReportSlip.cashOut)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(−) Safe Transfers:</span><span>−{money(activeReportSlip.safeDrops)}</span></div>
+              <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, paddingTop: "0.3rem", borderTop: "1px dotted #cbd5e1" }}>
+                <span>EXPECTED IN DRAWER:</span>
+                <span>{money(activeReportSlip.expectedCash)}</span>
+              </div>
+            </div>
+
+            {/* Physical Count & Variance */}
+            <div style={{ borderBottom: "1px dashed #94a3b8", paddingBottom: "0.6rem", marginBottom: "0.6rem" }}>
+              <div className="v2-flex v2-justify-between" style={{ fontWeight: 800 }}>
+                <span>PHYSICAL DECLARED:</span>
+                <span>{money(activeReportSlip.declaredCash)}</span>
+              </div>
+              <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, fontSize: "0.85rem", color: activeReportSlip.variance === 0 ? "#16a34a" : "#dc2626" }}>
+                <span>VARIANCE:</span>
+                <span>{activeReportSlip.variance > 0 ? `+${money(activeReportSlip.variance)} (OVER)` : activeReportSlip.variance < 0 ? `${money(activeReportSlip.variance)} (SHORT)` : "TSH 0 (BALANCED)"}</span>
+              </div>
+            </div>
+
+            {/* Signature Lines */}
+            <div style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem", fontSize: "0.68rem", color: "#64748b" }}>
+              <div style={{ marginBottom: "1.2rem" }}>Cashier Signature: ______________________</div>
+              <div>Manager Signature: ______________________</div>
+            </div>
+
+            {/* Modal Controls (Not printed on physical paper) */}
+            <div className="v2-flex v2-gap-2 v2-pt-3" style={{ borderTop: "1px solid #e2e8f0" }}>
+              <button
+                type="button"
+                className="v2-btn v2-btn-outline v2-btn-sm"
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={handleCopySlipText}
+              >
+                {copiedSlip ? <Check size={13} /> : <Copy size={13} />}
+                <span>{copiedSlip ? "Copied!" : "Copy Text"}</span>
+              </button>
+              <button
+                type="button"
+                className="v2-btn v2-btn-primary v2-btn-sm"
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={handlePrintSlip}
+              >
+                <Printer size={13} /> Print Slip
+              </button>
+              <button
+                type="button"
+                className="v2-btn v2-btn-ghost v2-btn-sm"
+                onClick={() => setActiveReportSlip(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Interactive Banknote & Coin Tally Calculator Modal --- */}
+      <CashCalculatorModal
+        isOpen={isCalculatorModalOpen}
+        onClose={() => setIsCalculatorModalOpen(false)}
+        expectedTotal={expectedCash}
+        onApply={(counted) => {
+          setBlindDeclaredCash(counted);
+          setBlindCountDone(true);
+          playSuccessChime();
+          toast.success("Count Applied", `Tsh ${Math.round(counted).toLocaleString()} set as declared cash count.`);
+        }}
+      />
     </div>
   );
 };

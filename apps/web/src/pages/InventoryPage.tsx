@@ -16,28 +16,85 @@
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Package, Layers, BarChart3, Tag, Clock, Plus, Search, Edit2, Trash2,
   AlertTriangle, ArrowLeftRight, ClipboardList, FileText, RefreshCw,
   TrendingUp, TrendingDown, Archive, Zap, Barcode, Hash, Target,
   Send, Check, Eye, ShoppingCart, DollarSign, Upload, Truck, ShieldAlert,
-  CheckCircle, Download, X, QrCode, Printer
+  CheckCircle, Download, X, QrCode, Printer, PackageOpen, Sparkles, Palette, Globe
 } from "lucide-react";
 import { useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useToast } from "../context/ToastContext.js";
+import { useAudioFeedback } from "../utils/useAudioFeedback.js";
+import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
+import { Sheet } from "../components/UI/Sheet.js";
+import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
+
+export interface CategoryRecord {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  isDefault?: boolean;
+}
+
+export interface BrandRecord {
+  id: string;
+  name: string;
+  origin?: string;
+  notes?: string;
+  isDefault?: boolean;
+}
+
+export const CATEGORY_COLORS = [
+  { name: "Emerald", hex: "#10b981", label: "Emerald Green" },
+  { name: "Sky", hex: "#0ea5e9", label: "Sky Blue" },
+  { name: "Purple", hex: "#8b5cf6", label: "Royal Purple" },
+  { name: "Amber", hex: "#f59e0b", label: "Warm Amber" },
+  { name: "Rose", hex: "#f43f5e", label: "Rose Crimson" },
+  { name: "Teal", hex: "#14b8a6", label: "Ocean Teal" },
+  { name: "Orange", hex: "#f97316", label: "Vibrant Orange" },
+  { name: "Indigo", hex: "#6366f1", label: "Deep Indigo" },
+];
+
+export const DEFAULT_CATEGORY_RECORDS: CategoryRecord[] = [
+  { id: "cat-1", name: "Grains & Flour", description: "Flour, cereals, maize, rice, and bulk staples", color: "#10b981", isDefault: true },
+  { id: "cat-2", name: "Beverages", description: "Juices, mineral water, sodas, and energy drinks", color: "#0ea5e9", isDefault: true },
+  { id: "cat-3", name: "Dairy", description: "Fresh milk, yogurt, butter, and cheese", color: "#6366f1", isDefault: true },
+  { id: "cat-4", name: "Edible Oils", description: "Cooking oil, sunflower, and vegetable fats", color: "#f59e0b", isDefault: true },
+  { id: "cat-5", name: "Pharmacy", description: "Over-the-counter wellness and health supplies", color: "#ec4899", isDefault: true },
+  { id: "cat-6", name: "Household & Cleaning", description: "Detergents, soaps, and home disinfectants", color: "#14b8a6", isDefault: true },
+  { id: "cat-7", name: "Bakery & Confectionery", description: "Bread, pastries, biscuits, and sweets", color: "#f97316", isDefault: true },
+  { id: "cat-8", name: "Personal Care", description: "Toiletries, hygiene, and skincare products", color: "#8b5cf6", isDefault: true },
+];
+
+export const DEFAULT_BRAND_RECORDS: BrandRecord[] = [
+  { id: "br-1", name: "Azam", origin: "Tanzania (SS Bakhresa)", notes: "Primary milling & consumer goods supplier", isDefault: true },
+  { id: "br-2", name: "Bakhresa", origin: "Tanzania", notes: "Grain milling and consumer staples", isDefault: true },
+  { id: "br-3", name: "Kilombero", origin: "Morogoro, Tanzania", notes: "Premium white cane sugar", isDefault: true },
+  { id: "br-4", name: "Mo Dewji", origin: "MeTL Group Tanzania", notes: "Edible oils, beverages, soaps", isDefault: true },
+  { id: "br-5", name: "Sayona", origin: "Tanzania", notes: "Carbonated drinks and fruit juices", isDefault: true },
+  { id: "br-6", name: "SERENGETI", origin: "Tanzania Breweries Ltd", notes: "Serengeti Premium Lager and malt", isDefault: true },
+  { id: "br-7", name: "TBL", origin: "Tanzania Breweries Ltd", notes: "National beverages and beer products", isDefault: true },
+  { id: "br-8", name: "General", origin: "Domestic / Unspecified", notes: "General unbranded or commodity stock", isDefault: true },
+];
 
 export interface ProductVariantData {
   id: string;
   name: string;
   sku: string;
+  barcode?: string;
   attributes: Record<string, string>;
   buyingPrice: number;
   sellingPrice: number;
   stock: number;
   reorderLevel: number;
+  batchNumber?: string;
+  expiryDate?: string;
 }
 
 export interface InventoryItem {
@@ -51,6 +108,8 @@ export interface InventoryItem {
   stock: number;
   reorderLevel: number;
   status: "Active" | "Low Stock" | "Out of Stock";
+  batchNumber?: string;
+  expiryDate?: string;
   hasVariants?: boolean;
   variants?: ProductVariantData[];
 }
@@ -59,45 +118,101 @@ export type InventoryTab =
   | "dashboard" | "products" | "categories" | "ledger"
   | "transfers" | "count" | "recipes" | "wastage" | "reports";
 
-export const InventoryPage: React.FC = () => {
-  const { currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
+export interface InventoryPageProps {
+  activeTab?: string;
+}
+
+export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propActiveTab }) => {
+  const { currentTenantId, currentTenantName } = useTenant();
+  const { currentBranchId, currentBranchName, availableBranches } = useBranch();
   const { activeModule } = useModule();
+  const { db, syncOutbox } = useSync();
+  const toast = useToast();
+  const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
   const [activeTab, setActiveTab] = useState<InventoryTab>("dashboard");
+  const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!propActiveTab) return;
+    const map: Record<string, InventoryTab> = {
+      "Inventory Overview": "dashboard",
+      "Products": "products",
+      "Categories & Brands": "categories",
+      "Stock Adjustment": "ledger",
+      "Stock Transfer": "transfers",
+      "Stock Alerts": "dashboard",
+      "Stock Sync Engine": "ledger",
+      "Product Bundles & Kits": "recipes",
+      "Stock Count": "count",
+      "Ledger Drilldown": "ledger",
+      "Inventory Reports": "reports",
+    };
+    if (map[propActiveTab]) {
+      setActiveTab(map[propActiveTab]);
+    }
+  }, [propActiveTab]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
 
-  // Sample Products State
-  const [items, setItems] = useState<InventoryItem[]>([
-    { id: "inv-001", name: "Azam Wheat Flour 2kg", sku: "SKU-AZM-FLR-01", category: "Grains & Flour", brand: "Azam", buyingPrice: 6200, sellingPrice: 7900, stock: 45, reorderLevel: 10, status: "Active" },
-    {
-      id: "inv-006",
-      name: "Amoxicillin 500mg Capsules",
-      sku: "SKU-AMX-500-06",
-      category: "Pharmacy",
-      brand: "Zenith Labs",
-      buyingPrice: 8000,
-      sellingPrice: 12000,
-      stock: 85,
-      reorderLevel: 15,
-      status: "Active",
-      hasVariants: true,
-      variants: [
-        { id: "var-01", name: "Box of 21 Capsules", sku: "AMX-500-BOX21", attributes: { Pack: "Box", Count: "21" }, buyingPrice: 8000, sellingPrice: 12000, stock: 50, reorderLevel: 10 },
-        { id: "var-02", name: "Strip of 10 Capsules", sku: "AMX-500-STP10", attributes: { Pack: "Strip", Count: "10" }, buyingPrice: 3800, sellingPrice: 6000, stock: 35, reorderLevel: 5 },
-      ]
-    },
-    { id: "inv-002", name: "Coca Cola 500ml Pet", sku: "SKU-COK-500-02", category: "Beverages", brand: "Coca Cola", buyingPrice: 1100, sellingPrice: 1500, stock: 120, reorderLevel: 20, status: "Active" },
-    { id: "inv-003", name: "Unga wa Ngano 10kg", sku: "SKU-UNG-10K-03", category: "Grains & Flour", brand: "Azam", buyingPrice: 24000, sellingPrice: 28000, stock: 8, reorderLevel: 10, status: "Low Stock" },
-    { id: "inv-004", name: "Fresh Cow Milk 1L", sku: "SKU-MLK-1L-04", category: "Dairy", brand: "ASAS", buyingPrice: 2200, sellingPrice: 3000, stock: 0, reorderLevel: 15, status: "Out of Stock" },
-    { id: "inv-005", name: "Cooking Oil 5L Refined", sku: "SKU-OIL-5L-05", category: "Edible Oils", brand: "Korie", buyingPrice: 36000, sellingPrice: 43000, stock: 14, reorderLevel: 5, status: "Active" },
-  ]);
+  // Dynamic Products & Ledger State
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [ledger, setLedger] = useState<{
+    id: string; date: string; sku: string; name: string; type: string; qty: number; qtyBefore: number; balance: number; unitCost: number; totalCost: number; ref: string; user: string; notes?: string; deviceId?: string;
+  }[]>([]);
 
   // Modal States
   const [addProductModal, setAddProductModal] = useState(false);
   const [csvImportModal, setCsvImportModal] = useState(false);
   const [barcodeModal, setBarcodeModal] = useState(false);
   const [selectedBarcodeItem, setSelectedBarcodeItem] = useState<InventoryItem | null>(null);
+
+  // Edit Product Modal State
+  const [editProductModal, setEditProductModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [editProd, setEditProd] = useState({
+    name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, status: "Active", batchNumber: "", expiryDate: ""
+  });
+
+  // Archive / Delete Confirmation State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
+
+  // Categories & Brands Master Management State
+  const [categoriesMeta, setCategoriesMeta] = useState<CategoryRecord[]>(DEFAULT_CATEGORY_RECORDS);
+  const [brandsMeta, setBrandsMeta] = useState<BrandRecord[]>(DEFAULT_BRAND_RECORDS);
+
+  // Search Filters for Tables
+  const [categorySearchQuery, setCategorySearchQuery] = useState("");
+  const [brandSearchQuery, setBrandSearchQuery] = useState("");
+
+  // Add / Edit Category State
+  const [addCategoryModal, setAddCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<CategoryRecord | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryDesc, setNewCategoryDesc] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState("#10b981");
+  const [categoryCascadeRename, setCategoryCascadeRename] = useState(true);
+
+  // Add / Edit Brand State
+  const [addBrandModal, setAddBrandModal] = useState(false);
+  const [editingBrand, setEditingBrand] = useState<BrandRecord | null>(null);
+  const [newBrandName, setNewBrandName] = useState("");
+  const [newBrandOrigin, setNewBrandOrigin] = useState("");
+  const [newBrandNotes, setNewBrandNotes] = useState("");
+  const [brandCascadeRename, setBrandCascadeRename] = useState(true);
+
+  // Delete Safeguard Modals
+  const [deleteCategorySafeguard, setDeleteCategorySafeguard] = useState<{
+    category: string;
+    assignedCount: number;
+    fallbackCategory: string;
+  } | null>(null);
+
+  const [deleteBrandSafeguard, setDeleteBrandSafeguard] = useState<{
+    brand: string;
+    assignedCount: number;
+    fallbackBrand: string;
+  } | null>(null);
 
   // Variant Builder Modal State
   const [variantModalProduct, setVariantModalProduct] = useState<InventoryItem | null>(null);
@@ -106,9 +221,50 @@ export const InventoryPage: React.FC = () => {
   const [newVarPrice, setNewVarPrice] = useState(0);
   const [newVarStock, setNewVarStock] = useState(10);
 
+  // In-Flow Variant Builder State (for Add Product Modal)
+  const [hasVariantsToggle, setHasVariantsToggle] = useState(false);
+  const [varOption1Name, setVarOption1Name] = useState("Size");
+  const [varOption1Values, setVarOption1Values] = useState("Small, Medium, Large");
+  const [varOption2Name, setVarOption2Name] = useState("");
+  const [varOption2Values, setVarOption2Values] = useState("");
+  const [inflowVariants, setInflowVariants] = useState<ProductVariantData[]>([]);
+
+  // Variant Studio Sub-Views & Form States (for Drawer Tab 4)
+  const [variantStudioPanel, setVariantStudioPanel] = useState<"none" | "add_single" | "generate_matrix" | "bulk_ops">("none");
+  const [singleVarName, setSingleVarName] = useState("");
+  const [singleVarSku, setSingleVarSku] = useState("");
+  const [singleVarBarcode, setSingleVarBarcode] = useState("");
+  const [singleVarBuying, setSingleVarBuying] = useState<number | "">("");
+  const [singleVarSelling, setSingleVarSelling] = useState<number | "">("");
+  const [singleVarStock, setSingleVarStock] = useState<number | "">(10);
+  const [singleVarReorder, setSingleVarReorder] = useState<number | "">(5);
+  const [studioMatrixOpt1, setStudioMatrixOpt1] = useState("Size");
+  const [studioMatrixVals1, setStudioMatrixVals1] = useState("Small, Medium, Large");
+  const [studioMatrixOpt2, setStudioMatrixOpt2] = useState("Color");
+  const [studioMatrixVals2, setStudioMatrixVals2] = useState("");
+  const [studioBulkPricePct, setStudioBulkPricePct] = useState(10);
+  const [studioBulkStockAdd, setStudioBulkStockAdd] = useState(20);
+  const [editingVariantRowId, setEditingVariantRowId] = useState<string | null>(null);
+  const [inlineVariantEdit, setInlineVariantEdit] = useState<{
+    name: string;
+    sku: string;
+    barcode: string;
+    buyingPrice: number;
+    sellingPrice: number;
+    stock: number;
+    reorderLevel: number;
+  }>({ name: "", sku: "", barcode: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 5 });
+
+  // Tab 2 Price Version Audit Form State
+  const [priceAuditOpen, setPriceAuditOpen] = useState(false);
+  const [priceAuditNewBuy, setPriceAuditNewBuy] = useState<number | "">("");
+  const [priceAuditNewSell, setPriceAuditNewSell] = useState<number | "">("");
+  const [priceAuditReason, setPriceAuditReason] = useState("Supplier Cost Adjustment");
+  const [priceAuditNotes, setPriceAuditNotes] = useState("");
+
   // New Product Form State
   const [newProd, setNewProd] = useState({
-    name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10
+    name: "", category: "Grains & Flour", brand: "General", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: ""
   });
 
   // Stock Movement Ledger Filter & Entry State
@@ -117,18 +273,230 @@ export const InventoryPage: React.FC = () => {
   const [stockAdjModal, setStockAdjModal] = useState(false);
   const [adjSku, setAdjSku] = useState("SKU-AZM-FLR-01");
   const [adjType, setAdjType] = useState<"ADJUSTMENT_GAIN" | "ADJUSTMENT_LOSS" | "OPENING_STOCK" | "WASTAGE_SPILL">("ADJUSTMENT_GAIN");
+  const [adjReasonCode, setAdjReasonCode] = useState("PHYSICAL_COUNT_VARIANCE");
   const [adjQty, setAdjQty] = useState(1);
   const [adjNotes, setAdjNotes] = useState("");
 
-  const [ledger, setLedger] = useState<{
-    id: string; date: string; sku: string; name: string; type: string; qty: number; qtyBefore: number; balance: number; unitCost: number; totalCost: number; ref: string; user: string; notes?: string; deviceId?: string;
-  }[]>([
-    { id: "led-101", date: "2026-09-01 10:15", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 2kg", type: "SALE_OUTBOUND", qty: -2, qtyBefore: 47, balance: 45, unitCost: 6200, totalCost: 12400, ref: "SALE-2026-9912", user: "Cashier 01", notes: "Standard POS Sale", deviceId: "POS-01" },
-    { id: "led-102", date: "2026-09-01 09:30", sku: "SKU-COK-500-02", name: "Coca Cola 500ml Pet", type: "GRN_INBOUND", qty: +50, qtyBefore: 70, balance: 120, unitCost: 1100, totalCost: 55000, ref: "PO-2026-004", user: "Inventory Officer", notes: "GRN Purchase Receive", deviceId: "HQ-ST-01" },
-    { id: "led-103", date: "2026-08-31 16:45", sku: "SKU-UNG-10K-03", name: "Unga wa Ngano 10kg", type: "TRANSFER_OUT", qty: -5, qtyBefore: 13, balance: 8, unitCost: 24000, totalCost: 120000, ref: "TR-2026-08", user: "Store Manager", notes: "Transfer to Kijitonyama", deviceId: "HQ-ST-01" },
-    { id: "led-104", date: "2026-08-31 14:10", sku: "SKU-AMX-500-06", name: "Amoxicillin 500mg Capsules", type: "OPENING_STOCK", qty: +85, qtyBefore: 0, balance: 85, unitCost: 8000, totalCost: 680000, ref: "INIT-2026-01", user: "System Bootstrap", notes: "Initial stock entry", deviceId: "SYS-INIT" },
-    { id: "led-105", date: "2026-08-31 11:20", sku: "SKU-MLK-1L-04", name: "Fresh Cow Milk 1L", type: "WASTAGE_SPILL", qty: -2, qtyBefore: 2, balance: 0, unitCost: 2200, totalCost: 4400, ref: "WST-2026-01", user: "Shift Supervisor", notes: "Spillage wastage", deviceId: "POS-02" },
-  ]);
+  // Branch Stock Transfer State
+  const [transfers, setTransfers] = useState<any[]>([]);
+  const [counts, setCounts] = useState<any[]>([]);
+  const [recipes, setRecipes] = useState<any[]>([]);
+  const [wastages, setWastages] = useState<any[]>([]);
+
+  // ─── Hydrate Authoritative Inventory Catalog from Local DB ──────────────────
+  const loadInventory = useCallback(async () => {
+    try {
+      await db.ready;
+      const variantsByProduct = new Map<string, ProductVariantData[]>();
+      for (const variant of db.productVariants.values()) {
+        const list = variantsByProduct.get(variant.productId) || [];
+        list.push({
+          id: variant.id,
+          name: variant.name,
+          sku: variant.sku,
+          barcode: (variant as any).barcode || (variant as any).attributes?.barcode || "",
+          attributes: (variant as any).attributes || {},
+          buyingPrice: Number((variant as any).buyingPrice || (variant as any).costPrice || 0),
+          sellingPrice: Number(variant.price || (variant as any).sellingPrice || 0),
+          stock: Number(variant.inventoryQuantity ?? (variant as any).stock ?? 0),
+          reorderLevel: Number((variant as any).reorderLevel || 5),
+        });
+        variantsByProduct.set(variant.productId, list);
+      }
+
+      const loaded: InventoryItem[] = [];
+      for (const prod of db.products.values()) {
+        const pAny = prod as any;
+        if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive") continue;
+        const pStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? 0);
+        const pReorder = Number(pAny.reorderLevel ?? 10);
+        const pStatus: InventoryItem["status"] = pStock === 0 ? "Out of Stock" : pStock <= pReorder ? "Low Stock" : "Active";
+        const vars = variantsByProduct.get(prod.id);
+        loaded.push({
+          id: prod.id,
+          name: prod.name,
+          sku: prod.sku,
+          category: pAny.category || "General",
+          brand: pAny.brand || "General",
+          buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
+          sellingPrice: Number(pAny.sellingPrice || pAny.price || 0),
+          stock: pStock,
+          reorderLevel: pReorder,
+          status: pStatus,
+          batchNumber: pAny.batchNumber || pAny.batch || "",
+          expiryDate: pAny.expiryDate || pAny.expiry || "",
+          hasVariants: Boolean(vars && vars.length > 0),
+          variants: vars,
+        });
+      }
+      setItems(loaded);
+
+      // Hydrate stock ledger
+      const loadedLedger: any[] = [];
+      for (const entry of db.stockLedger.values()) {
+        const eAny = entry as any;
+        const entryDate = eAny.createdAt || eAny.timestamp || eAny.date;
+        loadedLedger.push({
+          id: entry.id,
+          date: entryDate ? new Date(entryDate).toISOString().slice(0, 16).replace("T", " ") : "Recently",
+          sku: eAny.sku || "SKU-PROD",
+          name: eAny.name || "Stock Movement",
+          type: entry.movementType || "ADJUSTMENT",
+          qty: entry.quantity,
+          qtyBefore: (eAny.balanceAfter || 0) - entry.quantity,
+          balance: eAny.balanceAfter || 0,
+          unitCost: Number(eAny.unitCost || 0),
+          totalCost: Number(eAny.totalCost || 0),
+          ref: eAny.ref || eAny.reason || "SYS-ADJ",
+          user: eAny.user || "Staff",
+          notes: eAny.notes || eAny.reason,
+          deviceId: eAny.deviceId || "STORE",
+        });
+      }
+      // Hydrate custom categories & brands metadata from configuration
+      try {
+        const savedCatsMeta = db.getConfigurationLocal("inventory_categories_meta", currentTenantId ? { tenantId: currentTenantId } : undefined);
+        if (Array.isArray(savedCatsMeta) && savedCatsMeta.length > 0) {
+          setCategoriesMeta(savedCatsMeta);
+        } else {
+          // Backward compatibility fallback to legacy string array
+          const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          if (Array.isArray(legacyCats) && legacyCats.length > 0) {
+            const merged: CategoryRecord[] = [...DEFAULT_CATEGORY_RECORDS];
+            let cIdx = 0;
+            for (const cStr of legacyCats) {
+              if (typeof cStr === "string" && !merged.some((m) => m.name.toLowerCase() === cStr.toLowerCase())) {
+                merged.push({
+                  id: `cat-leg-${Date.now()}-${cIdx}`,
+                  name: cStr,
+                  color: CATEGORY_COLORS[cIdx % CATEGORY_COLORS.length].hex,
+                });
+                cIdx++;
+              }
+            }
+            setCategoriesMeta(merged);
+          }
+        }
+
+        const savedBrandsMeta = db.getConfigurationLocal("inventory_brands_meta", currentTenantId ? { tenantId: currentTenantId } : undefined);
+        if (Array.isArray(savedBrandsMeta) && savedBrandsMeta.length > 0) {
+          setBrandsMeta(savedBrandsMeta);
+        } else {
+          const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          if (Array.isArray(legacyBrands) && legacyBrands.length > 0) {
+            const merged: BrandRecord[] = [...DEFAULT_BRAND_RECORDS];
+            let bIdx = 0;
+            for (const bStr of legacyBrands) {
+              if (typeof bStr === "string" && !merged.some((m) => m.name.toLowerCase() === bStr.toLowerCase())) {
+                merged.push({
+                  id: `br-leg-${Date.now()}-${bIdx}`,
+                  name: bStr,
+                  origin: "Registered Vendor",
+                });
+                bIdx++;
+              }
+            }
+            setBrandsMeta(merged);
+          }
+        }
+      } catch {}
+
+      setLedger(loadedLedger.reverse());
+    } catch (err) {
+      console.error("[Inventory] Failed to hydrate inventory:", err);
+    }
+  }, [db, currentTenantId]);
+
+  useEffect(() => {
+    void loadInventory();
+    const handleSync = () => { void loadInventory(); };
+    window.addEventListener(DEMO_DATA_EVENT, handleSync);
+    return () => window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+  }, [loadInventory]);
+
+  const allCategories = useMemo(() => {
+    const metaMap = new Map<string, CategoryRecord>();
+    for (const cat of categoriesMeta) {
+      metaMap.set(cat.name.toLowerCase(), cat);
+    }
+    let colorIndex = 0;
+    for (const item of items) {
+      if (item.category && !metaMap.has(item.category.toLowerCase())) {
+        const fallbackColor = CATEGORY_COLORS[colorIndex % CATEGORY_COLORS.length].hex;
+        colorIndex++;
+        metaMap.set(item.category.toLowerCase(), {
+          id: `cat-dyn-${Date.now()}-${colorIndex}`,
+          name: item.category,
+          description: "Active catalog category",
+          color: fallbackColor,
+        });
+      }
+    }
+    return Array.from(metaMap.values());
+  }, [categoriesMeta, items]);
+
+  const allBrands = useMemo(() => {
+    const metaMap = new Map<string, BrandRecord>();
+    for (const b of brandsMeta) {
+      metaMap.set(b.name.toLowerCase(), b);
+    }
+    let bIndex = 0;
+    for (const item of items) {
+      if (item.brand && !metaMap.has(item.brand.toLowerCase())) {
+        bIndex++;
+        metaMap.set(item.brand.toLowerCase(), {
+          id: `br-dyn-${Date.now()}-${bIndex}`,
+          name: item.brand,
+          origin: "Catalog Vendor",
+          notes: "Auto-detected from inventory catalog",
+        });
+      }
+    }
+    return Array.from(metaMap.values());
+  }, [brandsMeta, items]);
+
+  const filteredCategories = useMemo(() => {
+    const q = categorySearchQuery.toLowerCase().trim();
+    if (!q) return allCategories;
+    return allCategories.filter((c) =>
+      c.name.toLowerCase().includes(q) || (c.description && c.description.toLowerCase().includes(q))
+    );
+  }, [allCategories, categorySearchQuery]);
+
+  const filteredBrands = useMemo(() => {
+    const q = brandSearchQuery.toLowerCase().trim();
+    if (!q) return allBrands;
+    return allBrands.filter((b) =>
+      b.name.toLowerCase().includes(q) || (b.origin && b.origin.toLowerCase().includes(q)) || (b.notes && b.notes.toLowerCase().includes(q))
+    );
+  }, [allBrands, brandSearchQuery]);
+
+  const topCategoryStat = useMemo(() => {
+    if (allCategories.length === 0) return null;
+    let best = { name: allCategories[0].name, valuation: 0, skus: 0 };
+    for (const cat of allCategories) {
+      const catItems = items.filter((i) => i.category.toLowerCase() === cat.name.toLowerCase());
+      const val = catItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
+      if (val >= best.valuation) {
+        best = { name: cat.name, valuation: val, skus: catItems.length };
+      }
+    }
+    return best;
+  }, [allCategories, items]);
+
+  const topBrandStat = useMemo(() => {
+    if (allBrands.length === 0) return null;
+    let best = { name: allBrands[0].name, units: 0, valuation: 0 };
+    for (const b of allBrands) {
+      const brandItems = items.filter((i) => i.brand.toLowerCase() === b.name.toLowerCase());
+      const units = brandItems.reduce((acc, i) => acc + i.stock, 0);
+      const val = brandItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
+      if (units >= best.units) {
+        best = { name: b.name, units, valuation: val };
+      }
+    }
+    return best;
+  }, [allBrands, items]);
 
   const filteredLedger = useMemo(() => {
     return ledger.filter((l) => {
@@ -138,27 +506,6 @@ export const InventoryPage: React.FC = () => {
       return matchType && matchQ;
     });
   }, [ledger, ledgerMovementFilter, ledgerSearchQuery]);
-
-  // Branch Stock Transfer State
-  const [transfers, setTransfers] = useState([
-    { id: "TR-2026-08", fromBranch: "Main HQ Warehouse", toBranch: "Kijitonyama Branch", itemsCount: 3, status: "IN_TRANSIT", date: "2026-08-31" },
-    { id: "TR-2026-07", fromBranch: "Posta Counter", toBranch: "Main HQ Warehouse", itemsCount: 1, status: "RECEIVED", date: "2026-08-28" },
-  ]);
-
-  // Physical Count State
-  const [counts] = useState([
-    { id: "CNT-2026-01", date: "2026-08-31", auditor: "Joseph Mchome", totalItems: 145, varianceItems: 3, status: "PENDING_APPROVAL" }
-  ]);
-
-  // Recipe State
-  const [recipes] = useState([
-    { id: "REC-01", parentName: "Cocktail Special 500ml", yieldQty: 1, ingredients: [{ name: "Safari Lager 500ml", qty: 250, unit: "ml" }, { name: "Sprite 300ml", qty: 250, unit: "ml" }] }
-  ]);
-
-  // Wastage State
-  const [wastages, setWastages] = useState([
-    { id: "WST-01", date: "2026-09-01 08:30", name: "Fresh Cow Milk 1L", qty: 2, reason: "EXPIRED", cost: 4400, loggedBy: "Shift Supervisor" }
-  ]);
 
   // Filtered Products
   const filteredItems = useMemo(() => {
@@ -180,36 +527,813 @@ export const InventoryPage: React.FC = () => {
   const lowStockCount = items.filter((i) => i.stock > 0 && i.stock <= i.reorderLevel).length;
   const outOfStockCount = items.filter((i) => i.stock === 0).length;
   const overstockCount = items.filter((i) => i.stock > 100).length;
-  const expiringCount = 3; // Pharmacy & Food batches expiring in 30 days
-  const healthScore = Math.max(0, 100 - (outOfStockCount * 12 + lowStockCount * 5));
+  const expiringCount = useMemo(() => {
+    const now = Date.now();
+    const limit30Days = 86400000 * 30;
+    return items.filter((i) => {
+      const exp = (i as any).expiryDate;
+      if (!exp) return false;
+      const diff = new Date(exp).getTime() - now;
+      return diff > 0 && diff <= limit30Days;
+    }).length;
+  }, [items]);
+  const healthScore = totalUniqueSkus === 0 ? 100 : Math.max(0, 100 - (outOfStockCount * 12 + lowStockCount * 5));
 
   // Valuation Date Snapshot Filter
   const [valuationDateFilter, setValuationDateFilter] = useState("Today");
   const [valuationMethod, setValuationMethod] = useState("WAC");
+
+  // ─── Dynamic Multi-Branch Valuation ───────────────────────────────────────
+  const branchValuationList = useMemo(() => {
+    const branches = availableBranches && availableBranches.length > 0
+      ? availableBranches
+      : [{ id: currentBranchId || "main", name: currentBranchName || "Main HQ" }];
+
+    // If single branch, 100% of the active inventory belongs to this branch
+    if (branches.length === 1) {
+      const b = branches[0];
+      const profit = stockSellingValue - stockBuyingValue;
+      const margin = stockSellingValue > 0 ? Math.round((profit / stockSellingValue) * 100) : 0;
+      return [{
+        id: b.id,
+        branch: b.name,
+        skus: totalUniqueSkus,
+        units: totalStockUnits,
+        buyingVal: stockBuyingValue,
+        sellingVal: stockSellingValue,
+        profit,
+        margin,
+      }];
+    }
+
+    // For multi-branch setups, allocate products by branchId or assign unallocated to primary HQ
+    const rawProducts = Array.from(db.products.values()).filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive");
+
+    return branches.map((b) => {
+      const branchProds = rawProducts.filter((p: any) => {
+        const pBranch = p.branchId || p.branch_id;
+        if (!pBranch || pBranch === "all" || pBranch === "default") {
+          return b.id === branches[0].id;
+        }
+        return pBranch === b.id || (b.name && String(pBranch).toLowerCase().includes(b.name.toLowerCase()));
+      });
+
+      const bSkus = branchProds.length;
+      const bUnits = branchProds.reduce((sum: number, p: any) => sum + Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0), 0);
+      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
+      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
+      const bProfit = bSelling - bBuying;
+      const bMargin = bSelling > 0 ? Math.round((bProfit / bSelling) * 100) : 0;
+
+      return {
+        id: b.id,
+        branch: b.name,
+        skus: bSkus,
+        units: bUnits,
+        buyingVal: bBuying,
+        sellingVal: bSelling,
+        profit: bProfit,
+        margin: bMargin,
+      };
+    });
+  }, [availableBranches, currentBranchId, currentBranchName, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
+
+  const generateInflowCombinations = (
+    opt1Name = varOption1Name,
+    opt1Vals = varOption1Values,
+    opt2Name = varOption2Name,
+    opt2Vals = varOption2Values
+  ) => {
+    const list1 = opt1Vals.split(",").map((s) => s.trim()).filter(Boolean);
+    const list2 = opt2Name.trim() && opt2Vals.trim()
+      ? opt2Vals.split(",").map((s) => s.trim()).filter(Boolean)
+      : [""];
+    if (list1.length === 0) return;
+
+    const baseName = newProd.name.trim() || "Item";
+    const prefix = baseName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "SKU";
+    const baseSku = `SKU-${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const generated: ProductVariantData[] = [];
+    for (const v1 of list1) {
+      for (const v2 of list2) {
+        const label = v2 ? `${opt1Name}: ${v1} / ${opt2Name}: ${v2}` : `${opt1Name}: ${v1}`;
+        const suffix = (v1 + (v2 ? `-${v2}` : "")).replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
+        generated.push({
+          id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: `${baseName} (${label})`,
+          sku: `${baseSku}-${suffix}`,
+          barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+          attributes: { [opt1Name]: v1, ...(opt2Name.trim() && v2 ? { [opt2Name]: v2 } : {}) },
+          buyingPrice: Number(newProd.buyingPrice) || 0,
+          sellingPrice: Number(newProd.sellingPrice) || 0,
+          stock: 10,
+          reorderLevel: 5,
+        });
+      }
+    }
+    setInflowVariants(generated);
+  };
 
   const handleCreateProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProd.name.trim()) return;
 
     const autoSku = `SKU-${newProd.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const status: InventoryItem["status"] = newProd.stock === 0 ? "Out of Stock" : newProd.stock <= newProd.reorderLevel ? "Low Stock" : "Active";
+    const prodId = `inv-${Date.now()}`;
 
-    const newItem: InventoryItem = {
-      id: `inv-${Date.now()}`,
+    const isVariantProduct = hasVariantsToggle && inflowVariants.length > 0;
+    const computedStock = isVariantProduct
+      ? inflowVariants.reduce((sum, v) => sum + Number(v.stock || 0), 0)
+      : Number(newProd.stock);
+    const computedSelling = isVariantProduct
+      ? (inflowVariants[0]?.sellingPrice || Number(newProd.sellingPrice))
+      : Number(newProd.sellingPrice);
+    const computedBuying = isVariantProduct
+      ? (inflowVariants[0]?.buyingPrice || Number(newProd.buyingPrice))
+      : Number(newProd.buyingPrice);
+
+    const status: InventoryItem["status"] = computedStock === 0 ? "Out of Stock" : computedStock <= Number(newProd.reorderLevel) ? "Low Stock" : "Active";
+
+    const newProductRecord = {
+      id: prodId,
       name: newProd.name.trim(),
       sku: autoSku,
       category: newProd.category,
       brand: newProd.brand.trim() || "General",
-      buyingPrice: Number(newProd.buyingPrice),
-      sellingPrice: Number(newProd.sellingPrice),
-      stock: Number(newProd.stock),
+      sellingPrice: computedSelling,
+      costPrice: computedBuying,
+      buyingPrice: computedBuying,
+      stock: computedStock,
+      totalStock: computedStock,
+      availableStock: computedStock,
       reorderLevel: Number(newProd.reorderLevel),
       status,
+      hasVariants: isVariantProduct,
+      batchNumber: newProd.batchNumber ? newProd.batchNumber.trim() : undefined,
+      expiryDate: newProd.expiryDate ? newProd.expiryDate : undefined,
+      tenantId: currentTenantId || undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
-    setItems((prev) => [newItem, ...prev]);
-    setNewProd({ name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10 });
+    if (isVariantProduct) {
+      const variantsToSave = inflowVariants.map((v) => ({
+        id: v.id,
+        productId: prodId,
+        name: v.name,
+        sku: v.sku,
+        barcode: v.barcode || "",
+        attributes: v.attributes || {},
+        buyingPrice: Number(v.buyingPrice || 0),
+        costPrice: Number(v.buyingPrice || 0),
+        sellingPrice: Number(v.sellingPrice || 0),
+        price: Number(v.sellingPrice || 0),
+        inventoryQuantity: Number(v.stock || 0),
+        stock: Number(v.stock || 0),
+        reorderLevel: Number(v.reorderLevel || 5),
+        isActive: true,
+        tenantId: currentTenantId || undefined,
+      }));
+
+      db.saveProductWithVariantsLocal(newProductRecord as any, variantsToSave as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+      db.enqueueOutbox({
+        entityType: "Product",
+        entityId: prodId,
+        operationType: "CREATE",
+        payload: {
+          id: prodId,
+          name: newProductRecord.name,
+          sku: autoSku,
+          category: newProductRecord.category,
+          brand: newProductRecord.brand,
+          brandId: (newProductRecord as any).brandId,
+          buyingPrice: Number(newProd.buyingPrice),
+          sellingPrice: Number(newProd.sellingPrice),
+          hasVariants: true,
+          variants: variantsToSave.map((v) => ({
+            id: v.id,
+            name: v.name,
+            sku: v.sku,
+            barcode: v.barcode || undefined,
+            price: Number(v.sellingPrice || 0),
+            costPrice: Number(v.buyingPrice || 0),
+            inventoryQuantity: Number(v.inventoryQuantity || 0),
+            stock: Number(v.stock || 0),
+            reorderLevel: Number(v.reorderLevel || 5),
+            attributes: v.attributes || {},
+            isActive: true,
+          })),
+        },
+        idempotencyKey: `PROD-CREATE-${prodId}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+
+      for (const v of variantsToSave) {
+        db.enqueueOutbox({
+          entityType: "ProductVariant",
+          entityId: v.id,
+          operationType: "CREATE",
+          payload: {
+            id: v.id,
+            productId: prodId,
+            name: v.name,
+            sku: v.sku,
+            barcode: v.barcode || undefined,
+            price: Number(v.sellingPrice || 0),
+            costPrice: Number(v.buyingPrice || 0),
+            inventoryQuantity: Number(v.inventoryQuantity || 0),
+            stock: Number(v.stock || 0),
+            reorderLevel: Number(v.reorderLevel || 5),
+            attributes: v.attributes || {},
+            isActive: true,
+          },
+          idempotencyKey: `VAR-CREATE-${v.id}`,
+          tenantId: currentTenantId || undefined,
+          branchId: currentBranchId || undefined,
+        });
+
+        if (Number(v.inventoryQuantity) > 0) {
+          db.saveStockLedgerLocal({
+            id: `led-${v.id}`,
+            productId: prodId,
+            variantId: v.id,
+            sku: v.sku,
+            name: v.name,
+            quantity: Number(v.inventoryQuantity),
+            balanceAfter: Number(v.inventoryQuantity),
+            reason: "MANUAL_VARIANT_CREATION",
+            movementType: "OPENING_STOCK",
+            timestamp: new Date().toISOString(),
+            tenantId: currentTenantId || "default",
+          } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+          db.enqueueOutbox({
+            entityType: "StockAdjustment",
+            entityId: `adj-${v.id}`,
+            operationType: "CREATE",
+            payload: {
+              productId: prodId,
+              variantId: v.id,
+              sku: v.sku,
+              adjustmentType: "INCREASE",
+              quantityChange: Number(v.inventoryQuantity),
+              reason: "MANUAL_VARIANT_CREATION",
+              deviceId: "web-client",
+              operationId: `adj-${v.id}`,
+              idempotencyKey: `ADJ-${v.id}`,
+            },
+            idempotencyKey: `ADJ-${v.id}`,
+            tenantId: currentTenantId || undefined,
+            branchId: currentBranchId || undefined,
+          });
+        }
+      }
+    } else {
+      const defaultVarId = `${prodId}-default`;
+      const defaultVariant = {
+        id: defaultVarId,
+        productId: prodId,
+        name: "Standard",
+        sku: `${autoSku}-STD`,
+        barcode: "",
+        price: Number(newProd.sellingPrice),
+        costPrice: Number(newProd.buyingPrice),
+        buyingPrice: Number(newProd.buyingPrice),
+        sellingPrice: Number(newProd.sellingPrice),
+        inventoryQuantity: Number(newProd.stock),
+        stock: Number(newProd.stock),
+        reorderLevel: Number(newProd.reorderLevel || 5),
+        isActive: true,
+        tenantId: currentTenantId || undefined,
+      };
+
+      db.saveProductLocal(newProductRecord as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+      db.saveVariantLocal(defaultVariant as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+      db.enqueueOutbox({
+        entityType: "Product",
+        entityId: prodId,
+        operationType: "CREATE",
+        payload: {
+          id: prodId,
+          name: newProductRecord.name,
+          sku: autoSku,
+          category: newProductRecord.category,
+          brand: newProductRecord.brand,
+          brandId: (newProductRecord as any).brandId,
+          buyingPrice: Number(newProd.buyingPrice),
+          sellingPrice: Number(newProd.sellingPrice),
+          hasVariants: false,
+          variants: [defaultVariant],
+        },
+        idempotencyKey: `PROD-CREATE-${prodId}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+
+      db.enqueueOutbox({
+        entityType: "ProductVariant",
+        entityId: defaultVarId,
+        operationType: "CREATE",
+        payload: defaultVariant,
+        idempotencyKey: `VAR-CREATE-${defaultVarId}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+
+      if (Number(newProd.stock) > 0) {
+        db.saveStockLedgerLocal({
+          id: `led-${defaultVarId}`,
+          productId: prodId,
+          variantId: defaultVarId,
+          sku: `${autoSku}-STD`,
+          name: newProductRecord.name,
+          quantity: Number(newProd.stock),
+          balanceAfter: Number(newProd.stock),
+          reason: "MANUAL_PRODUCT_CREATION",
+          movementType: "OPENING_STOCK",
+          timestamp: new Date().toISOString(),
+          tenantId: currentTenantId || "default",
+        } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+        db.enqueueOutbox({
+          entityType: "StockAdjustment",
+          entityId: `adj-${defaultVarId}`,
+          operationType: "CREATE",
+          payload: {
+            productId: prodId,
+            variantId: defaultVarId,
+            sku: `${autoSku}-STD`,
+            adjustmentType: "INCREASE",
+            quantityChange: Number(newProd.stock),
+            reason: "MANUAL_PRODUCT_CREATION",
+            deviceId: "web-client",
+            operationId: `adj-${defaultVarId}`,
+            idempotencyKey: `ADJ-${defaultVarId}`,
+          },
+          idempotencyKey: `ADJ-${defaultVarId}`,
+          tenantId: currentTenantId || undefined,
+          branchId: currentBranchId || undefined,
+        });
+      }
+    }
+
+    void loadInventory();
+    setNewProd({ name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
+    setHasVariantsToggle(false);
+    setInflowVariants([]);
     setAddProductModal(false);
+    toast.success("Product Created", isVariantProduct ? `Product "${newProductRecord.name}" created with ${inflowVariants.length} variants.` : `Product "${newProductRecord.name}" added to inventory.`);
+    playSuccessChime();
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    void syncOutbox?.().catch(() => {});
+  };
+
+  // ─── Product Edit Handlers ───────────────────────────────────────────────────
+  const handleOpenEditModal = (item: InventoryItem) => {
+    setEditingItem(item);
+    setEditProd({
+      name: item.name,
+      category: item.category,
+      brand: item.brand,
+      buyingPrice: item.buyingPrice,
+      sellingPrice: item.sellingPrice,
+      stock: item.stock,
+      reorderLevel: item.reorderLevel,
+      status: item.status,
+      batchNumber: (item as any).batchNumber || "",
+      expiryDate: (item as any).expiryDate || "",
+    });
+    setEditProductModal(true);
+  };
+
+  const handleSaveEditProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    const prevItem = editingItem;
+    const newStock = Number(editProd.stock);
+    const newReorder = Number(editProd.reorderLevel);
+    const newStatus: InventoryItem["status"] = newStock === 0 ? "Out of Stock" : newStock <= newReorder ? "Low Stock" : "Active";
+
+    let existing = db.products.get(prevItem.id) as any;
+    if (!existing) {
+      for (const p of db.products.values()) {
+        if (p.id === prevItem.id || p.sku === prevItem.sku) {
+          existing = p;
+          break;
+        }
+      }
+    }
+
+    const updatedRecord = {
+      ...(existing || {}),
+      id: prevItem.id,
+      name: editProd.name.trim(),
+      sku: prevItem.sku,
+      category: editProd.category,
+      brand: editProd.brand.trim() || "General",
+      costPrice: Number(editProd.buyingPrice),
+      buyingPrice: Number(editProd.buyingPrice),
+      sellingPrice: Number(editProd.sellingPrice),
+      price: Number(editProd.sellingPrice),
+      stock: newStock,
+      totalStock: newStock,
+      availableStock: newStock,
+      reorderLevel: newReorder,
+      status: newStatus,
+      batchNumber: editProd.batchNumber ? editProd.batchNumber.trim() : undefined,
+      expiryDate: editProd.expiryDate ? editProd.expiryDate : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    db.saveProductLocal(updatedRecord as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+
+    db.enqueueOutbox({
+      entityType: "Product",
+      entityId: prevItem.id,
+      operationType: "UPDATE",
+      payload: {
+        id: prevItem.id,
+        name: updatedRecord.name,
+        category: updatedRecord.category,
+        brand: updatedRecord.brand,
+        costPrice: Number(editProd.buyingPrice),
+        buyingPrice: Number(editProd.buyingPrice),
+        sellingPrice: Number(editProd.sellingPrice),
+        price: Number(editProd.sellingPrice),
+        reorderLevel: newReorder,
+        status: newStatus,
+        batchNumber: editProd.batchNumber ? editProd.batchNumber.trim() : undefined,
+        expiryDate: editProd.expiryDate ? editProd.expiryDate : undefined,
+      },
+      idempotencyKey: `PROD-UPDATE-${prevItem.id}-${Date.now()}`,
+      tenantId: currentTenantId || undefined,
+      branchId: currentBranchId || undefined,
+    });
+
+    // If stock was modified during edit, record an audit ledger adjustment
+    const stockDiff = newStock - prevItem.stock;
+    if (stockDiff !== 0) {
+      const adjOpId = `adj-edit-${Date.now()}-${prevItem.id}`;
+      db.saveStockLedgerLocal({
+        id: adjOpId,
+        productId: prevItem.id,
+        sku: prevItem.sku,
+        name: updatedRecord.name,
+        quantity: stockDiff,
+        balanceAfter: newStock,
+        unitCost: Number(editProd.buyingPrice),
+        totalCost: Math.abs(stockDiff) * Number(editProd.buyingPrice),
+        ref: `AUDIT-EDIT-${prevItem.sku}`,
+        reason: `MANUAL_PRODUCT_EDIT_STOCK_ADJUSTMENT`,
+        movementType: stockDiff > 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS",
+        timestamp: new Date().toISOString(),
+        tenantId: currentTenantId || "default",
+      } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+
+      db.enqueueOutbox({
+        entityType: "StockAdjustment",
+        entityId: adjOpId,
+        operationType: "CREATE",
+        payload: {
+          productId: prevItem.id,
+          variantId: prevItem.id,
+          sku: prevItem.sku,
+          adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE",
+          quantityChange: Math.abs(stockDiff),
+          reason: "MANUAL_PRODUCT_EDIT_STOCK_ADJUSTMENT",
+          deviceId: "web-client",
+          operationId: adjOpId,
+          idempotencyKey: `ADJ-${adjOpId}`,
+        },
+        idempotencyKey: `ADJ-${adjOpId}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+    }
+
+    void loadInventory();
+    setEditProductModal(false);
+    setEditingItem(null);
+    playSuccessChime();
+    toast.success("SKU Updated", `Product "${updatedRecord.name}" successfully updated.`);
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    void syncOutbox?.().catch(() => {});
+  };
+
+  // ─── Product Archival & Deletion Handlers ────────────────────────────────────
+  const handleOpenDeleteModal = (item: InventoryItem) => {
+    setItemToDelete(item);
+    setDeleteConfirmModal(true);
+  };
+
+  const handleConfirmArchiveDelete = (softDelete = true) => {
+    if (!itemToDelete) return;
+    const target = itemToDelete;
+
+    let existing = db.products.get(target.id) as any;
+    if (!existing) {
+      for (const p of db.products.values()) {
+        if (p.id === target.id || p.sku === target.sku) {
+          existing = p;
+          break;
+        }
+      }
+    }
+
+    if (softDelete && existing) {
+      // Standard SaaS Archival: hides product from POS counter while preserving historical sales and audit ledgers
+      const archived = {
+        ...existing,
+        status: "Inactive",
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      db.saveProductLocal(archived as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+      db.enqueueOutbox({
+        entityType: "Product",
+        entityId: target.id,
+        operationType: "UPDATE",
+        payload: {
+          id: target.id,
+          status: "Inactive",
+          deletedAt: archived.deletedAt,
+        },
+        idempotencyKey: `PROD-ARCHIVE-${target.id}-${Date.now()}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+    } else {
+      // Direct hard deletion from active cache
+      db.products.delete(target.id);
+      db.enqueueOutbox({
+        entityType: "Product",
+        entityId: target.id,
+        operationType: "UPDATE",
+        payload: {
+          id: target.id,
+          status: "Inactive",
+          deletedAt: new Date().toISOString(),
+        },
+        idempotencyKey: `PROD-DEL-${target.id}-${Date.now()}`,
+        tenantId: currentTenantId || undefined,
+        branchId: currentBranchId || undefined,
+      });
+    }
+
+    void loadInventory();
+    setDeleteConfirmModal(false);
+    setItemToDelete(null);
+    playSuccessChime();
+    toast.success("Product Archived", `"${target.name}" (${target.sku}) archived. Hidden from POS counter.`);
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    void syncOutbox?.().catch(() => {});
+  };
+
+  // ─── Categories & Brands Master Handlers ────────────────────────────────────
+  // ─── Categories Master Handlers ──────────────────────────────────────────
+  const handleOpenEditCategory = (cat: CategoryRecord) => {
+    setEditingCategory(cat);
+    setNewCategoryName(cat.name);
+    setNewCategoryDesc(cat.description || "");
+    setNewCategoryColor(cat.color || "#10b981");
+    setCategoryCascadeRename(true);
+    setAddCategoryModal(true);
+  };
+
+  const handleSaveCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) {
+      toast.warning("Name Required", "Please enter a valid category name.");
+      return;
+    }
+
+    if (editingCategory) {
+      const oldName = editingCategory.name;
+      const updatedCat: CategoryRecord = {
+        ...editingCategory,
+        name: trimmed,
+        description: newCategoryDesc.trim() || undefined,
+        color: newCategoryColor,
+      };
+
+      const updatedList = categoriesMeta.map((c) =>
+        c.id === editingCategory.id || c.name.toLowerCase() === oldName.toLowerCase() ? updatedCat : c
+      );
+      if (!updatedList.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+        updatedList.push(updatedCat);
+      }
+      setCategoriesMeta(updatedList);
+      db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+      // Cascade rename to catalog products if requested
+      if (categoryCascadeRename && oldName.toLowerCase() !== trimmed.toLowerCase()) {
+        let count = 0;
+        for (const p of db.products.values()) {
+          const pAny = p as any;
+          if (pAny.category && pAny.category.toLowerCase() === oldName.toLowerCase()) {
+            db.saveProductLocal({ ...pAny, category: trimmed, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+            count++;
+          }
+        }
+        if (count > 0) {
+          toast.info("Products Updated", `Updated ${count} product(s) to new category "${trimmed}".`);
+        }
+      }
+
+      playSuccessChime();
+      toast.success("Category Updated", `Category "${trimmed}" saved.`);
+    } else {
+      const newCat: CategoryRecord = {
+        id: `cat-${Date.now()}`,
+        name: trimmed,
+        description: newCategoryDesc.trim() || undefined,
+        color: newCategoryColor,
+      };
+      const updatedList = [...categoriesMeta.filter((c) => c.name.toLowerCase() !== trimmed.toLowerCase()), newCat];
+      setCategoriesMeta(updatedList);
+      db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+      playSuccessChime();
+      toast.success("Category Added", `Category "${trimmed}" created.`);
+      setNewProd((prev) => ({ ...prev, category: trimmed }));
+      setEditProd((prev) => ({ ...prev, category: trimmed }));
+    }
+
+    void loadInventory();
+    setAddCategoryModal(false);
+    setEditingCategory(null);
+    setNewCategoryName("");
+    setNewCategoryDesc("");
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+  };
+
+  const handleOpenDeleteCategory = (catName: string, assignedCount: number) => {
+    if (assignedCount > 0) {
+      const otherCats = allCategories.filter((c) => c.name.toLowerCase() !== catName.toLowerCase());
+      const fallback = otherCats.find((c) => c.name.toLowerCase() === "general")?.name || otherCats[0]?.name || "General";
+      setDeleteCategorySafeguard({
+        category: catName,
+        assignedCount,
+        fallbackCategory: fallback,
+      });
+    } else {
+      setDeleteCategorySafeguard({
+        category: catName,
+        assignedCount: 0,
+        fallbackCategory: "General",
+      });
+    }
+  };
+
+  const handleConfirmDeleteCategory = () => {
+    if (!deleteCategorySafeguard) return;
+    const { category: catName, assignedCount, fallbackCategory } = deleteCategorySafeguard;
+
+    if (assignedCount > 0 && fallbackCategory) {
+      let count = 0;
+      for (const p of db.products.values()) {
+        const pAny = p as any;
+        if (pAny.category && pAny.category.toLowerCase() === catName.toLowerCase()) {
+          db.saveProductLocal({ ...pAny, category: fallbackCategory, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+          count++;
+        }
+      }
+      toast.info("Products Reassigned", `Reassigned ${count} product(s) to "${fallbackCategory}".`);
+    }
+
+    const updatedList = categoriesMeta.filter((c) => c.name.toLowerCase() !== catName.toLowerCase());
+    setCategoriesMeta(updatedList);
+    db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+    setDeleteCategorySafeguard(null);
+    void loadInventory();
+    toast.info("Category Removed", `Category "${catName}" deleted.`);
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+  };
+
+  // ─── Brands Master Handlers ──────────────────────────────────────────────
+  const handleOpenEditBrand = (brand: BrandRecord) => {
+    setEditingBrand(brand);
+    setNewBrandName(brand.name);
+    setNewBrandOrigin(brand.origin || "");
+    setNewBrandNotes(brand.notes || "");
+    setBrandCascadeRename(true);
+    setAddBrandModal(true);
+  };
+
+  const handleSaveBrand = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newBrandName.trim();
+    if (!trimmed) {
+      toast.warning("Name Required", "Please enter a valid brand name.");
+      return;
+    }
+
+    if (editingBrand) {
+      const oldName = editingBrand.name;
+      const updatedBrand: BrandRecord = {
+        ...editingBrand,
+        name: trimmed,
+        origin: newBrandOrigin.trim() || undefined,
+        notes: newBrandNotes.trim() || undefined,
+      };
+
+      const updatedList = brandsMeta.map((b) =>
+        b.id === editingBrand.id || b.name.toLowerCase() === oldName.toLowerCase() ? updatedBrand : b
+      );
+      if (!updatedList.some((b) => b.name.toLowerCase() === trimmed.toLowerCase())) {
+        updatedList.push(updatedBrand);
+      }
+      setBrandsMeta(updatedList);
+      db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+      if (brandCascadeRename && oldName.toLowerCase() !== trimmed.toLowerCase()) {
+        let count = 0;
+        for (const p of db.products.values()) {
+          const pAny = p as any;
+          if (pAny.brand && pAny.brand.toLowerCase() === oldName.toLowerCase()) {
+            db.saveProductLocal({ ...pAny, brand: trimmed, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+            count++;
+          }
+        }
+        if (count > 0) {
+          toast.info("Products Updated", `Updated ${count} product(s) to new brand "${trimmed}".`);
+        }
+      }
+
+      playSuccessChime();
+      toast.success("Brand Updated", `Brand "${trimmed}" saved.`);
+    } else {
+      const newBrand: BrandRecord = {
+        id: `br-${Date.now()}`,
+        name: trimmed,
+        origin: newBrandOrigin.trim() || undefined,
+        notes: newBrandNotes.trim() || undefined,
+      };
+      const updatedList = [...brandsMeta.filter((b) => b.name.toLowerCase() !== trimmed.toLowerCase()), newBrand];
+      setBrandsMeta(updatedList);
+      db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+      playSuccessChime();
+      toast.success("Brand Added", `Brand "${trimmed}" created.`);
+      setNewProd((prev) => ({ ...prev, brand: trimmed }));
+      setEditProd((prev) => ({ ...prev, brand: trimmed }));
+    }
+
+    void loadInventory();
+    setAddBrandModal(false);
+    setEditingBrand(null);
+    setNewBrandName("");
+    setNewBrandOrigin("");
+    setNewBrandNotes("");
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+  };
+
+  const handleOpenDeleteBrand = (brandName: string, assignedCount: number) => {
+    if (assignedCount > 0) {
+      const otherBrands = allBrands.filter((b) => b.name.toLowerCase() !== brandName.toLowerCase());
+      const fallback = otherBrands.find((b) => b.name.toLowerCase() === "general")?.name || otherBrands[0]?.name || "General";
+      setDeleteBrandSafeguard({
+        brand: brandName,
+        assignedCount,
+        fallbackBrand: fallback,
+      });
+    } else {
+      setDeleteBrandSafeguard({
+        brand: brandName,
+        assignedCount: 0,
+        fallbackBrand: "General",
+      });
+    }
+  };
+
+  const handleConfirmDeleteBrand = () => {
+    if (!deleteBrandSafeguard) return;
+    const { brand: brandName, assignedCount, fallbackBrand } = deleteBrandSafeguard;
+
+    if (assignedCount > 0 && fallbackBrand) {
+      let count = 0;
+      for (const p of db.products.values()) {
+        const pAny = p as any;
+        if (pAny.brand && pAny.brand.toLowerCase() === brandName.toLowerCase()) {
+          db.saveProductLocal({ ...pAny, brand: fallbackBrand, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+          count++;
+        }
+      }
+      toast.info("Products Reassigned", `Reassigned ${count} product(s) to brand "${fallbackBrand}".`);
+    }
+
+    const updatedList = brandsMeta.filter((b) => b.name.toLowerCase() !== brandName.toLowerCase());
+    setBrandsMeta(updatedList);
+    db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
+
+    setDeleteBrandSafeguard(null);
+    void loadInventory();
+    toast.info("Brand Removed", `Brand "${brandName}" deleted.`);
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
   };
 
   return (
@@ -225,11 +1349,19 @@ export const InventoryPage: React.FC = () => {
           </p>
         </div>
         <div className="v2-flex v2-gap-2">
+          <button
+            className="v2-btn v2-btn-outline v2-btn-sm"
+            onClick={() => setIsBarcodeModalOpen(true)}
+            type="button"
+            title="Generate and Print Barcode Labels (40x30mm Thermal & A4 24-Up)"
+          >
+            <Barcode size={13} /> Print Barcodes
+          </button>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
             <Upload size={13} /> Bulk CSV Import
           </button>
           <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
-            <Plus size={13} /> Add New SKU
+            <Plus size={13} /> Add Product
           </button>
         </div>
       </div>
@@ -314,7 +1446,54 @@ export const InventoryPage: React.FC = () => {
             <div className="v2-space-y-4">
               <div className="v2-grid v2-grid-2 v2-gap-4">
                 <div>
-                  <h3 className="v2-font-bold v2-text-sm v2-mb-2">Low Stock Replenishment Required</h3>
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-2">
+                    <h3 className="v2-font-bold v2-text-sm">Low Stock Replenishment Required</h3>
+                    {items.filter((i) => i.stock <= i.reorderLevel).length > 0 && (
+                      <button
+                        type="button"
+                        className="v2-btn v2-btn-primary v2-btn-sm"
+                        onClick={() => {
+                          const lowItems = items.filter((i) => i.stock <= i.reorderLevel);
+                          const poId = `PO-DRAFT-${Date.now().toString().slice(-6)}`;
+                          const poLines = lowItems.map((item) => {
+                            const neededQty = Math.max(10, item.reorderLevel * 2 - item.stock);
+                            return {
+                              productId: item.id,
+                              sku: item.sku,
+                              name: item.name,
+                              qtyOrdered: neededQty,
+                              qtyReceived: 0,
+                              unitCost: item.buyingPrice,
+                              totalCost: neededQty * item.buyingPrice,
+                            };
+                          });
+                          const total = poLines.reduce((s, l) => s + l.totalCost, 0);
+                          const draftPO = {
+                            id: poId,
+                            poNumber: poId,
+                            supplier: "Primary Wholesale Supplier",
+                            supplierName: "Primary Wholesale Supplier",
+                            itemsCount: poLines.length,
+                            items: poLines,
+                            subtotal: total,
+                            vatAmount: 0,
+                            total,
+                            status: "Draft" as const,
+                            expected: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+                            date: new Date().toISOString().slice(0, 10),
+                          };
+                          const existingOrders = db.getConfigurationLocal("procurement_purchase_orders", currentTenantId ? { tenantId: currentTenantId } : undefined);
+                          const updatedOrders = Array.isArray(existingOrders) ? [draftPO, ...existingOrders] : [draftPO];
+                          db.saveConfigurationLocal("procurement_purchase_orders", updatedOrders, currentTenantId ? { tenantId: currentTenantId } : undefined);
+                          playSuccessChime();
+                          toast.success("Draft PO Created", `Generated PO #${poId} with ${lowItems.length} replenishment SKUs. Available in Purchasing.`);
+                          window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: draftPO } }));
+                        }}
+                      >
+                        <Truck size={13} /> Draft Low-Stock PO ({items.filter((i) => i.stock <= i.reorderLevel).length})
+                      </button>
+                    )}
+                  </div>
                   <div className="v2-card v2-p-2">
                     {items.filter((i) => i.stock <= i.reorderLevel).map((i) => (
                       <div key={i.id} className="v2-flex v2-items-center v2-justify-between v2-py-2" style={{ borderBottom: "1px solid var(--surface-border)" }}>
@@ -387,53 +1566,477 @@ export const InventoryPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => {
-                const itemBuyingVal = item.stock * item.buyingPrice;
-                const itemSellingVal = item.stock * item.sellingPrice;
-                const itemProfit = itemSellingVal - itemBuyingVal;
-                const itemMargin = itemSellingVal > 0 ? Math.round((itemProfit / itemSellingVal) * 100) : 0;
-                return (
-                  <tr key={item.id}>
-                    <td className="v2-mono v2-text-xs">{item.sku}</td>
-                    <td>
-                      <div className="v2-font-bold">{item.name}</div>
-                      <div className="v2-text-xs v2-text-muted">{item.category} · {item.brand}</div>
-                    </td>
-                    <td className="v2-mono v2-font-bold">{fmtNum(item.stock)}</td>
-                    <td className="v2-mono">{money(item.buyingPrice)}</td>
-                    <td className="v2-mono v2-font-bold">{money(item.sellingPrice)}</td>
-                    <td className="v2-mono" style={{ color: "var(--accent)" }}>{money(itemBuyingVal)}</td>
-                    <td className="v2-mono">{money(itemSellingVal)}</td>
-                    <td className="v2-mono v2-font-bold" style={{ color: "var(--success)" }}>{money(itemProfit)}</td>
-                    <td><span className="badge v2-badge-success">{itemMargin}%</span></td>
-                    <td>
-                      <div className="v2-flex v2-gap-1">
-                        <button
-                          className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                          onClick={() => setVariantModalProduct(item)}
-                          title="Manage Product Variants"
-                          type="button"
-                        >
-                          <Layers size={13} />
+              {filteredItems.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="v2-text-center v2-py-8">
+                    <div className="v2-flex v2-flex-col v2-items-center v2-gap-2">
+                      <PackageOpen size={36} style={{ color: "var(--muted)", opacity: 0.6 }} />
+                      <div className="v2-font-bold v2-text-sm">No Products in Inventory Catalog</div>
+                      <div className="v2-text-xs v2-text-muted" style={{ maxWidth: 380 }}>
+                        Your inventory catalog is currently empty. Add your first retail SKU, import via CSV, or load sample retail data to test.
+                      </div>
+                      <div className="v2-flex v2-gap-2 v2-mt-2">
+                        <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
+                          <Plus size={13} /> Add First Product
+                        </button>
+                        <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
+                          <Upload size={13} /> Bulk CSV Import
                         </button>
                         <button
-                          className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                          onClick={() => {
-                            setSelectedBarcodeItem(item);
-                            setBarcodeModal(true);
+                          className="v2-btn v2-btn-outline v2-btn-sm"
+                          onClick={async () => {
+                            const res = await loadSampleData(db, currentTenantId || undefined);
+                            toast.success("Sample Data Loaded", `Added ${res.products} retail products and sample ledger.`);
+                            playSuccessChime();
                           }}
-                          title="Print Barcode Labels"
                           type="button"
                         >
-                          <Barcode size={13} />
+                          <Sparkles size={13} /> Load Sample Data
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredItems.map((item) => {
+                  const itemBuyingVal = item.stock * item.buyingPrice;
+                  const itemSellingVal = item.stock * item.sellingPrice;
+                  const itemProfit = itemSellingVal - itemBuyingVal;
+                  const itemMargin = itemSellingVal > 0 ? Math.round((itemProfit / itemSellingVal) * 100) : 0;
+                  return (
+                    <tr key={item.id}>
+                      <td className="v2-mono v2-text-xs">{item.sku}</td>
+                      <td>
+                        <div className="v2-font-bold">{item.name}</div>
+                        <div className="v2-flex v2-items-center v2-gap-2 v2-mt-0.5">
+                          <span className="v2-text-xs v2-text-muted">{item.category} · {item.brand}</span>
+                          {item.batchNumber && (
+                            <span className="badge v2-badge-muted" style={{ fontSize: "10px", padding: "1px 4px" }}>
+                              Lot: {item.batchNumber}
+                            </span>
+                          )}
+                          {item.expiryDate && (() => {
+                            const diffDays = Math.round((new Date(item.expiryDate).getTime() - Date.now()) / 86400000);
+                            const badgeCls = diffDays <= 30 ? "v2-badge-danger" : diffDays <= 90 ? "v2-badge-warning" : "v2-badge-success";
+                            return (
+                              <span className={`badge ${badgeCls}`} style={{ fontSize: "10px", padding: "1px 4px" }}>
+                                Exp: {item.expiryDate} {diffDays <= 90 ? `(${diffDays}d)` : ""}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </td>
+                      <td className="v2-mono v2-font-bold">{fmtNum(item.stock)}</td>
+                      <td className="v2-mono">{money(item.buyingPrice)}</td>
+                      <td className="v2-mono v2-font-bold">{money(item.sellingPrice)}</td>
+                      <td className="v2-mono" style={{ color: "var(--accent)" }}>{money(itemBuyingVal)}</td>
+                      <td className="v2-mono">{money(itemSellingVal)}</td>
+                      <td className="v2-mono v2-font-bold" style={{ color: "var(--success)" }}>{money(itemProfit)}</td>
+                      <td><span className="badge v2-badge-success">{itemMargin}%</span></td>
+                      <td>
+                        <div className="v2-flex v2-gap-1">
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                            onClick={() => handleOpenEditModal(item)}
+                            title="Edit Product Details & Pricing"
+                            type="button"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                            onClick={() => setVariantModalProduct(item)}
+                            title="Manage Product Variants"
+                            type="button"
+                          >
+                            <Layers size={13} />
+                          </button>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                            onClick={() => {
+                              setSelectedBarcodeItem(item);
+                              setBarcodeModal(true);
+                            }}
+                            title="Print Barcode Labels"
+                            type="button"
+                          >
+                            <Barcode size={13} />
+                          </button>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                            onClick={() => handleOpenDeleteModal(item)}
+                            title="Archive / Delete Product"
+                            type="button"
+                            style={{ color: "var(--danger)" }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ─── TAB: CATEGORIES & BRANDS MASTER MANAGER ─────────────────────── */}
+      {activeTab === "categories" && (
+        <div className="v2-space-y-4">
+          {/* Header Banner */}
+          <div className="v2-flex v2-items-center v2-justify-between">
+            <div>
+              <h2 className="v2-text-base v2-font-black">Merchandise Categories &amp; Brand Taxonomy</h2>
+              <p className="v2-text-xs v2-text-muted">
+                Enterprise merchandise hierarchy, color-coded POS category tags, and manufacturer brand governance.
+              </p>
+            </div>
+            <div className="v2-flex v2-gap-2">
+              <button
+                className="v2-btn v2-btn-primary v2-btn-sm"
+                onClick={() => {
+                  setEditingCategory(null);
+                  setNewCategoryName("");
+                  setNewCategoryDesc("");
+                  setNewCategoryColor("#10b981");
+                  setAddCategoryModal(true);
+                }}
+                type="button"
+              >
+                <Plus size={13} /> Add Category
+              </button>
+              <button
+                className="v2-btn v2-btn-secondary v2-btn-sm"
+                onClick={() => {
+                  setEditingBrand(null);
+                  setNewBrandName("");
+                  setNewBrandOrigin("");
+                  setNewBrandNotes("");
+                  setAddBrandModal(true);
+                }}
+                type="button"
+              >
+                <Plus size={13} /> Add Brand
+              </button>
+            </div>
+          </div>
+
+          {/* Top Executive KPI Ribbon */}
+          <div className="v2-grid v2-grid-4 v2-gap-3">
+            <div className="v2-card v2-p-3">
+              <div className="v2-text-xs v2-text-muted">Total Categories</div>
+              <div className="v2-font-black v2-text-lg">{allCategories.length} Active</div>
+              <div className="v2-text-xs v2-text-muted v2-mt-1">
+                Catalog Valuation: <strong className="v2-mono">{money(stockSellingValue)}</strong>
+              </div>
+            </div>
+            <div className="v2-card v2-p-3">
+              <div className="v2-text-xs v2-text-muted">Top Category by Value</div>
+              <div className="v2-font-black v2-text-base v2-truncate" style={{ color: "var(--accent)" }}>
+                {topCategoryStat ? topCategoryStat.name : "None"}
+              </div>
+              <div className="v2-text-xs v2-text-muted v2-mt-1">
+                {topCategoryStat ? money(topCategoryStat.valuation) : "Tsh 0"} ({topCategoryStat ? topCategoryStat.skus : 0} SKUs)
+              </div>
+            </div>
+            <div className="v2-card v2-p-3">
+              <div className="v2-text-xs v2-text-muted">Total Brands &amp; Makes</div>
+              <div className="v2-font-black v2-text-lg">{allBrands.length} Active</div>
+              <div className="v2-text-xs v2-text-muted v2-mt-1">
+                In-Stock Units: <strong className="v2-mono">{totalStockUnits}</strong>
+              </div>
+            </div>
+            <div className="v2-card v2-p-3">
+              <div className="v2-text-xs v2-text-muted">Top Brand by Stock</div>
+              <div className="v2-font-black v2-text-base v2-truncate" style={{ color: "var(--success)" }}>
+                {topBrandStat ? topBrandStat.name : "None"}
+              </div>
+              <div className="v2-text-xs v2-text-muted v2-mt-1">
+                {topBrandStat ? `${topBrandStat.units} units` : "0 units"} ({topBrandStat ? money(topBrandStat.valuation) : "Tsh 0"})
+              </div>
+            </div>
+          </div>
+
+          <div className="v2-grid v2-grid-2 v2-gap-4">
+            {/* Categories Table Card */}
+            <div className="v2-card">
+              <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+                <div>
+                  <div className="v2-card-title">Merchandise Categories ({filteredCategories.length})</div>
+                  <div className="v2-card-subtitle">Active product categories configured for this store</div>
+                </div>
+                <button
+                  className="v2-btn v2-btn-ghost v2-btn-sm"
+                  onClick={() => {
+                    setEditingCategory(null);
+                    setNewCategoryName("");
+                    setNewCategoryDesc("");
+                    setNewCategoryColor("#10b981");
+                    setAddCategoryModal(true);
+                  }}
+                  type="button"
+                >
+                  <Plus size={12} /> New
+                </button>
+              </div>
+
+              {/* Category Search Input */}
+              <div style={{ padding: "0.5rem 1rem 0" }}>
+                <div className="v2-flex v2-items-center" style={{ position: "relative" }}>
+                  <Search size={13} style={{ position: "absolute", left: ".6rem", color: "var(--muted)" }} />
+                  <input
+                    className="v2-input v2-input-sm"
+                    style={{ paddingLeft: "1.8rem" }}
+                    placeholder="Filter categories by name or description..."
+                    value={categorySearchQuery}
+                    onChange={(e) => setCategorySearchQuery(e.target.value)}
+                  />
+                  {categorySearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCategorySearchQuery("")}
+                      className="v2-btn v2-btn-ghost v2-btn-xs"
+                      style={{ position: "absolute", right: ".4rem" }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table className="v2-table">
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 150 }}>Category</th>
+                      <th style={{ textAlign: "center", minWidth: 95 }}>Assigned SKUs</th>
+                      <th style={{ textAlign: "center", minWidth: 95 }}>In-Stock Units</th>
+                      <th style={{ textAlign: "right", minWidth: 115 }}>Valuation (Retail)</th>
+                      <th style={{ textAlign: "right", minWidth: 130 }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCategories.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="v2-text-center v2-py-4 v2-text-xs v2-text-muted">
+                          No categories matching "{categorySearchQuery}".
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCategories.map((cat) => {
+                        const catItems = items.filter((i) => i.category.toLowerCase() === cat.name.toLowerCase());
+                        const catSkus = catItems.length;
+                        const catUnits = catItems.reduce((acc, i) => acc + i.stock, 0);
+                        const catVal = catItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
+
+                        return (
+                          <tr key={cat.id || cat.name}>
+                            <td>
+                              <div
+                                style={{
+                                  borderLeft: `3.5px solid ${cat.color || "#10b981"}`,
+                                  paddingLeft: "10px",
+                                  minHeight: "22px",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <span className="v2-font-bold v2-text-sm" style={{ whiteSpace: "nowrap" }}>
+                                  {cat.name}
+                                </span>
+                                {cat.description && (
+                                  <div className="v2-text-xs v2-text-muted" style={{ fontSize: "11px", marginTop: "2px" }}>
+                                    {cat.description}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="v2-mono v2-font-bold" style={{ textAlign: "center" }}>{catSkus}</td>
+                            <td className="v2-mono" style={{ textAlign: "center" }}>{catUnits}</td>
+                            <td className="v2-mono v2-font-bold" style={{ textAlign: "right" }}>{money(catVal)}</td>
+                            <td style={{ textAlign: "right" }}>
+                              <div className="v2-flex v2-items-center v2-justify-end v2-gap-1">
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => {
+                                    setCategoryFilter(cat.name);
+                                    setActiveTab("products");
+                                    toast.info("Catalog Filtered", `Showing products in category "${cat.name}".`);
+                                  }}
+                                  title={`View ${catSkus} products in ${cat.name}`}
+                                  style={{ padding: "3px 6px", fontSize: "11px" }}
+                                >
+                                  <Eye size={12} style={{ marginRight: 2 }} />
+                                  <span>View</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => handleOpenEditCategory(cat)}
+                                  title="Edit Category"
+                                  style={{ padding: "3px 6px", fontSize: "11px" }}
+                                >
+                                  <Edit2 size={12} style={{ marginRight: 2 }} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => handleOpenDeleteCategory(cat.name, catSkus)}
+                                  title="Delete or Reassign Category"
+                                  style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Brands Table Card */}
+            <div className="v2-card">
+              <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+                <div>
+                  <div className="v2-card-title">Product Brands &amp; Makes ({filteredBrands.length})</div>
+                  <div className="v2-card-subtitle">Active manufacturer and vendor brands</div>
+                </div>
+                <button
+                  className="v2-btn v2-btn-ghost v2-btn-sm"
+                  onClick={() => {
+                    setEditingBrand(null);
+                    setNewBrandName("");
+                    setNewBrandOrigin("");
+                    setNewBrandNotes("");
+                    setAddBrandModal(true);
+                  }}
+                  type="button"
+                >
+                  <Plus size={12} /> New
+                </button>
+              </div>
+
+              {/* Brand Search Input */}
+              <div style={{ padding: "0.5rem 1rem 0" }}>
+                <div className="v2-flex v2-items-center" style={{ position: "relative" }}>
+                  <Search size={13} style={{ position: "absolute", left: ".6rem", color: "var(--muted)" }} />
+                  <input
+                    className="v2-input v2-input-sm"
+                    style={{ paddingLeft: "1.8rem" }}
+                    placeholder="Filter brands by name, origin, or maker..."
+                    value={brandSearchQuery}
+                    onChange={(e) => setBrandSearchQuery(e.target.value)}
+                  />
+                  {brandSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setBrandSearchQuery("")}
+                      className="v2-btn v2-btn-ghost v2-btn-xs"
+                      style={{ position: "absolute", right: ".4rem" }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table className="v2-table">
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 150 }}>Brand Name</th>
+                      <th style={{ textAlign: "center", minWidth: 95 }}>Assigned SKUs</th>
+                      <th style={{ textAlign: "center", minWidth: 95 }}>In-Stock Units</th>
+                      <th style={{ textAlign: "right", minWidth: 115 }}>Valuation (Retail)</th>
+                      <th style={{ textAlign: "right", minWidth: 130 }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredBrands.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="v2-text-center v2-py-4 v2-text-xs v2-text-muted">
+                          No brands matching "{brandSearchQuery}".
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredBrands.map((brand) => {
+                        const brandItems = items.filter((i) => i.brand.toLowerCase() === brand.name.toLowerCase());
+                        const brandSkus = brandItems.length;
+                        const brandUnits = brandItems.reduce((acc, i) => acc + i.stock, 0);
+                        const brandVal = brandItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
+
+                        return (
+                          <tr key={brand.id || brand.name}>
+                            <td>
+                              <div>
+                                <span className="v2-font-bold v2-text-sm" style={{ whiteSpace: "nowrap" }}>
+                                  {brand.name}
+                                </span>
+                                {brand.origin && (
+                                  <div className="v2-text-xs v2-text-muted" style={{ fontSize: "11px", marginTop: "1px" }}>
+                                    {brand.origin}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="v2-mono v2-font-bold" style={{ textAlign: "center" }}>{brandSkus}</td>
+                            <td className="v2-mono" style={{ textAlign: "center" }}>{brandUnits}</td>
+                            <td className="v2-mono v2-font-bold" style={{ textAlign: "right" }}>{money(brandVal)}</td>
+                            <td style={{ textAlign: "right" }}>
+                              <div className="v2-flex v2-items-center v2-justify-end v2-gap-1">
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => {
+                                    setSearchQuery(brand.name);
+                                    setActiveTab("products");
+                                    toast.info("Catalog Filtered", `Showing products for brand "${brand.name}".`);
+                                  }}
+                                  title={`View ${brandSkus} products for ${brand.name}`}
+                                  style={{ padding: "3px 6px", fontSize: "11px" }}
+                                >
+                                  <Eye size={12} style={{ marginRight: 2 }} />
+                                  <span>View</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => handleOpenEditBrand(brand)}
+                                  title="Edit Brand"
+                                  style={{ padding: "3px 6px", fontSize: "11px" }}
+                                >
+                                  <Edit2 size={12} style={{ marginRight: 2 }} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="v2-btn v2-btn-ghost v2-btn-xs"
+                                  onClick={() => handleOpenDeleteBrand(brand.name, brandSkus)}
+                                  title="Delete or Reassign Brand"
+                                  style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -586,25 +2189,17 @@ export const InventoryPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  { branch: "Posta HQ (Main Branch)", skus: totalUniqueSkus, units: Math.round(totalStockUnits * 0.5), buyingVal: stockBuyingValue * 0.5, sellingVal: stockSellingValue * 0.5 },
-                  { branch: "Kariakoo Store", skus: totalUniqueSkus - 1, units: Math.round(totalStockUnits * 0.3), buyingVal: stockBuyingValue * 0.3, sellingVal: stockSellingValue * 0.3 },
-                  { branch: "Arusha Hub", skus: totalUniqueSkus - 2, units: Math.round(totalStockUnits * 0.2), buyingVal: stockBuyingValue * 0.2, sellingVal: stockSellingValue * 0.2 },
-                ].map((b) => {
-                  const bProfit = b.sellingVal - b.buyingVal;
-                  const bMargin = b.sellingVal > 0 ? Math.round((bProfit / b.sellingVal) * 100) : 0;
-                  return (
-                    <tr key={b.branch}>
-                      <td className="v2-font-bold">{b.branch}</td>
-                      <td className="v2-mono">{b.skus}</td>
-                      <td className="v2-mono">{fmtNum(b.units)}</td>
-                      <td className="v2-mono" style={{ color: "var(--accent)" }}>{money(b.buyingVal)}</td>
-                      <td className="v2-mono">{money(b.sellingVal)}</td>
-                      <td className="v2-mono v2-font-bold" style={{ color: "var(--success)" }}>{money(bProfit)}</td>
-                      <td><span className="badge v2-badge-success">{bMargin}%</span></td>
-                    </tr>
-                  );
-                })}
+                {branchValuationList.map((b) => (
+                  <tr key={b.id || b.branch}>
+                    <td className="v2-font-bold">{b.branch}</td>
+                    <td className="v2-mono">{b.skus}</td>
+                    <td className="v2-mono">{fmtNum(b.units)}</td>
+                    <td className="v2-mono" style={{ color: "var(--accent)" }}>{money(b.buyingVal)}</td>
+                    <td className="v2-mono">{money(b.sellingVal)}</td>
+                    <td className="v2-mono v2-font-bold" style={{ color: "var(--success)" }}>{money(b.profit)}</td>
+                    <td><span className="badge v2-badge-success">{b.margin}%</span></td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr style={{ background: "var(--surface-2)", fontWeight: "bold" }}>
@@ -626,50 +2221,313 @@ export const InventoryPage: React.FC = () => {
       {/* --- Add Product Modal --- */}
       {addProductModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 500, padding: "1.5rem" }}>
+          <div className="v2-card" style={{ width: hasVariantsToggle ? 780 : 520, maxWidth: "96vw", maxHeight: "92vh", overflowY: "auto", padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-              <h2 className="v2-text-lg v2-font-black">Register New Inventory SKU</h2>
+              <div>
+                <h2 className="v2-text-lg v2-font-black">Register New Product</h2>
+                <p className="v2-text-xs v2-text-muted">Multi-location catalog master with variant matrix support</p>
+              </div>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setAddProductModal(false)} type="button">✕</button>
             </div>
 
             <form onSubmit={handleCreateProduct} className="v2-space-y-4">
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT FULL NAME *</label>
-                <input className="v2-input" value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} placeholder="e.g. Premium White Sugar 1kg" required />
+                <input
+                  className="v2-input"
+                  value={newProd.name}
+                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+                  placeholder="e.g. Premium White Sugar or Men's Oxford Shirt"
+                  required
+                />
               </div>
 
               <div className="v2-grid v2-grid-2 v2-gap-3">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY</label>
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY</label>
+                    <button
+                      type="button"
+                      className="v2-btn v2-btn-ghost v2-btn-xs"
+                      onClick={() => setAddCategoryModal(true)}
+                      style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
+                    >
+                      + New Cat
+                    </button>
+                  </div>
                   <select className="v2-input" value={newProd.category} onChange={(e) => setNewProd({ ...newProd, category: e.target.value })}>
-                    <option value="Grains & Flour">Grains & Flour</option>
-                    <option value="Beverages">Beverages</option>
-                    <option value="Dairy">Dairy</option>
-                    <option value="Edible Oils">Edible Oils</option>
-                    <option value="Pharmacy">Pharmacy</option>
+                    {allCategories.map((c) => (
+                      <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND / MAKE</label>
-                  <input className="v2-input" value={newProd.brand} onChange={(e) => setNewProd({ ...newProd, brand: e.target.value })} placeholder="Brand name" />
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND / MAKE</label>
+                    <button
+                      type="button"
+                      className="v2-btn v2-btn-ghost v2-btn-xs"
+                      onClick={() => {
+                        setEditingBrand(null);
+                        setNewBrandName("");
+                        setNewBrandOrigin("");
+                        setNewBrandNotes("");
+                        setAddBrandModal(true);
+                      }}
+                      style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
+                    >
+                      + New Brand
+                    </button>
+                  </div>
+                  <select
+                    className="v2-input"
+                    value={newProd.brand || "General"}
+                    onChange={(e) => setNewProd({ ...newProd, brand: e.target.value })}
+                  >
+                    <option value="General">General (Unbranded)</option>
+                    {allBrands
+                      .filter((b) => b.name.toLowerCase() !== "general")
+                      .map((b) => (
+                        <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                      ))}
+                    {newProd.brand && newProd.brand !== "General" && !allBrands.some((b) => b.name.toLowerCase() === newProd.brand.toLowerCase()) && (
+                      <option value={newProd.brand}>{newProd.brand}</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* In-Flow Variant Builder Toggle & Matrix Studio */}
+              <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)", border: "1px solid var(--surface-border)" }}>
+                <label className="v2-flex v2-items-center v2-justify-between" style={{ cursor: "pointer", userSelect: "none" }}>
+                  <div className="v2-flex v2-items-center v2-gap-2">
+                    <input
+                      type="checkbox"
+                      checked={hasVariantsToggle}
+                      onChange={(e) => {
+                        const active = e.target.checked;
+                        setHasVariantsToggle(active);
+                        if (active && inflowVariants.length === 0) {
+                          generateInflowCombinations();
+                        }
+                      }}
+                    />
+                    <span className="v2-font-bold v2-text-sm">This product has variants (e.g. Multiple Sizes, Colors, Packs, or Flavours)</span>
+                  </div>
+                  <span className="badge v2-badge-primary">World-Class Variant Matrix</span>
+                </label>
+
+                {hasVariantsToggle && (
+                  <div className="v2-mt-3 v2-space-y-3">
+                    <div className="v2-grid v2-grid-2 v2-gap-2">
+                      <div>
+                        <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 1 (e.g. Size, Pack, Weight)</label>
+                        <input
+                          className="v2-input v2-input-sm"
+                          value={varOption1Name}
+                          onChange={(e) => setVarOption1Name(e.target.value)}
+                          placeholder="e.g. Size"
+                        />
+                      </div>
+                      <div>
+                        <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
+                        <input
+                          className="v2-input v2-input-sm"
+                          value={varOption1Values}
+                          onChange={(e) => setVarOption1Values(e.target.value)}
+                          placeholder="Small, Medium, Large"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="v2-grid v2-grid-2 v2-gap-2">
+                      <div>
+                        <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 2 (Optional, e.g. Color, Flavour)</label>
+                        <input
+                          className="v2-input v2-input-sm"
+                          value={varOption2Name}
+                          onChange={(e) => setVarOption2Name(e.target.value)}
+                          placeholder="e.g. Color"
+                        />
+                      </div>
+                      <div>
+                        <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
+                        <input
+                          className="v2-input v2-input-sm"
+                          value={varOption2Values}
+                          onChange={(e) => setVarOption2Values(e.target.value)}
+                          placeholder="Red, Blue, Black (or leave empty)"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="v2-flex v2-items-center v2-justify-between v2-pt-1">
+                      <button
+                        type="button"
+                        className="v2-btn v2-btn-secondary v2-btn-xs"
+                        onClick={() => generateInflowCombinations()}
+                      >
+                        <Zap size={12} /> Regenerate Combinations Matrix
+                      </button>
+                      <span className="v2-text-xs v2-text-muted">
+                        <strong>{inflowVariants.length}</strong> variant{inflowVariants.length === 1 ? "" : "s"} &bull; Total Variant Stock: <strong>{inflowVariants.reduce((s, v) => s + (Number(v.stock) || 0), 0)}</strong> units
+                      </span>
+                    </div>
+
+                    {/* Matrix Grid */}
+                    <div style={{ maxHeight: "220px", overflowY: "auto", border: "1px solid var(--surface-border)", borderRadius: "var(--radius-xs)" }}>
+                      <table className="v2-table v2-table-sm" style={{ margin: 0, fontSize: "11px" }}>
+                        <thead>
+                          <tr>
+                            <th>Variant Name</th>
+                            <th>SKU Code</th>
+                            <th>Barcode</th>
+                            <th>Cost</th>
+                            <th>Retail</th>
+                            <th>Stock</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inflowVariants.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="v2-text-center v2-text-muted v2-py-3">
+                                No variant combinations yet. Click 'Regenerate Combinations Matrix' above.
+                              </td>
+                            </tr>
+                          ) : (
+                            inflowVariants.map((v, vIdx) => (
+                              <tr key={v.id}>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs"
+                                    value={v.name}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, name: val } : item));
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs v2-mono"
+                                    value={v.sku}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, sku: val } : item));
+                                    }}
+                                    style={{ width: "130px" }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs v2-mono"
+                                    value={v.barcode || ""}
+                                    placeholder="Scan or auto"
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, barcode: val } : item));
+                                    }}
+                                    style={{ width: "110px" }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs v2-mono"
+                                    type="number"
+                                    value={v.buyingPrice || ""}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, buyingPrice: val } : item));
+                                    }}
+                                    style={{ width: "70px" }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs v2-mono"
+                                    type="number"
+                                    value={v.sellingPrice || ""}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, sellingPrice: val } : item));
+                                    }}
+                                    style={{ width: "70px" }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="v2-input v2-input-xs v2-mono"
+                                    type="number"
+                                    value={v.stock || ""}
+                                    onChange={(e) => {
+                                      const val = Number(e.target.value);
+                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, stock: val } : item));
+                                    }}
+                                    style={{ width: "55px" }}
+                                  />
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="v2-btn v2-btn-ghost v2-btn-icon-xs"
+                                    style={{ color: "var(--danger)" }}
+                                    title="Remove variant combination"
+                                    onClick={() => setInflowVariants(prev => prev.filter((_, idx) => idx !== vIdx))}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="v2-grid v2-grid-2 v2-gap-3">
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">
+                    BUYING COST PRICE (TSH) {hasVariantsToggle && <span className="badge v2-badge-muted">Variant Default</span>}
+                  </label>
+                  <input
+                    className="v2-input"
+                    type="number"
+                    value={hasVariantsToggle && inflowVariants[0] ? inflowVariants[0].buyingPrice : (newProd.buyingPrice || "")}
+                    onChange={(e) => setNewProd({ ...newProd, buyingPrice: Number(e.target.value) })}
+                    required={!hasVariantsToggle}
+                  />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">
+                    SELLING RETAIL PRICE (TSH) {hasVariantsToggle && <span className="badge v2-badge-muted">Variant Default</span>}
+                  </label>
+                  <input
+                    className="v2-input"
+                    type="number"
+                    value={hasVariantsToggle && inflowVariants[0] ? inflowVariants[0].sellingPrice : (newProd.sellingPrice || "")}
+                    onChange={(e) => setNewProd({ ...newProd, sellingPrice: Number(e.target.value) })}
+                    required={!hasVariantsToggle}
+                  />
                 </div>
               </div>
 
               <div className="v2-grid v2-grid-2 v2-gap-3">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">BUYING COST PRICE (TSH)</label>
-                  <input className="v2-input" type="number" value={newProd.buyingPrice || ""} onChange={(e) => setNewProd({ ...newProd, buyingPrice: Number(e.target.value) })} required />
-                </div>
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">SELLING RETAIL PRICE (TSH)</label>
-                  <input className="v2-input" type="number" value={newProd.sellingPrice || ""} onChange={(e) => setNewProd({ ...newProd, sellingPrice: Number(e.target.value) })} required />
-                </div>
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-3">
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">INITIAL STOCK QTY</label>
-                  <input className="v2-input" type="number" value={newProd.stock || ""} onChange={(e) => setNewProd({ ...newProd, stock: Number(e.target.value) })} required />
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">
+                    INITIAL STOCK QTY {hasVariantsToggle && <span className="badge v2-badge-success">Sum of Variants</span>}
+                  </label>
+                  <input
+                    className="v2-input"
+                    type="number"
+                    disabled={hasVariantsToggle}
+                    value={hasVariantsToggle ? inflowVariants.reduce((s, v) => s + (Number(v.stock) || 0), 0) : (newProd.stock || "")}
+                    onChange={(e) => setNewProd({ ...newProd, stock: Number(e.target.value) })}
+                    required={!hasVariantsToggle}
+                  />
                 </div>
                 <div>
                   <label className="v2-text-xs v2-font-bold v2-text-muted">REORDER THRESHOLD</label>
@@ -677,11 +2535,690 @@ export const InventoryPage: React.FC = () => {
                 </div>
               </div>
 
+              <div className="v2-grid v2-grid-2 v2-gap-3">
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">BATCH / LOT NUMBER</label>
+                  <input
+                    className="v2-input"
+                    placeholder="e.g. LOT-2026-09"
+                    value={newProd.batchNumber || ""}
+                    onChange={(e) => setNewProd({ ...newProd, batchNumber: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">EXPIRY DATE (FEFO)</label>
+                  <input
+                    className="v2-input"
+                    type="date"
+                    value={newProd.expiryDate || ""}
+                    onChange={(e) => setNewProd({ ...newProd, expiryDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
                 <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setAddProductModal(false)} type="button">Cancel</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Save Product SKU</button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
+                  {hasVariantsToggle && inflowVariants.length > 0 ? `Save Product & ${inflowVariants.length} Variants` : "Save Product"}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Edit Product Slide-Over Drawer (Sheet) --- */}
+      <Sheet
+        isOpen={Boolean(editProductModal && editingItem)}
+        onClose={() => setEditProductModal(false)}
+        title={
+          <div className="v2-flex v2-items-center v2-gap-2">
+            <Edit2 size={18} className="v2-text-accent" />
+            <span>Edit Inventory SKU</span>
+          </div>
+        }
+        description={editingItem ? `SKU Code: ${editingItem.sku} · Update pricing, classification, and stock targets` : ""}
+        width={560}
+      >
+        {editingItem && (
+          <form onSubmit={handleSaveEditProduct} className="v2-space-y-4">
+            <div>
+              <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT FULL NAME *</label>
+              <input
+                className="v2-input"
+                value={editProd.name}
+                onChange={(e) => setEditProd({ ...editProd, name: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="v2-grid v2-grid-2 v2-gap-3">
+              <div>
+                <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY</label>
+                  <button
+                    type="button"
+                    className="v2-btn v2-btn-ghost v2-btn-xs"
+                    onClick={() => setAddCategoryModal(true)}
+                    style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
+                  >
+                    + New
+                  </button>
+                </div>
+                <select
+                  className="v2-input"
+                  value={editProd.category}
+                  onChange={(e) => setEditProd({ ...editProd, category: e.target.value })}
+                >
+                  {allCategories.map((c) => (
+                    <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND / MAKE</label>
+                  <button
+                    type="button"
+                    className="v2-btn v2-btn-ghost v2-btn-xs"
+                    onClick={() => {
+                      setEditingBrand(null);
+                      setNewBrandName("");
+                      setNewBrandOrigin("");
+                      setNewBrandNotes("");
+                      setAddBrandModal(true);
+                    }}
+                    style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
+                  >
+                    + New Brand
+                  </button>
+                </div>
+                <select
+                  className="v2-input"
+                  value={editProd.brand || "General"}
+                  onChange={(e) => setEditProd({ ...editProd, brand: e.target.value })}
+                >
+                  <option value="General">General (Unbranded)</option>
+                  {allBrands
+                    .filter((b) => b.name.toLowerCase() !== "general")
+                    .map((b) => (
+                      <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  {editProd.brand && editProd.brand !== "General" && !allBrands.some((b) => b.name.toLowerCase() === editProd.brand.toLowerCase()) && (
+                    <option value={editProd.brand}>{editProd.brand}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div className="v2-grid v2-grid-2 v2-gap-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">BUYING COST PRICE (TSH)</label>
+                <input
+                  className="v2-input"
+                  type="number"
+                  value={editProd.buyingPrice}
+                  onChange={(e) => setEditProd({ ...editProd, buyingPrice: Number(e.target.value) })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">SELLING RETAIL PRICE (TSH)</label>
+                <input
+                  className="v2-input"
+                  type="number"
+                  value={editProd.sellingPrice}
+                  onChange={(e) => setEditProd({ ...editProd, sellingPrice: Number(e.target.value) })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="v2-grid v2-grid-2 v2-gap-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">INVENTORY STOCK ON HAND</label>
+                <input
+                  className="v2-input"
+                  type="number"
+                  value={editProd.stock}
+                  onChange={(e) => setEditProd({ ...editProd, stock: Number(e.target.value) })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">REORDER THRESHOLD</label>
+                <input
+                  className="v2-input"
+                  type="number"
+                  value={editProd.reorderLevel}
+                  onChange={(e) => setEditProd({ ...editProd, reorderLevel: Number(e.target.value) })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="v2-grid v2-grid-2 v2-gap-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">BATCH / LOT NUMBER</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. LOT-2026-09"
+                  value={editProd.batchNumber || ""}
+                  onChange={(e) => setEditProd({ ...editProd, batchNumber: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">EXPIRY DATE (FEFO)</label>
+                <input
+                  className="v2-input"
+                  type="date"
+                  value={editProd.expiryDate || ""}
+                  onChange={(e) => setEditProd({ ...editProd, expiryDate: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-flex v2-justify-between v2-text-xs">
+                <span className="v2-text-muted">Expected Unit Margin:</span>
+                <span className="v2-mono v2-font-bold" style={{ color: "var(--success)" }}>
+                  {money(editProd.sellingPrice - editProd.buyingPrice)} ({editProd.sellingPrice > 0 ? Math.round(((editProd.sellingPrice - editProd.buyingPrice) / editProd.sellingPrice) * 100) : 0}%)
+                </span>
+              </div>
+            </div>
+
+            <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-4" style={{ borderTop: "1px solid var(--surface-border)" }}>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setEditProductModal(false)} type="button">Cancel</button>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Save Changes</button>
+            </div>
+          </form>
+        )}
+      </Sheet>
+
+      {/* --- Archive / Delete SKU Confirmation Modal --- */}
+      {deleteConfirmModal && itemToDelete && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-gap-3 v2-mb-3">
+              <div
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "var(--radius-full)",
+                  background: "rgba(239, 68, 68, 0.15)",
+                  color: "var(--danger)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="v2-font-black v2-text-base">Archive Product SKU</h3>
+                <div className="v2-text-xs v2-text-muted">Preserve audit trail and financial history</div>
+              </div>
+            </div>
+
+            <p className="v2-text-sm v2-mb-3">
+              Are you sure you want to archive <strong>{itemToDelete.name}</strong> (<span className="v2-mono v2-text-xs">{itemToDelete.sku}</span>)?
+            </p>
+
+            <div className="v2-p-3 v2-mb-4" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", fontSize: ".8rem" }}>
+              <div className="v2-font-bold v2-mb-1">SaaS Best-Practice Architecture:</div>
+              <div className="v2-text-muted">
+                Archiving marks the SKU inactive and immediately hides it from the active POS counter. Past receipts, sales reports, and stock ledgers are securely retained for tax and audit compliance.
+              </div>
+            </div>
+
+            <div className="v2-flex v2-justify-end v2-gap-2">
+              <button
+                className="v2-btn v2-btn-secondary v2-btn-sm"
+                onClick={() => {
+                  setDeleteConfirmModal(false);
+                  setItemToDelete(null);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="v2-btn v2-btn-danger v2-btn-sm"
+                onClick={() => handleConfirmArchiveDelete(true)}
+                type="button"
+              >
+                Archive SKU
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Add / Edit Merchandise Category Modal --- */}
+      {addCategoryModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 480, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+              <div>
+                <h3 className="v2-font-black v2-text-base">
+                  {editingCategory ? "Edit Merchandise Category" : "Add New Category"}
+                </h3>
+                <div className="v2-text-xs v2-text-muted">
+                  Enterprise taxonomy, POS color badge, and real-time SKU re-classification
+                </div>
+              </div>
+              <button
+                className="v2-btn v2-btn-ghost v2-btn-sm"
+                onClick={() => {
+                  setAddCategoryModal(false);
+                  setEditingCategory(null);
+                }}
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCategory} className="v2-space-y-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY NAME *</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. Frozen Foods, Dairy, Beverages..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">DESCRIPTION (OPTIONAL)</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. Perishable frozen items requiring refrigeration"
+                  value={newCategoryDesc}
+                  onChange={(e) => setNewCategoryDesc(e.target.value)}
+                />
+              </div>
+
+              {/* Square Register Style Color Swatches */}
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted v2-block v2-mb-1">
+                  POS TILE COLOR THEME
+                </label>
+                <div className="v2-flex v2-items-center v2-gap-2 v2-flex-wrap">
+                  {CATEGORY_COLORS.map((col) => {
+                    const isSelected = newCategoryColor.toLowerCase() === col.hex.toLowerCase();
+                    return (
+                      <button
+                        key={col.hex}
+                        type="button"
+                        onClick={() => setNewCategoryColor(col.hex)}
+                        title={col.label}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: "50%",
+                          backgroundColor: col.hex,
+                          border: isSelected ? "3px solid var(--text)" : "2px solid transparent",
+                          cursor: "pointer",
+                          display: "grid",
+                          placeItems: "center",
+                          outline: "none",
+                          transition: "transform 0.15s ease",
+                          transform: isSelected ? "scale(1.15)" : "scale(1)",
+                          boxShadow: isSelected ? `0 0 8px ${col.hex}aa` : "none",
+                        }}
+                      >
+                        {isSelected && <Check size={14} color="#ffffff" strokeWidth={3} />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="v2-flex v2-items-center v2-gap-2 v2-mt-2">
+                  <span className="v2-text-xs v2-text-muted">Preview:</span>
+                  <span
+                    className="badge v2-text-xs v2-font-bold"
+                    style={{
+                      background: `${newCategoryColor}18`,
+                      color: newCategoryColor,
+                      border: `1px solid ${newCategoryColor}40`,
+                      padding: "2px 8px",
+                    }}
+                  >
+                    {newCategoryName.trim() || "Category Preview"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Cascade Rename Toggle if editing existing category */}
+              {editingCategory && (
+                <label
+                  className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-font-bold v2-cursor-pointer v2-p-2"
+                  style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={categoryCascadeRename}
+                    onChange={(e) => setCategoryCascadeRename(e.target.checked)}
+                  />
+                  <span>Automatically update category on all existing assigned products</span>
+                </label>
+              )}
+
+              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
+                <button
+                  className="v2-btn v2-btn-ghost v2-btn-sm"
+                  onClick={() => {
+                    setAddCategoryModal(false);
+                    setEditingCategory(null);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
+                  {editingCategory ? "Update Category" : "Save Category"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Add / Edit Brand Modal --- */}
+      {addBrandModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 480, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+              <div>
+                <h3 className="v2-font-black v2-text-base">
+                  {editingBrand ? "Edit Brand / Manufacturer" : "Add New Brand / Make"}
+                </h3>
+                <div className="v2-text-xs v2-text-muted">
+                  Global manufacturer taxonomy, supplier origin, and product governance
+                </div>
+              </div>
+              <button
+                className="v2-btn v2-btn-ghost v2-btn-sm"
+                onClick={() => {
+                  setAddBrandModal(false);
+                  setEditingBrand(null);
+                }}
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBrand} className="v2-space-y-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND NAME *</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. Coca-Cola, Samsung, Azam, Unilever..."
+                  value={newBrandName}
+                  onChange={(e) => setNewBrandName(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">ORIGIN / SUPPLIER (OPTIONAL)</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. Tanzania, Kenya, Germany, Japan..."
+                  value={newBrandOrigin}
+                  onChange={(e) => setNewBrandOrigin(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">VENDOR / INTERNAL NOTES (OPTIONAL)</label>
+                <input
+                  className="v2-input"
+                  placeholder="e.g. Authorized distributor code, contact, or delivery cycle"
+                  value={newBrandNotes}
+                  onChange={(e) => setNewBrandNotes(e.target.value)}
+                />
+              </div>
+
+              {/* Cascade Rename Toggle if editing existing brand */}
+              {editingBrand && (
+                <label
+                  className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-font-bold v2-cursor-pointer v2-p-2"
+                  style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={brandCascadeRename}
+                    onChange={(e) => setBrandCascadeRename(e.target.checked)}
+                  />
+                  <span>Automatically update brand on all existing assigned products</span>
+                </label>
+              )}
+
+              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
+                <button
+                  className="v2-btn v2-btn-ghost v2-btn-sm"
+                  onClick={() => {
+                    setAddBrandModal(false);
+                    setEditingBrand(null);
+                  }}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
+                  {editingBrand ? "Update Brand" : "Save Brand"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Delete Category Safeguard Modal --- */}
+      {deleteCategorySafeguard && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 460, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-gap-3 v2-mb-3">
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "var(--radius-full)",
+                  background: "rgba(239, 68, 68, 0.15)",
+                  color: "var(--danger)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="v2-font-black v2-text-base">Delete Category Safeguard</h3>
+                <div className="v2-text-xs v2-text-muted">
+                  Prevent orphaned catalog SKUs &amp; maintain catalog taxonomy
+                </div>
+              </div>
+            </div>
+
+            {deleteCategorySafeguard.assignedCount > 0 ? (
+              <div className="v2-space-y-3">
+                <div
+                  className="v2-p-3"
+                  style={{
+                    background: "rgba(239, 68, 68, 0.08)",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    borderRadius: "var(--radius-md)",
+                  }}
+                >
+                  <div className="v2-font-bold v2-text-xs" style={{ color: "var(--danger)" }}>
+                    ACTIVE PRODUCTS ASSIGNED
+                  </div>
+                  <div className="v2-text-xs v2-mt-1">
+                    There are currently <strong>{deleteCategorySafeguard.assignedCount} active products</strong> assigned to category <strong>"{deleteCategorySafeguard.category}"</strong>.
+                  </div>
+                </div>
+
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">
+                    SELECT FALLBACK REASSIGNMENT CATEGORY *
+                  </label>
+                  <select
+                    className="v2-input v2-mt-1"
+                    value={deleteCategorySafeguard.fallbackCategory}
+                    onChange={(e) =>
+                      setDeleteCategorySafeguard({
+                        ...deleteCategorySafeguard,
+                        fallbackCategory: e.target.value,
+                      })
+                    }
+                  >
+                    {allCategories
+                      .filter((c) => c.name.toLowerCase() !== deleteCategorySafeguard.category.toLowerCase())
+                      .map((c) => (
+                        <option key={c.id || c.name} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    <option value="General">General (Default Fallback)</option>
+                  </select>
+                  <p className="v2-text-xs v2-text-muted v2-mt-1">
+                    All {deleteCategorySafeguard.assignedCount} products will be safely moved to this category to prevent orphans.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="v2-text-sm">
+                Are you sure you want to delete category <strong>"{deleteCategorySafeguard.category}"</strong>?
+                No active catalog products are assigned to this category.
+              </p>
+            )}
+
+            <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-4" style={{ borderTop: "1px solid var(--surface-border)" }}>
+              <button
+                className="v2-btn v2-btn-secondary v2-btn-sm"
+                onClick={() => setDeleteCategorySafeguard(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="v2-btn v2-btn-danger v2-btn-sm"
+                onClick={handleConfirmDeleteCategory}
+                type="button"
+              >
+                {deleteCategorySafeguard.assignedCount > 0 ? "Reassign SKUs & Delete" : "Delete Category"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Delete Brand Safeguard Modal --- */}
+      {deleteBrandSafeguard && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 460, padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-gap-3 v2-mb-3">
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "var(--radius-full)",
+                  background: "rgba(239, 68, 68, 0.15)",
+                  color: "var(--danger)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="v2-font-black v2-text-base">Delete Brand Safeguard</h3>
+                <div className="v2-text-xs v2-text-muted">
+                  Prevent unbranded SKUs &amp; maintain vendor lineage
+                </div>
+              </div>
+            </div>
+
+            {deleteBrandSafeguard.assignedCount > 0 ? (
+              <div className="v2-space-y-3">
+                <div
+                  className="v2-p-3"
+                  style={{
+                    background: "rgba(239, 68, 68, 0.08)",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    borderRadius: "var(--radius-md)",
+                  }}
+                >
+                  <div className="v2-font-bold v2-text-xs" style={{ color: "var(--danger)" }}>
+                    ACTIVE PRODUCTS ASSIGNED
+                  </div>
+                  <div className="v2-text-xs v2-mt-1">
+                    There are currently <strong>{deleteBrandSafeguard.assignedCount} active products</strong> assigned to brand <strong>"{deleteBrandSafeguard.brand}"</strong>.
+                  </div>
+                </div>
+
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">
+                    SELECT FALLBACK REASSIGNMENT BRAND *
+                  </label>
+                  <select
+                    className="v2-input v2-mt-1"
+                    value={deleteBrandSafeguard.fallbackBrand}
+                    onChange={(e) =>
+                      setDeleteBrandSafeguard({
+                        ...deleteBrandSafeguard,
+                        fallbackBrand: e.target.value,
+                      })
+                    }
+                  >
+                    {allBrands
+                      .filter((b) => b.name.toLowerCase() !== deleteBrandSafeguard.brand.toLowerCase())
+                      .map((b) => (
+                        <option key={b.id || b.name} value={b.name}>
+                          {b.name}
+                        </option>
+                      ))}
+                    <option value="General">General (Default Fallback)</option>
+                  </select>
+                  <p className="v2-text-xs v2-text-muted v2-mt-1">
+                    All {deleteBrandSafeguard.assignedCount} products will be safely moved to this brand.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="v2-text-sm">
+                Are you sure you want to delete brand <strong>"{deleteBrandSafeguard.brand}"</strong>?
+                No active catalog products are assigned to this brand.
+              </p>
+            )}
+
+            <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-4" style={{ borderTop: "1px solid var(--surface-border)" }}>
+              <button
+                className="v2-btn v2-btn-secondary v2-btn-sm"
+                onClick={() => setDeleteBrandSafeguard(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="v2-btn v2-btn-danger v2-btn-sm"
+                onClick={handleConfirmDeleteBrand}
+                type="button"
+              >
+                {deleteBrandSafeguard.assignedCount > 0 ? "Reassign SKUs & Delete" : "Delete Brand"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -793,35 +3330,114 @@ export const InventoryPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="v2-flex v2-items-center v2-justify-between v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
-                    <div className="v2-font-bold v2-text-xs">Price Versioning & Price History Ledger</div>
-                    <button
-                      className="v2-btn v2-btn-primary v2-btn-sm"
-                      type="button"
-                      onClick={() => {
-                        const newBuy = Number(prompt("Enter NEW Buying Price (Cost):", String(variantModalProduct.buyingPrice)));
-                        if (isNaN(newBuy) || newBuy < 0) return;
-                        const newSell = Number(prompt("Enter NEW Selling Price (Retail):", String(variantModalProduct.sellingPrice)));
-                        if (isNaN(newSell) || newSell < 0) return;
-                        const reason = prompt("Enter mandatory Reason for Price Change (e.g. Supplier Increase, Promotion):", "Supplier Cost Adjustment");
-                        if (!reason || !reason.trim()) {
-                          alert("Reason is required for Price History audit logging!");
-                          return;
-                        }
-                        const margin = newSell - newBuy;
-                        const marginPct = newSell > 0 ? Math.round((margin / newSell) * 10000) / 100 : 0;
-                        const updated = {
-                          ...variantModalProduct,
-                          buyingPrice: newBuy,
-                          sellingPrice: newSell,
-                        };
-                        setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updated : i));
-                        setVariantModalProduct(updated);
-                        alert(`Price version recorded! New Margin: ${money(margin)} (${marginPct}%)`);
-                      }}
-                    >
-                      <DollarSign size={13} /> Record Price Change
-                    </button>
+                  <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                    <div className="v2-flex v2-items-center v2-justify-between">
+                      <div>
+                        <div className="v2-font-bold v2-text-sm">Price Versioning & Margin Audit Ledger</div>
+                        <div className="v2-text-xs v2-text-muted">Commit verified wholesale cost & retail price version with audit trail</div>
+                      </div>
+                      <button
+                        className="v2-btn v2-btn-primary v2-btn-sm"
+                        type="button"
+                        onClick={() => {
+                          setPriceAuditNewBuy(variantModalProduct.buyingPrice);
+                          setPriceAuditNewSell(variantModalProduct.sellingPrice);
+                          setPriceAuditReason("Supplier Cost Adjustment");
+                          setPriceAuditNotes("");
+                          setPriceAuditOpen(!priceAuditOpen);
+                        }}
+                      >
+                        <DollarSign size={13} /> {priceAuditOpen ? "Close Form" : "Record Price Change"}
+                      </button>
+                    </div>
+
+                    {priceAuditOpen && (
+                      <div className="v2-mt-3 v2-p-3" style={{ background: "var(--surface-1)", borderRadius: "var(--radius-xs)", border: "1px solid var(--surface-border)" }}>
+                        <div className="v2-font-bold v2-text-xs v2-mb-2" style={{ color: "var(--primary)" }}>NEW PRICE VERSION AUDIT FORM</div>
+                        <div className="v2-grid v2-grid-3 v2-gap-2">
+                          <div>
+                            <label className="v2-text-xs v2-font-bold v2-text-muted">NEW BUYING COST (TSH)</label>
+                            <input
+                              className="v2-input v2-input-sm"
+                              type="number"
+                              value={priceAuditNewBuy}
+                              onChange={(e) => setPriceAuditNewBuy(Number(e.target.value))}
+                            />
+                          </div>
+                          <div>
+                            <label className="v2-text-xs v2-font-bold v2-text-muted">NEW SELLING PRICE (TSH)</label>
+                            <input
+                              className="v2-input v2-input-sm"
+                              type="number"
+                              value={priceAuditNewSell}
+                              onChange={(e) => setPriceAuditNewSell(Number(e.target.value))}
+                            />
+                          </div>
+                          <div>
+                            <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT REASON CODE</label>
+                            <select
+                              className="v2-input v2-input-sm"
+                              value={priceAuditReason}
+                              onChange={(e) => setPriceAuditReason(e.target.value)}
+                            >
+                              <option value="Supplier Cost Adjustment">Supplier Cost Adjustment</option>
+                              <option value="Inflation / FX Shift">Inflation / FX Shift</option>
+                              <option value="Promotional Markdown">Promotional Markdown</option>
+                              <option value="Market Competitor Match">Market Competitor Match</option>
+                              <option value="End of Season Liquidation">End of Season Liquidation</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="v2-mt-2">
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">AUDITOR MEMO / NOTES</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            placeholder="e.g. Invoice #TZ-2026-99 received from supplier with updated tariff"
+                            value={priceAuditNotes}
+                            onChange={(e) => setPriceAuditNotes(e.target.value)}
+                          />
+                        </div>
+                        <div className="v2-flex v2-justify-end v2-gap-2 v2-mt-3">
+                          <button
+                            type="button"
+                            className="v2-btn v2-btn-ghost v2-btn-xs"
+                            onClick={() => setPriceAuditOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="v2-btn v2-btn-primary v2-btn-xs"
+                            onClick={() => {
+                              const newBuy = Number(priceAuditNewBuy);
+                              const newSell = Number(priceAuditNewSell);
+                              if (isNaN(newBuy) || newBuy < 0 || isNaN(newSell) || newSell < 0) {
+                                toast.warning("Invalid Input", "Please enter valid buying and selling prices.");
+                                return;
+                              }
+                              const margin = newSell - newBuy;
+                              const marginPct = newSell > 0 ? Math.round((margin / newSell) * 10000) / 100 : 0;
+                              const updated = {
+                                ...variantModalProduct,
+                                buyingPrice: newBuy,
+                                costPrice: newBuy,
+                                sellingPrice: newSell,
+                                price: newSell,
+                              };
+                              db.saveProductLocal(updated as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
+                              setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updated : i));
+                              setVariantModalProduct(updated);
+                              setPriceAuditOpen(false);
+                              playSuccessChime();
+                              toast.success("Price Version Recorded", `New Margin: ${money(margin)} (${marginPct}%) · Reason: ${priceAuditReason}`);
+                              window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            }}
+                          >
+                            <Check size={12} /> Commit Price Version
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Price History Timeline */}
@@ -886,115 +3502,609 @@ export const InventoryPage: React.FC = () => {
                 </div>
               )}
 
-              {/* TAB 4: Variants */}
+              {/* TAB 4: Variants Studio */}
               {(newVarAttrKey === "variants" || newVarAttrKey === "Pack" || newVarAttrKey === "Color" || newVarAttrKey === "Custom") && (
                 <div className="v2-space-y-4">
                   {/* Action Toolbar */}
                   <div className="v2-flex v2-items-center v2-justify-between v2-gap-2 v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
                     <div className="v2-flex v2-items-center v2-gap-2">
                       <button
-                        className="v2-btn v2-btn-primary v2-btn-sm"
+                        className={`v2-btn v2-btn-sm ${variantStudioPanel === "add_single" ? "v2-btn-primary" : "v2-btn-secondary"}`}
                         type="button"
                         onClick={() => {
-                          const vName = prompt("Enter variant name (e.g. Size: Large / Color: Blue):", "Size: Large");
-                          if (!vName) return;
-                          const vPrice = Number(prompt("Enter selling price (Leave 0 to inherit parent price):", "0") || 0);
-                          const vStock = Number(prompt("Enter initial stock quantity:", "10") || 10);
-                          const newVar: ProductVariantData = {
-                            id: `var-${Date.now()}`,
-                            name: vName,
-                            sku: `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`,
-                            attributes: { Custom: vName },
-                            buyingPrice: variantModalProduct.buyingPrice,
-                            sellingPrice: vPrice > 0 ? vPrice : variantModalProduct.sellingPrice,
-                            stock: vStock,
-                            reorderLevel: 5,
-                          };
-                          const updated = [...(variantModalProduct.variants || []), newVar];
-                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updated } : i));
-                          setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updated });
+                          if (variantStudioPanel === "add_single") {
+                            setVariantStudioPanel("none");
+                          } else {
+                            setSingleVarName("");
+                            setSingleVarSku(`VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`);
+                            setSingleVarBarcode(`890${Math.floor(100000000 + Math.random() * 900000000)}`);
+                            setSingleVarBuying(variantModalProduct.buyingPrice);
+                            setSingleVarSelling(variantModalProduct.sellingPrice);
+                            setSingleVarStock(10);
+                            setSingleVarReorder(5);
+                            setVariantStudioPanel("add_single");
+                          }
                         }}
                       >
-                        <Plus size={13} /> Add Variant
+                        <Plus size={13} /> Add Single Variant
                       </button>
 
                       <button
-                        className="v2-btn v2-btn-secondary v2-btn-sm"
+                        className={`v2-btn v2-btn-sm ${variantStudioPanel === "generate_matrix" ? "v2-btn-primary" : "v2-btn-secondary"}`}
                         type="button"
                         onClick={() => {
-                          const attr1 = prompt("Enter first attribute name (e.g. Size):", "Size");
-                          if (!attr1) return;
-                          const vals1 = prompt("Enter comma-separated values for " + attr1 + ":", "Small, Medium, Large");
-                          if (!vals1) return;
-                          const attr2 = prompt("Enter second attribute name (e.g. Color) or leave empty:", "Color");
-                          const vals2 = attr2 ? prompt("Enter comma-separated values for " + attr2 + ":", "Black, White") : "";
-
-                          const list1 = vals1.split(",").map((s) => s.trim()).filter(Boolean);
-                          const list2 = vals2 ? vals2.split(",").map((s) => s.trim()).filter(Boolean) : [""];
-
-                          const generated: ProductVariantData[] = [];
-                          for (const v1 of list1) {
-                            for (const v2 of list2) {
-                              const label = v2 ? `${attr1}: ${v1} / ${attr2}: ${v2}` : `${attr1}: ${v1}`;
-                              const skuSuffix = (v1 + (v2 ? "-" + v2 : "")).replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
-                              generated.push({
-                                id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                                name: `${variantModalProduct.name} (${label})`,
-                                sku: `${variantModalProduct.sku}-${skuSuffix}`,
-                                attributes: { [attr1]: v1, ...(attr2 && v2 ? { [attr2]: v2 } : {}) },
-                                buyingPrice: variantModalProduct.buyingPrice,
-                                sellingPrice: variantModalProduct.sellingPrice,
-                                stock: 10,
-                                reorderLevel: 5,
-                              });
-                            }
-                          }
-
-                          const updated = [...(variantModalProduct.variants || []), ...generated];
-                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, hasVariants: true, variants: updated } : i));
-                          setVariantModalProduct({ ...variantModalProduct, hasVariants: true, variants: updated });
-                          alert(`Successfully generated ${generated.length} variant combinations!`);
+                          setVariantStudioPanel(variantStudioPanel === "generate_matrix" ? "none" : "generate_matrix");
                         }}
                       >
-                        <Zap size={13} /> Generate Variants Matrix
+                        <Zap size={13} /> Generate Matrix
+                      </button>
+
+                      <button
+                        className={`v2-btn v2-btn-sm ${variantStudioPanel === "bulk_ops" ? "v2-btn-primary" : "v2-btn-ghost"}`}
+                        type="button"
+                        onClick={() => {
+                          setVariantStudioPanel(variantStudioPanel === "bulk_ops" ? "none" : "bulk_ops");
+                        }}
+                      >
+                        Bulk Adjustments
                       </button>
                     </div>
 
-                    <div className="v2-flex v2-items-center v2-gap-2">
-                      <button
-                        className="v2-btn v2-btn-ghost v2-btn-sm"
-                        type="button"
-                        onClick={() => {
-                          const pct = Number(prompt("Enter price change percentage (e.g., 10 for +10%, -5 for -5%):", "10"));
-                          if (isNaN(pct) || pct === 0) return;
-                          const updated = (variantModalProduct.variants || []).map((v) => ({
-                            ...v,
-                            sellingPrice: Math.round(v.sellingPrice * (1 + pct / 100)),
-                          }));
-                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
-                          setVariantModalProduct({ ...variantModalProduct, variants: updated });
-                        }}
-                      >
-                        Bulk Price Update
-                      </button>
-                      <button
-                        className="v2-btn v2-btn-ghost v2-btn-sm"
-                        type="button"
-                        onClick={() => {
-                          const addStock = Number(prompt("Enter quantity to add to all variants:", "20"));
-                          if (isNaN(addStock)) return;
-                          const updated = (variantModalProduct.variants || []).map((v) => ({
-                            ...v,
-                            stock: v.stock + addStock,
-                          }));
-                          setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
-                          setVariantModalProduct({ ...variantModalProduct, variants: updated });
-                        }}
-                      >
-                        Bulk Stock Add
-                      </button>
+                    <div className="v2-text-xs v2-text-muted">
+                      <strong>{variantModalProduct.variants?.length || 0}</strong> variants &bull; <strong>{variantModalProduct.stock}</strong> total units
                     </div>
                   </div>
+
+                  {/* Panel 1: Quick Add Single Variant Form */}
+                  {variantStudioPanel === "add_single" && (
+                    <div className="v2-p-3" style={{ background: "var(--surface-1)", borderRadius: "var(--radius-xs)", border: "1px solid var(--surface-border)" }}>
+                      <div className="v2-font-bold v2-text-xs v2-mb-2" style={{ color: "var(--primary)" }}>ADD SINGLE PRODUCT VARIATION</div>
+                      <div className="v2-grid v2-grid-3 v2-gap-2">
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">VARIANT NAME *</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            placeholder="e.g. Size: Large or 500ml Pack"
+                            value={singleVarName}
+                            onChange={(e) => setSingleVarName(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">SKU CODE *</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            value={singleVarSku}
+                            onChange={(e) => setSingleVarSku(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">BARCODE / EAN</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            placeholder="Scan or auto-generated"
+                            value={singleVarBarcode}
+                            onChange={(e) => setSingleVarBarcode(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="v2-grid v2-grid-4 v2-gap-2 v2-mt-2">
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">BUYING COST (TSH)</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            type="number"
+                            value={singleVarBuying}
+                            onChange={(e) => setSingleVarBuying(Number(e.target.value))}
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">SELLING RETAIL (TSH)</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            type="number"
+                            value={singleVarSelling}
+                            onChange={(e) => setSingleVarSelling(Number(e.target.value))}
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">INITIAL STOCK</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            type="number"
+                            value={singleVarStock}
+                            onChange={(e) => setSingleVarStock(Number(e.target.value))}
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">REORDER LEVEL</label>
+                          <input
+                            className="v2-input v2-input-sm v2-mono"
+                            type="number"
+                            value={singleVarReorder}
+                            onChange={(e) => setSingleVarReorder(Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="v2-flex v2-justify-end v2-gap-2 v2-mt-3">
+                        <button
+                          type="button"
+                          className="v2-btn v2-btn-ghost v2-btn-xs"
+                          onClick={() => setVariantStudioPanel("none")}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="v2-btn v2-btn-primary v2-btn-xs"
+                          onClick={() => {
+                            if (!singleVarName.trim()) {
+                              toast.warning("Name Required", "Please specify a variant name.");
+                              return;
+                            }
+                            const newVar: ProductVariantData = {
+                              id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                              name: singleVarName.trim(),
+                              sku: singleVarSku.trim() || `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`,
+                              barcode: singleVarBarcode.trim() || `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+                              attributes: { Custom: singleVarName.trim() },
+                              buyingPrice: Number(singleVarBuying) || variantModalProduct.buyingPrice,
+                              sellingPrice: Number(singleVarSelling) || variantModalProduct.sellingPrice,
+                              stock: Number(singleVarStock) || 0,
+                              reorderLevel: Number(singleVarReorder) || 5,
+                            };
+                            const updatedList = [...(variantModalProduct.variants || []), newVar];
+                            const sumStock = updatedList.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
+                            const updatedProduct = {
+                              ...variantModalProduct,
+                              stock: sumStock,
+                              totalStock: sumStock,
+                              availableStock: sumStock,
+                              hasVariants: true,
+                              variants: updatedList,
+                            };
+
+                            db.saveProductWithVariantsLocal(
+                              updatedProduct as any,
+                              updatedList.map((v) => ({
+                                id: v.id,
+                                productId: variantModalProduct.id,
+                                name: v.name,
+                                sku: v.sku,
+                                barcode: v.barcode || "",
+                                attributes: v.attributes || {},
+                                buyingPrice: v.buyingPrice,
+                                costPrice: v.buyingPrice,
+                                sellingPrice: v.sellingPrice,
+                                price: v.sellingPrice,
+                                inventoryQuantity: v.stock,
+                                stock: v.stock,
+                                reorderLevel: v.reorderLevel,
+                                isActive: true,
+                                tenantId: currentTenantId || undefined,
+                              })) as any,
+                              currentTenantId ? { tenantId: currentTenantId } : undefined
+                            );
+
+                            db.enqueueOutbox({
+                              entityType: "ProductVariant",
+                              entityId: newVar.id,
+                              operationType: "CREATE",
+                              payload: {
+                                id: newVar.id,
+                                productId: variantModalProduct.id,
+                                name: newVar.name,
+                                sku: newVar.sku,
+                                barcode: newVar.barcode || undefined,
+                                price: newVar.sellingPrice,
+                                costPrice: newVar.buyingPrice,
+                                inventoryQuantity: newVar.stock,
+                                stock: newVar.stock,
+                                reorderLevel: newVar.reorderLevel,
+                                attributes: newVar.attributes || {},
+                                isActive: true,
+                              },
+                              idempotencyKey: `VAR-CREATE-${newVar.id}`,
+                              tenantId: currentTenantId || undefined,
+                              branchId: currentBranchId || undefined,
+                            });
+
+                            if (Number(newVar.stock) > 0) {
+                              const adjOpId = `adj-var-${Date.now()}-${newVar.id}`;
+                              db.enqueueOutbox({
+                                entityType: "StockAdjustment",
+                                entityId: adjOpId,
+                                operationType: "CREATE",
+                                payload: {
+                                  productId: variantModalProduct.id,
+                                  variantId: newVar.id,
+                                  sku: newVar.sku,
+                                  adjustmentType: "INCREASE",
+                                  quantityChange: Number(newVar.stock),
+                                  reason: "MANUAL_VARIANT_CREATION",
+                                  deviceId: "web-client",
+                                  operationId: adjOpId,
+                                  idempotencyKey: `ADJ-${adjOpId}`,
+                                },
+                                idempotencyKey: `ADJ-${adjOpId}`,
+                                tenantId: currentTenantId || undefined,
+                                branchId: currentBranchId || undefined,
+                              });
+                            }
+
+                            setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                            setVariantModalProduct(updatedProduct);
+                            setVariantStudioPanel("none");
+                            playSuccessChime();
+                            toast.success("Variant Created", `Variant "${newVar.name}" added and synced.`);
+                            window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            void syncOutbox?.().catch(() => {});
+                          }}
+                        >
+                          <Check size={12} /> Save Variant
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Panel 2: Matrix Generator Form */}
+                  {variantStudioPanel === "generate_matrix" && (
+                    <div className="v2-p-3" style={{ background: "var(--surface-1)", borderRadius: "var(--radius-xs)", border: "1px solid var(--surface-border)" }}>
+                      <div className="v2-font-bold v2-text-xs v2-mb-2" style={{ color: "var(--primary)" }}>CARTESIAN VARIANT MATRIX GENERATOR</div>
+                      <div className="v2-grid v2-grid-2 v2-gap-2">
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 1 (e.g. Size, Pack, Volume)</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            value={studioMatrixOpt1}
+                            onChange={(e) => setStudioMatrixOpt1(e.target.value)}
+                            placeholder="e.g. Size"
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            value={studioMatrixVals1}
+                            onChange={(e) => setStudioMatrixVals1(e.target.value)}
+                            placeholder="Small, Medium, Large"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="v2-grid v2-grid-2 v2-gap-2 v2-mt-2">
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 2 (Optional, e.g. Color, Flavour)</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            value={studioMatrixOpt2}
+                            onChange={(e) => setStudioMatrixOpt2(e.target.value)}
+                            placeholder="e.g. Color"
+                          />
+                        </div>
+                        <div>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
+                          <input
+                            className="v2-input v2-input-sm"
+                            value={studioMatrixVals2}
+                            onChange={(e) => setStudioMatrixVals2(e.target.value)}
+                            placeholder="Red, Blue, Green (or leave empty)"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="v2-flex v2-justify-end v2-gap-2 v2-mt-3">
+                        <button
+                          type="button"
+                          className="v2-btn v2-btn-ghost v2-btn-xs"
+                          onClick={() => setVariantStudioPanel("none")}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="v2-btn v2-btn-primary v2-btn-xs"
+                          onClick={() => {
+                            const list1 = studioMatrixVals1.split(",").map((s) => s.trim()).filter(Boolean);
+                            const list2 = studioMatrixOpt2.trim() && studioMatrixVals2.trim()
+                              ? studioMatrixVals2.split(",").map((s) => s.trim()).filter(Boolean)
+                              : [""];
+                            if (list1.length === 0) {
+                              toast.warning("Values Required", "Please specify at least one option value.");
+                              return;
+                            }
+
+                            const generated: ProductVariantData[] = [];
+                            for (const v1 of list1) {
+                              for (const v2 of list2) {
+                                const label = v2 ? `${studioMatrixOpt1}: ${v1} / ${studioMatrixOpt2}: ${v2}` : `${studioMatrixOpt1}: ${v1}`;
+                                const skuSuffix = (v1 + (v2 ? `-${v2}` : "")).replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
+                                generated.push({
+                                  id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                                  name: `${variantModalProduct.name} (${label})`,
+                                  sku: `${variantModalProduct.sku}-${skuSuffix}`,
+                                  barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+                                  attributes: { [studioMatrixOpt1]: v1, ...(studioMatrixOpt2 && v2 ? { [studioMatrixOpt2]: v2 } : {}) },
+                                  buyingPrice: variantModalProduct.buyingPrice,
+                                  sellingPrice: variantModalProduct.sellingPrice,
+                                  stock: 10,
+                                  reorderLevel: 5,
+                                });
+                              }
+                            }
+
+                            const updatedList = [...(variantModalProduct.variants || []), ...generated];
+                            const sumStock = updatedList.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
+                            const updatedProduct = {
+                              ...variantModalProduct,
+                              stock: sumStock,
+                              totalStock: sumStock,
+                              availableStock: sumStock,
+                              hasVariants: true,
+                              variants: updatedList,
+                            };
+
+                            db.saveProductWithVariantsLocal(
+                              updatedProduct as any,
+                              updatedList.map((v) => ({
+                                id: v.id,
+                                productId: variantModalProduct.id,
+                                name: v.name,
+                                sku: v.sku,
+                                barcode: v.barcode || "",
+                                attributes: v.attributes || {},
+                                buyingPrice: v.buyingPrice,
+                                costPrice: v.buyingPrice,
+                                sellingPrice: v.sellingPrice,
+                                price: v.sellingPrice,
+                                inventoryQuantity: v.stock,
+                                stock: v.stock,
+                                reorderLevel: v.reorderLevel,
+                                isActive: true,
+                                tenantId: currentTenantId || undefined,
+                              })) as any,
+                              currentTenantId ? { tenantId: currentTenantId } : undefined
+                            );
+
+                            for (const g of generated) {
+                              db.enqueueOutbox({
+                                entityType: "ProductVariant",
+                                entityId: g.id,
+                                operationType: "CREATE",
+                                payload: {
+                                  id: g.id,
+                                  productId: variantModalProduct.id,
+                                  name: g.name,
+                                  sku: g.sku,
+                                  barcode: g.barcode || undefined,
+                                  price: g.sellingPrice,
+                                  costPrice: g.buyingPrice,
+                                  inventoryQuantity: g.stock,
+                                  stock: g.stock,
+                                  reorderLevel: g.reorderLevel,
+                                  attributes: g.attributes || {},
+                                  isActive: true,
+                                },
+                                idempotencyKey: `VAR-GEN-${g.id}`,
+                                tenantId: currentTenantId || undefined,
+                                branchId: currentBranchId || undefined,
+                              });
+                              if (Number(g.stock) > 0) {
+                                const adjOpId = `adj-gen-${Date.now()}-${g.id}`;
+                                db.enqueueOutbox({
+                                  entityType: "StockAdjustment",
+                                  entityId: adjOpId,
+                                  operationType: "CREATE",
+                                  payload: {
+                                    productId: variantModalProduct.id,
+                                    variantId: g.id,
+                                    sku: g.sku,
+                                    adjustmentType: "INCREASE",
+                                    quantityChange: Number(g.stock),
+                                    reason: "MANUAL_VARIANT_CREATION",
+                                    deviceId: "web-client",
+                                    operationId: adjOpId,
+                                    idempotencyKey: `ADJ-${adjOpId}`,
+                                  },
+                                  idempotencyKey: `ADJ-${adjOpId}`,
+                                  tenantId: currentTenantId || undefined,
+                                  branchId: currentBranchId || undefined,
+                                });
+                              }
+                            }
+
+                            setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                            setVariantModalProduct(updatedProduct);
+                            setVariantStudioPanel("none");
+                            playSuccessChime();
+                            toast.success("Variants Matrix Generated", `Generated and synced ${generated.length} variant combinations.`);
+                            window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            void syncOutbox?.().catch(() => {});
+                          }}
+                        >
+                          <Zap size={12} /> Generate {
+                            (studioMatrixVals1.split(",").filter(Boolean).length || 1) *
+                            (studioMatrixOpt2 && studioMatrixVals2 ? (studioMatrixVals2.split(",").filter(Boolean).length || 1) : 1)
+                          } Combinations
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Panel 3: Bulk Operations Form */}
+                  {variantStudioPanel === "bulk_ops" && (
+                    <div className="v2-p-3" style={{ background: "var(--surface-1)", borderRadius: "var(--radius-xs)", border: "1px solid var(--surface-border)" }}>
+                      <div className="v2-font-bold v2-text-xs v2-mb-2" style={{ color: "var(--primary)" }}>BULK INVENTORY & PRICE ADJUSTMENTS</div>
+                      <div className="v2-grid v2-grid-2 v2-gap-3">
+                        <div className="v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-xs)" }}>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">BULK PRICE SHIFT (%)</label>
+                          <div className="v2-flex v2-gap-2 v2-mt-1">
+                            <input
+                              className="v2-input v2-input-sm v2-mono"
+                              type="number"
+                              value={studioBulkPricePct}
+                              onChange={(e) => setStudioBulkPricePct(Number(e.target.value))}
+                              placeholder="e.g. 10 or -5"
+                            />
+                            <button
+                              type="button"
+                              className="v2-btn v2-btn-secondary v2-btn-xs"
+                              style={{ whiteSpace: "nowrap" }}
+                              onClick={() => {
+                                const pct = Number(studioBulkPricePct);
+                                if (isNaN(pct) || pct === 0) return;
+                                const updatedList = (variantModalProduct.variants || []).map((v) => ({
+                                  ...v,
+                                  sellingPrice: Math.round(v.sellingPrice * (1 + pct / 100)),
+                                }));
+                                const sumStock = updatedList.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
+                                const updatedProduct = {
+                                  ...variantModalProduct,
+                                  stock: sumStock,
+                                  totalStock: sumStock,
+                                  availableStock: sumStock,
+                                  variants: updatedList,
+                                };
+                                db.saveProductWithVariantsLocal(
+                                  updatedProduct as any,
+                                  updatedList.map((v) => ({
+                                    id: v.id,
+                                    productId: variantModalProduct.id,
+                                    name: v.name,
+                                    sku: v.sku,
+                                    barcode: v.barcode || "",
+                                    attributes: v.attributes || {},
+                                    buyingPrice: v.buyingPrice,
+                                    costPrice: v.buyingPrice,
+                                    sellingPrice: v.sellingPrice,
+                                    price: v.sellingPrice,
+                                    inventoryQuantity: v.stock,
+                                    stock: v.stock,
+                                    reorderLevel: v.reorderLevel,
+                                    isActive: true,
+                                    tenantId: currentTenantId || undefined,
+                                  })) as any,
+                                  currentTenantId ? { tenantId: currentTenantId } : undefined
+                                );
+
+                                for (const v of updatedList) {
+                                  db.enqueueOutbox({
+                                    entityType: "ProductVariant",
+                                    entityId: v.id,
+                                    operationType: "UPDATE",
+                                    payload: {
+                                      id: v.id,
+                                      price: v.sellingPrice,
+                                    },
+                                    idempotencyKey: `VAR-PRICE-${v.id}-${Date.now()}`,
+                                    tenantId: currentTenantId || undefined,
+                                    branchId: currentBranchId || undefined,
+                                  });
+                                }
+
+                                setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                                setVariantModalProduct(updatedProduct);
+                                playSuccessChime();
+                                toast.success("Bulk Prices Adjusted", `Shifted selling price by ${pct > 0 ? `+${pct}` : pct}% across all variants.`);
+                                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                void syncOutbox?.().catch(() => {});
+                              }}
+                            >
+                              Apply % Shift
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-xs)" }}>
+                          <label className="v2-text-xs v2-font-bold v2-text-muted">BULK STOCK ADDITION (UNITS)</label>
+                          <div className="v2-flex v2-gap-2 v2-mt-1">
+                            <input
+                              className="v2-input v2-input-sm v2-mono"
+                              type="number"
+                              value={studioBulkStockAdd}
+                              onChange={(e) => setStudioBulkStockAdd(Number(e.target.value))}
+                              placeholder="e.g. 20"
+                            />
+                            <button
+                              type="button"
+                              className="v2-btn v2-btn-secondary v2-btn-xs"
+                              style={{ whiteSpace: "nowrap" }}
+                              onClick={() => {
+                                const addStock = Number(studioBulkStockAdd);
+                                if (isNaN(addStock) || addStock === 0) return;
+                                const updatedList = (variantModalProduct.variants || []).map((v) => ({
+                                  ...v,
+                                  stock: Math.max(0, (v.stock || 0) + addStock),
+                                }));
+                                const sumStock = updatedList.reduce((acc, v) => acc + (Number(v.stock) || 0), 0);
+                                const updatedProduct = {
+                                  ...variantModalProduct,
+                                  stock: sumStock,
+                                  totalStock: sumStock,
+                                  availableStock: sumStock,
+                                  variants: updatedList,
+                                };
+                                db.saveProductWithVariantsLocal(
+                                  updatedProduct as any,
+                                  updatedList.map((v) => ({
+                                    id: v.id,
+                                    productId: variantModalProduct.id,
+                                    name: v.name,
+                                    sku: v.sku,
+                                    barcode: v.barcode || "",
+                                    attributes: v.attributes || {},
+                                    buyingPrice: v.buyingPrice,
+                                    costPrice: v.buyingPrice,
+                                    sellingPrice: v.sellingPrice,
+                                    price: v.sellingPrice,
+                                    inventoryQuantity: v.stock,
+                                    stock: v.stock,
+                                    reorderLevel: v.reorderLevel,
+                                    isActive: true,
+                                    tenantId: currentTenantId || undefined,
+                                  })) as any,
+                                  currentTenantId ? { tenantId: currentTenantId } : undefined
+                                );
+
+                                for (const v of updatedList) {
+                                  const adjOpId = `adj-bulk-${Date.now()}-${v.id}`;
+                                  db.enqueueOutbox({
+                                    entityType: "StockAdjustment",
+                                    entityId: adjOpId,
+                                    operationType: "CREATE",
+                                    payload: {
+                                      productId: variantModalProduct.id,
+                                      variantId: v.id,
+                                      sku: v.sku,
+                                      adjustmentType: "INCREASE",
+                                      quantityChange: addStock,
+                                      reason: "BULK_STOCK_ADDITION",
+                                      deviceId: "web-client",
+                                      operationId: adjOpId,
+                                      idempotencyKey: `ADJ-${adjOpId}`,
+                                    },
+                                    idempotencyKey: `ADJ-${adjOpId}`,
+                                    tenantId: currentTenantId || undefined,
+                                    branchId: currentBranchId || undefined,
+                                  });
+                                }
+
+                                setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                                setVariantModalProduct(updatedProduct);
+                                playSuccessChime();
+                                toast.success("Bulk Stock Updated", `Added ${addStock} units to all variants.`);
+                                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                void syncOutbox?.().catch(() => {});
+                              }}
+                            >
+                              Add Stock
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Variants List Table */}
                   <table className="v2-table v2-table-sm">
@@ -1002,61 +4112,220 @@ export const InventoryPage: React.FC = () => {
                       <tr>
                         <th>Variant Name</th>
                         <th>SKU Code</th>
-                        <th>Inherited Buying</th>
-                        <th>Inherited Selling</th>
-                        <th>Current Stock</th>
-                        <th>Reorder Level</th>
+                        <th>Barcode</th>
+                        <th>Cost (Buying)</th>
+                        <th>Retail (Selling)</th>
+                        <th>Stock Units</th>
+                        <th>Reorder</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(!variantModalProduct.variants || variantModalProduct.variants.length === 0) ? (
                         <tr>
-                          <td colSpan={7} className="v2-text-center v2-text-muted v2-py-4">No variant variations configured for this SKU yet. Click 'Generate Variants Matrix' above to create combinations!</td>
+                          <td colSpan={8} className="v2-text-center v2-text-muted v2-py-4">
+                            No variants configured for this SKU yet. Click <strong>Generate Matrix</strong> or <strong>Add Single Variant</strong> above to build combinations.
+                          </td>
                         </tr>
                       ) : (
-                        variantModalProduct.variants.map((v) => (
-                          <tr key={v.id}>
-                            <td className="v2-font-bold">{v.name}</td>
-                            <td className="v2-mono v2-text-xs">{v.sku}</td>
-                            <td className="v2-mono">{money(v.buyingPrice)} <span className="badge v2-badge-success">Inherited</span></td>
-                            <td className="v2-mono v2-font-bold">{money(v.sellingPrice)}</td>
-                            <td className="v2-mono v2-font-bold">{v.stock}</td>
-                            <td className="v2-mono">{v.reorderLevel}</td>
-                            <td>
-                              <div className="v2-flex v2-gap-1">
-                                <button
-                                  className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                                  title="Edit Variant Price / Stock"
-                                  type="button"
-                                  onClick={() => {
-                                    const p = Number(prompt(`Update price for ${v.name}:`, String(v.sellingPrice)));
-                                    const s = Number(prompt(`Update stock for ${v.name}:`, String(v.stock)));
-                                    if (isNaN(p) || isNaN(s)) return;
-                                    const updated = (variantModalProduct.variants || []).map((x) => x.id === v.id ? { ...x, sellingPrice: p, stock: s } : x);
-                                    setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
-                                    setVariantModalProduct({ ...variantModalProduct, variants: updated });
-                                  }}
-                                >
-                                  <Edit2 size={12} />
-                                </button>
-                                <button
-                                  className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                                  style={{ color: "var(--danger)" }}
-                                  type="button"
-                                  onClick={() => {
-                                    if (!confirm(`Delete variant ${v.name}?`)) return;
-                                    const updated = (variantModalProduct.variants || []).filter((x) => x.id !== v.id);
-                                    setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? { ...i, variants: updated } : i));
-                                    setVariantModalProduct({ ...variantModalProduct, variants: updated });
-                                  }}
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
+                        variantModalProduct.variants.map((v) => {
+                          const isEditing = editingVariantRowId === v.id;
+                          return isEditing ? (
+                            <tr key={v.id} style={{ background: "var(--surface-2)" }}>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs"
+                                  value={inlineVariantEdit.name}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, name: e.target.value })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  value={inlineVariantEdit.sku}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, sku: e.target.value })}
+                                  style={{ width: "120px" }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  value={inlineVariantEdit.barcode}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, barcode: e.target.value })}
+                                  style={{ width: "105px" }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  type="number"
+                                  value={inlineVariantEdit.buyingPrice}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, buyingPrice: Number(e.target.value) })}
+                                  style={{ width: "70px" }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  type="number"
+                                  value={inlineVariantEdit.sellingPrice}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, sellingPrice: Number(e.target.value) })}
+                                  style={{ width: "70px" }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  type="number"
+                                  value={inlineVariantEdit.stock}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, stock: Number(e.target.value) })}
+                                  style={{ width: "55px" }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="v2-input v2-input-xs v2-mono"
+                                  type="number"
+                                  value={inlineVariantEdit.reorderLevel}
+                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, reorderLevel: Number(e.target.value) })}
+                                  style={{ width: "50px" }}
+                                />
+                              </td>
+                              <td>
+                                <div className="v2-flex v2-gap-1">
+                                  <button
+                                    className="v2-btn v2-btn-primary v2-btn-icon-xs"
+                                    type="button"
+                                    title="Save changes"
+                                    onClick={() => {
+                                      const updatedList = (variantModalProduct.variants || []).map((item) =>
+                                        item.id === v.id
+                                          ? {
+                                              ...item,
+                                              name: inlineVariantEdit.name,
+                                              sku: inlineVariantEdit.sku,
+                                              barcode: inlineVariantEdit.barcode,
+                                              buyingPrice: inlineVariantEdit.buyingPrice,
+                                              sellingPrice: inlineVariantEdit.sellingPrice,
+                                              stock: inlineVariantEdit.stock,
+                                              reorderLevel: inlineVariantEdit.reorderLevel,
+                                            }
+                                          : item
+                                      );
+                                      const sumStock = updatedList.reduce((acc, item) => acc + (Number(item.stock) || 0), 0);
+                                      const updatedProduct = {
+                                        ...variantModalProduct,
+                                        stock: sumStock,
+                                        totalStock: sumStock,
+                                        availableStock: sumStock,
+                                        variants: updatedList,
+                                      };
+                                      db.saveProductWithVariantsLocal(
+                                        updatedProduct as any,
+                                        updatedList.map((item) => ({
+                                          id: item.id,
+                                          productId: variantModalProduct.id,
+                                          name: item.name,
+                                          sku: item.sku,
+                                          barcode: item.barcode || "",
+                                          attributes: item.attributes || {},
+                                          buyingPrice: item.buyingPrice,
+                                          costPrice: item.buyingPrice,
+                                          sellingPrice: item.sellingPrice,
+                                          price: item.sellingPrice,
+                                          inventoryQuantity: item.stock,
+                                          stock: item.stock,
+                                          reorderLevel: item.reorderLevel,
+                                          isActive: true,
+                                          tenantId: currentTenantId || undefined,
+                                        })) as any,
+                                        currentTenantId ? { tenantId: currentTenantId } : undefined
+                                      );
+                                      setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                                      setVariantModalProduct(updatedProduct);
+                                      setEditingVariantRowId(null);
+                                      playSuccessChime();
+                                      toast.success("Variant Updated", `Variant "${inlineVariantEdit.name}" saved.`);
+                                      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                    }}
+                                  >
+                                    <Check size={11} />
+                                  </button>
+                                  <button
+                                    className="v2-btn v2-btn-ghost v2-btn-icon-xs"
+                                    type="button"
+                                    title="Cancel"
+                                    onClick={() => setEditingVariantRowId(null)}
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={v.id}>
+                              <td className="v2-font-bold">{v.name}</td>
+                              <td className="v2-mono v2-text-xs">{v.sku}</td>
+                              <td className="v2-mono v2-text-xs" style={{ color: "var(--accent)" }}>{v.barcode || "—"}</td>
+                              <td className="v2-mono">{money(v.buyingPrice)}</td>
+                              <td className="v2-mono v2-font-bold">{money(v.sellingPrice)}</td>
+                              <td className="v2-mono v2-font-bold" style={{ color: v.stock <= (v.reorderLevel || 5) ? "var(--warning)" : "var(--success)" }}>
+                                {v.stock}
+                              </td>
+                              <td className="v2-mono">{v.reorderLevel || 5}</td>
+                              <td>
+                                <div className="v2-flex v2-gap-1">
+                                  <button
+                                    className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                                    title="Edit Variant Details"
+                                    type="button"
+                                    onClick={() => {
+                                      setInlineVariantEdit({
+                                        name: v.name,
+                                        sku: v.sku,
+                                        barcode: v.barcode || "",
+                                        buyingPrice: v.buyingPrice,
+                                        sellingPrice: v.sellingPrice,
+                                        stock: v.stock,
+                                        reorderLevel: v.reorderLevel || 5,
+                                      });
+                                      setEditingVariantRowId(v.id);
+                                    }}
+                                  >
+                                    <Edit2 size={12} />
+                                  </button>
+                                  <button
+                                    className="v2-btn v2-btn-ghost v2-btn-icon-sm"
+                                    style={{ color: "var(--danger)" }}
+                                    title="Delete Variant"
+                                    type="button"
+                                    onClick={() => {
+                                      if (!confirm(`Delete variant "${v.name}"? Parent stock will automatically adjust.`)) return;
+                                      db.deleteVariantLocal(v.id);
+                                      const updatedList = (variantModalProduct.variants || []).filter((x) => x.id !== v.id);
+                                      const sumStock = updatedList.reduce((acc, item) => acc + (Number(item.stock) || 0), 0);
+                                      const updatedProduct = {
+                                        ...variantModalProduct,
+                                        stock: sumStock,
+                                        totalStock: sumStock,
+                                        availableStock: sumStock,
+                                        hasVariants: updatedList.length > 0,
+                                        variants: updatedList,
+                                      };
+                                      setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
+                                      setVariantModalProduct(updatedProduct);
+                                      playSuccessChime();
+                                      toast.success("Variant Deleted", `Removed "${v.name}". Parent SKU stock recalculated.`);
+                                      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                    }}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -1181,6 +4450,7 @@ export const InventoryPage: React.FC = () => {
 
                 const nowStr = new Date().toISOString().replace("T", " ").slice(0, 16);
                 const refCode = `ADJ-${Date.now().toString().slice(-6)}`;
+                const fullReason = `${adjReasonCode}${adjNotes ? ` - ${adjNotes}` : ""}`;
 
                 const newEntry = {
                   id: `led-${Date.now()}`,
@@ -1189,13 +4459,65 @@ export const InventoryPage: React.FC = () => {
                   name: targetItem.name,
                   type: adjType,
                   qty: qtyChange,
+                  quantity: qtyChange,
                   qtyBefore: prevStock,
                   balance: newStock,
+                  balanceAfter: newStock,
                   unitCost: targetItem.buyingPrice,
                   totalCost: Math.abs(qtyChange) * targetItem.buyingPrice,
                   ref: refCode,
+                  reason: fullReason,
+                  notes: fullReason,
                   user: "Current Operator",
+                  movementType: adjType,
+                  timestamp: new Date().toISOString(),
+                  tenantId: currentTenantId || "default",
                 };
+
+                // Persist ledger entry
+                db.saveStockLedgerLocal(newEntry as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+
+                const adjOpId = `adj-modal-${Date.now()}-${targetItem.id}`;
+                db.enqueueOutbox({
+                  entityType: "StockAdjustment",
+                  entityId: adjOpId,
+                  operationType: "CREATE",
+                  payload: {
+                    productId: targetItem.id,
+                    variantId: targetItem.id,
+                    sku: targetItem.sku,
+                    adjustmentType: qtyChange > 0 ? "INCREASE" : "DECREASE",
+                    quantityChange: Math.abs(qtyChange),
+                    reason: fullReason,
+                    deviceId: "web-client",
+                    operationId: adjOpId,
+                    idempotencyKey: `ADJ-${adjOpId}`,
+                  },
+                  idempotencyKey: `ADJ-${adjOpId}`,
+                  tenantId: currentTenantId || undefined,
+                  branchId: currentBranchId || undefined,
+                });
+
+                // Persist updated product stock
+                let existing = db.products.get(targetItem.id) as any;
+                if (!existing) {
+                  for (const p of db.products.values()) {
+                    if (p.id === targetItem.id || p.sku === targetItem.sku) {
+                      existing = p;
+                      break;
+                    }
+                  }
+                }
+                if (existing) {
+                  db.saveProductLocal({
+                    ...existing,
+                    stock: newStock,
+                    availableStock: newStock,
+                    totalStock: newStock,
+                    status: newStock === 0 ? "Out of Stock" : newStock <= targetItem.reorderLevel ? "Low Stock" : "Active",
+                    updatedAt: new Date().toISOString(),
+                  } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+                }
 
                 setLedger((prev) => [newEntry, ...prev]);
                 setItems((prev) =>
@@ -1205,6 +4527,11 @@ export const InventoryPage: React.FC = () => {
                       : i
                   )
                 );
+
+                playSuccessChime();
+                toast.success("Adjustment Recorded", `Stock updated to ${newStock} for ${targetItem.name}.`);
+                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                void syncOutbox?.().catch(() => {});
 
                 setStockAdjModal(false);
                 setAdjNotes("");
@@ -1239,8 +4566,25 @@ export const InventoryPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">REASON & AUDIT NOTES</label>
-                <input className="v2-input" placeholder="e.g. Physical inventory count discrepancy" value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
+                <label className="v2-text-xs v2-font-bold v2-text-muted">ADJUSTMENT REASON CODE *</label>
+                <select
+                  className="v2-input"
+                  value={adjReasonCode}
+                  onChange={(e) => setAdjReasonCode(e.target.value)}
+                >
+                  <option value="PHYSICAL_COUNT_VARIANCE">Physical Inventory Count Variance</option>
+                  <option value="DAMAGED_IN_STORE">Damaged / Breakage in Store</option>
+                  <option value="EXPIRED_GOODS">Expired Goods (FEFO Purge)</option>
+                  <option value="SUPPLIER_RETURN">Supplier Return (Defective/Mishandled)</option>
+                  <option value="INTERNAL_CONSUMPTION">Internal Store Consumption / Sampling</option>
+                  <option value="OPENING_RECONCILIATION">Initial Balance Reconciliation</option>
+                  <option value="OTHER">Other (Document in Audit Notes)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT EXPLANATION &amp; NOTES</label>
+                <input className="v2-input" placeholder="e.g. Broken packaging discovered during weekly cycle count" value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
               </div>
 
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
@@ -1251,6 +4595,27 @@ export const InventoryPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* --- Barcode Label Sheet Generator Modal (40x30mm & A4 24-Up) --- */}
+      <BarcodeLabelGeneratorModal
+        isOpen={isBarcodeModalOpen}
+        onClose={() => setIsBarcodeModalOpen(false)}
+        products={items.map((i) => ({
+          id: i.id,
+          name: i.name,
+          sku: i.sku,
+          price: i.sellingPrice,
+          category: i.category,
+          variants: i.variants?.map((v) => ({
+            id: v.id,
+            name: v.name,
+            sku: v.sku,
+            barcode: v.barcode,
+            price: v.sellingPrice,
+            stock: v.stock,
+          })),
+        }))}
+      />
     </div>
   );
 };

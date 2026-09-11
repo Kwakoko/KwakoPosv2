@@ -75,6 +75,8 @@ export function validateSyncRequest(request: SyncPushRequest): void {
 }
 
 export function syncDependencyRank(op: SyncOperationEnvelope): number {
+  if (op.entityType === "Setting" || op.entityType === "FeatureFlag") return 1;
+  if (op.entityType === "Category" || op.entityType === "Brand") return 5;
   if (op.entityType === "Product" && op.operationType === "CREATE") return 10;
   if (op.entityType === "Product" && op.operationType === "UPDATE") return 20;
   if (op.entityType === "ProductVariant" && op.operationType === "CREATE") return 30;
@@ -84,6 +86,7 @@ export function syncDependencyRank(op: SyncOperationEnvelope): number {
   if (op.entityType === "Customer" || op.entityType === "Supplier") return 70;
   if (op.entityType === "PurchaseOrder") return 80;
   if (op.entityType === "PurchaseReceipt" || op.entityType === "Sale") return 90;
+  if (op.entityType === "Expense") return 95;
   if (op.entityType === "Payment" || op.entityType === "CashSession") return 100;
   if (op.entityType.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(op.entityType)) return 110;
   return 120;
@@ -97,6 +100,16 @@ export function orderSyncOperations<T extends SyncOperationEnvelope>(operations:
     if (timeDiff !== 0) return timeDiff;
     return a.operationId.localeCompare(b.operationId);
   });
+}
+
+export function computePayloadChecksum(payload: unknown): string {
+  const normalized = stableNormalize(payload);
+  return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+}
+
+export function verifyPayloadChecksum(payload: unknown, expectedChecksum: string): boolean {
+  if (!expectedChecksum) return false;
+  return computePayloadChecksum(payload) === expectedChecksum;
 }
 
 export function getBaseUpdatedAt(payload: unknown): string | null {
@@ -125,3 +138,4 @@ export function checkRollbackBarrier(isBarrierActive: boolean): void {
     );
   }
 }
+

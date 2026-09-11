@@ -18,6 +18,7 @@ export interface AuthoritativeReleaseIdentity {
   gitTag: string;
   gitSha: string;
   buildId: string;
+  buildNumber?: number;
   releaseId: string;
   containerDigest: string | null;
   cloudRunRevision: string | null;
@@ -42,6 +43,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   gitTag: "v2.12.5",
   gitSha: "",
   buildId: "",
+  buildNumber: 584,
   releaseId: "",
   containerDigest: null,
   cloudRunRevision: null,

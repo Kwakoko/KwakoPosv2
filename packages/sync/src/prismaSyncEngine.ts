@@ -1,7 +1,27 @@
-import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
+import type {
+  TenantContext,
+  SyncPushRequest,
+  SyncPushResponse,
+  SyncDeltaRequest,
+  SyncDeltaResponse,
+  SyncBootstrapRequest,
+  SyncBootstrapResponse,
+  SyncStateManifest,
+  SyncReconciliationResponse,
+  SyncReconciliationDiscrepancy,
+} from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, globalRollbackRepository } from "@kwakopos2/database";
 import { prisma } from "@kwakopos2/database";
-import { getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest, validateSyncEpoch, checkRollbackBarrier } from "./syncIntegrity.js";
+import {
+  getBaseUpdatedAt,
+  operationFingerprint,
+  orderSyncOperations,
+  stripSyncControlFields,
+  validateSyncRequest,
+  validateSyncEpoch,
+  checkRollbackBarrier,
+  computePayloadChecksum,
+} from "./syncIntegrity.js";
 
 export class PrismaSyncEngine {
   private readonly atomicCommercialFinance: PrismaAtomicCommercialFinanceService;
@@ -157,6 +177,180 @@ export class PrismaSyncEngine {
       adjustments: adjustments.map((a: any) => ({ id: a.id, tenantId: a.tenantId, branchId: a.branchId, variantId: a.variantId, adjustmentType: a.adjustmentType, quantityChange: Number(a.quantityChange), reason: a.reason, referenceNote: a.referenceNote ?? null, status: a.status, createdByUserId: a.createdByUserId, deviceId: a.deviceId, operationId: a.operationId, idempotencyKey: a.idempotencyKey, createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() })),
       customers: customers.map((c: any) => ({ ...c, creditLimit: Number(c.creditLimit), currentBalance: Number(c.currentBalance), openingBalance: Number(c.openingBalance), createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
       suppliers: suppliers.map((s: any) => ({ ...s, outstandingBalance: Number(s.outstandingBalance), createdAt: s.createdAt.toISOString(), updatedAt: s.updatedAt.toISOString() })),
+      integrityChecksum: computePayloadChecksum({ products, variants, ledger, adjustments, customers, suppliers }),
+    };
+  }
+
+  async processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): Promise<SyncBootstrapResponse> {
+    const anchor = new Date();
+    const products = await this.productRepo.getProducts(ctx);
+    const variants = await prisma.productVariant.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    });
+    const ledger = await this.stockRepo.getLedger(ctx);
+    const adjustments = await prisma.stockAdjustment.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    });
+    const customers = await prisma.customer.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    });
+    const suppliers = await prisma.supplier.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+    });
+
+    const mappedVariants = variants.map((v: any) => ({
+      id: v.id,
+      tenantId: v.tenantId,
+      branchId: v.branchId,
+      productId: v.productId,
+      name: v.name,
+      sku: v.sku,
+      barcode: v.barcode ?? null,
+      price: Number(v.price),
+      costPrice: Number(v.costPrice),
+      isActive: v.isActive,
+      createdAt: v.createdAt.toISOString(),
+      updatedAt: v.updatedAt.toISOString(),
+    })) as any;
+
+    const mappedAdjustments = adjustments.map((a: any) => ({
+      id: a.id,
+      tenantId: a.tenantId,
+      branchId: a.branchId,
+      variantId: a.variantId,
+      adjustmentType: a.adjustmentType,
+      quantityChange: Number(a.quantityChange),
+      reason: a.reason,
+      referenceNote: a.referenceNote ?? null,
+      status: a.status,
+      createdByUserId: a.createdByUserId,
+      deviceId: a.deviceId,
+      operationId: a.operationId,
+      idempotencyKey: a.idempotencyKey,
+      createdAt: a.createdAt.toISOString(),
+      updatedAt: a.updatedAt.toISOString(),
+    }));
+
+    const mappedCustomers = customers.map((c: any) => ({
+      ...c,
+      creditLimit: Number(c.creditLimit),
+      currentBalance: Number(c.currentBalance),
+      openingBalance: Number(c.openingBalance),
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+    }));
+
+    const mappedSuppliers = suppliers.map((s: any) => ({
+      ...s,
+      outstandingBalance: Number(s.outstandingBalance),
+      createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
+    }));
+
+    const snapshotData = {
+      products,
+      variants: mappedVariants,
+      stockLedger: ledger,
+      adjustments: mappedAdjustments,
+      customers: mappedCustomers,
+      suppliers: mappedSuppliers,
+    };
+    const integrityChecksum = computePayloadChecksum(snapshotData);
+
+    return {
+      snapshotTimestamp: anchor.toISOString(),
+      integrityChecksum,
+      schemaVersion: req.schemaVersion || 4,
+      entityCounts: {
+        products: products.length,
+        variants: mappedVariants.length,
+        stockLedger: ledger.length,
+        adjustments: mappedAdjustments.length,
+        customers: mappedCustomers.length,
+        suppliers: mappedSuppliers.length,
+      },
+      ...snapshotData,
+    };
+  }
+
+  async reconcileState(ctx: TenantContext, manifest: SyncStateManifest): Promise<SyncReconciliationResponse> {
+    const discrepancies: SyncReconciliationDiscrepancy[] = [];
+    const serverProducts = await this.productRepo.getProducts(ctx);
+    const serverProductIds = new Set(serverProducts.map((p) => p.id));
+    const clientProductIds = new Set(manifest.productIds || []);
+
+    for (const serverId of serverProductIds) {
+      if (!clientProductIds.has(serverId)) {
+        discrepancies.push({
+          entityType: "Product",
+          entityId: serverId,
+          kind: "MISSING_ON_CLIENT",
+          remediation: "Client should pull delta or execute bootstrap.",
+        });
+      }
+    }
+
+    for (const clientId of clientProductIds) {
+      if (!serverProductIds.has(clientId)) {
+        discrepancies.push({
+          entityType: "Product",
+          entityId: clientId,
+          kind: "EXTRA_ON_CLIENT",
+          remediation: "Verify uncommitted outbox mutation or purge stale client record.",
+        });
+      }
+    }
+
+    const serverVariants = await prisma.productVariant.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+    });
+
+    for (const v of serverVariants) {
+      if (!serverProductIds.has(v.productId)) {
+        discrepancies.push({
+          entityType: "ProductVariant",
+          entityId: v.id,
+          kind: "ORPHANED_VARIANT",
+          remediation: "Re-associate variant with valid parent or archive variant.",
+        });
+      }
+    }
+
+    if (manifest.stockBalances) {
+      for (const [variantId, clientQty] of Object.entries(manifest.stockBalances)) {
+        const serverQty = await this.stockRepo.getAvailableStock(ctx, variantId);
+        if (serverQty !== clientQty) {
+          discrepancies.push({
+            entityType: "StockBalance",
+            entityId: variantId,
+            kind: "STOCK_MISMATCH",
+            serverValue: serverQty,
+            clientValue: clientQty,
+            remediation: "Client must reconcile with authoritative ledger movements.",
+          });
+        }
+      }
+    }
+
+    const serverCounts: Record<string, number> = {
+      products: serverProducts.length,
+      variants: serverVariants.length,
+      stockLedger: (await this.stockRepo.getLedger(ctx)).length,
+    };
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      evaluatedAt: new Date().toISOString(),
+      inSync: discrepancies.length === 0,
+      totalDiscrepancies: discrepancies.length,
+      discrepancies,
+      serverCounts,
+      integrityChecksum: computePayloadChecksum({ serverCounts, discrepancies }),
     };
   }
 }

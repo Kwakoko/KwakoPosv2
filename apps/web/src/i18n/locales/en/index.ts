@@ -207,7 +207,7 @@ export const en: TranslationDictionary = {
     applyDiscount: "Discount",
     discountPercent: "Discount %",
     subtotal: "Subtotal",
-    taxTotal: "VAT (18%)",
+    taxTotal: "VAT (0%)",
     grandTotal: "Grand Total",
     payNow: "Proceed to Checkout (F9)",
     checkoutTitle: "Complete Transaction",
@@ -241,6 +241,9 @@ export const en: TranslationDictionary = {
     voidItem: "Authorize Void",
     invalidPin: "Invalid supervisor PIN code.",
     stockUnavailable: "Insufficient stock quantity available.",
+    saleDeniedTitle: "Sale Denied",
+    saleDeniedZeroTotal: "Cannot proceed with sale. Grand Total must be greater than zero.",
+    emptyCartSaleDenied: "Cannot proceed with sale. Cart is empty and Grand Total is zero.",
   },
   inventory: {
     title: "Inventory & Stock Ledger",

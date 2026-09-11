@@ -7,6 +7,8 @@ import type {
   ProductPriceHistory,
   SyncOperationType,
   SyncDeltaResponse,
+  SyncBootstrapResponse,
+  SyncStateManifest,
 } from "@kwakopos2/contracts";
 import { globalMigrationEngine, MigrationJournalEntry } from "./persistence/migrationEngine.js";
 import { globalSnapshotRecoveryEngine, RecoverySnapshot, SnapshotStoreItem } from "./persistence/snapshotRecoveryEngine.js";
@@ -422,11 +424,32 @@ export class LocalIndexedDbStore {
     if (ctx?.tenantId && (!product.tenantId || product.tenantId !== ctx.tenantId)) {
       product = { ...product, tenantId: ctx.tenantId };
     }
+
+    // World-class Product-Variant First Architecture: deterministic stock derivation
+    if (product.variants && product.variants.length > 0) {
+      const activeVars = product.variants.filter((v: any) => v.isActive !== false);
+      const sumStock = activeVars.reduce((acc, v) => acc + Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0), 0);
+      const pAny = product as any;
+      pAny.stock = sumStock;
+      pAny.totalStock = sumStock;
+      pAny.availableStock = sumStock;
+      pAny.hasVariants = true;
+    }
+
     this.products.set(product.id, product);
     this.persist("products", product.id, product);
     for (const variant of product.variants || []) {
       this.saveVariantLocal(variant, ctx);
     }
+  }
+
+  saveProductWithVariantsLocal(product: Product, variants: ProductVariant[], ctx?: TenantScopedContext): void {
+    const updatedProduct = {
+      ...product,
+      hasVariants: variants.length > 0,
+      variants,
+    };
+    this.saveProductLocal(updatedProduct, ctx);
   }
 
   saveVariantLocal(variant: ProductVariant, ctx?: TenantScopedContext): void {
@@ -435,6 +458,33 @@ export class LocalIndexedDbStore {
     }
     this.productVariants.set(variant.id, variant);
     this.persist("productVariants", variant.id, variant);
+  }
+
+  deleteVariantLocal(variantId: string): void {
+    const v = this.productVariants.get(variantId);
+    this.productVariants.delete(variantId);
+    if (this.nativeDb && this.nativeDb.objectStoreNames.contains("productVariants")) {
+      try {
+        this.nativeDb.transaction("productVariants", "readwrite").objectStore("productVariants").delete(variantId);
+      } catch {}
+    }
+    const productId = v?.productId;
+    if (productId) {
+      const p = this.products.get(productId);
+      if (p) {
+        const remainingVariants: any[] = [];
+        for (const varItem of this.productVariants.values()) {
+          if (varItem.productId === productId && varItem.id !== variantId) {
+            remainingVariants.push(varItem);
+          }
+        }
+        this.saveProductLocal({
+          ...p,
+          hasVariants: remainingVariants.length > 0,
+          variants: remainingVariants,
+        });
+      }
+    }
   }
 
   saveStockLedgerLocal(entry: StockLedger, ctx?: TenantScopedContext): void {
@@ -520,7 +570,15 @@ export class LocalIndexedDbStore {
       if (item) return item.value;
     }
     const direct = this.configuration.get(key);
-    return direct?.value !== undefined ? direct.value : direct;
+    if (direct !== undefined) {
+      return direct?.value !== undefined ? direct.value : direct;
+    }
+    for (const [k, item] of this.configuration.entries()) {
+      if (k.endsWith(`:${key}`)) {
+        return item?.value !== undefined ? item.value : item;
+      }
+    }
+    return undefined;
   }
 
   getProductsLocal(tenantId?: string): Product[] {
@@ -830,6 +888,131 @@ export class LocalIndexedDbStore {
     return appliedCount;
   }
 
+  recalculateProductStockLocal(productId: string): void {
+    const product = this.products.get(productId);
+    if (!product) return;
+    const variants: ProductVariant[] = [];
+    for (const v of this.productVariants.values()) {
+      if (v.productId === productId) {
+        variants.push(v);
+      }
+    }
+    const activeVars = variants.filter((v: any) => v.isActive !== false);
+    const sumStock = activeVars.reduce((acc, v) => acc + Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0), 0);
+    const updatedProduct = {
+      ...product,
+      variants,
+      hasVariants: variants.length > 0,
+      stock: sumStock,
+      totalStock: sumStock,
+      availableStock: sumStock,
+    };
+    this.products.set(productId, updatedProduct);
+    this.persist("products", productId, updatedProduct);
+  }
+
+  async bootstrapFromAuthoritativeSnapshot(
+    snapshot: SyncBootstrapResponse,
+    ctx?: TenantScopedContext,
+  ): Promise<{ applied: number }> {
+    await this.ready;
+    const serverTime = Date.parse(snapshot.snapshotTimestamp);
+    if (!Number.isFinite(serverTime)) throw new Error("SYNC_PROTOCOL_INVALID: invalid snapshot timestamp");
+
+    let appliedCount = 0;
+    const products = Array.isArray(snapshot.products) ? snapshot.products : [];
+    const variants = Array.isArray(snapshot.variants) ? snapshot.variants : [];
+    const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
+    const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
+    const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
+    const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+
+    for (const product of products) {
+      if (
+        this.protectServerRecord("Product", product.id) ||
+        (product.variants || []).some((v) => this.protectServerRecord("ProductVariant", v.id))
+      ) {
+        continue;
+      }
+      this.saveProductLocal(product, ctx);
+      appliedCount += 1;
+    }
+
+    for (const variant of variants) {
+      if (this.protectServerRecord("ProductVariant", variant.id)) continue;
+      this.saveVariantLocal(variant, ctx);
+      appliedCount += 1;
+    }
+
+    for (const entry of ledger) {
+      this.saveStockLedgerLocal(entry, ctx);
+      appliedCount += 1;
+    }
+
+    for (const adjustment of adjustments) {
+      if (this.protectServerRecord("StockAdjustment", adjustment.id)) continue;
+      this.saveStockAdjustmentLocal(adjustment, ctx);
+      appliedCount += 1;
+    }
+
+    for (const customer of customers) {
+      if (this.protectServerRecord("Customer", customer.id)) continue;
+      this.saveCustomerLocal(customer, ctx);
+      appliedCount += 1;
+    }
+
+    for (const supplier of suppliers) {
+      if (this.protectServerRecord("Supplier", supplier.id)) continue;
+      this.saveSupplierLocal(supplier, ctx);
+      appliedCount += 1;
+    }
+
+    // Ensure all parent products have deterministic stock derived from variants
+    for (const prodId of this.products.keys()) {
+      this.recalculateProductStockLocal(prodId);
+    }
+
+    this.setSyncMetadata("lastSyncTime", snapshot.snapshotTimestamp);
+    this.setSyncMetadata("lastBootstrapTime", snapshot.snapshotTimestamp);
+    this.setSyncMetadata("lastBootstrapChecksum", snapshot.integrityChecksum);
+    await this.flushPersistence();
+
+    return { applied: appliedCount };
+  }
+
+  generateStateManifest(deviceId: string, tenantId?: string): SyncStateManifest {
+    const products = this.getProductsLocal(tenantId);
+    const variants = this.getProductVariantsLocal(tenantId);
+    const ledger = this.getStockLedgerLocal(tenantId);
+    const adjustments = this.getStockAdjustmentsLocal(tenantId);
+    const customers = this.getCustomersLocal(tenantId);
+    const suppliers = this.getSuppliersLocal(tenantId);
+
+    const stockBalances: Record<string, number> = {};
+    for (const v of variants) {
+      stockBalances[v.id] = Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0);
+    }
+
+    return {
+      deviceId,
+      lastSyncTime: this.syncMetadata.get("lastSyncTime") || null,
+      schemaVersion: this.schemaVersion,
+      storeCounts: {
+        products: products.length,
+        productVariants: variants.length,
+        stockLedger: ledger.length,
+        stockAdjustments: adjustments.length,
+        customers: customers.length,
+        suppliers: suppliers.length,
+        syncOutbox: this.syncOutbox.size,
+      },
+      productIds: products.map((p) => p.id),
+      variantIds: variants.map((v) => v.id),
+      ledgerIds: ledger.map((l) => l.id),
+      stockBalances,
+    };
+  }
+
   private localUpdatedAt(entityType: string, entityId: string): string | null {
     const row =
       entityType === "Product"
@@ -875,6 +1058,18 @@ export class LocalIndexedDbStore {
       branchId: item.branchId || (sourcePayload.branchId as string | undefined),
     };
     this.recordOutboxMutation(outboxItem);
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
+        if ("BroadcastChannel" in window) {
+          const bc = new BroadcastChannel("kwakopos_sync_channel");
+          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.close();
+        }
+      }
+    } catch {
+      /* ignore broadcast error in isolated environments */
+    }
     return outboxItem;
   }
 

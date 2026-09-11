@@ -4,6 +4,11 @@ import type {
   SyncPushResponse,
   SyncDeltaRequest,
   SyncDeltaResponse,
+  SyncBootstrapRequest,
+  SyncBootstrapResponse,
+  SyncStateManifest,
+  SyncReconciliationResponse,
+  SyncReconciliationDiscrepancy,
   SyncOperation,
   CreateProductRequest,
   CreateVariantRequest,
@@ -34,6 +39,7 @@ import {
   validateSyncRequest,
   validateSyncEpoch,
   checkRollbackBarrier,
+  computePayloadChecksum,
 } from "./syncIntegrity.js";
 
 export class SyncEngine {
@@ -169,6 +175,30 @@ export class SyncEngine {
             operationId: op.operationId,
             idempotencyKey: op.idempotencyKey,
           });
+        } else if ((op.entityType === "StockMovement" || op.entityType === "StockLedger") && op.operationType === "CREATE") {
+          this.stockRepo.recordMovement(ctx, {
+            ...(op.payload as any),
+            id: op.entityId,
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: op.idempotencyKey,
+          });
+        } else if (op.entityType === "Category" && (op.operationType === "CREATE" || op.operationType === "UPDATE")) {
+          const categoriesMap = (this.store as any).categories || new Map();
+          categoriesMap.set(`${ctx.tenantId}:${op.entityId}`, { id: op.entityId, tenantId: ctx.tenantId, ...op.payload, updatedAt: new Date().toISOString() });
+          (this.store as any).categories = categoriesMap;
+        } else if (op.entityType === "Brand" && (op.operationType === "CREATE" || op.operationType === "UPDATE")) {
+          const brandsMap = (this.store as any).brands || new Map();
+          brandsMap.set(`${ctx.tenantId}:${op.entityId}`, { id: op.entityId, tenantId: ctx.tenantId, ...op.payload, updatedAt: new Date().toISOString() });
+          (this.store as any).brands = brandsMap;
+        } else if (op.entityType === "Expense" && op.operationType === "CREATE") {
+          const expensesMap = (this.store as any).expenses || new Map();
+          expensesMap.set(op.entityId, { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, ...op.payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+          (this.store as any).expenses = expensesMap;
+        } else if (op.entityType === "Setting" && (op.operationType === "CREATE" || op.operationType === "UPDATE")) {
+          const settingsMap = (this.store as any).settings || new Map();
+          settingsMap.set(`${ctx.tenantId}:${op.entityId}`, { id: op.entityId, tenantId: ctx.tenantId, ...op.payload, updatedAt: new Date().toISOString() });
+          (this.store as any).settings = settingsMap;
         } else if (op.entityType === "Customer" && op.operationType === "CREATE") {
           this.commercialRepo.createCustomer(ctx, { ...(op.payload as unknown as CreateCustomerRequest), id: op.entityId });
         } else if (op.entityType === "Supplier" && op.operationType === "CREATE") {
@@ -238,24 +268,167 @@ export class SyncEngine {
     if (Number.isNaN(sinceDate.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
     const anchor = new Date();
     const maxTime = anchor.getTime() + 5000;
+    const products = this.productRepo.getProducts(ctx).filter((p) => {
+      const t = new Date(p.updatedAt).getTime();
+      return t >= sinceDate.getTime() && t <= maxTime;
+    }).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const variants = Array.from(this.store.variants.values()).filter(
+      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId) && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= maxTime
+    ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const stockLedger = this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= maxTime).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
+    const adjustments = Array.from(this.store.stockAdjustments.values()).filter(
+      (a) => a.tenantId === ctx.tenantId && (!ctx.branchId || !a.branchId || a.branchId === ctx.branchId) && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= maxTime
+    ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const customers = this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const suppliers = this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+
+    const deltaData = { products, variants, stockLedger, adjustments, customers, suppliers };
     return {
       serverTimestamp: anchor.toISOString(),
-      products: this.productRepo.getProducts(ctx).filter((p) => {
-        const t = new Date(p.updatedAt).getTime();
-        return t >= sinceDate.getTime() && t <= maxTime;
-      }).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      variants: Array.from(this.store.variants.values()).filter(
-        (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= maxTime
-      ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      stockLedger: this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= maxTime).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id)),
-      adjustments: Array.from(this.store.stockAdjustments.values()).filter(
-        (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= maxTime
-      ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      customers: this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
-      suppliers: this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id)),
+      ...deltaData,
+      integrityChecksum: computePayloadChecksum(deltaData),
+    };
+  }
+
+  processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): SyncBootstrapResponse {
+    const anchor = new Date().toISOString();
+    const products = this.productRepo.getProducts(ctx);
+    const variants = Array.from(this.store.variants.values()).filter(
+      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId)
+    );
+    const stockLedger = this.stockRepo.getLedger(ctx);
+    const adjustments = Array.from(this.store.stockAdjustments.values()).filter(
+      (a) => a.tenantId === ctx.tenantId && (!ctx.branchId || !a.branchId || a.branchId === ctx.branchId)
+    );
+    const customers = this.commercialRepo.getCustomers(ctx);
+    const suppliers = this.commercialRepo.getSuppliers(ctx);
+    const categories = Array.from(((this.store as any).categories || new Map()).values()).filter((c: any) => c.tenantId === ctx.tenantId) as Record<string, unknown>[];
+    const brands = Array.from(((this.store as any).brands || new Map()).values()).filter((b: any) => b.tenantId === ctx.tenantId) as Record<string, unknown>[];
+    const settings = Array.from(((this.store as any).settings || new Map()).values()).filter((s: any) => s.tenantId === ctx.tenantId) as Record<string, unknown>[];
+
+    const snapshotPayload = {
+      products,
+      variants,
+      stockLedger,
+      adjustments,
+      customers,
+      suppliers,
+      categories,
+      brands,
+      settings,
+    };
+    const integrityChecksum = computePayloadChecksum(snapshotPayload);
+
+    return {
+      snapshotTimestamp: anchor,
+      integrityChecksum,
+      schemaVersion: req.schemaVersion || 4,
+      entityCounts: {
+        products: products.length,
+        variants: variants.length,
+        stockLedger: stockLedger.length,
+        adjustments: adjustments.length,
+        customers: customers.length,
+        suppliers: suppliers.length,
+        categories: categories.length,
+        brands: brands.length,
+        settings: settings.length,
+      },
+      products,
+      variants,
+      stockLedger,
+      adjustments,
+      customers,
+      suppliers,
+      categories,
+      brands,
+      settings,
+    };
+  }
+
+  reconcileState(ctx: TenantContext, manifest: SyncStateManifest): SyncReconciliationResponse {
+    const discrepancies: SyncReconciliationDiscrepancy[] = [];
+    const serverProducts = this.productRepo.getProducts(ctx);
+    const serverProductIds = new Set(serverProducts.map((p) => p.id));
+    const clientProductIds = new Set(manifest.productIds || []);
+
+    for (const serverId of serverProductIds) {
+      if (!clientProductIds.has(serverId)) {
+        discrepancies.push({
+          entityType: "Product",
+          entityId: serverId,
+          kind: "MISSING_ON_CLIENT",
+          remediation: "Client should pull delta or execute bootstrap.",
+        });
+      }
+    }
+
+    for (const clientId of clientProductIds) {
+      if (!serverProductIds.has(clientId)) {
+        discrepancies.push({
+          entityType: "Product",
+          entityId: clientId,
+          kind: "EXTRA_ON_CLIENT",
+          remediation: "Verify uncommitted outbox mutation or purge stale client record.",
+        });
+      }
+    }
+
+    const serverVariants = Array.from(this.store.variants.values()).filter(
+      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId)
+    );
+    for (const v of serverVariants) {
+      if (!serverProductIds.has(v.productId)) {
+        discrepancies.push({
+          entityType: "ProductVariant",
+          entityId: v.id,
+          kind: "ORPHANED_VARIANT",
+          remediation: "Re-associate variant with valid parent or archive variant.",
+        });
+      }
+    }
+
+    if (manifest.stockBalances) {
+      for (const [variantId, clientQty] of Object.entries(manifest.stockBalances)) {
+        const serverQty = this.stockRepo.getAvailableStock(ctx, variantId);
+        if (serverQty !== clientQty) {
+          discrepancies.push({
+            entityType: "StockBalance",
+            entityId: variantId,
+            kind: "STOCK_MISMATCH",
+            serverValue: serverQty,
+            clientValue: clientQty,
+            remediation: "Client must reconcile with authoritative ledger movements.",
+          });
+        }
+      }
+    }
+
+    const serverCounts: Record<string, number> = {
+      products: serverProducts.length,
+      variants: serverVariants.length,
+      stockLedger: this.stockRepo.getLedger(ctx).length,
+    };
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      evaluatedAt: new Date().toISOString(),
+      inSync: discrepancies.length === 0,
+      totalDiscrepancies: discrepancies.length,
+      discrepancies,
+      serverCounts,
+      integrityChecksum: computePayloadChecksum({ serverCounts, discrepancies }),
     };
   }
 }
 
 export { PrismaSyncEngine } from "./prismaSyncEngine.js";
-export { checkRollbackBarrier, validateSyncEpoch } from "./syncIntegrity.js";
+export {
+  checkRollbackBarrier,
+  validateSyncEpoch,
+  computePayloadChecksum,
+  verifyPayloadChecksum,
+  syncDependencyRank,
+  orderSyncOperations,
+} from "./syncIntegrity.js";

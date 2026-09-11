@@ -207,7 +207,7 @@ export const sw: TranslationDictionary = {
     applyDiscount: "Punguzo",
     discountPercent: "Punguzo %",
     subtotal: "Jumla Ndogo",
-    taxTotal: "Kodi ya Ongezeko la Thamani (VAT 18%)",
+    taxTotal: "Kodi ya Ongezeko la Thamani (VAT 0%)",
     grandTotal: "Jumla Kuu",
     payNow: "Lipia Sasa (F9)",
     checkoutTitle: "Kamilisha Muamala",
@@ -241,6 +241,9 @@ export const sw: TranslationDictionary = {
     voidItem: "Idhinisha Kufuta",
     invalidPin: "Msimbo wa PIN ya msimamizi si sahihi.",
     stockUnavailable: "Kiasi cha bidhaa hakitoshelezi ghalani.",
+    saleDeniedTitle: "Mauzo Yamekataliwa",
+    saleDeniedZeroTotal: "Hauwezi kuendelea na mauzo. Jumla Kuu lazima iwe zaidi ya sifuri.",
+    emptyCartSaleDenied: "Hauwezi kuendelea na mauzo. Kikapu hakina bidhaa na Jumla Kuu ni sifuri.",
   },
   inventory: {
     title: "Usimamizi wa Gala & Bidhaa",

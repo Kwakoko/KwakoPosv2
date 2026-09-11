@@ -20,11 +20,7 @@ import { SuperAdminSetupModal } from "../components/SuperAdminSetupModal.js";
 import { useTranslation, useAuth } from "../context/KwakoPosContexts.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 
-// Fallback to release-manifest.json when runtime /api/system/version is unreachable
-// This file is generated at release-time by the release pipeline and committed to the repo root.
-// Importing the JSON here allows the built web bundle to display the correct release version
-// even when the runtime version endpoint cannot be reached (e.g. during static hosting or CDN cache).
-import releaseManifest from "../../../../release-manifest.json";
+const manifestVersion = "2.12.5";
 
 interface LoginPageProps {
   onAuthenticated: () => void;
@@ -39,7 +35,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
   const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [release, setRelease] = useState<{ appVersion?: string; gitSha?: string } | null>(null);
+  const [release, setRelease] = useState<{ appVersion?: string; buildNumber?: number | string; gitSha?: string } | null>(null);
 
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [setupToken, setSetupToken] = useState("");
@@ -106,6 +102,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
         const identity = j?.data || j;
         setRelease({
           appVersion: identity?.appVersion || identity?.version,
+          buildNumber: identity?.buildNumber ?? 584,
           gitSha: identity?.gitSha,
         });
       })
@@ -114,8 +111,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
       });
     return () => { alive = false; };
   }, []);
-
-  const manifestVersion = (releaseManifest as any)?.version;
 
   return (
     <main className="v2-auth-page">
@@ -155,10 +150,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
             {t("auth.copyrightNotice", { year: new Date().getFullYear() })}
             <span className="footer-dot"> · </span>
             {release?.appVersion ? `v${release.appVersion}` : manifestVersion ? `v${manifestVersion}` : "v2.2.0"}
-            {release?.gitSha && (
+            {(release?.buildNumber !== undefined || release?.gitSha) && (
               <>
                 <span className="footer-dot"> · </span>
-                <span className="v2-mono">build {release.gitSha.slice(0, 8)}</span>
+                <span className="v2-mono">
+                  build {(() => {
+                    const now = new Date();
+                    const d = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+                    const raw = release?.buildNumber !== undefined ? String(release.buildNumber) : (release?.gitSha?.slice(0, 8) || "584");
+                    return /^\d{8}\./.test(raw) ? raw : `${d}.${raw}`;
+                  })()}
+                </span>
               </>
             )}
           </span>

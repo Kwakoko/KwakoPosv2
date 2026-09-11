@@ -111,7 +111,7 @@ export class AuditComplianceEngine {
     ctx: TenantContext,
     filter?: { entityType?: string; entityId?: string; limit?: number }
   ): UniversalAuditEvent[] {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     let list = this.auditEvents.filter((e) => isSuperAdmin || e.tenantId === ctx.tenantId);
 
     if (filter?.entityType) {

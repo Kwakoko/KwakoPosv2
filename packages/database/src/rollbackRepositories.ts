@@ -59,7 +59,7 @@ export class ScopedRollbackRepository {
       tenantId?: string;
     }
   ): Promise<RollbackRequest[]> {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     const targetTenant = isSuperAdmin ? filters?.tenantId || null : ctx.tenantId;
 
     let items = Array.from(this.store.rollbackRequests.values()) as RollbackRequest[];

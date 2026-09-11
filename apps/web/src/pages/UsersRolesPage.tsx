@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
+import { useToast } from "../context/ToastContext.js";
 
 type SubTab = "directory" | "employees" | "branches" | "roles_builder" | "matrix" | "sessions" | "audit" | "super_admin";
 
@@ -111,6 +112,7 @@ export const UsersRolesPage: React.FC = () => {
   const { currentBranchName, availableBranches } = useBranch();
   const { permissions: rbacPermissions, hasPermission, isSuperAdmin } = useRbac();
   const { isOnline, pendingOutboxCount, db } = useSync();
+  const toast = useToast();
 
   const [activeTab, setActiveTab] = useState<SubTab>("directory");
   const [isLoading, setIsLoading] = useState(true);
@@ -371,13 +373,14 @@ export const UsersRolesPage: React.FC = () => {
 
   const handleDeleteUser = async (userRec: UserRecord) => {
     if (userRec.id === currentUser?.id) {
-      alert("You cannot delete your own active session account.");
+      toast.warning("Action Denied", "You cannot delete your own active session account.");
       return;
     }
     if (confirm(`Permanently delete user account for ${userRec.firstName} ${userRec.lastName}?`)) {
       await apiFetch(`/api/v1/users/${userRec.id}`, { method: "DELETE" }).catch(() => {});
       db.enqueueOutbox({ entityType: "User", operationType: "DELETE", payload: { id: userRec.id } });
       setUsersList((prev) => prev.filter((u) => u.id !== userRec.id));
+      toast.success("User Deleted", `Account for ${userRec.firstName} ${userRec.lastName} removed.`);
     }
   };
 

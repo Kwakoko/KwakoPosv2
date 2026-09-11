@@ -44,6 +44,8 @@ export { SuperAdminPage } from "./SuperAdminPage.js";
 export { CashDrawerPage } from "./CashDrawerPage.js";
 export { ReceiptsPage } from "./ReceiptsPage.js";
 export { TrashPage } from "./TrashPage.js";
+export { PersistenceTestPage } from "./PersistenceTestPage.js";
+export { BusinessConsultingPage } from "./BusinessConsultingPage.js";
 export { HelpPage } from "./HelpPage.js";
 export { CustomersPage } from "./CustomersPage.js";
 export { PurchasingPage } from "./PurchasingPage.js";
@@ -51,6 +53,7 @@ export { SettingsPage } from "./SettingsPage.js";
 export { PosPage } from "./PosPage.js";
 export { InventoryPage } from "./InventoryPage.js";
 export { DashboardPage } from "./DashboardPage.js";
+export { ExpensesPage } from "./ExpensesPage.js";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -228,9 +231,21 @@ export const DiagnosticsPage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("nav.diagnostics")}</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={!isOnline} onClick={() => void syncOutbox().catch(() => undefined)} type="button">
-          <RefreshCw size={13} /> {t("sync.forceSync")}
-        </button>
+        <div className="v2-flex v2-gap-2">
+          <button
+            className="v2-btn v2-btn-secondary v2-btn-sm"
+            onClick={() => {
+              window.history.pushState({}, "", "/persistence-test");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+            type="button"
+          >
+            <Activity size={13} /> Persistence &amp; Sync Test Lab
+          </button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={!isOnline} onClick={() => void syncOutbox().catch(() => undefined)} type="button">
+            <RefreshCw size={13} /> {t("sync.forceSync")}
+          </button>
+        </div>
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
         <KpiCard label="Network Status"    value={isOnline ? t("sync.networkOnline") : t("sync.networkOffline")} icon={isOnline ? <Wifi size={18} /> : <WifiOff size={18} />} accent={isOnline ? "#4ade80" : "#fbbf24"} />
@@ -253,65 +268,15 @@ export const DiagnosticsPage: React.FC = () => {
 
 // ─── EXPENSES PAGE ────────────────────────────────────────────────────────────
 
-const DEMO_EXPENSES = [
-  { id: "EXP-2026-081", category: "Utilities",  desc: "TANESCO Electricity Bill",    amount: 850000,  status: "PAID"    },
-  { id: "EXP-2026-082", category: "Rent",       desc: "Store Monthly Lease",          amount: 3000000, status: "PAID"    },
-  { id: "EXP-2026-083", category: "Supplies",   desc: "Thermal Printer Roll Paper",   amount: 120000,  status: "PENDING" },
-  { id: "EXP-2026-084", category: "Wages",      desc: "Casual Labour - Stocktake",    amount: 450000,  status: "PAID"    },
-  { id: "EXP-2026-085", category: "Transport",  desc: "Delivery motorbike fuel",       amount: 85000,   status: "PENDING" },
-];
-
-export const ExpensesPage: React.FC = () => {
-  const { t } = useTranslation();
-  const { formatCurrency, formatMoneyCompact } = useFormatters();
-  const totalExpenses = DEMO_EXPENSES.reduce((s, e) => s + e.amount, 0);
-  const pending       = DEMO_EXPENSES.filter((e) => e.status === "PENDING").reduce((s, e) => s + e.amount, 0);
-
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("expenses.title")}</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> {t("expenses.recordExpense")}</button>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label={t("expenses.monthlyExpenses")}  value={formatMoneyCompact(totalExpenses)} desc="All categories"       icon={<DollarSign size={18} />} accent="#f87171" />
-        <KpiCard label={t("expenses.pettyCashBalance")} value={formatMoneyCompact(650000)}        desc="Available float"      icon={<Coins size={18} />}      accent="#38bdf8" />
-        <KpiCard label={t("expenses.pendingApproval")}  value={`${DEMO_EXPENSES.filter((e) => e.status === "PENDING").length} Vouchers`} desc={formatMoneyCompact(pending)} icon={<Clock size={18} />} accent="#fbbf24" />
-        <KpiCard label={t("expenses.paidThisMonth")}    value={`${DEMO_EXPENSES.filter((e) => e.status === "PAID").length} Vouchers`} desc="Processed" icon={<CheckCircle size={18} />} accent="#4ade80" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header">
-          <div className="v2-card-title">{t("expenses.outgoingsLedger")}</div>
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> {t("expenses.exportVouchers")}</button>
-        </div>
-        <table className="v2-table">
-          <thead><tr><th>{t("expenses.voucherNumber")}</th><th>{t("expenses.expenseCategory")}</th><th>{t("expenses.expenseDescription")}</th><th>{t("expenses.expenseAmount")}</th><th>{t("expenses.voucherStatus")}</th><th>{t("common.actions")}</th></tr></thead>
-          <tbody>
-            {DEMO_EXPENSES.map((e) => (
-              <tr key={e.id}>
-                <td className="v2-mono v2-text-xs">{e.id}</td>
-                <td><span className="badge v2-badge-muted">{e.category}</span></td>
-                <td>{e.desc}</td>
-                <td className="v2-font-black">{formatCurrency(e.amount)}</td>
-                <td><span className={`badge ${e.status === "PAID" ? "v2-badge-success" : "v2-badge-warning"}`}>{e.status}</span></td>
-                <td>
-                  <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    {e.status === "PENDING" && <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" title={t("expenses.approveVoucher")}><Check size={13} style={{ color: "var(--success)" }} /></button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
+// ExpensesPage is exported from ./ExpensesPage.js
 
 // ─── AI INSIGHTS PAGE ─────────────────────────────────────────────────────────
 
-export const AiPage: React.FC = () => {
+export interface AiPageProps {
+  activeTab?: string;
+}
+
+export const AiPage: React.FC<AiPageProps> = () => {
   const [killSwitch, setKillSwitch] = useState(false);
   return (
     <div className="v2-animate-page-enter">

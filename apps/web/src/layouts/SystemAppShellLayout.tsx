@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, AlignLeft, Bell, BarChart2, Box, Briefcase, Boxes,
+  Activity, AlertTriangle, AlignLeft, Bell, BarChart2, BarChart3, Box, Briefcase, Boxes,
   BookOpen, BedDouble, Building, Car, ChevronDown, ChevronRight,
   Clock, Coins, Cpu, Droplets, Egg, ExternalLink, Fuel, GraduationCap,
   Hammer, HardHat, Hash, Home, LogIn, LogOut, Map,
@@ -20,6 +20,12 @@ import {
   Truck, Tv, Users, Utensils, Wifi, WifiOff, Wine, Wrench,
   X, Zap, ChefHat, ClipboardList, Gauge, FileText, DollarSign,
   PawPrint, Calendar, Receipt, BarChart, Layers, Check, Eye, RotateCcw,
+  Volume2, VolumeX, Keyboard,
+  // ── Icon Upgrade 2026-09-09 ───────────────────────────────────────────────
+  LayoutDashboard, ScanBarcode, Landmark, ContactRound,
+  PackageSearch, Wallet, BadgeCheck, BrainCircuit, Settings2,
+  CalendarDays, BadgeDollarSign, UtensilsCrossed, LineChart, Banknote,
+  UserCheck, Package2, ShoppingBasket, Cog, Building2,
 } from "lucide-react";
 import {
   useAuth, useTenant, useBranch, useSync, useTheme, useRbac, useModule, useTranslation,
@@ -35,6 +41,11 @@ import {
 import { apiFetch } from "../services/apiClient.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 import { ImpersonationModal } from "../components/ImpersonationModal.js";
+import { KeyboardShortcutsModal } from "../components/UI/KeyboardShortcutsModal.js";
+import { CommandPaletteModal } from "../components/UI/CommandPaletteModal.js";
+import { audioSynthesizer } from "../utils/useAudioFeedback.js";
+import { useToast } from "../context/ToastContext.js";
+import { isDemoModeActive, purgeSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -78,18 +89,18 @@ type SearchResult = { type: string; label: string; id: string; target: string };
 // Map lucide icon names (as strings in the registry) → actual components.
 // Used for module cards and sidebar icons.
 const ICON_MAP: Record<string, React.ElementType> = {
-  Activity, AlertTriangle, AlignLeft, BarChart2, BarChart, Bed: BedDouble, BedDouble, Bell,
-  BookOpen, Boxes, Box, Briefcase, Building, Calendar,
+  Activity, AlertTriangle, AlignLeft, BarChart2, BarChart, BarChart3, Bed: BedDouble, BedDouble, Bell,
+  BookOpen, Boxes, Box, Briefcase, Building, Building2, Calendar, CalendarDays,
   Car, ChefHat, Check, ChevronDown, ChevronRight,
-  Clock, ClipboardList, Coins, Cpu, DollarSign,
+  Clock, ClipboardList, Cog, Coins, ContactRound, Cpu, DollarSign, BadgeDollarSign,
   Droplets, Egg, ExternalLink, FileText, Fuel,
   Gauge, GraduationCap, Hammer, HardHat, Hash,
-  Home, Hotel: BedDouble, Layers, LogIn, LogOut, Map,
-  MapPin, Package, PawPrint, Pill, Pills: Pill, Radio, Receipt, RefreshCw,
-  Scale, Scissors, Search, Shield, ShoppingBag,
-  ShoppingCart, Shirt, Sparkles, Sprout, Store, Tag,
-  Trash2, TrendingUp, Truck, Tv, Users, Utensils,
-  Wine, Wrench, Wifi, WifiOff, X, Zap,
+  Home, Hotel: BedDouble, Landmark, Layers, LayoutDashboard, LineChart, LogIn, LogOut, Map,
+  MapPin, Package, Package2, PackageSearch, PawPrint, Pill, Pills: Pill, Radio, Receipt, RefreshCw,
+  BadgeCheck, BrainCircuit, Scale, ScanBarcode, Scissors, Search, Settings2, Shield, ShoppingBag,
+  ShoppingBasket, ShoppingCart, Shirt, Sparkles, Sprout, Store, Tag, Banknote,
+  Trash2, TrendingUp, Truck, Tv, UserCheck, Users, Utensils, UtensilsCrossed,
+  Wallet, Wine, Wrench, Wifi, WifiOff, X, Zap,
 };
 
 function LucideIcon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {
@@ -319,37 +330,293 @@ const SidebarAccordion: React.FC<{
   );
 };
 
-// ─── Sidebar Icon Map (per tab name heuristics) ───────────────────────────────
-function guessTabIcon(name: string): string {
+// ─── Sidebar Icon Map — Deterministic (replaces brittle heuristics) ──────────
+// Each key is an exact tab/section name from moduleRegistry.ts.
+// Unknown tabs gracefully fall back to "ChevronRight".
+const SIDEBAR_ICON_MAP: Record<string, string> = {
+  // ── Universal ────────────────────────────────────────────────────────────
+  "Dashboard":               "LayoutDashboard",
+  "Settings":                "Settings2",
+  "Employees":               "BadgeCheck",
+  "Reports":                 "BarChart3",
+
+  // ── POS & Sales ──────────────────────────────────────────────────────────
+  "POS":                     "ScanBarcode",
+  "Point of Sale":           "ScanBarcode",
+  "New Sale":                "ScanBarcode",
+  "Sales History":           "BarChart3",
+  "Returns":                 "RotateCcw",
+
+  // ── Cash Drawer ──────────────────────────────────────────────────────────
+  "Cash Drawer":             "Landmark",
+  "Shift & Active Register": "Clock",
+  "Cash Movement Ledger":    "Banknote",
+  "Reconciliation & Variances": "BarChart2",
+  "Safe & Bank Deposits":    "Landmark",
+  "No Sale & Event Logs":    "FileText",
+  "15 Financial Reports":    "BarChart3",
+  "Security & RBAC Rules":   "Shield",
+  "AI Cash Advisor":         "BrainCircuit",
+
+  // ── Inventory & Stock ────────────────────────────────────────────────────
+  "Inventory":               "Boxes",
+  "Inventory Overview":      "Boxes",
+  "Products":                "Package2",
+  "Categories & Brands":     "Tag",
+  "Stock Adjustment":        "ClipboardList",
+  "Stock Transfer":          "Truck",
+  "Stock Alerts":            "AlertTriangle",
+  "Stock Sync Engine":       "RefreshCw",
+  "Product Bundles & Kits":  "Layers",
+  "Stock Count":             "ClipboardList",
+  "Ledger Drilldown":        "TrendingUp",
+  "Inventory Reports":       "BarChart3",
+  "Ingredients":             "Sprout",
+
+  // ── Receipts ─────────────────────────────────────────────────────────────
+  "Receipts":                "Receipt",
+  "Receipt History":         "Receipt",
+  "Receipt Viewer":          "FileText",
+  "Receipt Templates":       "FileText",
+  "Receipt Analytics":       "BarChart3",
+  "Receipt Verification":    "BadgeCheck",
+  "Receipt Archive":         "Layers",
+
+  // ── Customers / CRM ──────────────────────────────────────────────────────
+  "Customers":               "ContactRound",
+  "Members":                 "ContactRound",
+  "Clients":                 "ContactRound",
+  "Patients":                "ContactRound",
+  "Tenants":                 "Building2",
+  "Debtors":                 "ContactRound",
+
+  // ── Purchasing / Procurement ─────────────────────────────────────────────
+  "Purchasing":              "PackageSearch",
+  "Suppliers":               "Truck",
+  "Purchase Orders":         "ClipboardList",
+  "Goods Received":          "Package2",
+  "Supplier Ledgers":        "Banknote",
+  "Warehouses":              "Building2",
+
+  // ── Expenses ─────────────────────────────────────────────────────────────
+  "Expenses":                "Wallet",
+
+  // ── Finance ──────────────────────────────────────────────────────────────
+  "Finance":                 "Coins",
+  "Loans":                   "Coins",
+  "Loan Applications":       "FileText",
+  "Repayments":              "Banknote",
+  "Savings":                 "Landmark",
+  "Accounts":                "Landmark",
+  "Transactions":            "BarChart2",
+
+  // ── AI Engine ────────────────────────────────────────────────────────────
+  "AI Insights Engine":      "BrainCircuit",
+  "AI Insights":             "BrainCircuit",
+  "Business Health Score":   "Activity",
+  "Sales Intelligence":      "TrendingUp",
+  "Inventory Intelligence":  "Boxes",
+  "Profit & Pricing":        "Coins",
+  "Customer CLV":            "ContactRound",
+  "Cash Flow & Burn":        "Landmark",
+  "Fraud & Security":        "Shield",
+  "Branch Comparison":       "BarChart3",
+  "Demand Forecast":         "TrendingUp",
+
+  // ── Reports sub-items ────────────────────────────────────────────────────
+  "Sales":                   "BarChart3",
+  "Profit":                  "TrendingUp",
+  "Inventory Valuation":     "Boxes",
+  "Tax":                     "Scale",
+  "Customers Report":        "ContactRound",
+  "Expenses Report":         "Wallet",
+  "Payment Methods":         "Banknote",
+  "Stock Movement":          "Truck",
+  "Purchasing Report":       "PackageSearch",
+  "Discounts":               "Tag",
+  "Returns & Refunds":       "RotateCcw",
+  "Cashier Performance":     "BadgeCheck",
+  "Receivables Aging":       "Clock",
+
+  // ── Settings sub-items ───────────────────────────────────────────────────
+  "Business Profile & Identity": "Building2",
+  "POS Configurations":      "ScanBarcode",
+  "Inventory Rules":         "Boxes",
+  "Tax & Billing":           "Scale",
+  "Security Policies":       "Shield",
+  "Terminals & Sessions":    "Cpu",
+  "Trash Can & Recovery":    "Trash2",
+  "Subscriptions & Billing": "Coins",
+  "Developer Options":       "Cog",
+  "Help & Manuals":          "BookOpen",
+  "Change Log":              "FileText",
+  "General Settings":        "Settings2",
+  "Users & Roles":           "UserCheck",
+
+  // ── Restaurant specific ──────────────────────────────────────────────────
+  "Tables":                  "UtensilsCrossed",
+  "Kitchen Display":         "ChefHat",
+  "Orders":                  "ClipboardList",
+  "Open Orders":             "ClipboardList",
+  "Completed Orders":        "BadgeCheck",
+  "Cancelled Orders":        "RotateCcw",
+  "Menu Management":         "BookOpen",
+  "Food Items":              "Utensils",
+  "Categories":              "Tag",
+  "Recipes":                 "BookOpen",
+  "Reservations":            "CalendarDays",
+  "Table Reservations":      "CalendarDays",
+
+  // ── Fleet & Transport ────────────────────────────────────────────────────
+  "Vehicles":                "Truck",
+  "Fleet":                   "Truck",
+  "Drivers":                 "Car",
+  "Maintenance":             "Wrench",
+  "Fuel Management":         "Fuel",
+  "Routes":                  "Map",
+  "Trips":                   "MapPin",
+  "GPS Tracking":            "MapPin",
+
+  // ── Workforce / HR ───────────────────────────────────────────────────────
+  "Attendance":              "Clock",
+  "Payroll":                 "BadgeDollarSign",
+  "Salary":                  "BadgeDollarSign",
+  "Departments":             "Building2",
+  "Positions":               "BadgeCheck",
+  "Leave Management":        "CalendarDays",
+  "Shifts":                  "Clock",
+
+  // ── Legal / Law ──────────────────────────────────────────────────────────
+  "Cases":                   "Scale",
+  "Legal Documents":         "FileText",
+  "Court Hearings":          "CalendarDays",
+  "Contracts":               "FileText",
+  "Billing":                 "Banknote",
+  "Time Tracking":           "Clock",
+  "Engagements":             "Briefcase",
+  "Clients & Contacts":      "ContactRound",
+
+  // ── Pharmacy specific ────────────────────────────────────────────────────
+  "Medicines":               "Pill",
+  "Prescriptions":           "Pill",
+  "Drug Inventory":          "Package2",
+  "Expiry Tracking":         "Clock",
+
+  // ── Agriculture / Poultry ────────────────────────────────────────────────
+  "Flock Management":        "Egg",
+  "Harvests":                "Sprout",
+  "Farm Records":            "Sprout",
+  "Feed Management":         "Sprout",
+
+  // ── Construction ─────────────────────────────────────────────────────────
+  "Projects":                "Briefcase",
+  "Sites":                   "MapPin",
+  "Materials":               "Hammer",
+  "Labor":                   "HardHat",
+  "Equipment":               "Wrench",
+  "Progress Reports":        "BarChart3",
+
+  // ── Telecom ──────────────────────────────────────────────────────────────
+  "Airtime":                 "Radio",
+  "Data Bundles":            "Wifi",
+  "SIM Management":          "Cpu",
+  "Network Coverage":        "Radio",
+  "Recharge Logs":           "RefreshCw",
+
+  // ── School / Education ───────────────────────────────────────────────────
+  "Students":                "GraduationCap",
+  "Classes":                 "BookOpen",
+  "Exams":                   "ClipboardList",
+  "Timetable":               "CalendarDays",
+  "Fees":                    "Banknote",
+  "Library":                 "BookOpen",
+
+  // ── Security Company ─────────────────────────────────────────────────────
+  "Guards":                  "Shield",
+  "Patrol Logs":             "MapPin",
+  "Incidents":               "AlertTriangle",
+  "Client Sites":            "Building2",
+  "Duty Rosters":            "CalendarDays",
+
+  // ── Water / Utility ──────────────────────────────────────────────────────
+  "Connections":             "Droplets",
+  "Meter Readings":          "Gauge",
+  "Water Bills":             "Banknote",
+  "Zones":                   "MapPin",
+
+  // ── Real Estate ──────────────────────────────────────────────────────────
+  "Properties":              "Building2",
+  "Leases":                  "FileText",
+  "Rent Collection":         "Banknote",
+  "Maintenance Requests":    "Wrench",
+  "Property Tenants":        "ContactRound",
+
+  // ── Salon / Spa ──────────────────────────────────────────────────────────
+  "Appointments":            "CalendarDays",
+  "Services":                "Scissors",
+  "Staff":                   "BadgeCheck",
+  "Products & Retail":       "Package2",
+
+  // ── Hotel ────────────────────────────────────────────────────────────────
+  "Rooms":                   "BedDouble",
+  "Bookings":                "CalendarDays",
+  "Housekeeping":            "BedDouble",
+  "Restaurant":              "Utensils",
+  "Bar":                     "Wine",
+
+  // ── Fuel Station ─────────────────────────────────────────────────────────
+  "Pumps":                   "Fuel",
+  "Fuel Sales":              "Fuel",
+  "Tank Levels":             "Gauge",
+  "Fuel Deliveries":         "Truck",
+  "Daily Readings":          "BarChart3",
+
+  // ── Help & System ────────────────────────────────────────────────────────
+  "Help":                    "BookOpen",
+  "Help & Docs":             "BookOpen",
+  "Trash":                   "Trash2",
+  "Diagnostics":             "Cpu",
+  "AI":                      "BrainCircuit",
+};
+
+/** Deterministic icon lookup — replaces fragile guessTabIcon() heuristic */
+function getSidebarIcon(name: string): string {
+  // Exact match first
+  if (SIDEBAR_ICON_MAP[name]) return SIDEBAR_ICON_MAP[name];
+  // Normalised match (trim + collapse whitespace)
+  const normalised = name.trim().replace(/\s+/g, " ");
+  if (SIDEBAR_ICON_MAP[normalised]) return SIDEBAR_ICON_MAP[normalised];
+  // Keyword fallback for dynamic/future tabs
   const n = name.toLowerCase();
-  if (n.includes("dashboard")) return "Home";
-  if (n.includes("pos") || n.includes("checkout") || n.includes("counter")) return "ShoppingCart";
-  if (n.includes("inventory") || n.includes("stock") || n.includes("product")) return "Package";
-  if (n.includes("customer") || n.includes("patient") || n.includes("member") || n.includes("client") || n.includes("tenant")) return "Users";
-  if (n.includes("purchase") || n.includes("supplier") || n.includes("warehouse")) return "ShoppingBag";
-  if (n.includes("report") || n.includes("analytics") || n.includes("stats")) return "BarChart2";
-  if (n.includes("setting") || n.includes("config")) return "Zap";
-  if (n.includes("expense")) return "DollarSign";
-  if (n.includes("receipt") || n.includes("invoice") || n.includes("billing")) return "Receipt";
-  if (n.includes("employee") || n.includes("staff") || n.includes("guard") || n.includes("worker")) return "Users";
-  if (n.includes("vehicle") || n.includes("fleet") || n.includes("truck")) return "Truck";
-  if (n.includes("driver")) return "Car";
-  if (n.includes("fuel")) return "Fuel";
-  if (n.includes("maintenance")) return "Wrench";
-  if (n.includes("case") || n.includes("legal")) return "Scale";
-  if (n.includes("calendar") || n.includes("schedule") || n.includes("roster")) return "Calendar";
-  if (n.includes("map") || n.includes("gis") || n.includes("route") || n.includes("geofence")) return "Map";
-  if (n.includes("task") || n.includes("order") || n.includes("work")) return "ClipboardList";
-  if (n.includes("site") || n.includes("location")) return "MapPin";
-  if (n.includes("farm") || n.includes("crop") || n.includes("harvest") || n.includes("flock")) return "Sprout";
-  if (n.includes("prescription") || n.includes("medicine") || n.includes("drug") || n.includes("pharmacy")) return "Pill";
-  if (n.includes("project") || n.includes("engagement")) return "Briefcase";
-  if (n.includes("contract") || n.includes("document")) return "FileText";
-  if (n.includes("payroll") || n.includes("salary") || n.includes("commission")) return "DollarSign";
-  if (n.includes("timesheet") || n.includes("attendance") || n.includes("clock")) return "Clock";
-  if (n.includes("ai") || n.includes("insight") || n.includes("assistant")) return "Sparkles";
+  if (n.includes("dashboard"))                         return "LayoutDashboard";
+  if (n.includes("pos") || n.includes("checkout"))    return "ScanBarcode";
+  if (n.includes("cash") || n.includes("drawer"))     return "Landmark";
+  if (n.includes("inventory") || n.includes("stock")) return "Boxes";
+  if (n.includes("receipt") || n.includes("invoice")) return "Receipt";
+  if (n.includes("customer") || n.includes("client")) return "ContactRound";
+  if (n.includes("employee") || n.includes("staff"))  return "BadgeCheck";
+  if (n.includes("purchase") || n.includes("supplier")) return "PackageSearch";
+  if (n.includes("expense"))                           return "Wallet";
+  if (n.includes("report") || n.includes("analytics")) return "BarChart3";
+  if (n.includes("setting") || n.includes("config"))  return "Settings2";
+  if (n.includes("ai") || n.includes("insight"))      return "BrainCircuit";
+  if (n.includes("vehicle") || n.includes("fleet"))   return "Truck";
+  if (n.includes("driver"))                            return "Car";
+  if (n.includes("fuel"))                              return "Fuel";
+  if (n.includes("maintenance"))                       return "Wrench";
+  if (n.includes("legal") || n.includes("case"))      return "Scale";
+  if (n.includes("calendar") || n.includes("schedule")) return "CalendarDays";
+  if (n.includes("map") || n.includes("route"))       return "Map";
+  if (n.includes("order") || n.includes("task"))      return "ClipboardList";
+  if (n.includes("payroll") || n.includes("salary"))  return "BadgeDollarSign";
+  if (n.includes("attendance") || n.includes("clock")) return "Clock";
+  if (n.includes("farm") || n.includes("crop"))       return "Sprout";
+  if (n.includes("medicine") || n.includes("drug"))   return "Pill";
+  if (n.includes("project"))                           return "Briefcase";
+  if (n.includes("document") || n.includes("contract")) return "FileText";
   return "ChevronRight";
 }
+
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -601,7 +868,7 @@ export const Sidebar: React.FC<{
                     type="button"
                   >
                     <span className="sidebar-item-icon">
-                      <LucideIcon name={guessTabIcon(item)} size={14} />
+                      <LucideIcon name={getSidebarIcon(item)} size={14} />
                     </span>
                     <span className="sidebar-item-label">{translateNavTab(item, t)}</span>
                   </button>
@@ -616,7 +883,7 @@ export const Sidebar: React.FC<{
                     onSelectTab={handleTabSelect}
                     expanded={!!expanded[item.name]}
                     onToggle={() => toggleExpand(item.name)}
-                    iconName={guessTabIcon(item.name)}
+                    iconName={getSidebarIcon(item.name)}
                   />
                 );
               }
@@ -685,36 +952,39 @@ export const AppVersionFooter: React.FC<{
   };
 
   return (
-    <footer>
-      <span>KwakoPos</span>
-      <span className="footer-dot">·</span>
-      <span>{appVersion || "v2.12.5"}</span>
-      {gitSha && (
-        <>
-          <span className="footer-dot">·</span>
-          <span className="v2-mono">{gitSha.slice(0, 8)}</span>
-        </>
-      )}
-      <span className="footer-dot">·</span>
-      <span className="footer-status">
-        <span className={`footer-status-dot${isOnline ? "" : " offline"}`} />
-        {isOnline ? "Connected" : "Offline"}
-      </span>
-      <span className="footer-dot">·</span>
-      <span className="v2-text-muted">{activeModule}</span>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/privacy")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Privacy</button>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Data Protection</button>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Terms</button>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>License</button>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Cookies</button>
-      <span className="footer-dot">·</span>
-      <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Security</button>
-      <span style={{ marginLeft: "auto" }} className="v2-text-muted">{new Date().getFullYear()} ©</span>
+    <footer className="app-version-footer">
+      <div className="app-version-footer-inner">
+        <span className="app-version-brand">KwakoPos</span>
+        <span className="footer-dot">·</span>
+        <span>{appVersion || "v2.12.5"}</span>
+        {gitSha && (
+          <>
+            <span className="footer-dot">·</span>
+            <span className="v2-mono">{gitSha.slice(0, 8)}</span>
+          </>
+        )}
+        <span className="footer-dot">·</span>
+        <span className="footer-status">
+          <span className={`footer-status-dot${isOnline ? "" : " offline"}`} />
+          {isOnline ? "Connected" : "Offline"}
+        </span>
+        <span className="footer-dot">·</span>
+        <span className="v2-text-muted">{activeModule}</span>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/privacy")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Privacy</button>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Data Protection</button>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Terms</button>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>License</button>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Cookies</button>
+        <span className="footer-dot">·</span>
+        <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Security</button>
+        <span className="footer-dot">·</span>
+        <span className="v2-text-muted">{new Date().getFullYear()} ©</span>
+      </div>
     </footer>
   );
 };
@@ -1303,16 +1573,33 @@ export const TopBar: React.FC<{
   onOpenMobileSidebar: () => void;
   onSync: () => void;
   onOpenInspectModal?: () => void;
+  onOpenShortcuts?: () => void;
+  isAudioMuted?: boolean;
+  onToggleAudio?: () => void;
 }> = ({
   currentTenantId, currentBranchId, currentTenantName, currentBranchName,
   availableTenants, availableBranches, onSwitchTenant, onSwitchBranch,
   isOnline, pendingOutboxCount, theme, onToggleTheme, onNavigate,
   onOpenSearch, onLogout, user, onOpenMobileSidebar, onSync, onOpenInspectModal,
+  onOpenShortcuts, isAudioMuted, onToggleAudio,
 }) => {
   const { activeModule, manifest } = useModule();
   const { isSuperAdmin } = useRbac();
   const { impersonatedTenant, stopImpersonation } = useAuth();
   const { t } = useTranslation();
+  const { db } = useSync();
+  const [isDemoActive, setIsDemoActive] = useState(() => isDemoModeActive(db));
+
+  useEffect(() => {
+    const handleDemoChange = () => {
+      setIsDemoActive(isDemoModeActive(db));
+    };
+    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    };
+  }, [db]);
+
   const [showModule, setShowModule] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [showUser, setShowUser] = useState(false);
@@ -1600,6 +1887,38 @@ export const TopBar: React.FC<{
             </div>
           )}
 
+          {/* Demo Mode HUD Badge */}
+          {isDemoActive && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm("Purge all demo data and restore store to pristine zero data?")) {
+                  await purgeSampleData(db, currentTenantId || undefined);
+                  onNavigate("/settings");
+                }
+              }}
+              style={{
+                background: "rgba(245, 158, 11, 0.16)",
+                color: "#f59e0b",
+                border: "1px solid rgba(245, 158, 11, 0.45)",
+                fontSize: "0.72rem",
+                fontWeight: 800,
+                padding: "0.22rem 0.6rem",
+                borderRadius: "6px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                cursor: "pointer",
+                letterSpacing: "0.03em",
+                textTransform: "uppercase",
+              }}
+              title="Demo Training Sandbox Active. Click to purge all sample data."
+            >
+              <Sparkles size={12} />
+              <span>⚡ Demo Mode</span>
+            </button>
+          )}
+
           {/* Sync status */}
           <div style={{ position: "relative" }}>
             <button
@@ -1652,6 +1971,32 @@ export const TopBar: React.FC<{
           {/* Language selector */}
           <LanguageSelector variant="topbar" />
 
+          {/* Sound / Chimes toggle */}
+          {onToggleAudio && (
+            <button
+              className="topbar-icon-btn"
+              onClick={onToggleAudio}
+              aria-label={isAudioMuted ? "Unmute Audio Chimes" : "Mute Audio Chimes"}
+              title={isAudioMuted ? "Audio Chimes: Muted (Click to unmute)" : "Audio Chimes: Active (Click to mute)"}
+              type="button"
+            >
+              {isAudioMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
+          )}
+
+          {/* Keyboard shortcuts cheatsheet */}
+          {onOpenShortcuts && (
+            <button
+              className="topbar-icon-btn"
+              onClick={onOpenShortcuts}
+              aria-label="Keyboard Shortcuts (? or Ctrl+/)"
+              title="Keyboard Shortcuts (? or Ctrl+/)"
+              type="button"
+            >
+              <Keyboard size={16} />
+            </button>
+          )}
+
           {/* Theme toggle */}
           <button
             className="topbar-icon-btn"
@@ -1699,88 +2044,7 @@ export const TopBar: React.FC<{
   );
 };
 
-// ─── Search Modal ─────────────────────────────────────────────────────────────
-
-const SearchModal: React.FC<{
-  onClose: () => void;
-  onNavigate: (path: string) => void;
-}> = ({ onClose, onNavigate }) => {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  useEffect(() => {
-    if (!query.trim()) { setResults([]); return; }
-    const handle = window.setTimeout(async () => {
-      try {
-        const [products, customers] = await Promise.all([
-          apiFetch<{ success: boolean; data: Array<{ id: string; name: string; sku: string }> }>(
-            `/api/v1/products/search?q=${encodeURIComponent(query)}`),
-          apiFetch<{ success: boolean; data: Array<{ id: string; name: string }> }>("/api/v1/customers"),
-        ]);
-        const q = query.toLowerCase();
-        const r: SearchResult[] = [
-          ...(products.data || []).slice(0, 5).map((p) => ({
-            type: "Product", label: `${p.name} (${p.sku})`, id: p.id, target: "/pos",
-          })),
-          ...(customers.data || [])
-            .filter((c) => c.name.toLowerCase().includes(q))
-            .slice(0, 5)
-            .map((c) => ({ type: "Customer", label: c.name, id: c.id, target: "/customers" })),
-        ];
-        setResults(r);
-      } catch { setResults([]); }
-    }, 180);
-    return () => window.clearTimeout(handle);
-  }, [query]);
-
-  return (
-    <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Search">
-      <div className="modal-card search-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="v2-flex v2-items-center v2-gap-2" style={{ marginBottom: ".85rem" }}>
-          <Search size={16} className="v2-text-muted" aria-hidden="true" />
-          <input
-            ref={inputRef}
-            className="v2-input"
-            style={{ border: "none", padding: ".3rem .5rem", fontSize: ".88rem" }}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products, customers, modules…"
-            aria-label="Search input"
-          />
-          <button className="topbar-icon-btn" onClick={onClose} aria-label="Close search">
-            <X size={15} />
-          </button>
-        </div>
-
-        {!query.trim() ? (
-          <div className="v2-empty v2-p-4">
-            <p className="v2-text-sm v2-text-muted">Search is scoped to your V2 session & permissions.</p>
-          </div>
-        ) : results.length ? (
-          results.map((r) => (
-            <button
-              key={`${r.type}-${r.id}`}
-              className="search-result-item"
-              onClick={() => { onClose(); onNavigate(r.target); }}
-              type="button"
-            >
-              <span className="search-result-type">{r.type}</span>
-              <span className="search-result-label">{r.label}</span>
-              <ChevronRight size={13} className="v2-text-muted" aria-hidden="true" />
-            </button>
-          ))
-        ) : (
-          <div className="v2-empty v2-p-4">
-            <p className="v2-text-sm v2-text-muted">No results found for "{query}".</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+// ─── Search Modal (Replaced by CommandPaletteModal) ───────────────────────────
 
 // ─── EmptySearch ──────────────────────────────────────────────────────────────
 // Kept for backward-compat with any existing consumer.
@@ -1808,6 +2072,8 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   );
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(() => audioSynthesizer.getMuted());
   const [isInspectModalOpen, setIsInspectModalOpen] = useState(false);
   const [release, setRelease] = useState<{ appVersion?: string; gitSha?: string }>({});
 
@@ -1823,23 +2089,58 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Global Search
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setIsSearchOpen(true);
+        return;
       }
-      if (e.key === "Escape") setIsSearchOpen(false);
+      // Shortcuts Modal Toggle (Ctrl + /)
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setIsShortcutsOpen((prev) => !prev);
+        return;
+      }
+      // Global workspace navigation (Ctrl + Shift + ...)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+        const k = e.key.toUpperCase();
+        if (k === "P") { e.preventDefault(); onNavigate("/pos"); return; }
+        if (k === "I") { e.preventDefault(); onNavigate("/inventory"); return; }
+        if (k === "C") { e.preventDefault(); onNavigate("/cash-drawer"); return; }
+        if (k === "R") { e.preventDefault(); onNavigate("/receipts"); return; }
+        if (k === "D") { e.preventDefault(); onNavigate("/"); return; }
+      }
+      // Quick Keyboard Help with '?' when not in input
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (!isInput && e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setIsShortcutsOpen(true);
+        return;
+      }
+      if (e.key === "Escape") {
+        setIsSearchOpen(false);
+        setIsShortcutsOpen(false);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [onNavigate]);
+
+  const toast = useToast();
 
   const safeSwitchTenant = async (id: string) => {
     try { await switchTenant(id); }
-    catch (error) { window.alert(error instanceof Error ? error.message : "Tenant switch denied"); }
+    catch (error) { toast.error("Tenant Switch Denied", error instanceof Error ? error.message : "Tenant switch denied"); }
   };
   const safeSwitchBranch = async (id: string) => {
     try { await switchBranch(id); }
-    catch (error) { window.alert(error instanceof Error ? error.message : "Branch switch denied"); }
+    catch (error) { toast.error("Branch Switch Denied", error instanceof Error ? error.message : "Branch switch denied"); }
   };
 
   return (
@@ -1871,6 +2172,13 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
         onSync={() => void syncOutbox()}
         onOpenInspectModal={() => setIsInspectModalOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        isAudioMuted={isAudioMuted}
+        onToggleAudio={() => {
+          const next = !isAudioMuted;
+          audioSynthesizer.setMuted(next);
+          setIsAudioMuted(next);
+        }}
       />
 
       <div className="app-layout">
@@ -1958,12 +2266,16 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
 
       <BottomNav />
 
-      {isSearchOpen && (
-        <SearchModal
-          onClose={() => setIsSearchOpen(false)}
-          onNavigate={onNavigate}
-        />
-      )}
+      <CommandPaletteModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onNavigate={onNavigate}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
 
       <ImpersonationModal
         isOpen={isInspectModalOpen}

@@ -1,4 +1,5 @@
 import { getReleaseIdentity, loadConfig } from "../../packages/config/src/index.js";
+import { execSync } from "node:child_process";
 import * as fs from "fs";
 import * as path from "path";
 

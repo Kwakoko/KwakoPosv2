@@ -9,6 +9,18 @@ const rootDir = process.cwd().endsWith("web") ? path.resolve(process.cwd(), "../
 const publicDir = path.join(dir, "public");
 fs.mkdirSync(publicDir, { recursive: true });
 
+function safeWriteFileSync(filePath: string, data: string): void {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.writeFileSync(filePath, data);
+      return;
+    } catch (err) {
+      if (attempt === 4) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 // Read single authoritative release manifest
 const releaseManifestPath = path.join(rootDir, "release-manifest.json");
 if (!fs.existsSync(releaseManifestPath)) {
@@ -18,17 +30,22 @@ if (!fs.existsSync(releaseManifestPath)) {
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
 const version = String(releaseManifest.version || "2.12.5");
 const gitSha = String(releaseManifest.gitSha || "unknown");
+const rawBuildNumber = releaseManifest.buildNumber || 584;
+const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+const buildNumber = `${dateStr}.${rawBuildNumber}`;
 const releaseId = `kwakopos-rel-${version}-${gitSha.slice(0, 7)}`;
 const cacheName = `kwakopos-runtime-v${version}`;
 const pwaSchemaVersion = Number(releaseManifest.compatibility?.pwaSchemaVersion || 4);
 
 // 1. Write public/release-manifest.json
-fs.writeFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify({
+safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify({
   appVersion: version,
   version,
   tag: `v${version}`,
   gitTag: `v${version}`,
   gitSha,
+  buildNumber,
+  rawBuildNumber,
   releaseId,
   environment: releaseManifest.environment || "production",
   releasedAt: releaseManifest.releasedAt || new Date().toISOString(),
@@ -43,7 +60,7 @@ fs.writeFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify({
 }, null, 2));
 
 // 2. Write public/manifest.json
-fs.writeFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
+safeWriteFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
   name: "KwakoPos 2.0 POS & Enterprise System",
   short_name: "KwakoPos",
   description: "Production Offline-First POS & Enterprise Business Operating System",
@@ -80,10 +97,10 @@ const assetManifest = {
     return { path: assetPath, hash };
   }),
 };
-fs.writeFileSync(path.join(publicDir, "asset-manifest.json"), JSON.stringify(assetManifest, null, 2));
+safeWriteFileSync(path.join(publicDir, "asset-manifest.json"), JSON.stringify(assetManifest, null, 2));
 
 // 4. Generate public/sw.js with atomic release strategy, handshake activation, and recovery window retention
-fs.writeFileSync(path.join(publicDir, "sw.js"), `/**
+safeWriteFileSync(path.join(publicDir, "sw.js"), `/**
  * KwakoPos Enterprise PWA Upgrade-Safe Service Worker
  * Release: ${releaseId} • Version: ${version}
  * Cache: ${cacheName}

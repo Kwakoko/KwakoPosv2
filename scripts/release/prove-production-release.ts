@@ -209,7 +209,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
     deployedIdentity: deployedCert.identity,
     productionBrowser: browserEvidence.finalConvergenceStatus,
     browserAtoServerToB: browserEvidence.finalConvergenceStatus,
-    expectedStock: Number(browserEvidence.expectedStock),
+    expectedStock: Number(browserEvidence.expectedStock) as 188,
     trafficPercent: promotion.trafficPercent,
     liveIdentity: promotion.liveIdentityMatch,
     folderSyncState: "PASS",

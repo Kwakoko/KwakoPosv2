@@ -44,6 +44,13 @@ function resolvePackageVersion(): string {
   }
   return "2.12.5";
 }
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // .env not present or already supplied via runtime environment
+  }
+}
 
 const developmentJwtSecret = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
 
@@ -56,12 +63,25 @@ export const ConfigSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default("7d"),
   GIT_SHA: z.string().optional(),
+  BUILD_NUMBER: z.coerce.number().default(584),
   CONTAINER_DIGEST: z.string().optional(),
   CLOUD_RUN_REVISION: z.string().optional(),
   APP_VERSION: z.string().default(resolvePackageVersion()),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+
+export function resolveRealBuildNumber(): number {
+  const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
+  if (envBuild && /^\d+$/.test(envBuild)) return parseInt(envBuild, 10);
+  try {
+    const count = execSync("git rev-list --count HEAD", { encoding: "utf8" }).trim();
+    if (/^\d+$/.test(count)) return parseInt(count, 10);
+  } catch {
+    // Git may be unavailable inside the runtime container.
+  }
+  return 584;
+}
 
 export function resolveRealGitSha(): string {
   const envSha = process.env.GIT_SHA || process.env.COMMIT_SHA || process.env.CONTAINER_SOURCE_SHA || process.env.GITHUB_SHA || process.env.GIT_COMMIT;
@@ -87,8 +107,10 @@ export function resolveRealGitSha(): string {
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
   const gitSha = resolveRealGitSha();
+  const buildNumber = resolveRealBuildNumber();
   const env = {
     GIT_SHA: gitSha,
+    BUILD_NUMBER: buildNumber,
     ...process.env,
     ...overrideEnv,
   };
@@ -106,6 +128,7 @@ export interface ReleaseIdentity {
   appVersion: string;
   gitTag: string;
   gitSha: string;
+  buildNumber: number;
   containerDigest: string | null;
   cloudRunRevision: string | null;
   environment: string;
@@ -150,7 +173,8 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<str
     gitTag,
     gitSha,
     releaseId: auth.releaseId,
-    buildId: auth.buildId,
+    buildId: auth.buildId || gitSha.slice(0, 8),
+    buildNumber: Number(config.BUILD_NUMBER || auth.buildNumber || resolveRealBuildNumber()),
     pwaVersion: auth.pwaVersion,
     pwaSchemaVersion: auth.pwaSchemaVersion,
     syncProtocolVersion: auth.syncProtocolVersion,

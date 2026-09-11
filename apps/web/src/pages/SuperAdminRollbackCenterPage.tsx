@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
+import { useToast } from "../context/ToastContext.js";
 import type {
   RollbackRequest,
   RollbackScope,
@@ -18,6 +19,7 @@ import type {
 
 export const SuperAdminRollbackCenterPage: React.FC = () => {
   const { user } = useAuth();
+  const toast = useToast();
 
   // Data state
   const [requests, setRequests] = useState<RollbackRequest[]>([]);
@@ -173,8 +175,9 @@ export const SuperAdminRollbackCenterPage: React.FC = () => {
       });
       setApprovalModalRequest(null);
       await loadData();
+      toast.success("Rollback Approved", "Rollback request approved successfully.");
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Approval failed");
+      toast.error("Approval Failed", err instanceof Error ? err.message : "Approval failed");
     } finally {
       setApprovalBusy(false);
     }
@@ -189,15 +192,16 @@ export const SuperAdminRollbackCenterPage: React.FC = () => {
         body: JSON.stringify({ reason: reasonPrompt }),
       });
       await loadData();
+      toast.info("Rollback Rejected", `Request ${reqId} was rejected.`);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Rejection failed");
+      toast.error("Rejection Failed", err instanceof Error ? err.message : "Rejection failed");
     }
   };
 
   const handleExecute = async () => {
     if (!selectedRequestForExecution) return;
     if (selectedRequestForExecution.riskLevel === "CRITICAL" && confirmationPhrase.trim() !== "AUTHORIZE ROLLBACK") {
-      window.alert("You must type 'AUTHORIZE ROLLBACK' to proceed with critical execution.");
+      toast.warning("Authorization Required", "You must type 'AUTHORIZE ROLLBACK' to proceed with critical execution.");
       return;
     }
 
@@ -213,8 +217,9 @@ export const SuperAdminRollbackCenterPage: React.FC = () => {
       setSelectedRequestForExecution(null);
       setConfirmationPhrase("");
       await loadData();
+      toast.success("Rollback Executed", "Rollback operation executed successfully.");
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Execution failed");
+      toast.error("Execution Failed", err instanceof Error ? err.message : "Execution failed");
     }
   };
 

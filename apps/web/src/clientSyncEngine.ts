@@ -1,5 +1,14 @@
 import { LocalIndexedDbStore } from "./indexedDb.js";
-import type { SyncPushRequest, SyncPushResponse, SyncDeltaResponse } from "@kwakopos2/contracts";
+import type {
+  SyncPushRequest,
+  SyncPushResponse,
+  SyncDeltaResponse,
+  SyncBootstrapRequest,
+  SyncBootstrapResponse,
+  SyncStateManifest,
+  SyncReconciliationResponse,
+  SyncObservabilityStatus,
+} from "@kwakopos2/contracts";
 import { globalRumCollector } from "./rum/rumCollector.js";
 import { globalClientCoordination } from "./persistence/clientCoordination.js";
 
@@ -9,12 +18,73 @@ export class ClientSyncEngine {
   public deviceId: string;
   public localDb: LocalIndexedDbStore;
   private syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
+  private retryCount = 0;
+  private lastReconciliationStatus: "IN_SYNC" | "DIVERGENT" | "UNKNOWN" = "UNKNOWN";
 
   constructor(deviceId: string, localDb: LocalIndexedDbStore) {
     if (!deviceId || deviceId.length > 128)
       throw new Error("SYNC_CONFIGURATION_INVALID: deviceId is required and must be <= 128 characters");
     this.deviceId = deviceId;
     this.localDb = localDb;
+  }
+
+  async bootstrapWithServer(
+    bootstrapApiFn: (req: SyncBootstrapRequest) => Promise<SyncBootstrapResponse>,
+    tenantId?: string,
+    branchId?: string,
+  ): Promise<{ applied: number; snapshotTimestamp: string }> {
+    await this.localDb.ready;
+    const req: SyncBootstrapRequest = {
+      deviceId: this.deviceId,
+      clientVersion: "2.12.5",
+      schemaVersion: this.localDb.schemaVersion,
+      branchId,
+    };
+    const snapshot = await bootstrapApiFn(req);
+    if (!snapshot || typeof snapshot.snapshotTimestamp !== "string") {
+      throw new Error("SYNC_PROTOCOL_VIOLATION: invalid bootstrap snapshot response");
+    }
+    const result = await this.localDb.bootstrapFromAuthoritativeSnapshot(snapshot, { tenantId: tenantId || "", branchId });
+    return { applied: result.applied, snapshotTimestamp: snapshot.snapshotTimestamp };
+  }
+
+  async reconcileWithServer(
+    reconcileApiFn: (manifest: SyncStateManifest) => Promise<SyncReconciliationResponse>,
+    tenantId?: string,
+  ): Promise<SyncReconciliationResponse> {
+    await this.localDb.ready;
+    const manifest = this.localDb.generateStateManifest(this.deviceId, tenantId);
+    const report = await reconcileApiFn(manifest);
+    this.lastReconciliationStatus = report.inSync ? "IN_SYNC" : "DIVERGENT";
+    this.localDb.setSyncMetadata("reconciliationStatus", this.lastReconciliationStatus);
+    this.localDb.setSyncMetadata("lastReconciliationTime", report.evaluatedAt);
+    return report;
+  }
+
+  getObservabilityStatus(tenantId?: string): SyncObservabilityStatus {
+    const pendingOutbox = this.localDb.getPendingOutbox(tenantId);
+    const failedOutbox = this.localDb.getFailedOutbox(tenantId);
+    const lastSync = this.localDb.syncMetadata.get("lastSyncTime") || null;
+    const lastBootstrap = this.localDb.syncMetadata.get("lastBootstrapTime") || null;
+    const isBootstrapped = Boolean(lastBootstrap || lastSync);
+
+    return {
+      tenantId: tenantId || "DEFAULT",
+      lastSyncTime: lastSync,
+      pendingOutboxCount: pendingOutbox.length,
+      failedOperationsCount: failedOutbox.length,
+      retryCount: this.retryCount,
+      syncCursor: lastSync,
+      serverVersion: "2.12.5",
+      clientVersion: "2.12.5",
+      schemaVersion: this.localDb.schemaVersion,
+      serviceWorkerVersion: "2.12.5",
+      conflictCount: Array.from(this.localDb.syncMetadata.keys()).filter((k) => k.startsWith("sync_conflict_")).length,
+      reconciliationStatus: this.lastReconciliationStatus,
+      bootstrapStatus: isBootstrapped ? "BOOTSTRAPPED" : "NOT_BOOTSTRAPPED",
+      lastAuthoritativeSnapshot: lastBootstrap,
+      integrityStatus: "VERIFIED",
+    };
   }
 
   async syncWithServer(

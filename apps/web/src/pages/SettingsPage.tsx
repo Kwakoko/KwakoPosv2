@@ -16,22 +16,32 @@
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
   Zap, Database, Save, CheckCircle, Globe, Check, Sliders, Calendar,
-  DollarSign, Hash, LucideIcon
+  DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles
 } from "lucide-react";
-import { useTenant, useBranch, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
+import { useTenant, useBranch, useSync, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
+import { useToast } from "../components/UI/Toast.js";
+import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
+import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
 import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
+import { loadSampleData, purgeSampleData, isDemoModeActive, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
 
 type SettingsTab =
   | "profile" | "localization" | "pos" | "tax" | "inventory"
   | "security" | "notifications" | "sync" | "integrations" | "advanced";
 
-export const SettingsPage: React.FC = () => {
-  const { currentTenantName } = useTenant();
+export interface SettingsPageProps {
+  activeTab?: string;
+}
+
+export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiveTab }) => {
+  const { currentTenantId, currentTenantName } = useTenant();
   const { currentBranchName } = useBranch();
+  const { db } = useSync();
+  const toast = useToast();
   const { t } = useTranslation();
   const { locale, setLocale, availableLocales } = useLocale();
   const { formatCurrency, formatMoneyCompact, formatDate, formatTime, formatNumber } = useFormatters();
@@ -39,16 +49,81 @@ export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  useEffect(() => {
+    if (!propActiveTab) return;
+    const map: Record<string, SettingsTab> = {
+      "General Settings": "profile",
+      "POS Settings": "pos",
+      "Tax & Currency": "tax",
+      "Printers & Hardware": "pos",
+      "Barcode & Labels": "inventory",
+      "Payment Gateways": "integrations",
+      "Backup & Restore": "advanced",
+      "Audit Trail": "advanced",
+      "Branch Management": "profile",
+      "Custom Fields": "advanced",
+      "Fiscal Device (TRA)": "tax",
+    };
+    if (map[propActiveTab]) {
+      setActiveTab(map[propActiveTab]);
+    }
+  }, [propActiveTab]);
+
+  const [isDemoActive, setIsDemoActive] = useState(() => isDemoModeActive(db));
+
   // Form states across tabs
-  const [profile, setProfile] = useState({
-    businessName: currentTenantName || "Kwakoko Supermarket Ltd",
-    tradingName: "KwakoPos Central",
-    tinNumber: "104-982-114",
-    vrnNumber: "40019283H",
-    email: "info@kwakopos.com",
-    phone: "+255 754 112 233",
-    address: "Posta HQ Block A, Dar es Salaam",
+  const [profile, setProfile] = useState(() => {
+    const saved = db.getConfigurationLocal?.("store_profile") as any;
+    return {
+      businessName: saved?.businessName || currentTenantName || "",
+      tradingName: saved?.tradingName || "KwakoPos Central",
+      tinNumber: saved?.tinNumber || "",
+      vrnNumber: saved?.vrnNumber || "",
+      email: saved?.email || "",
+      phone: saved?.phone || "",
+      address: saved?.address || "",
+    };
   });
+
+  useEffect(() => {
+    const saved = db.getConfigurationLocal?.("store_profile") as any;
+    if (saved) {
+      setProfile((prev) => ({
+        ...prev,
+        businessName: saved.businessName || currentTenantName || prev.businessName,
+        tradingName: saved.tradingName || prev.tradingName,
+        tinNumber: saved.tinNumber || prev.tinNumber,
+        vrnNumber: saved.vrnNumber || prev.vrnNumber,
+        email: saved.email || prev.email,
+        phone: saved.phone || prev.phone,
+        address: saved.address || prev.address,
+      }));
+    }
+  }, [currentTenantName, db]);
+
+  useEffect(() => {
+    const handleDemoChange = () => {
+      setIsDemoActive(isDemoModeActive(db));
+    };
+    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    };
+  }, [db]);
+
+  useEffect(() => {
+    const saved = db.getConfigurationLocal?.("tax_config") as any;
+    if (saved) {
+      setTaxConfig((prev) => ({
+        ...prev,
+        vatEnabled: Boolean(saved.vatEnabled),
+        vatRatePercent: Number(saved.vatRatePercent ?? 0),
+        currencySymbol: saved.currencySymbol || prev.currencySymbol,
+        currencyCode: saved.currencyCode || prev.currencyCode,
+        traVfdEndpoint: saved.traVfdEndpoint || prev.traVfdEndpoint,
+      }));
+    }
+  }, [db]);
 
   const [posConfig, setPosConfig] = useState({
     autoPrintReceipt: true,
@@ -58,12 +133,26 @@ export const SettingsPage: React.FC = () => {
     allowHoldOrders: true,
   });
 
-  const [taxConfig, setTaxConfig] = useState({
-    vatEnabled: true,
-    vatRatePercent: 18,
-    currencySymbol: "Tsh",
-    currencyCode: "TZS",
-    traVfdEndpoint: "https://vfd.tra.go.tz/api/v1/receipts",
+  const [taxConfig, setTaxConfig] = useState(() => {
+    try {
+      const saved = db.getConfigurationLocal?.("tax_config") as any;
+      if (saved) {
+        return {
+          vatEnabled: Boolean(saved.vatEnabled),
+          vatRatePercent: Number(saved.vatRatePercent ?? 0),
+          currencySymbol: saved.currencySymbol || "Tsh",
+          currencyCode: saved.currencyCode || "TZS",
+          traVfdEndpoint: saved.traVfdEndpoint || "https://vfd.tra.go.tz/api/v1/receipts",
+        };
+      }
+    } catch {}
+    return {
+      vatEnabled: false,
+      vatRatePercent: 0,
+      currencySymbol: "Tsh",
+      currencyCode: "TZS",
+      traVfdEndpoint: "https://vfd.tra.go.tz/api/v1/receipts",
+    };
   });
 
   const [invConfig, setInvConfig] = useState({
@@ -75,6 +164,10 @@ export const SettingsPage: React.FC = () => {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    db.saveConfigurationLocal?.("store_profile", profile);
+    db.saveConfigurationLocal?.("pos_config", posConfig);
+    db.saveConfigurationLocal?.("tax_config", taxConfig);
+    db.saveConfigurationLocal?.("inv_config", invConfig);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -388,8 +481,319 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Advanced Settings & Danger Zone */}
+      {activeTab === "advanced" && (
+        <div className="v2-space-y-4">
+          <div className="v2-card">
+            <div className="v2-card-header">
+              <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                <Database size={16} className="v2-text-accent" />
+                <span>Enterprise Database Diagnostics &amp; System Telemetry</span>
+              </div>
+            </div>
+            <div className="v2-card-body v2-space-y-3">
+              <div className="v2-text-xs v2-text-muted">
+                Offline IndexedDB storage engine is operating under authoritative schema version 4.
+                Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong> ({currentTenantId}).
+              </div>
+              <div className="v2-grid v2-grid-3 v2-gap-3">
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Active Products</div>
+                  <div className="v2-text-base v2-font-bold">{db?.products?.size || 0} items</div>
+                </div>
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Stored Sales Records</div>
+                  <div className="v2-text-base v2-font-bold">{db?.sales?.size || 0} records</div>
+                </div>
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Customer Accounts</div>
+                  <div className="v2-text-base v2-font-bold">{db?.customers?.size || 0} accounts</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Training Sandbox & Sample Retail Data */}
+          <div
+            className="v2-card"
+            style={{
+              border: isDemoActive ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid var(--surface-border)",
+              background: isDemoActive ? "linear-gradient(180deg, rgba(56, 189, 248, 0.05) 0%, transparent 100%)" : undefined,
+            }}
+          >
+            <div className="v2-card-header" style={{ borderBottom: "1px solid var(--surface-border)" }}>
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                  <Sparkles size={18} style={{ color: isDemoActive ? "var(--accent)" : "var(--muted)" }} />
+                  <span>Store Data &amp; Training Sandbox Engine</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: "0.7rem",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    background: isDemoActive ? "rgba(56, 189, 248, 0.2)" : "var(--surface-3)",
+                    color: isDemoActive ? "var(--accent)" : "var(--text-muted)",
+                    border: isDemoActive ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid var(--surface-border)",
+                  }}
+                >
+                  {isDemoActive ? "⚡ Demo Mode Active" : "Production Mode Clean"}
+                </span>
+              </div>
+            </div>
+
+            <div className="v2-card-body v2-space-y-4">
+              <div className="v2-text-xs v2-text-muted">
+                Quickly populate your store with a complete, localized retail simulation dataset (fast-moving products, variants, barcode mappings, wholesale &amp; VIP customers, suppliers, realistic completed sales, operational petty cash vouchers, and an active drawer shift). All sample data is isolated and can be cleanly purged at any time with 1 click before going live.
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "1rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--surface-border)",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
+                    {isDemoActive ? "Reset / Reload Sample Retail Data" : "Load Realistic Retail Demo Dataset"}
+                  </div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                    Injects Azam Flour, Coca Cola, ASAS Milk, Korie Oil, VIP customers, sales ledger, and active shift.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="v2-btn v2-btn-primary v2-btn-sm"
+                  onClick={async () => {
+                    const res = await loadSampleData(db, currentTenantId || undefined);
+                    toast.success(
+                      "Sample Data Loaded",
+                      `Injected ${res.products} products, ${res.customers} customers, ${res.sales} sales, and ${res.expenses} expense records.`
+                    );
+                  }}
+                >
+                  <Sparkles size={13} /> {isDemoActive ? "Re-load Sample Data" : "Load Sample Retail Data"}
+                </button>
+              </div>
+
+              {isDemoActive && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "1rem",
+                    borderRadius: "var(--radius-md, 0.55rem)",
+                    background: "rgba(248, 113, 113, 0.08)",
+                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                    gap: "1rem",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div className="v2-font-bold v2-text-sm" style={{ color: "var(--danger)" }}>
+                      1-Click Purge All Sample Data
+                    </div>
+                    <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                      Instantly purges all tagged demo products, customers, suppliers, sales, and demo expenses back to 100% pristine zero data.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="v2-btn v2-btn-danger v2-btn-sm"
+                    onClick={async () => {
+                      await purgeSampleData(db, currentTenantId || undefined);
+                      toast.success(
+                        "Sample Data Purged",
+                        "All demo products, sales, customers, and active shift data have been wiped."
+                      );
+                    }}
+                  >
+                    <Trash2 size={13} /> Purge All Sample Data
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Danger Zone: Store Cleanliness */}
+          <div
+            className="v2-card"
+            style={{
+              border: "1px solid rgba(248, 113, 113, 0.35)",
+              background: "linear-gradient(180deg, rgba(248, 113, 113, 0.04) 0%, transparent 100%)",
+            }}
+          >
+            <div
+              className="v2-card-header"
+              style={{ borderBottom: "1px solid rgba(248, 113, 113, 0.2)" }}
+            >
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div className="v2-card-title v2-flex v2-items-center v2-gap-2" style={{ color: "var(--danger, #f87171)" }}>
+                  <AlertTriangle size={18} />
+                  <span>Store Data Cleanliness &amp; Danger Zone</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: "0.7rem",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    background: "rgba(248, 113, 113, 0.15)",
+                    color: "var(--danger, #f87171)",
+                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                  }}
+                >
+                  Strict 2s Hold Required
+                </span>
+              </div>
+            </div>
+
+            <div className="v2-card-body v2-space-y-4">
+              <div className="v2-text-xs v2-text-muted">
+                These operations permanently purge data for <strong>{currentTenantName}</strong> from this terminal's local IndexedDB and the cloud database.
+                To prevent accidental loss, each action requires a continuous <strong>2-second press-and-hold</strong>.
+              </div>
+
+              {/* Danger Operation 1: Purge Products */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "1rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "var(--surface-2, #243047)",
+                  border: "1px solid var(--surface-border, #334155)",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
+                    Purge Catalog, Variants &amp; Stock Ledgers
+                  </div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                    Permanently deletes all products, barcodes, batches, and inventory ledger movements for this store.
+                  </div>
+                </div>
+                <HoldToConfirmButton
+                  label="Hold 2s to Purge Products"
+                  holdingLabel="Purging Products..."
+                  completedLabel="Products Purged"
+                  variant="danger"
+                  onConfirm={async () => {
+                    if (!currentTenantId) {
+                      toast.error("Tenant Context Required", "Cannot purge store data without an active tenant context.");
+                      return;
+                    }
+                    const result = await tenantStoreCleanupService.purgeProductsAndLedgers(currentTenantId, db);
+                    toast.success(
+                      "Products & Ledgers Purged",
+                      `Removed ${result.purgedCounts.products || 0} products and ${result.purgedCounts.stockLedger || 0} ledger records.`,
+                    );
+                  }}
+                />
+              </div>
+
+              {/* Danger Operation 2: Purge Sales */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "1rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "var(--surface-2, #243047)",
+                  border: "1px solid var(--surface-border, #334155)",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
+                    Purge Point-of-Sale Receipts &amp; Orders
+                  </div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                    Deletes historical receipts, order transactions, payments, and sanitizes pending sales outbox queues.
+                  </div>
+                </div>
+                <HoldToConfirmButton
+                  label="Hold 2s to Purge Sales"
+                  holdingLabel="Purging Sales..."
+                  completedLabel="Sales Purged"
+                  variant="danger"
+                  onConfirm={async () => {
+                    if (!currentTenantId) {
+                      toast.error("Tenant Context Required", "Cannot purge store data without an active tenant context.");
+                      return;
+                    }
+                    const result = await tenantStoreCleanupService.purgeSalesAndReceipts(currentTenantId, db);
+                    toast.success(
+                      "Sales & Receipts Purged",
+                      `Removed ${result.purgedCounts.sales || 0} sales, ${result.purgedCounts.receipts || 0} receipts, and cleared outbox.`,
+                    );
+                  }}
+                />
+              </div>
+
+              {/* Danger Operation 3: Purge Contacts */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "1rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "var(--surface-2, #243047)",
+                  border: "1px solid var(--surface-border, #334155)",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
+                    Purge Customer Accounts &amp; Suppliers
+                  </div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                    Clears customer directories, balance ledgers, member accounts, and registered supplier contacts.
+                  </div>
+                </div>
+                <HoldToConfirmButton
+                  label="Hold 2s to Purge Contacts"
+                  holdingLabel="Purging Contacts..."
+                  completedLabel="Contacts Purged"
+                  variant="danger"
+                  onConfirm={async () => {
+                    if (!currentTenantId) {
+                      toast.error("Tenant Context Required", "Cannot purge store data without an active tenant context.");
+                      return;
+                    }
+                    const result = await tenantStoreCleanupService.purgeContactsAndExpenses(currentTenantId, db);
+                    toast.success(
+                      "Contacts & Suppliers Purged",
+                      `Removed ${result.purgedCounts.customers || 0} customers and ${result.purgedCounts.suppliers || 0} suppliers.`,
+                    );
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Other Tabs */}
-      {["notifications", "sync", "integrations", "advanced"].includes(activeTab) && (
+      {["notifications", "sync", "integrations"].includes(activeTab) && (
         <div className="v2-card">
           <div className="v2-card-header">
             <div className="v2-card-title">
