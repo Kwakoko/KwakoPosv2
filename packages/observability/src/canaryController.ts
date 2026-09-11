@@ -1,3 +1,5 @@
+import type { SloReport } from "./sloEvaluator.js";
+
 export interface CanaryStage {
   stageIndex: number;
   trafficPercentage: number;
@@ -142,6 +144,95 @@ export class CanaryController {
       advanced: true,
       newTrafficPercentage: nextStage.trafficPercentage,
       message: `Canary advanced to ${nextStage.trafficPercentage}% traffic.`,
+    };
+  }
+
+  /**
+   * H-019: Evaluate an active production SLO report against canary policy.
+   * If any SLO target is BREACHED, recommend and trigger immediate automatic rollback.
+   */
+  public evaluateSloReport(report: SloReport): {
+    passed: boolean;
+    triggerRollback: boolean;
+    breachedSlos: string[];
+    reason: string;
+  } {
+    const breached: string[] = [];
+
+    if (report.targets.availability.status === "BREACHED") {
+      breached.push(`Availability (${report.targets.availability.currentPercent}% < ${report.targets.availability.targetPercent}%)`);
+    }
+    if (report.targets.apiSuccessRate.status === "BREACHED") {
+      breached.push(`API Success Rate (${report.targets.apiSuccessRate.currentPercent}% < ${report.targets.apiSuccessRate.targetPercent}%)`);
+    }
+    if (report.targets.syncSuccessRate.status === "BREACHED") {
+      breached.push(`Sync Success Rate (${report.targets.syncSuccessRate.currentPercent}% < ${report.targets.syncSuccessRate.targetPercent}%)`);
+    }
+    if (report.targets.latencyP95.status === "BREACHED") {
+      breached.push(`P95 Latency (${report.targets.latencyP95.currentP95Ms}ms > ${report.targets.latencyP95.thresholdMs}ms)`);
+    }
+    if (report.targets.inventoryIntegrity.status === "BREACHED") {
+      breached.push(`Inventory Integrity (${report.targets.inventoryIntegrity.currentPercent}% < 100%)`);
+    }
+    if (report.targets.tenantIsolationViolations.status === "BREACHED") {
+      breached.push(`Tenant Isolation (${report.targets.tenantIsolationViolations.currentViolations} violations > 0)`);
+    }
+    if (report.targets.dataLossIncidents.status === "BREACHED") {
+      breached.push(`Data Loss (${report.targets.dataLossIncidents.currentCount} incidents > 0)`);
+    }
+
+    if (breached.length > 0) {
+      const current = this.stages[this.currentStageIndex];
+      current.status = "FAILED";
+      current.evaluatedAt = new Date().toISOString();
+      return {
+        passed: false,
+        triggerRollback: true,
+        breachedSlos: breached,
+        reason: `SLO_BREACH_DETECTED: Canary stage ${current.trafficPercentage}% breached production SLOs: ${breached.join("; ")}. Automatic rollback required.`,
+      };
+    }
+
+    return {
+      passed: true,
+      triggerRollback: false,
+      breachedSlos: [],
+      reason: "All production SLOs compliant with canary policy.",
+    };
+  }
+
+  /**
+   * H-019: Execute an automated canary rollback to revert candidate traffic to 0%
+   */
+  public triggerAutomatedRollback(
+    reason: string,
+    stableRevision?: string
+  ): {
+    rollbackTriggered: boolean;
+    previousTrafficPercentage: number;
+    revertedToTrafficPercentage: number;
+    targetRevision: string;
+    reason: string;
+    timestamp: string;
+  } {
+    const current = this.stages[this.currentStageIndex];
+    const prevTraffic = current.trafficPercentage;
+    const now = new Date().toISOString();
+
+    current.status = "FAILED";
+    current.evaluatedAt = now;
+
+    // Reset back to baseline stage 0 (0% traffic)
+    this.currentStageIndex = 0;
+    this.stages[0].status = "PASSED";
+
+    return {
+      rollbackTriggered: true,
+      previousTrafficPercentage: prevTraffic,
+      revertedToTrafficPercentage: 0,
+      targetRevision: stableRevision || "PREVIOUS_STABLE_PRODUCTION",
+      reason: `AUTO_ROLLBACK_EXECUTED: ${reason}`,
+      timestamp: now,
     };
   }
 }
