@@ -241,6 +241,9 @@ export const fr: TranslationDictionary = {
     voidItem: "Autoriser l'Annulation",
     invalidPin: "Code PIN superviseur incorrect.",
     stockUnavailable: "Quantité en stock insuffisante.",
+    saleDeniedTitle: "Vente Refusée",
+    saleDeniedZeroTotal: "Impossible de procéder à la vente. Le total général doit être supérieur à zéro.",
+    emptyCartSaleDenied: "Impossible de procéder à la vente. Le panier est vide et le total général est égal à zéro.",
   },
   inventory: {
     title: "Gestion des Stocks & Inventaire",

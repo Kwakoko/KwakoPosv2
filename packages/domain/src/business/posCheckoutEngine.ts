@@ -127,7 +127,7 @@ export class PosCheckoutEngine {
   }
 
   private assertIsolation(ctx: TenantContext, tenantId: string): void {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     if (!isSuperAdmin && ctx.tenantId !== tenantId) {
       throw new Error(
         `TENANT_BOUNDARY_VIOLATION: Context tenant '${ctx.tenantId}' cannot execute checkout for tenant '${tenantId}'.`
@@ -215,6 +215,15 @@ export class PosCheckoutEngine {
         taxAmount: item.taxAmount || 0,
         reservationId: item.reservationId,
       });
+    }
+
+    // Validate that items have a positive grand total
+    const computedTotal = validatedLines.reduce(
+      (sum, l) => sum + (l.quantity * l.unitPrice - l.discountAmount + l.taxAmount),
+      0
+    );
+    if (computedTotal <= 0) {
+      throw new Error("EMPTY_OR_ZERO_SALE: Cannot proceed with sale. Grand total must be greater than zero.");
     }
 
     // 2. Generate sale numbers and compute totals

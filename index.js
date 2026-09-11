@@ -21,7 +21,10 @@ const foundPath = candidatePaths.find((p) => fs.existsSync(p));
 
 if (foundPath) {
   console.log(`Starting KwakoPos 2.0 API from entrypoint: ${foundPath}`);
-  await import(pathToFileURL(foundPath).href);
+  const mod = await import(pathToFileURL(foundPath).href);
+  if (typeof mod.startFixedServer === "function") {
+    await mod.startFixedServer();
+  }
 } else {
   console.error("CRITICAL: No compiled API server entrypoint found in dist candidates:", candidatePaths);
   process.exit(1);

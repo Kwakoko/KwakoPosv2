@@ -26,6 +26,29 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     console.error("[KwakoPos UI RootErrorBoundary caught exception]:", error, errorInfo);
   }
 
+  private handleRecovery = async (clearStorage = false) => {
+    try {
+      if (clearStorage) {
+        sessionStorage.clear();
+        localStorage.removeItem("kwakopos_auth_token");
+        localStorage.removeItem("kwakopos_user");
+        localStorage.removeItem("kwakopos_tenant_id");
+      }
+      if (typeof window !== "undefined" && "caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+    } catch {
+      // ignore recovery cleanup errors
+    }
+    const cleanUrl = window.location.origin + window.location.pathname + "?_r=" + Date.now();
+    window.location.replace(cleanUrl);
+  };
+
   public render() {
     if (this.state.hasError) {
       return (
@@ -43,13 +66,13 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
               <button
                 style={{ background: "#38bdf8", color: "#082f49", border: 0, borderRadius: "0.45rem", padding: "0.6rem 1rem", fontWeight: 800, cursor: "pointer" }}
-                onClick={() => window.location.reload()}
+                onClick={() => void this.handleRecovery(false)}
               >
                 🔄 Reload Workspace
               </button>
               <button
                 style={{ background: "transparent", color: "#94a3b8", border: "1px solid #334155", borderRadius: "0.45rem", padding: "0.6rem 1rem", fontWeight: 700, cursor: "pointer" }}
-                onClick={() => { sessionStorage.clear(); window.location.reload(); }}
+                onClick={() => void this.handleRecovery(true)}
               >
                 🧹 Clear Session & Reload
               </button>

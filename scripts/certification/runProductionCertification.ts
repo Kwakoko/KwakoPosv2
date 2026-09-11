@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from "fs";
+import fs, { writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { createHash } from "crypto";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";

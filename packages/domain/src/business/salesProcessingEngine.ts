@@ -120,7 +120,7 @@ export class SalesProcessingEngine {
   }
 
   private assertIsolation(ctx: TenantContext, tenantId: string): void {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     if (!isSuperAdmin && ctx.tenantId !== tenantId) {
       throw new Error(
         `TENANT_BOUNDARY_VIOLATION: Context tenant '${ctx.tenantId}' cannot access sales of tenant '${tenantId}'.`
@@ -180,6 +180,9 @@ export class SalesProcessingEngine {
     });
 
     const grandTotal = Number((subtotal - discountTotal + taxTotal).toFixed(2));
+    if (grandTotal <= 0) {
+      throw new Error("EMPTY_OR_ZERO_SALE: Sale grand total must be greater than zero.");
+    }
     const grossProfit = Number((grandTotal - totalCost).toFixed(2));
 
     const sale: Sale = {

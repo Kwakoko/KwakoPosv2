@@ -3,8 +3,10 @@ import {
   Users, User, Phone, Mail, Award, DollarSign, Search, Coins, Edit2, Trash2,
   UserPlus, Sparkles, Plus, AlertCircle, CheckCircle, Wallet, Shield, RefreshCw
 } from "lucide-react";
-import { useModule, useSync } from "../context/KwakoPosContexts.js";
+import { useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
+import { useToast } from "../context/ToastContext.js";
+import { loadSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
 
 export interface CustomerRecord {
   id: string;
@@ -20,9 +22,15 @@ export interface CustomerRecord {
 
 const fmtCcy = (n: number) => `Tsh ${Math.round(n).toLocaleString()}`;
 
-export const CustomersPage: React.FC = () => {
+export interface CustomersPageProps {
+  activeTab?: string;
+}
+
+export const CustomersPage: React.FC<CustomersPageProps> = () => {
   const { activeModule } = useModule();
   const { isOnline, pendingOutboxCount, db } = useSync();
+  const { currentTenantId } = useTenant();
+  const toast = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
   const [customers, setCustomers] = useState<CustomerRecord[]>([]);
@@ -57,7 +65,7 @@ export const CustomersPage: React.FC = () => {
       let loaded: CustomerRecord[] = [];
       try {
         const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/customers");
-        if (res.success && Array.isArray(res.data)) {
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
           loaded = res.data.map((c) => ({
             id: c.id || `cust-${Date.now()}`,
             name: c.name || "Unnamed Customer",
@@ -71,8 +79,23 @@ export const CustomersPage: React.FC = () => {
           }));
         }
       } catch {
-        // Fallback to local outbox mutations or empty
+        // Fallback to local store
+      }
+
+      if (loaded.length === 0) {
         await db.ready;
+        const localCusts = Array.from(db.customers.values()).map((c: any) => ({
+          id: c.id || `cust-${Date.now()}`,
+          name: c.name || "Unnamed Customer",
+          phone: c.phone || "",
+          email: c.email || "",
+          type: c.type || targetType,
+          loyaltyPoints: Number(c.loyaltyPoints || c.points || 0),
+          outstandingBalance: Number(c.outstandingBalance || c.debt || 0),
+          creditLimit: Number(c.creditLimit || 0),
+          walletBalance: Number(c.walletBalance || 0),
+        }));
+
         const outboxCusts = [...db.syncOutbox.values()]
           .filter((item) => item.entityType === "Customer" && item.status !== "FAILED")
           .map((item) => {
@@ -89,7 +112,13 @@ export const CustomersPage: React.FC = () => {
               walletBalance: Number(p.walletBalance || 0),
             };
           });
-        loaded = outboxCusts;
+
+        const combined = [...localCusts];
+        outboxCusts.forEach((oc) => {
+          if (!combined.some((c) => c.id === oc.id)) combined.push(oc);
+        });
+
+        loaded = combined;
       }
       setCustomers(loaded);
     } catch {
@@ -101,6 +130,13 @@ export const CustomersPage: React.FC = () => {
 
   useEffect(() => {
     void loadCustomers();
+    const handleDemoChange = () => {
+      void loadCustomers();
+    };
+    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    };
   }, [loadCustomers]);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -168,7 +204,9 @@ export const CustomersPage: React.FC = () => {
       };
       await apiFetch("/api/v1/customers", { method: "POST", body: JSON.stringify(newCust) }).catch(() => {});
       db.enqueueOutbox({ entityType: "Customer", operationType: "CREATE", payload: { ...newCust } as Record<string, unknown> });
+      db.saveCustomerLocal(newCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
       setCustomers((prev) => [newCust, ...prev]);
+      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
     } else if (selectedCust) {
       const updatedCust: CustomerRecord = {
         ...selectedCust,
@@ -181,7 +219,9 @@ export const CustomersPage: React.FC = () => {
       };
       await apiFetch(`/api/v1/customers/${selectedCust.id}`, { method: "PUT", body: JSON.stringify(updatedCust) }).catch(() => {});
       db.enqueueOutbox({ entityType: "Customer", operationType: "UPDATE", payload: { ...updatedCust } as Record<string, unknown> });
+      db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
       setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
+      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_UPDATED", customer: updatedCust } }));
     }
     setIsFormOpen(false);
     resetForm();
@@ -217,13 +257,16 @@ export const CustomersPage: React.FC = () => {
 
   const handleDelete = async (c: CustomerRecord) => {
     if (c.outstandingBalance > 0) {
-      alert(`Cannot delete profile. ${c.name} has an outstanding debt of ${fmtCcy(c.outstandingBalance)}.`);
+      toast.warning("Cannot Delete Profile", `${c.name} has an outstanding debt of ${fmtCcy(c.outstandingBalance)}.`);
       return;
     }
     if (confirm(`Permanently delete profile for ${c.name}?`)) {
       await apiFetch(`/api/v1/customers/${c.id}`, { method: "DELETE" }).catch(() => {});
       db.enqueueOutbox({ entityType: "Customer", operationType: "DELETE", payload: { id: c.id } });
+      db.customers.delete(c.id);
       setCustomers((prev) => prev.filter((item) => item.id !== c.id));
+      toast.success("Profile Deleted", `Customer ${c.name} was removed.`);
+      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_DELETED", customerId: c.id } }));
     }
   };
 
@@ -234,7 +277,7 @@ export const CustomersPage: React.FC = () => {
     let updatedWallet = selectedCust.walletBalance || 0;
     if (payUsingWallet) {
       if (updatedWallet < paymentVal) {
-        alert("Insufficient wallet balance for this repayment.");
+        toast.warning("Insufficient Balance", "Insufficient wallet balance for this repayment.");
         return;
       }
       updatedWallet -= paymentVal;
@@ -245,8 +288,10 @@ export const CustomersPage: React.FC = () => {
 
     await apiFetch(`/api/v1/customers/${selectedCust.id}/payment`, { method: "POST", body: JSON.stringify({ amount: paymentVal, payUsingWallet }) }).catch(() => {});
     db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, amount: paymentVal, payUsingWallet } });
+    db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_DEBT_PAID", customer: updatedCust } }));
 
     setIsPayOpen(false);
     setSelectedCust(null);
@@ -262,8 +307,10 @@ export const CustomersPage: React.FC = () => {
 
     await apiFetch(`/api/v1/customers/${selectedCust.id}/wallet`, { method: "POST", body: JSON.stringify({ amount: walletVal }) }).catch(() => {});
     db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, walletDepositAmount: walletVal } });
+    db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
+    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust } }));
 
     setIsWalletOpen(false);
     setSelectedCust(null);
@@ -337,8 +384,33 @@ export const CustomersPage: React.FC = () => {
       {/* Main Cards Grid */}
       <div className="v2-grid v2-grid-3 v2-gap-4">
         {filteredCustomers.length === 0 ? (
-          <div className="v2-empty" style={{ gridColumn: "1 / -1" }}>
-            <p className="v2-empty-title">No {targetType.toLowerCase()} profiles found</p>
+          <div className="v2-empty" style={{ gridColumn: "1 / -1", padding: "3.5rem 1.5rem", textAlign: "center" }}>
+            <Users className="v2-text-muted" size={44} style={{ margin: "0 auto 1rem", opacity: 0.5 }} />
+            <p className="v2-empty-title v2-text-base v2-font-bold">
+              {customers.length === 0 ? `No ${targetType} Profiles Registered` : `No ${targetType.toLowerCase()} profiles match your search`}
+            </p>
+            <p className="v2-empty-desc v2-text-xs v2-text-muted v2-mt-1" style={{ maxWidth: 460, margin: "0.5rem auto 1.5rem" }}>
+              {customers.length === 0
+                ? `Build customer loyalty, manage store credit ledgers, and issue prepaid digital wallets by registering your first ${targetType.toLowerCase()}.`
+                : "Try searching with a different name, phone number, or email address."}
+            </p>
+            <div className="v2-flex v2-justify-center v2-gap-2">
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openCreateForm} type="button">
+                <UserPlus size={13} /> Add {targetType}
+              </button>
+              {customers.length === 0 && (
+                <button
+                  className="v2-btn v2-btn-secondary v2-btn-sm"
+                  onClick={async () => {
+                    await loadSampleData(db);
+                    await loadCustomers();
+                  }}
+                  type="button"
+                >
+                  <Sparkles size={13} /> Load Sample Customers
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           filteredCustomers.map((c) => {

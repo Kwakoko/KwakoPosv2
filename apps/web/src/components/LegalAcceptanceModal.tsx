@@ -10,6 +10,42 @@ interface PendingDoc {
   reason: "FIRST_TIME" | "MATERIAL_UPDATE";
 }
 
+// ─── Module-level guard utilities (no component state dependency) ─────────────
+
+const DISMISSED_KEY = "kwakopos:v2:legal-dismissed";
+
+/** Returns today's date as YYYY-MM-DD in local time */
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Stable, sorted fingerprint of pending docs — detects genuinely new/updated doc sets */
+function docsFingerprint(docs: PendingDoc[]): string {
+  return docs.map((d) => `${d.documentId}@${d.requiredVersion}`).sort().join("|");
+}
+
+/** Persist today's date + doc fingerprint so repeated refreshes skip the modal */
+function markDismissed(docs: PendingDoc[]): void {
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify({ date: todayStr(), fingerprint: docsFingerprint(docs) }));
+  } catch { /* ignore quota/private-mode errors */ }
+}
+
+/** Returns true if the exact same pending-doc set was already dismissed today */
+function wasAlreadyDismissedToday(docs: PendingDoc[]): boolean {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    if (!raw) return false;
+    const { date, fingerprint } = JSON.parse(raw) as { date: string; fingerprint: string };
+    return date === todayStr() && fingerprint === docsFingerprint(docs);
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const LegalAcceptanceModal: React.FC<{
   isOpen?: boolean;
   onAccepted?: () => void;
@@ -23,9 +59,11 @@ export const LegalAcceptanceModal: React.FC<{
   const [error, setError] = useState<string | null>(null);
 
   const handleEscape = useCallback(() => {
+    // "Skip & Remind Me Later" — suppress for the rest of today only
+    if (pendingDocs.length > 0) markDismissed(pendingDocs);
     setIsOpen(false);
     if (onAccepted) onAccepted();
-  }, [onAccepted]);
+  }, [onAccepted, pendingDocs]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -45,7 +83,10 @@ export const LegalAcceptanceModal: React.FC<{
       .then((res) => {
         if (res.success && res.data) {
           if (!res.data.isCompliant && res.data.requiredDocuments.length > 0) {
-            setPendingDocs(res.data.requiredDocuments);
+            const docs = res.data.requiredDocuments;
+            // Guard: do NOT pop the modal again if dismissed within the same calendar day
+            if (wasAlreadyDismissedToday(docs)) return;
+            setPendingDocs(docs);
             setIsOpen(true);
             setCurrentIndex(0);
           } else {
@@ -54,10 +95,11 @@ export const LegalAcceptanceModal: React.FC<{
         }
       })
       .catch(() => {
-        // Not authenticated or network unavailable
+        // Not authenticated or network unavailable — silent
       });
   };
 
+  // Run status check only once per component mount (triggered by forcedOpen change or initial mount)
   useEffect(() => {
     checkStatus();
   }, [forcedOpen]);
@@ -123,6 +165,8 @@ export const LegalAcceptanceModal: React.FC<{
         if (currentIndex + 1 < pendingDocs.length) {
           setCurrentIndex((prev) => prev + 1);
         } else {
+          // All documents accepted — mark dismissed for today
+          markDismissed(pendingDocs);
           setIsOpen(false);
           if (onAccepted) onAccepted();
         }
@@ -146,6 +190,8 @@ export const LegalAcceptanceModal: React.FC<{
       });
 
       if (res.success) {
+        // All batch-accepted — mark dismissed for today
+        markDismissed(pendingDocs);
         setIsOpen(false);
         if (onAccepted) onAccepted();
       } else {

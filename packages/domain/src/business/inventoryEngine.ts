@@ -137,7 +137,7 @@ export class InventoryEngine {
   }
 
   private assertIsolation(ctx: TenantContext, tenantId: string): void {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     if (!isSuperAdmin && ctx.tenantId !== tenantId) {
       throw new Error(
         `TENANT_BOUNDARY_VIOLATION: Context tenant '${ctx.tenantId}' cannot access inventory of tenant '${tenantId}'.`

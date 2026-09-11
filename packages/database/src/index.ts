@@ -33,11 +33,38 @@ import {
   assertPriceHistoryImmutability,
 } from "@kwakopos2/domain";
 import { randomUUID } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // Search parent directories for monorepo root .env
+    const candidates = [
+      path.resolve(process.cwd(), ".env"),
+      path.resolve(process.cwd(), "../../.env"),
+      path.resolve(process.cwd(), "../.env"),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        try {
+          (process as any).loadEnvFile(candidate);
+          break;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+}
 
 export const prisma = new PrismaClient();
 
+
 import { InMemoryStore, globalInMemoryStore } from "./inMemoryStore.js";
 export { InMemoryStore, globalInMemoryStore };
+export { setRlsTenantContext, clearRlsTenantContext } from "./rlsContext.js";
 
 export class ScopedProductRepository {
   private store: InMemoryStore;
@@ -392,14 +419,14 @@ export class ScopedProductRepository {
 
   getProducts(ctx: TenantContext): Product[] {
     const products = Array.from(this.store.products.values()).filter(
-      (p) => p.tenantId === ctx.tenantId && p.branchId === ctx.branchId
+      (p) => p.tenantId === ctx.tenantId && (!ctx.branchId || !p.branchId || p.branchId === ctx.branchId)
     );
 
     return products.map((p) => {
       this.recalculateProductStock(ctx, p.id);
       const fresh = this.store.products.get(p.id)!;
       const variants = Array.from(this.store.variants.values())
-        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && v.branchId === ctx.branchId)
+        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId))
         .map((v) => this.attachEffectivePrices(fresh, v));
       return { ...fresh, variants };
     });
@@ -686,8 +713,12 @@ export class ScopedStockRepository {
       return { adjustment: existingAdjustment, ledger: existingLedger };
     }
 
-    const variant = this.store.variants.get(req.variantId);
+    const variant = this.store.variants.get(req.variantId) ||
+      Array.from(this.store.variants.values()).find(
+        (v) => v.tenantId === ctx.tenantId && (v.productId === req.variantId || v.productId === (req as any).productId || v.id === `${req.variantId}-default`)
+      );
     if (!variant) throw new Error(`Variant ${req.variantId} not found`);
+    const resolvedVariantId = variant.id;
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
     const now = new Date().toISOString();
@@ -695,7 +726,7 @@ export class ScopedStockRepository {
     let changeQty = req.quantityChange;
 
     if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
-    else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, req.variantId);
+    else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, resolvedVariantId);
 
     const movementType = changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS";
 
@@ -703,7 +734,7 @@ export class ScopedStockRepository {
       id: adjustmentId,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
-      variantId: req.variantId,
+      variantId: resolvedVariantId,
       adjustmentType: req.adjustmentType,
       quantityChange: changeQty,
       reason: req.reason,

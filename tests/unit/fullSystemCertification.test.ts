@@ -29,6 +29,6 @@ describe("Phase 45 — Full KwakoPos Operating System Certification OS (KFOS-CER
 
     const hs = engine.getHealthSummary("SYSTEM");
     expect(hs.authorityOperational).toBe(true);
-    expect(hs.totalCertifiedPillars).toBe(181);
+    expect(hs.totalCertifiedPillars).toBe(182);
   });
 });

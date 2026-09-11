@@ -495,6 +495,28 @@ describe("SalesProcessingEngine", () => {
       engine.voidSale(ctx, TENANT_A, created.id, "Second void attempt")
     ).toThrow("SALE_ALREADY_VOIDED");
   });
+
+  it("rejects sale creation when grand total is zero or negative", () => {
+    const engine = SalesProcessingEngine.getInstance();
+    expect(() =>
+      engine.createSale(ctx, {
+        tenantId: TENANT_A,
+        branchId: BRANCH_A,
+        saleNumber: "SALE-ZERO-TOTAL",
+        lines: [
+          {
+            productId: PRODUCT_1,
+            variantId: null,
+            quantity: 1,
+            unitPrice: 0,
+            unitCost: 0,
+            discountAmount: 0,
+            taxAmount: 0,
+          },
+        ],
+      })
+    ).toThrow("EMPTY_OR_ZERO_SALE");
+  });
 });
 
 // ===========================================================================
@@ -579,6 +601,30 @@ describe("PosCheckoutEngine", () => {
         payment: { method: "CASH", amount: 0, isSplit: false },
       })
     ).toThrow("EMPTY_CHECKOUT_CART");
+  });
+
+  it("rejects checkout when grand total is zero or negative", () => {
+    const checkout = PosCheckoutEngine.getInstance();
+    const catalog = ProductCatalogEngine.getInstance();
+    const ledger = StockLedgerEngine.getInstance();
+    const product = seedProduct(catalog, ledger, 10);
+    expect(() =>
+      checkout.processCheckout(ctx, {
+        tenantId: TENANT_A,
+        branchId: BRANCH_A,
+        customerId: null,
+        cashSessionId: null,
+        items: [
+          {
+            productId: product.id,
+            variantId: null,
+            quantity: 1,
+            discountAmount: product.sellingPrice,
+          },
+        ],
+        payment: { method: "CASH", amount: 0, isSplit: false },
+      })
+    ).toThrow("EMPTY_OR_ZERO_SALE");
   });
 });
 

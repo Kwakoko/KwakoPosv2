@@ -15,6 +15,24 @@ import type {
 } from '@kwakopos2/contracts';
 
 export class InMemoryStore {
+  // H-002: Production guard — InMemoryStore must never run in production.
+  // The globalInMemoryStore singleton instantiated at module load will also
+  // trigger this throw, which is intentional: production should never import
+  // this module through a live code path. The server.ts productionPersistence
+  // flag already gates this, but we add a belt-and-suspenders hard stop here.
+  constructor() {
+    if (
+      process.env['NODE_ENV'] === 'production' &&
+      process.env['ALLOW_IN_MEMORY_STORE'] !== 'true'
+    ) {
+      throw new Error(
+        'FATAL: InMemoryStore must not be used in production. ' +
+          'Use Prisma repositories. Set ALLOW_IN_MEMORY_STORE=true only for ' +
+          'explicitly approved test scenarios.',
+      );
+    }
+  }
+
   tenants: Map<string, any> = new Map();
   branches: Map<string, any> = new Map();
   users: Map<string, any> = new Map();

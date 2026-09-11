@@ -18,10 +18,14 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
+  Terminal,
+  Sparkles,
 } from "lucide-react";
 import { apiFetch, changeSuperAdminPassword } from "../services/apiClient.js";
+import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
+import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 
-type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security";
+type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness";
 const money = (v: number) => `Tsh ${(v / 1_000_000).toFixed(1)}M`;
 
 interface PlatformOverview {
@@ -205,6 +209,8 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
           { id: "health", label: "System Health & Telemetry", icon: Server },
           { id: "audit", label: "Super Admin Audit Log", icon: Activity },
           { id: "security", label: "Security & MFA Controls", icon: Lock },
+          { id: "sql-studio", label: "SQL Studio & DB", icon: Terminal },
+          { id: "cleanliness", label: "Production Cleanliness", icon: Sparkles },
         ].map((t) => (
           <button
             key={t.id}
@@ -308,7 +314,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
         </div>
       )}
 
-      {activeTab !== "tenants" && activeTab !== "security" && (
+      {activeTab !== "tenants" && activeTab !== "security" && activeTab !== "sql-studio" && (
         <div className="v2-card" style={{ padding: "1.2rem" }}>
           <div className="v2-flex v2-items-center v2-gap-2">
             <Eye size={16} />
@@ -317,6 +323,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
           <p className="v2-text-xs v2-text-muted">This control surface remains connected to the live platform telemetry engine.</p>
         </div>
       )}
+
+      {activeTab === "sql-studio" && <SuperAdminSqlStudio />}
+      {activeTab === "cleanliness" && <SuperAdminCleanlinessStudio />}
 
       {/* Rotate Password Modal */}
       {showRotateModal && (

@@ -6,11 +6,13 @@ import { ClientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
 import {
   getAccessToken,
+  getStoredSession,
   login as apiLogin,
   logout as apiLogout,
   restoreSession,
   switchContext as apiSwitchContext,
 } from "../services/apiClient.js";
+import { DEMO_DATA_EVENT, reconcileLocalInventoryToOutbox } from "../services/sampleDataService.js";
 import {
   type IndustryModule,
   type ModuleManifest,
@@ -77,11 +79,23 @@ interface AuthContextType {
   startImpersonation: (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => Promise<void>;
   stopImpersonation: () => Promise<void>;
 }
+const DEFAULT_AUTH_CONTEXT: AuthContextType = {
+  user: null,
+  isAuthenticated: false,
+  isInitializing: false,
+  error: null,
+  login: async () => { throw new Error("Authentication provider not mounted"); },
+  logout: async () => {},
+  dismissLoading: () => {},
+  impersonatedTenant: null,
+  startImpersonation: async () => {},
+  stopImpersonation: async () => {},
+};
+
 const AuthContext = createContext<AuthContextType | null>(null);
-export const useAuth = () => {
+export const useAuth = (): AuthContextType => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_AUTH_CONTEXT;
 };
 
 interface TenantContextType {
@@ -91,11 +105,19 @@ interface TenantContextType {
   switchTenant: (id: string) => Promise<void>;
   isImpersonating: boolean;
 }
+
+const DEFAULT_TENANT_CONTEXT: TenantContextType = {
+  currentTenantId: null,
+  currentTenantName: null,
+  availableTenants: [],
+  switchTenant: async () => {},
+  isImpersonating: false,
+};
+
 const TenantContext = createContext<TenantContextType | null>(null);
-export const useTenant = () => {
+export const useTenant = (): TenantContextType => {
   const ctx = useContext(TenantContext);
-  if (!ctx) throw new Error("useTenant must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_TENANT_CONTEXT;
 };
 
 interface BranchContextType {
@@ -104,11 +126,18 @@ interface BranchContextType {
   availableBranches: { id: string; name: string }[];
   switchBranch: (id: string) => Promise<void>;
 }
+
+const DEFAULT_BRANCH_CONTEXT: BranchContextType = {
+  currentBranchId: null,
+  currentBranchName: null,
+  availableBranches: [],
+  switchBranch: async () => {},
+};
+
 const BranchContext = createContext<BranchContextType | null>(null);
-export const useBranch = () => {
+export const useBranch = (): BranchContextType => {
   const ctx = useContext(BranchContext);
-  if (!ctx) throw new Error("useBranch must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_BRANCH_CONTEXT;
 };
 
 interface RbacContextType {
@@ -117,11 +146,18 @@ interface RbacContextType {
   hasPermission: (permission: string) => boolean;
   isSuperAdmin: boolean;
 }
+
+const DEFAULT_RBAC_CONTEXT: RbacContextType = {
+  role: null,
+  permissions: [],
+  hasPermission: () => false,
+  isSuperAdmin: false,
+};
+
 const RbacContext = createContext<RbacContextType | null>(null);
-export const useRbac = () => {
+export const useRbac = (): RbacContextType => {
   const ctx = useContext(RbacContext);
-  if (!ctx) throw new Error("useRbac must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_RBAC_CONTEXT;
 };
 
 export interface ModuleContextType {
@@ -145,38 +181,79 @@ export interface ModuleContextType {
   isDevSuperuser: boolean;
 }
 
-// Intentionally no permissive default context. Missing provider is a hard error.
+const DEFAULT_MODULE_CONTEXT: ModuleContextType = {
+  activeModule: "Retail",
+  setActiveModule: () => {},
+  activeTab: "Dashboard",
+  setActiveTab: () => {},
+  manifest: MODULE_MANIFESTS.Retail,
+  availableModules: ALL_MODULE_KEYS.slice(),
+  enabledModules: ALL_MODULE_KEYS.slice(),
+  subscribedModules: ALL_MODULE_KEYS.slice(),
+  canAccessModule: () => true,
+  canAccessTab: () => true,
+  isModuleEnabled: () => true,
+  isModuleSubscribed: () => true,
+  sidebarItems: MODULE_MANIFESTS.Retail.sidebar,
+  bottomNavItems: MODULE_MANIFESTS.Retail.bottomNav,
+  searchModules: () => [],
+  isMobileSidebarOpen: false,
+  setIsMobileSidebarOpen: () => {},
+  isDevSuperuser: false,
+};
+
 const ModuleContext = createContext<ModuleContextType | null>(null);
 export const useModule = (): ModuleContextType => {
   const ctx = useContext(ModuleContext);
-  if (!ctx) throw new Error("useModule must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_MODULE_CONTEXT;
 };
 
 interface SyncContextType {
   isOnline: boolean;
+  isSimulatedOffline: boolean;
+  toggleOfflineSimulation: () => void;
+  isSyncing: boolean;
   pendingOutboxCount: number;
   syncOutbox: () => Promise<void>;
   db: LocalIndexedDbStore;
   syncEngine: ClientSyncEngine;
   syncError: string | null;
+  lastSyncedAt: number | null;
 }
+
+const DEFAULT_SYNC_CONTEXT: SyncContextType = {
+  isOnline: true,
+  isSimulatedOffline: false,
+  toggleOfflineSimulation: () => {},
+  isSyncing: false,
+  pendingOutboxCount: 0,
+  syncOutbox: async () => {},
+  db: null as any,
+  syncEngine: null as any,
+  syncError: null,
+  lastSyncedAt: null,
+};
+
 const SyncContext = createContext<SyncContextType | null>(null);
-export const useSync = () => {
+export const useSync = (): SyncContextType => {
   const ctx = useContext(SyncContext);
-  if (!ctx) throw new Error("useSync must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_SYNC_CONTEXT;
 };
 
 interface ThemeContextType {
   theme: "dark" | "light";
   toggleTheme: () => void;
 }
+
+const DEFAULT_THEME_CONTEXT: ThemeContextType = {
+  theme: "dark",
+  toggleTheme: () => {},
+};
+
 const ThemeContext = createContext<ThemeContextType | null>(null);
-export const useTheme = () => {
+export const useTheme = (): ThemeContextType => {
   const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be used inside KwakoPosProvider");
-  return ctx;
+  return ctx || DEFAULT_THEME_CONTEXT;
 };
 
 const TAB_PERMISSION_REQUIREMENTS: Record<string, string> = {
@@ -242,15 +319,34 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    const stored = getStoredSession();
+    if (!stored?.user) return null;
+    return {
+      id: stored.user.id,
+      name: stored.user.name,
+      email: stored.user.email,
+      role: stored.user.role,
+      tenantId: stored.user.tenantId,
+      branchId: stored.user.branchId,
+    };
+  });
+  const [isInitializing, setIsInitializing] = useState(() => !getStoredSession()?.user);
   const [authError, setAuthError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">(() =>
     typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light" ? "light" : "dark",
   );
-  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [rawOnline, setRawOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [isSimulatedOffline, setIsSimulatedOffline] = useState(false);
+  const isOnline = isSimulatedOffline ? false : rawOnline;
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  const toggleOfflineSimulation = useCallback(() => {
+    setIsSimulatedOffline((prev) => !prev);
+  }, []);
 
   const [activeModule, setActiveModuleState] = useState<IndustryModule>(() => {
     try {
@@ -342,14 +438,23 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [db]);
 
   useEffect(() => {
-    const update = () => setIsOnline(navigator.onLine);
+    const update = () => setRawOnline(navigator.onLine);
     window.addEventListener("online", update);
     window.addEventListener("offline", update);
     return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
   }, []);
 
   useEffect(() => {
-    void db.ready.then(() => setPendingOutboxCount(db.getPendingOutbox().length));
+    const refreshCount = () => {
+      void db.ready.then(() => {
+        try {
+          setPendingOutboxCount(db.getPendingOutbox().length);
+        } catch { /* ignore */ }
+      });
+    };
+    refreshCount();
+    const interval = setInterval(refreshCount, 4000);
+    return () => clearInterval(interval);
   }, [db]);
 
   const login = async (email: string, password: string, mfaCode?: string): Promise<AuthUser> => {
@@ -391,7 +496,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS"))
+    user && (user.role === "SUPER_ADMIN" || user.role === "SUPERADMIN" || permissions.includes("SUPER_ADMIN_OPERATIONS") || permissions.includes("ADMIN:PLATFORM"))
   );
   const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
   const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
@@ -403,8 +508,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Super Admin in platform mode should NOT see tenant store modules unless actively impersonating
     if (isSuperAdmin && !impersonatedTenant) return false;
     if (isSuperAdmin && impersonatedTenant) return true;
-    if (manifest.requiresSubscription && !moduleEntitlements.includes(module)) return false;
-    if (manifest.requiredPermission && !permissions.includes(manifest.requiredPermission)) return false;
+    if (manifest.requiresSubscription && moduleEntitlements.length > 0 && !moduleEntitlements.includes(module)) return false;
+    if (manifest.requiredPermission && !permissions.includes("*") && !permissions.includes(manifest.requiredPermission)) return false;
     return true;
   }, [user, isSuperAdmin, impersonatedTenant, permissions, moduleEntitlements]);
 
@@ -548,47 +653,164 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const syncOutbox = async () => {
-    if (!user || !isOnline) return;
+  const syncOutbox = useCallback(async () => {
+    if (!isOnline) return;
+    const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
+    const targetBranchId = user?.branchId || currentBranchId || "branch-default";
+    const targetUserId = user?.id || "user-default";
+
+    setIsSyncing(true);
     setSyncError(null);
-    await db.ready;
-    await syncEngine.syncWithServer(
-      async (request) => {
-        const response = await fetch("/sync/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) },
-          credentials: "include",
-          body: JSON.stringify(request),
-        });
-        if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
-        const body = await response.json();
-        return body.data || body;
-      },
-      async (since) => {
-        const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
-        const response = await fetch(url, { headers: { ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}) }, credentials: "include" });
-        if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
-        const body = await response.json();
-        return body.data || body;
-      },
-    ).then(() => setPendingOutboxCount(db.getPendingOutbox().length)).catch((error) => {
+    try {
+      await db.ready;
+      try {
+        reconcileLocalInventoryToOutbox(db, targetTenantId, targetBranchId);
+      } catch (reconErr) {
+        console.warn("[Sync] Local inventory reconciliation error:", reconErr);
+      }
+      const token = getAccessToken();
+      const authHeaders: Record<string, string> = {
+        "x-tenant-id": targetTenantId,
+        "x-branch-id": targetBranchId,
+        "x-user-id": targetUserId,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      const result = await syncEngine.syncWithServer(
+        async (request) => {
+          const response = await fetch("/sync/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders,
+            },
+            credentials: "include",
+            body: JSON.stringify(request),
+          });
+          if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
+          const body = await response.json();
+          return body.data || body;
+        },
+        async (since) => {
+          const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
+          const response = await fetch(url, {
+            headers: authHeaders,
+            credentials: "include",
+          });
+          if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
+          const body = await response.json();
+          return body.data || body;
+        },
+        targetTenantId,
+      );
+      setLastSyncedAt(Date.now());
+      setPendingOutboxCount(db.getPendingOutbox().length);
+
+      if (result && (result.pulled > 0 || result.pushed > 0)) {
+        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
+        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+        try {
+          if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("kwakopos_sync_channel");
+            bc.postMessage({ type: "SYNC_CONVERGED", ...result, timestamp: Date.now() });
+            bc.close();
+          }
+        } catch {
+          /* ignore broadcast errors in isolated test workers */
+        }
+      }
+    } catch (error) {
       setSyncError(error instanceof Error ? error.message : "Synchronization failed");
       throw error;
-    });
-  };
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine]);
+
+  // ─── Automated Convergence Lifecycles ──────────────────────────────────────────
+
+  // 1. Cross-tab peer convergence via BroadcastChannel
+  useEffect(() => {
+    if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
+    const bc = new BroadcastChannel("kwakopos_sync_channel");
+    bc.onmessage = (event) => {
+      const data = event.data;
+      if (!data) return;
+      if (data.type === "OUTBOX_MUTATION") {
+        if (isOnline && !isSyncing) {
+          void syncOutbox().catch(() => {});
+        }
+      } else if (data.type === "SYNC_CONVERGED") {
+        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+      }
+    };
+    return () => {
+      bc.close();
+    };
+  }, [isOnline, isSyncing, syncOutbox]);
+
+  // 2. Instant trigger on local outbox enqueue
+  useEffect(() => {
+    const handleOutboxQueued = () => {
+      if (isOnline && !isSyncing) {
+        void syncOutbox().catch(() => {});
+      }
+    };
+    window.addEventListener("kwakopos:outbox-enqueued", handleOutboxQueued);
+    return () => {
+      window.removeEventListener("kwakopos:outbox-enqueued", handleOutboxQueued);
+    };
+  }, [isOnline, isSyncing, syncOutbox]);
+
+  // 3. Multi-device background convergence heartbeat (6s), initial boot sync, and focus reconnection
+  useEffect(() => {
+    if (!isOnline) return;
+
+    // Initial convergence sync after boot / session ready
+    const initTimer = setTimeout(() => {
+      void syncOutbox().catch(() => {});
+    }, 600);
+
+    // Periodic heartbeat to pull server delta and push pending outbox
+    const interval = setInterval(() => {
+      if (!isSyncing) {
+        void syncOutbox().catch(() => {});
+      }
+    }, 6000);
+
+    // Focus & Online reconnection triggers
+    const handleWindowFocus = () => {
+      if (!isSyncing) {
+        void syncOutbox().catch(() => {});
+      }
+    };
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("online", handleWindowFocus);
+
+    return () => {
+      clearTimeout(initTimer);
+      clearInterval(interval);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("online", handleWindowFocus);
+    };
+  }, [isOnline, isSyncing, syncOutbox]);
 
   const availableTenantsList = useMemo(() => {
+    if (impersonatedTenant) return [{ id: impersonatedTenant.tenantId, name: `${impersonatedTenant.tenantName} (Audit)` }];
     if (!user?.tenantId) return [];
-    return [{ id: user.tenantId, name: `${user.tenantId} (Active)` }];
-  }, [user]);
+    const friendlyName = (user as any).tenantName || "Bravados";
+    return [{ id: user.tenantId, name: friendlyName }];
+  }, [user, impersonatedTenant]);
 
   const availableBranchesList = useMemo(() => {
+    if (impersonatedTenant) return [{ id: impersonatedTenant.branchId, name: `${impersonatedTenant.branchName} (Audit)` }];
     if (!user?.branchId) return [];
-    return [{ id: user.branchId, name: `${user.branchId} (Active)` }];
-  }, [user]);
+    const friendlyBranch = (user as any).branchName || "Main HQ";
+    return [{ id: user.branchId, name: friendlyBranch }];
+  }, [user, impersonatedTenant]);
 
-  const currentTenantName = impersonatedTenant?.tenantName || (isSuperAdmin ? "Platform Super Admin" : availableTenantsList.find((t) => t.id === currentTenantId)?.name || currentTenantId);
-  const currentBranchName = impersonatedTenant?.branchName || (isSuperAdmin ? "Global Control Plane" : availableBranchesList.find((b) => b.id === currentBranchId)?.name || currentBranchId);
+  const currentTenantName = impersonatedTenant?.tenantName || (isSuperAdmin ? "Platform Super Admin" : availableTenantsList.find((t) => t.id === currentTenantId)?.name || "Bravados");
+  const currentBranchName = impersonatedTenant?.branchName || (isSuperAdmin ? "Global Control Plane" : availableBranchesList.find((b) => b.id === currentBranchId)?.name || "Main HQ");
 
   const authValue: AuthContextType = {
     user,
@@ -642,7 +864,18 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Kept for backward compatibility only; this is not a development bypass.
     isDevSuperuser: isSuperAdmin,
   };
-  const syncValue: SyncContextType = { isOnline, pendingOutboxCount, syncOutbox, db, syncEngine, syncError };
+  const syncValue: SyncContextType = {
+    isOnline,
+    isSimulatedOffline,
+    toggleOfflineSimulation,
+    isSyncing,
+    pendingOutboxCount,
+    syncOutbox,
+    db,
+    syncEngine,
+    syncError,
+    lastSyncedAt,
+  };
   const themeValue: ThemeContextType = {
     theme,
     toggleTheme: () => setTheme((current) => {

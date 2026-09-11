@@ -146,6 +146,19 @@ const adjustmentShape = (row: any): StockAdjustment => ({
 
 export class PrismaProductRepository {
   async createProduct(ctx: TenantContext, req: CreateProductRequest): Promise<Product> {
+    const defaultVariant = {
+      id: req.id ? `${req.id}-default` : undefined,
+      name: "Standard",
+      sku: `${req.sku}-STD`,
+      barcode: null,
+      price: req.sellingPrice || 0,
+      costPrice: req.buyingPrice || 0,
+      isActive: true,
+    };
+    const variantsToCreate = (req.variants && req.variants.length > 0)
+      ? req.variants
+      : [defaultVariant];
+
     const row = await prisma.product.create({
       data: {
         id: req.id,
@@ -156,8 +169,11 @@ export class PrismaProductRepository {
         sku: req.sku,
         category: req.category ?? "General",
         isActive: true,
+        buyingPrice: req.buyingPrice || 0,
+        sellingPrice: req.sellingPrice || 0,
+        hasVariants: Boolean(req.hasVariants),
         variants: {
-          create: (req.variants || []).map((v) => ({
+          create: variantsToCreate.map((v: any) => ({
             id: v.id,
             tenantId: ctx.tenantId,
             branchId: ctx.branchId,
@@ -339,15 +355,29 @@ export class PrismaStockRepository {
       return { adjustment: adjustmentShape(existing), ledger: ledgerShape(ledger) };
     }
 
-    const variant = await prisma.productVariant.findUnique({ where: { id: req.variantId } });
+    let variant = await prisma.productVariant.findUnique({ where: { id: req.variantId } });
+    if (!variant) {
+      variant = await prisma.productVariant.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          OR: [
+            { id: `${req.variantId}-default` },
+            { productId: req.variantId },
+            { productId: (req as any).productId },
+          ],
+        },
+      });
+    }
     if (!variant) throw new Error(`Variant ${req.variantId} not found`);
+    const resolvedVariantId = variant.id;
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
     const result = await prisma.$transaction(async (tx: any) => {
       let changeQty = req.quantityChange;
       if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
       if (req.adjustmentType === "SET") {
-        const ledgerRows = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId } });
+        const ledgerRows = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId } });
         const currentStock = calculateAvailableStock(ledgerRows.map(ledgerShape));
         changeQty = req.quantityChange - currentStock;
       }
@@ -357,7 +387,7 @@ export class PrismaStockRepository {
           id: req.id,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
-          variantId: req.variantId,
+          variantId: resolvedVariantId,
           adjustmentType: req.adjustmentType,
           quantityChange: changeQty,
           reason: req.reason,

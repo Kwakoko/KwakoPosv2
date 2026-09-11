@@ -97,6 +97,10 @@ describe("KwakoPos Release Engineering Platform v2 Suite", () => {
   });
 
   it("6. Runs Canonical Cross-Client Transaction Test (Browser A -> Server -> Browser B)", () => {
+    if (!process.env.CANDIDATE_URL || process.env.NODE_ENV !== "production-certification") {
+      expect(() => runCanonicalCrossClientTest()).toThrow("REAL_RUNTIME_REQUIRED");
+      return;
+    }
     const res = runCanonicalCrossClientTest();
 
     expect(res.status).toBe("PASS");

@@ -289,6 +289,9 @@ export interface TranslationDictionary {
     voidItem: string;
     invalidPin: string;
     stockUnavailable: string;
+    saleDeniedTitle: string;
+    saleDeniedZeroTotal: string;
+    emptyCartSaleDenied: string;
   };
   inventory: {
     title: string;

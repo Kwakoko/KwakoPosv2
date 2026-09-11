@@ -1050,6 +1050,25 @@ export type CommercialDashboardSummary = z.infer<typeof CommercialDashboardSumma
 export const SyncOperationTypeEnum = z.enum(["CREATE", "UPDATE", "DELETE"]);
 export type SyncOperationType = z.infer<typeof SyncOperationTypeEnum>;
 
+export const CanonicalStockMovementTypeEnum = z.enum([
+  "OPENING",
+  "PURCHASE",
+  "SALE",
+  "SALE_RETURN",
+  "PURCHASE_RETURN",
+  "ADJUSTMENT_IN",
+  "ADJUSTMENT_OUT",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+  "DAMAGE",
+  "LOSS",
+  "COUNT_CORRECTION",
+  "OTHER_AUTHORIZED_MOVEMENT",
+  "ADJUSTMENT_GAIN",
+  "ADJUSTMENT_LOSS"
+]);
+export type CanonicalStockMovementType = z.infer<typeof CanonicalStockMovementTypeEnum>;
+
 export const CommercialEntityTypeEnum = z.enum([
   "Product",
   "ProductVariant",
@@ -1065,6 +1084,14 @@ export const CommercialEntityTypeEnum = z.enum([
   "Payment",
   "CashSession",
   "Expense",
+  "Category",
+  "Brand",
+  "ProductPriceHistory",
+  "Receivable",
+  "Payable",
+  "Setting",
+  "FeatureFlag",
+  "Report"
 ]);
 export type CommercialEntityType = z.infer<typeof CommercialEntityTypeEnum>;
 
@@ -1074,7 +1101,7 @@ export const SyncOperationSchema = z.object({
   branchId: z.string().uuid(),
   deviceId: z.string(),
   operationId: z.string(),
-  entityType: CommercialEntityTypeEnum,
+  entityType: z.string(),
   entityId: z.string(),
   operationType: SyncOperationTypeEnum,
   payload: z.record(z.unknown()),
@@ -1088,10 +1115,11 @@ export type SyncOperation = z.infer<typeof SyncOperationSchema>;
 
 export const SyncPushRequestSchema = z.object({
   deviceId: z.string().min(1),
+  syncEpoch: z.number().optional(),
   operations: z.array(
     z.object({
       operationId: z.string().min(1),
-      entityType: CommercialEntityTypeEnum,
+      entityType: z.string(),
       entityId: z.string().min(1),
       operationType: SyncOperationTypeEnum,
       payload: z.record(z.unknown()),
@@ -1132,8 +1160,99 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
+  categories: z.array(z.record(z.unknown())).optional(),
+  brands: z.array(z.record(z.unknown())).optional(),
+  settings: z.array(z.record(z.unknown())).optional(),
+  integrityChecksum: z.string().optional(),
 });
 export type SyncDeltaResponse = z.infer<typeof SyncDeltaResponseSchema>;
+
+export const SyncBootstrapRequestSchema = z.object({
+  deviceId: z.string().min(1),
+  clientVersion: z.string().optional(),
+  schemaVersion: z.number().optional(),
+  branchId: z.string().optional(),
+});
+export type SyncBootstrapRequest = z.infer<typeof SyncBootstrapRequestSchema>;
+
+export const SyncBootstrapResponseSchema = z.object({
+  snapshotTimestamp: z.string(),
+  integrityChecksum: z.string(),
+  schemaVersion: z.number(),
+  entityCounts: z.record(z.number()),
+  products: z.array(ProductSchema),
+  variants: z.array(ProductVariantSchema),
+  stockLedger: z.array(StockLedgerSchema),
+  adjustments: z.array(StockAdjustmentSchema),
+  customers: z.array(CustomerSchema),
+  suppliers: z.array(SupplierSchema),
+  categories: z.array(z.record(z.unknown())).optional(),
+  brands: z.array(z.record(z.unknown())).optional(),
+  settings: z.array(z.record(z.unknown())).optional(),
+});
+export type SyncBootstrapResponse = z.infer<typeof SyncBootstrapResponseSchema>;
+
+export const SyncStateManifestSchema = z.object({
+  deviceId: z.string(),
+  lastSyncTime: z.string().nullable().optional(),
+  schemaVersion: z.number().optional(),
+  storeCounts: z.record(z.number()),
+  storeChecksums: z.record(z.string()).optional(),
+  productIds: z.array(z.string()).optional(),
+  variantIds: z.array(z.string()).optional(),
+  ledgerIds: z.array(z.string()).optional(),
+  stockBalances: z.record(z.number()).optional(),
+});
+export type SyncStateManifest = z.infer<typeof SyncStateManifestSchema>;
+
+export const SyncReconciliationDiscrepancySchema = z.object({
+  entityType: z.string(),
+  entityId: z.string(),
+  kind: z.enum([
+    "MISSING_ON_CLIENT",
+    "EXTRA_ON_CLIENT",
+    "STALE_ON_CLIENT",
+    "STOCK_MISMATCH",
+    "ORPHANED_VARIANT",
+    "CHECKSUM_MISMATCH"
+  ]),
+  serverValue: z.unknown().optional(),
+  clientValue: z.unknown().optional(),
+  remediation: z.string(),
+});
+export type SyncReconciliationDiscrepancy = z.infer<typeof SyncReconciliationDiscrepancySchema>;
+
+export const SyncReconciliationResponseSchema = z.object({
+  tenantId: z.string(),
+  branchId: z.string().nullable().optional(),
+  evaluatedAt: z.string(),
+  inSync: z.boolean(),
+  totalDiscrepancies: z.number(),
+  discrepancies: z.array(SyncReconciliationDiscrepancySchema),
+  serverCounts: z.record(z.number()),
+  integrityChecksum: z.string(),
+});
+export type SyncReconciliationResponse = z.infer<typeof SyncReconciliationResponseSchema>;
+
+export const SyncObservabilityStatusSchema = z.object({
+  tenantId: z.string(),
+  branchId: z.string().nullable().optional(),
+  lastSyncTime: z.string().nullable().optional(),
+  pendingOutboxCount: z.number(),
+  failedOperationsCount: z.number(),
+  retryCount: z.number(),
+  syncCursor: z.string().nullable().optional(),
+  serverVersion: z.string(),
+  clientVersion: z.string().optional(),
+  schemaVersion: z.number(),
+  serviceWorkerVersion: z.string().optional(),
+  conflictCount: z.number(),
+  reconciliationStatus: z.enum(["IN_SYNC", "DIVERGENT", "UNKNOWN"]),
+  bootstrapStatus: z.enum(["NOT_BOOTSTRAPPED", "BOOTSTRAPPED", "IN_PROGRESS"]),
+  lastAuthoritativeSnapshot: z.string().nullable().optional(),
+  integrityStatus: z.enum(["VERIFIED", "FAILED", "PENDING"]),
+});
+export type SyncObservabilityStatus = z.infer<typeof SyncObservabilityStatusSchema>;
 
 // ==========================================
 // Health & Version Contracts
@@ -2677,6 +2796,8 @@ export * from "./tenantOnboardingContracts.js";
 export * from "./legalComplianceContracts.js";
 export * from "./rollbackContracts.js";
 export * from "./coreEngineContracts.js";
+export * from "./inventoryBatchContracts.js";
+export * from "./stockCountContracts.js";
 
 
 

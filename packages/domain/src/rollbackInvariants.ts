@@ -39,7 +39,7 @@ export function normalizeRollbackPermission(perm: string): string {
 }
 
 export function hasRollbackPermission(ctx: TenantContext, requiredPermission: string): boolean {
-  if (ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz") {
+  if (ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN")) {
     return true;
   }
 
@@ -64,7 +64,7 @@ export function assertRollbackAuthorized(
   scope: RollbackScope,
   action: "view" | "request" | "approve" | "execute" | "cancel" | "verify" | "recover" | "emergency" | "platform" | "audit"
 ): void {
-  const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+  const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
 
   // Level 4 (PLATFORM) and Level 5 (EMERGENCY) scope strictly require Super Admin or explicit platform permission
   if (scope === "PLATFORM" && !isSuperAdmin && !hasRollbackPermission(ctx, "rollback.platform")) {
@@ -214,7 +214,7 @@ export function assertStockLedgerRecalculationPasses(
  * Invariant 7: Tenant Isolation Invariant
  */
 export function assertRollbackTenantIsolation(ctx: TenantContext, requestTenantId: string): void {
-  const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+  const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
   if (!isSuperAdmin && ctx.tenantId !== requestTenantId) {
     throw new RollbackAuthorizationError(
       "CROSS_TENANT_ROLLBACK_FORBIDDEN",

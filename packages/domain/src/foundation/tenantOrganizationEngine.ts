@@ -32,7 +32,7 @@ export class TenantOrganizationEngine {
    * Enforce tenant isolation invariant
    */
   public assertIsolation(ctx: TenantContext, resourceTenantId: string): void {
-    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || (ctx as any).email === "admin@kwakoko.co.tz";
+    const isSuperAdmin = ctx.roles?.includes("SUPER_ADMIN") || ctx.roles?.includes("SUPERADMIN");
     if (!isSuperAdmin && ctx.tenantId !== resourceTenantId) {
       throw new Error(
         `TENANT_BOUNDARY_VIOLATION: Context tenant '${ctx.tenantId}' cannot access resource owned by tenant '${resourceTenantId}'.`

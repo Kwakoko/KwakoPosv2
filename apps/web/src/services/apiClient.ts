@@ -36,8 +36,10 @@ export class MfaRequiredError extends Error {
   }
 }
 
-interface StoredSession {
+export interface StoredSession {
   sessionId: string;
+  accessToken?: string;
+  refreshToken?: string;
   user: LoginResponseUser;
 }
 
@@ -45,38 +47,60 @@ interface ApiErrorPayload {
   error?: { message?: string; code?: string };
 }
 
-let accessToken: string | null = null;
-let refreshInFlight: Promise<string | null> | null = null;
 const SESSION_KEY = "kwakopos:v2:session";
 
-export function getAccessToken(): string | null { return accessToken; }
-export function setAccessToken(token: string | null): void { accessToken = token; }
-
-function getStoredSession(): StoredSession | null {
+export function getStoredSession(): StoredSession | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(SESSION_KEY);
+    let raw = window.localStorage.getItem(SESSION_KEY);
+    if (!raw) {
+      raw = window.sessionStorage.getItem(SESSION_KEY);
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSession>;
     if (!parsed.sessionId || !parsed.user) {
+      window.localStorage.removeItem(SESSION_KEY);
       window.sessionStorage.removeItem(SESSION_KEY);
       return null;
     }
-    return { sessionId: parsed.sessionId, user: parsed.user as LoginResponseUser };
+    return {
+      sessionId: parsed.sessionId,
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      user: parsed.user as LoginResponseUser,
+    };
   } catch {
-    try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    try {
+      window.localStorage.removeItem(SESSION_KEY);
+      window.sessionStorage.removeItem(SESSION_KEY);
+    } catch { /* ignore */ }
     return null;
   }
 }
 
-function setStoredSession(session: StoredSession | null): void {
+export function setStoredSession(session: StoredSession | null): void {
   if (typeof window === "undefined") return;
-  if (!session) window.sessionStorage.removeItem(SESSION_KEY);
-  else window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  if (!session) {
+    try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  } else {
+    const serialized = JSON.stringify(session);
+    try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+    try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+  }
 }
 
+let accessToken: string | null = typeof window !== "undefined" ? getStoredSession()?.accessToken || null : null;
+let refreshInFlight: Promise<string | null> | null = null;
+
+export function getAccessToken(): string | null { return accessToken; }
+export function setAccessToken(token: string | null): void { accessToken = token; }
+
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, allowRefresh = true): Promise<T> {
-  const response = await fetch(input, {
+  const url = typeof input === "string" && input.startsWith("/") && typeof window === "undefined"
+    ? `http://127.0.0.1:${process.env.PORT || 3000}${input}`
+    : input;
+  const response = await fetch(url, {
     ...init,
     headers: {
       Accept: "application/json",
@@ -108,17 +132,32 @@ async function refreshAccessToken(): Promise<string | null> {
     const stored = getStoredSession();
     if (!stored) return null;
     try {
-      const result = await requestJson<{ success: boolean; data?: { accessToken: string } }>(
+      const result = await requestJson<{
+        success: boolean;
+        data?: { accessToken: string };
+      }>(
         "/auth/refresh",
-        { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            sessionId: stored.sessionId,
+            email: stored.user.email,
+            tenantId: stored.user.tenantId,
+            branchId: stored.user.branchId,
+            userId: stored.user.id,
+          }),
+        },
         false,
       );
       if (!result.success || !result.data?.accessToken) return null;
       accessToken = result.data.accessToken;
+      setStoredSession({
+        ...stored,
+        accessToken: result.data.accessToken,
+      });
       return accessToken;
-    } catch {
-      accessToken = null;
-      setStoredSession(null);
+    } catch (err) {
+      console.warn("[Session] Token refresh attempt deferred:", err);
       return null;
     } finally {
       refreshInFlight = null;
@@ -134,7 +173,11 @@ export async function login(email: string, password: string, mfaCode?: string): 
   }, false);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Authentication failed");
   accessToken = result.data.accessToken;
-  setStoredSession({ sessionId: result.data.sessionId, user: result.data.user });
+  setStoredSession({
+    sessionId: result.data.sessionId,
+    accessToken: result.data.accessToken,
+    user: result.data.user,
+  });
   return result.data.user;
 }
 
@@ -180,10 +223,34 @@ export async function changeSuperAdminPassword(currentPassword: string, newPassw
 
 export async function restoreSession(): Promise<LoginResponseUser | null> {
   const stored = getStoredSession();
-  if (!stored) return null;
+  if (!stored || !stored.user) return null;
+
+  // If stored accessToken is present and not expired, restore immediately
+  if (stored.accessToken) {
+    try {
+      const parts = stored.accessToken.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+        if (payload && typeof payload.exp === "number") {
+          const expiresAtMs = payload.exp * 1000;
+          if (expiresAtMs > Date.now() + 30000) {
+            accessToken = stored.accessToken;
+            return stored.user;
+          }
+        }
+      }
+    } catch {
+      // Decode fallback
+    }
+  }
+
   const refreshed = await refreshAccessToken();
-  if (!refreshed) return null;
-  return getStoredSession()?.user || null;
+  if (refreshed) {
+    return getStoredSession()?.user || stored.user;
+  }
+
+  // Preserve stored user so offline POS sessions do not get logged out on page refresh
+  return stored.user;
 }
 
 export async function logout(): Promise<void> {
@@ -223,7 +290,12 @@ export async function switchContext(
   }, true);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Failed to switch context");
   accessToken = result.data.accessToken;
-  setStoredSession({ sessionId: result.data.sessionId, user: result.data.user });
+  const existing = getStoredSession();
+  setStoredSession({
+    sessionId: result.data.sessionId,
+    accessToken: result.data.accessToken,
+    user: result.data.user,
+  });
   return {
     ...result.data.user,
     tenantName: result.data.tenantName,

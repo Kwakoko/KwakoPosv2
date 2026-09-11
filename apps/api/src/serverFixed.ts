@@ -260,9 +260,9 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/refresh" && req.method === "POST") {
-      const body = (req.body || {}) as RefreshRequestBody;
+      const body = (req.body || {}) as RefreshRequestBody & { refreshToken?: string };
       const sessionId = String(body.sessionId || "");
-      const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
+      const refreshToken = body.refreshToken || parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
       if (!sessionId || !refreshToken) {
         reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired session" } });
         return;
@@ -305,10 +305,29 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
 }
 
 export async function startFixedServer(): Promise<FastifyInstance> {
-  const server = buildFixedServer();
-  await server.listen({ port: Number(process.env.PORT || 8080), host: process.env.HOST || "0.0.0.0" });
+  const config = loadConfig();
+  const server = buildFixedServer({ config });
+  const port = Number(process.env.PORT || config.PORT || 3000);
+  const host = process.env.HOST || config.HOST || "0.0.0.0";
+  await server.listen({ port, host });
+  console.log(`KwakoPos 2.0 API listening on ${host}:${port}`);
   return server;
 }
 
-if (typeof require !== "undefined" && require.main === module) void startFixedServer();
+const isMainModule = () => {
+  if (typeof require !== "undefined" && require.main === module) return true;
+  if (process.argv[1]) {
+    const p = process.argv[1].replace(/\\/g, "/");
+    if (p.endsWith("serverFixed.ts") || p.endsWith("serverFixed.js")) return true;
+  }
+  return false;
+};
+
+if (isMainModule()) {
+  void startFixedServer().catch((err) => {
+    console.error("FAILED_TO_START_API_SERVER:", err);
+    process.exit(1);
+  });
+}
+
 
