@@ -713,5 +713,6 @@ export * from "./business/posCheckoutEngine.js";
 export * from "./engineRegistry/bootstrapEngines.js";
 export * from "./inventoryBatchEngine.js";
 export * from "./stockCountEngine.js";
+export * from "./exchangeRateProvider.js";
 
 

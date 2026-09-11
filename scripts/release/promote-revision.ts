@@ -39,8 +39,12 @@ async function fetchHttpJson(url: string): Promise<{ statusCode: number; data: a
 }
 
 export async function promoteCandidateRevision(candidateInput?: CandidateDeploymentEvidence): Promise<PromotionEvidence> {
+  const targetTrafficPercent = process.env.PROMOTION_PERCENT
+    ? Math.max(1, Math.min(100, Number(process.env.PROMOTION_PERCENT)))
+    : 100;
+
   console.log("----------------------------------------------------------------");
-  console.log(" STEP 5 — Promote Certified Candidate Revision to 100% Traffic ");
+  console.log(` STEP 5 — Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
   console.log("----------------------------------------------------------------");
 
   const isProdCert = process.env.NODE_ENV === "production-certification";
@@ -74,8 +78,12 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
 
   try {
     execSync("gcloud --version", { stdio: "ignore" });
+    const trafficArg = targetTrafficPercent === 100
+      ? `${candidate.candidateRevision}=100`
+      : `${candidate.candidateRevision}=${targetTrafficPercent}`;
+
     execSync(
-      `gcloud run services update-traffic ${serviceName} --project=${project} --region=${region} --to-revisions=${candidate.candidateRevision}=100`,
+      `gcloud run services update-traffic ${serviceName} --project=${project} --region=${region} --to-revisions=${trafficArg}`,
       { stdio: "inherit" },
     );
 
@@ -90,8 +98,8 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     const certifiedTraffic = trafficList.find((t: any) => t.revisionName === candidate.candidateRevision);
     const totalTraffic = trafficList.reduce((sum: number, t: any) => sum + Number(t.percent || 0), 0);
 
-    if (!certifiedTraffic || certifiedTraffic.percent !== 100) {
-      throw new Error(`Traffic allocation mismatch: certified revision has ${certifiedTraffic?.percent || 0}% instead of 100%.`);
+    if (!certifiedTraffic || certifiedTraffic.percent !== targetTrafficPercent) {
+      throw new Error(`Traffic allocation mismatch: certified revision has ${certifiedTraffic?.percent || 0}% instead of ${targetTrafficPercent}%.`);
     }
     if (totalTraffic !== 100) {
       throw new Error(`Traffic allocation invalid: total reported traffic is ${totalTraffic}%, expected 100%.`);
@@ -123,13 +131,13 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     };
 
     assertReleaseIdentityMatch(liveIdentity, expectedCertified);
-    assertVerifiedTrafficPromotion(true, 100);
+    assertVerifiedTrafficPromotion(true, targetTrafficPercent);
 
     const evidence: PromotionEvidence = {
       status: "PASS",
       promotedRevision: candidate.candidateRevision,
       productionUrl,
-      trafficPercent: 100,
+      trafficPercent: targetTrafficPercent,
       liveGitSha: liveIdentity.gitSha,
       liveContainerDigest: liveIdentity.containerDigest,
       liveCloudRunRevision: liveIdentity.cloudRunRevision,

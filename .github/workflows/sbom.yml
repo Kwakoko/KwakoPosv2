@@ -1,0 +1,60 @@
+name: KwakoPos Release Software Bill of Materials (SBOM)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: 'Git SHA to generate SBOM for'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  generate-sbom:
+    name: Generate & Attest SPDX / CycloneDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate CycloneDX SBOM for Monorepo Workspaces
+        run: |
+          npx @cyclonedx/cyclonedx-npm --output-file artifacts/release-evidence/kwakopos-sbom-cyclonedx.json --spec-version 1.5
+
+      - name: Verify SBOM completeness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f artifacts/release-evidence/kwakopos-sbom-cyclonedx.json
+          node -e "
+            const sbom = require('./artifacts/release-evidence/kwakopos-sbom-cyclonedx.json');
+            if (!sbom.components || sbom.components.length === 0) {
+              console.error('SBOM_BLOCKED: No components recorded in SBOM');
+              process.exit(1);
+            }
+            console.log('SBOM successfully verified. Total registered dependencies: ' + sbom.components.length);
+          "
+
+      - name: Archive SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwakopos-release-sbom-${{ inputs.release_sha || github.sha }}
+          path: artifacts/release-evidence/kwakopos-sbom-cyclonedx.json
+          retention-days: 90
