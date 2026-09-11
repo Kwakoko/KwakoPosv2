@@ -2798,6 +2798,7 @@ export * from "./rollbackContracts.js";
 export * from "./coreEngineContracts.js";
 export * from "./inventoryBatchContracts.js";
 export * from "./stockCountContracts.js";
+export * from "./syncConflictContracts.js";
 
 
 
