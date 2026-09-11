@@ -432,3 +432,4 @@ export {
   syncDependencyRank,
   orderSyncOperations,
 } from "./syncIntegrity.js";
+export { SyncConflictLogger, globalSyncConflictLogger } from "./syncConflictLogger.js";

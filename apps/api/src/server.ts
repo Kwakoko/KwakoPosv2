@@ -12,6 +12,7 @@ import { rollbackAuthorizationRoutes } from "./routes/rollbackAuthorizationRoute
 import { superAdminDatabaseRoutes } from "./routes/superAdminDatabaseRoutes.js";
 import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoutes.js";
 import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
+import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -4784,6 +4785,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   tenantOnboardingRoutes(server);
   legalGovernanceRoutes(server);
   rollbackAuthorizationRoutes(server);
+  tenantExportRoutes(server);
 
   return server;
 }
