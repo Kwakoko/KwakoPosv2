@@ -825,10 +825,13 @@ export async function purgeSampleData(
     }
   }
 
-  // 7. Clear shift and expenses configuration
+  // 7. Clear shift, expenses, and procurement configuration
   db.saveConfigurationLocal("demo_expenses", [], ctx);
   db.saveConfigurationLocal("active_shift_session", null, ctx);
   db.saveConfigurationLocal("demo_mode_active", false, ctx);
+  db.saveConfigurationLocal("procurement_suppliers", [], ctx);
+  db.saveConfigurationLocal("procurement_purchase_orders", [], ctx);
+  db.saveConfigurationLocal("procurement_grns", [], ctx);
 
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(DEMO_MODE_STORAGE_KEY);

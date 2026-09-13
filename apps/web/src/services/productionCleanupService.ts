@@ -153,6 +153,12 @@ export const productionCleanupService = {
           db.syncOutbox.clear();
         }
 
+        if (typeof db.saveConfigurationLocal === "function") {
+          db.saveConfigurationLocal("procurement_suppliers", []);
+          db.saveConfigurationLocal("procurement_purchase_orders", []);
+          db.saveConfigurationLocal("procurement_grns", []);
+        }
+
         if (typeof db.flushPersistence === "function") {
           await db.flushPersistence().catch(() => {});
         }

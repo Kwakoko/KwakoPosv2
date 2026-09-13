@@ -289,7 +289,6 @@ export async function runProductionCleanlinessCertification(): Promise<{
 
 if (process.argv[1]?.endsWith("runProductionCleanlinessCertification.ts")) {
   runProductionCleanlinessCertification().then((cert) => {
-    if (cert.failedPillars > 0) process.exit(1);
-    process.exit(0);
+    process.exitCode = cert.failedPillars > 0 ? 1 : 0;
   });
 }
