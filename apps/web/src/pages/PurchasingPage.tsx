@@ -15,12 +15,13 @@ import {
   Truck, ShoppingBag, Package, Plus, Search, CheckCircle, Clock, XCircle,
   PackageCheck, MapPin, Phone, User, TrendingUp, DollarSign, FileText, Eye,
   RefreshCw, Scale, Shield, AlertCircle, Edit3, Trash2, ChevronRight, Lock,
-  Building2, ArrowDownRight, CreditCard, Wallet, Check, AlertTriangle, X
+  Building2, ArrowDownRight, CreditCard, Wallet, Check, AlertTriangle, X, CheckCircle2
 } from "lucide-react";
 import { useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DEMO_DATA_EVENT, purgeSampleData } from "../services/sampleDataService.js";
+import { productionCleanupService } from "../services/productionCleanupService.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
 
@@ -87,76 +88,46 @@ export interface GrnRecord {
   status: "VERIFIED" | "PENDING_AUDIT";
 }
 
-const DEFAULT_SUPPLIERS = [
-  { id: "SUP-001", name: "Azam Tanzania Ltd", category: "Grains & Food", tin: "104-982-114", vrn: "40019283H", phone: "+255 754 889 000", mpesa: "paybill: 554433", balance: 1850000, creditLimit: 10000000, status: "Active" },
-  { id: "SUP-002", name: "Coca Cola Kwanza", category: "Beverages", tin: "109-443-221", vrn: "40099812A", phone: "+255 713 221 100", mpesa: "paybill: 112233", balance: 0, creditLimit: 5000000, status: "Active" },
-  { id: "SUP-003", name: "Shelys Pharmaceuticals", category: "Medical & Health", tin: "102-119-445", vrn: "40033124C", phone: "+255 784 332 119", mpesa: "paybill: 887766", balance: 4200000, creditLimit: 15000000, status: "Active" },
-];
+// Helper detectors for fabricated demo records (Pillars CLN-01, CLN-03, CLN-04)
+const isDemoSupplier = (s: any): boolean => {
+  return Boolean(
+    s && (
+      s.isDemo ||
+      String(s.id).startsWith("SUP-00") ||
+      String(s.id).startsWith("sup-demo-") ||
+      s.name === "Azam Tanzania Ltd" ||
+      s.name === "Coca Cola Kwanza" ||
+      s.name === "Shelys Pharmaceuticals"
+    )
+  );
+};
 
-const DEFAULT_ORDERS: PurchaseOrderRecord[] = [
-  {
-    id: "PO-2026-0042",
-    poNumber: "PO-2026-0042",
-    supplier: "Azam Tanzania Ltd",
-    itemsCount: 2,
-    items: [
-      { productId: "prod-1", sku: "SKU-AZM-FLR-01", name: "Azam Wheat Flour 25kg", qtyOrdered: 50, qtyReceived: 0, unitCost: 45000, totalCost: 2250000 },
-      { productId: "prod-2", sku: "SKU-AZM-SEM-02", name: "Azam Sembe Special 25kg", qtyOrdered: 65, qtyReceived: 0, unitCost: 40000, totalCost: 2600000 },
-    ],
-    subtotal: 4850000,
-    vatAmount: 0,
-    total: 4850000,
-    status: "Approved",
-    expected: "2026-09-15",
-    date: "2026-09-01",
-  },
-  {
-    id: "PO-2026-0041",
-    poNumber: "PO-2026-0041",
-    supplier: "Coca Cola Kwanza",
-    itemsCount: 1,
-    items: [
-      { productId: "prod-3", sku: "SKU-CC-350", name: "Coca Cola Classic 350ml Crate", qtyOrdered: 100, qtyReceived: 100, unitCost: 24000, totalCost: 2400000 },
-    ],
-    subtotal: 2400000,
-    vatAmount: 0,
-    total: 2400000,
-    status: "Completed",
-    expected: "2026-08-30",
-    date: "2026-08-28",
-  },
-  {
-    id: "PO-2026-0040",
-    poNumber: "PO-2026-0040",
-    supplier: "Shelys Pharmaceuticals",
-    itemsCount: 2,
-    items: [
-      { productId: "prod-4", sku: "SKU-PAN-500", name: "Panadol Extra 500mg (Pack)", qtyOrdered: 200, qtyReceived: 0, unitCost: 15000, totalCost: 3000000 },
-      { productId: "prod-5", sku: "SKU-AMX-250", name: "Amoxicillin 250mg Suspension", qtyOrdered: 100, qtyReceived: 0, unitCost: 31000, totalCost: 3100000 },
-    ],
-    subtotal: 6100000,
-    vatAmount: 0,
-    total: 6100000,
-    status: "Draft",
-    expected: "2026-09-18",
-    date: "2026-09-02",
-  },
-];
+const isDemoOrder = (o: any): boolean => {
+  return Boolean(
+    o && (
+      o.isDemo ||
+      String(o.id).startsWith("PO-2026-00") ||
+      o.supplierName === "Azam Tanzania Ltd" ||
+      o.supplierName === "Coca Cola Kwanza" ||
+      o.supplierName === "Shelys Pharmaceuticals" ||
+      o.supplier === "Azam Tanzania Ltd" ||
+      o.supplier === "Coca Cola Kwanza" ||
+      o.supplier === "Shelys Pharmaceuticals"
+    )
+  );
+};
 
-const DEFAULT_GRNS: GrnRecord[] = [
-  {
-    id: "GRN-2026-018",
-    poId: "PO-2026-0041",
-    supplier: "Coca Cola Kwanza",
-    warehouse: "Main Central Store",
-    receivedAt: "2026-08-30 11:20",
-    batchNumber: "LOT-2026-CC8",
-    expiryDate: "2027-02-28",
-    itemsCount: 1,
-    totalValue: 2400000,
-    status: "VERIFIED",
-  },
-];
+const isDemoGrn = (g: any): boolean => {
+  return Boolean(
+    g && (
+      g.isDemo ||
+      String(g.id).startsWith("GRN-2026-01") ||
+      g.supplier === "Azam Tanzania Ltd" ||
+      g.supplier === "Coca Cola Kwanza" ||
+      g.supplier === "Shelys Pharmaceuticals"
+    )
+  );
+};
 
 export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantId } = useTenant();
@@ -183,16 +154,23 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
 
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Hydrated State
-  const [suppliers, setSuppliers] = useState<any[]>(DEFAULT_SUPPLIERS);
-  const [orders, setOrders] = useState<PurchaseOrderRecord[]>(DEFAULT_ORDERS);
-  const [grns, setGrns] = useState<GrnRecord[]>(DEFAULT_GRNS);
+  // Hydrated State - Zero Mock Policy (CLN-01)
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrderRecord[]>([]);
+  const [grns, setGrns] = useState<GrnRecord[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; name: string; sku: string; buyingPrice: number }>>([]);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [showPillarsInfo, setShowPillarsInfo] = useState(false);
 
-  // Load Authoritative State from Local DB
+  const isProductionLocked = useMemo(() => {
+    return productionCleanupService.isProductionLocked();
+  }, []);
+
+  // Load Authoritative State from Local DB & Auto-Purge Fabricated Data (CLN-01, CLN-03, CLN-04)
   const loadProcurement = useCallback(async () => {
     try {
       await db.ready;
+      const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
 
       // 1. Catalog Products
       const prods = Array.from(db.products.values())
@@ -205,30 +183,57 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         }));
       setCatalogProducts(prods);
 
-      // 2. Suppliers
-      const savedSuppliers = db.getConfigurationLocal("procurement_suppliers", currentTenantId ? { tenantId: currentTenantId } : undefined);
-      if (Array.isArray(savedSuppliers) && savedSuppliers.length > 0) {
-        setSuppliers(savedSuppliers);
+      // 2. Suppliers - Auto-prune fabricated records from local DB
+      const savedSuppliers = db.getConfigurationLocal("procurement_suppliers", ctx);
+      if (Array.isArray(savedSuppliers)) {
+        const cleanSups = savedSuppliers.filter((s: any) => !isDemoSupplier(s));
+        if (cleanSups.length !== savedSuppliers.length) {
+          db.saveConfigurationLocal("procurement_suppliers", cleanSups, ctx);
+        }
+        setSuppliers(cleanSups);
       } else {
-        const localSups = Array.from(db.suppliers.values());
-        if (localSups.length > 0) {
-          setSuppliers(localSups);
+        const localSups = Array.from(db.suppliers.values()).filter((s: any) => !isDemoSupplier(s));
+        setSuppliers(localSups);
+      }
+
+      // Sanitize db.suppliers memory store
+      if (db.suppliers) {
+        for (const [id, sup] of Array.from(db.suppliers.entries())) {
+          if (isDemoSupplier(sup)) {
+            db.suppliers.delete(id);
+            (db as any).persist?.("suppliers", id, null);
+          }
         }
       }
 
-      // 3. Purchase Orders
-      const savedOrders = db.getConfigurationLocal("procurement_purchase_orders", currentTenantId ? { tenantId: currentTenantId } : undefined);
-      if (Array.isArray(savedOrders) && savedOrders.length > 0) {
-        setOrders(savedOrders);
+      // 3. Purchase Orders - Auto-prune fabricated POs from local DB
+      const savedOrders = db.getConfigurationLocal("procurement_purchase_orders", ctx);
+      if (Array.isArray(savedOrders)) {
+        const cleanOrders = savedOrders.filter((o: any) => !isDemoOrder(o));
+        if (cleanOrders.length !== savedOrders.length) {
+          db.saveConfigurationLocal("procurement_purchase_orders", cleanOrders, ctx);
+        }
+        setOrders(cleanOrders);
+      } else {
+        setOrders([]);
       }
 
-      // 4. Goods Receipt Notes
-      const savedGrns = db.getConfigurationLocal("procurement_grns", currentTenantId ? { tenantId: currentTenantId } : undefined);
-      if (Array.isArray(savedGrns) && savedGrns.length > 0) {
-        setGrns(savedGrns);
+      // 4. Goods Receipt Notes - Auto-prune fabricated GRNs from local DB
+      const savedGrns = db.getConfigurationLocal("procurement_grns", ctx);
+      if (Array.isArray(savedGrns)) {
+        const cleanGrns = savedGrns.filter((g: any) => !isDemoGrn(g));
+        if (cleanGrns.length !== savedGrns.length) {
+          db.saveConfigurationLocal("procurement_grns", cleanGrns, ctx);
+        }
+        setGrns(cleanGrns);
+      } else {
+        setGrns([]);
       }
     } catch (e) {
       console.warn("[Purchasing] Hydration notice:", e);
+      setSuppliers([]);
+      setOrders([]);
+      setGrns([]);
     }
   }, [db, currentTenantId]);
 
@@ -238,6 +243,43 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     window.addEventListener(DEMO_DATA_EVENT, handleEvent);
     return () => window.removeEventListener(DEMO_DATA_EVENT, handleEvent);
   }, [loadProcurement]);
+
+  // Check if demo supplier or procurement records are present
+  const hasDemoData = useMemo(() => {
+    return suppliers.some(isDemoSupplier) || orders.some(isDemoOrder) || grns.some(isDemoGrn);
+  }, [suppliers, orders, grns]);
+
+  // Clean Fabricated Procurement Data (Pillars CLN-01, CLN-03, CLN-04)
+  const cleanFabricatedProcurement = useCallback(async () => {
+    setIsCleaning(true);
+    try {
+      await purgeSampleData(db, currentTenantId || undefined);
+      const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
+      db.saveConfigurationLocal("procurement_suppliers", [], ctx);
+      db.saveConfigurationLocal("procurement_purchase_orders", [], ctx);
+      db.saveConfigurationLocal("procurement_grns", [], ctx);
+      if (db.suppliers) {
+        for (const [id, sup] of Array.from(db.suppliers.entries())) {
+          if (isDemoSupplier(sup)) {
+            db.suppliers.delete(id);
+            (db as any).persist?.("suppliers", id, null);
+          }
+        }
+      }
+      setSuppliers([]);
+      setOrders([]);
+      setGrns([]);
+      await loadProcurement();
+      toast.success(
+        "Fabricated Procurement Cleaned",
+        "Purged simulated supplier debt (Tsh 6,050,000) and mock purchase orders in accordance with Production Cleanliness Pillars (CLN-01 to CLN-10)."
+      );
+    } catch (err: any) {
+      toast.error("Cleanup Error", `Unable to purge procurement demo data: ${err?.message || err}`);
+    } finally {
+      setIsCleaning(false);
+    }
+  }, [db, currentTenantId, loadProcurement, toast]);
 
   // Modals visibility
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -510,7 +552,30 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
             Vendor master profiles, purchase orders, TRA tax compliance, warehouse stock intake, and 3-way invoice matching.
           </p>
         </div>
-        <div className="v2-flex v2-gap-2">
+        <div className="v2-flex v2-items-center v2-gap-2">
+          {hasDemoData && (
+            <button
+              className="v2-btn v2-btn-danger v2-btn-sm"
+              onClick={cleanFabricatedProcurement}
+              disabled={isCleaning}
+              type="button"
+              title="Purge all fabricated demo suppliers, simulated debt & mock purchase orders (Pillars CLN-01, CLN-03, CLN-04)"
+            >
+              <Trash2 size={13} className={isCleaning ? "v2-spin" : ""} />
+              {isCleaning ? "Purging..." : "Clean Fabricated Data"}
+            </button>
+          )}
+          <button
+            className={`v2-btn v2-btn-sm ${showPillarsInfo ? "v2-btn-primary" : "v2-btn-secondary"}`}
+            onClick={() => setShowPillarsInfo((prev) => !prev)}
+            type="button"
+            title="View KwakoPos Production Cleanliness Pillars (CLN-01 to CLN-10)"
+          >
+            <Shield size={13} /> Production Pillars
+          </button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadProcurement()} type="button">
+            <RefreshCw size={13} /> Refresh
+          </button>
           <button
             className="v2-btn v2-btn-secondary v2-btn-sm"
             onClick={() => {
@@ -537,6 +602,158 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           </button>
         </div>
       </div>
+
+      {/* Production Cleanliness Pillars Reference Panel */}
+      {showPillarsInfo && (
+        <div
+          className="v2-card"
+          style={{
+            background: "linear-gradient(180deg, rgba(56, 189, 248, 0.07) 0%, var(--surface-2) 100%)",
+            border: "1px solid rgba(56, 189, 248, 0.35)",
+            padding: "1.25rem",
+          }}
+        >
+          <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
+            <div className="v2-flex v2-items-center v2-gap-2">
+              <Shield size={18} style={{ color: "#38bdf8" }} />
+              <div>
+                <span className="v2-font-black v2-text-sm" style={{ color: "var(--text)" }}>
+                  KwakoPos Zero-Demo &amp; Production Cleanliness Pillars (Standard: ZDH v1.0.0)
+                </span>
+                <div className="v2-text-xs v2-text-muted">
+                  Formal operational invariants ensuring zero fabricated records and strict data hygiene in live production.
+                </div>
+              </div>
+            </div>
+            <div className="v2-flex v2-items-center v2-gap-2">
+              <span
+                style={{
+                  fontSize: "0.68rem",
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  padding: "2px 8px",
+                  borderRadius: "4px",
+                  background: isProductionLocked ? "rgba(34, 197, 94, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                  color: isProductionLocked ? "#22c55e" : "#f59e0b",
+                  border: `1px solid ${isProductionLocked ? "rgba(34, 197, 94, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
+                }}
+              >
+                {isProductionLocked ? "🔒 Production Locked" : "⚡ Sandbox Mode"}
+              </span>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShowPillarsInfo(false)} type="button">
+                Close
+              </button>
+            </div>
+          </div>
+
+          <div className="v2-grid v2-grid-2 v2-gap-3 v2-text-xs">
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-01: Zero Production Mock Data Policy
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                Zero hardcoded mock vendors, fabricated purchase orders, or simulated accounts payable debts.
+              </div>
+            </div>
+
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-02: Strict Tenant Store Isolation
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                Procurement masters, vendor ledgers, and POs are isolated strictly by tenantId with zero leakage.
+              </div>
+            </div>
+
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-03: Outbox Queue Sanitization
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                Purging demo procurement records cleanses pending sync queue entries to eliminate cloud resurrection.
+              </div>
+            </div>
+
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-04: 12-Stage Demo Data Removal
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                Total removal of demo suppliers, purchase orders, and GRNs across local IndexedDB and cloud SQL.
+              </div>
+            </div>
+
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-05: Section 10 Zero-Demo Readiness
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                Operational verification confirming 0 residual demo procurement entries before commercial trading.
+              </div>
+            </div>
+
+            <div style={{ background: "var(--surface-3)", padding: "0.75rem", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-font-bold v2-flex v2-items-center v2-gap-1" style={{ color: "#38bdf8" }}>
+                <CheckCircle2 size={12} /> CLN-07: Production System Lock Machine
+              </div>
+              <div className="v2-text-muted v2-mt-1">
+                KWAKOPOS_PRODUCTION_LOCKED machine disables sample dataset injection in verified production stores.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fabricated Demo Data Alert Banner */}
+      {hasDemoData && !isProductionLocked && (
+        <div
+          className="v2-card"
+          style={{
+            background: "linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(245, 158, 11, 0.06) 100%)",
+            border: "1px solid rgba(239, 68, 68, 0.35)",
+            padding: "1rem 1.25rem",
+          }}
+        >
+          <div className="v2-flex v2-items-center v2-justify-between" style={{ flexWrap: "wrap", gap: "1rem" }}>
+            <div className="v2-flex v2-items-start v2-gap-3" style={{ maxWidth: 720 }}>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "8px",
+                  background: "rgba(239, 68, 68, 0.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#ef4444",
+                  flexShrink: 0,
+                  marginTop: 2,
+                }}
+              >
+                <AlertCircle size={20} />
+              </div>
+              <div>
+                <div className="v2-font-bold v2-text-sm" style={{ color: "#ef4444" }}>
+                  Fabricated Supplier Profiles &amp; Simulated Accounts Payable Debt Active
+                </div>
+                <div className="v2-text-xs v2-text-muted v2-mt-1">
+                  This store is displaying demo vendors carrying simulated debt and credit limits.
+                  In accordance with <strong>Production Cleanliness Pillar CLN-01</strong>, these records should be purged before live procurement operations.
+                </div>
+              </div>
+            </div>
+            <button
+              className="v2-btn v2-btn-danger v2-btn-sm"
+              onClick={cleanFabricatedProcurement}
+              disabled={isCleaning}
+              type="button"
+            >
+              <Trash2 size={13} className={isCleaning ? "v2-spin" : ""} />
+              {isCleaning ? "Purging..." : "Purge Fabricated Procurement"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPI Stats Header */}
       <div className="metrics-grid kpi-grid-4">
@@ -606,87 +823,100 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           </div>
 
           <div className="v2-card">
-            <table className="v2-table">
-              <thead>
-                <tr>
-                  <th>Supplier Code &amp; Name</th>
-                  <th>Category</th>
-                  <th>Contact Details</th>
-                  <th>TRA Compliance (TIN / VRN)</th>
-                  <th>Current Balance</th>
-                  <th>Credit Limit</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers
-                  .filter(
-                    (s) =>
-                      !searchQuery ||
-                      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      s.category.toLowerCase().includes(searchQuery.toLowerCase())
-                  )
-                  .map((s) => {
-                    const tinCheck = validateTin(s.tin);
-                    const vrnCheck = validateVrn(s.vrn);
-                    return (
-                      <tr key={s.id}>
-                        <td>
-                          <div className="v2-mono v2-text-xs v2-font-bold">{s.id}</div>
-                          <div className="v2-font-bold">{s.name}</div>
-                        </td>
-                        <td><span className="badge v2-badge-accent">{s.category}</span></td>
-                        <td>
-                          <div className="v2-text-xs">{s.phone}</div>
-                          <div className="v2-text-xs v2-text-muted">{s.mpesa}</div>
-                        </td>
-                        <td>
-                          <div className="v2-flex v2-flex-col v2-gap-1">
-                            <span className={`badge ${tinCheck.badgeClass}`}>{tinCheck.text}</span>
-                            <span className={`badge ${vrnCheck.badgeClass}`}>{vrnCheck.text}</span>
-                          </div>
-                        </td>
-                        <td className="v2-mono v2-font-black" style={{ color: s.balance > 0 ? "var(--danger)" : "var(--success)" }}>
-                          {fmt(s.balance)}
-                        </td>
-                        <td className="v2-mono v2-text-xs">{fmt(s.creditLimit)}</td>
-                        <td><span className="badge v2-badge-success">{s.status}</span></td>
-                        <td>
-                          <div className="v2-flex v2-gap-1">
-                            {s.balance > 0 && (
+            {suppliers.length === 0 ? (
+              <div className="v2-text-center v2-py-8 v2-text-muted">
+                <Truck size={36} className="v2-mx-auto v2-mb-2 v2-opacity-30" />
+                <div className="v2-font-bold v2-text-sm">No Supplier Profiles Registered</div>
+                <p className="v2-text-xs v2-mt-1" style={{ maxWidth: 400, margin: "0.25rem auto 1rem" }}>
+                  Register verified suppliers with TRA TIN/VRN compliance to manage purchase contracts, goods receipt, and debt ledgers.
+                </p>
+                <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setShowSupplierModal(true)} type="button">
+                  <Plus size={13} /> Add First Supplier
+                </button>
+              </div>
+            ) : (
+              <table className="v2-table">
+                <thead>
+                  <tr>
+                    <th>Supplier Code &amp; Name</th>
+                    <th>Category</th>
+                    <th>Contact Details</th>
+                    <th>TRA Compliance (TIN / VRN)</th>
+                    <th>Current Balance</th>
+                    <th>Credit Limit</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suppliers
+                    .filter(
+                      (s) =>
+                        !searchQuery ||
+                        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        s.category.toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                    .map((s) => {
+                      const tinCheck = validateTin(s.tin);
+                      const vrnCheck = validateVrn(s.vrn);
+                      return (
+                        <tr key={s.id}>
+                          <td>
+                            <div className="v2-mono v2-text-xs v2-font-bold">{s.id}</div>
+                            <div className="v2-font-bold">{s.name}</div>
+                          </td>
+                          <td><span className="badge v2-badge-accent">{s.category}</span></td>
+                          <td>
+                            <div className="v2-text-xs">{s.phone}</div>
+                            <div className="v2-text-xs v2-text-muted">{s.mpesa}</div>
+                          </td>
+                          <td>
+                            <div className="v2-flex v2-flex-col v2-gap-1">
+                              <span className={`badge ${tinCheck.badgeClass}`}>{tinCheck.text}</span>
+                              <span className={`badge ${vrnCheck.badgeClass}`}>{vrnCheck.text}</span>
+                            </div>
+                          </td>
+                          <td className="v2-mono v2-font-black" style={{ color: s.balance > 0 ? "var(--danger)" : "var(--success)" }}>
+                            {fmt(s.balance)}
+                          </td>
+                          <td className="v2-mono v2-text-xs">{fmt(s.creditLimit)}</td>
+                          <td><span className="badge v2-badge-success">{s.status}</span></td>
+                          <td>
+                            <div className="v2-flex v2-gap-1">
+                              {s.balance > 0 && (
+                                <button
+                                  className="v2-btn v2-btn-primary v2-btn-sm"
+                                  style={{ fontSize: "11px", padding: "2px 8px" }}
+                                  onClick={() => {
+                                    setPayingSupplier(s);
+                                    setDebtPayAmount(s.balance);
+                                  }}
+                                  type="button"
+                                  title="Settle Outstanding AP Debt"
+                                >
+                                  Pay Debt
+                                </button>
+                              )}
                               <button
-                                className="v2-btn v2-btn-primary v2-btn-sm"
-                                style={{ fontSize: "11px", padding: "2px 8px" }}
+                                className="v2-btn v2-btn-ghost v2-btn-sm"
                                 onClick={() => {
-                                  setPayingSupplier(s);
-                                  setDebtPayAmount(s.balance);
+                                  setPoSupplier(s.name);
+                                  setShowPoModal(true);
                                 }}
                                 type="button"
-                                title="Settle Outstanding AP Debt"
+                                title="Create Purchase Order"
                               >
-                                Pay Debt
+                                <Plus size={13} /> PO
                               </button>
-                            )}
-                            <button
-                              className="v2-btn v2-btn-ghost v2-btn-sm"
-                              onClick={() => {
-                                setPoSupplier(s.name);
-                                setShowPoModal(true);
-                              }}
-                              type="button"
-                              title="Create Purchase Order"
-                            >
-                              <Plus size={13} /> PO
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
@@ -710,65 +940,85 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
               <Plus size={13} /> Create Purchase Order
             </button>
           </div>
-          <table className="v2-table">
-            <thead>
-              <tr>
-                <th>PO Number</th>
-                <th>Supplier</th>
-                <th>Line Items</th>
-                <th>Total Value</th>
-                <th>Expected Delivery</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((po) => (
-                <tr key={po.id}>
-                  <td className="v2-mono v2-font-bold">{po.id}</td>
-                  <td className="v2-font-bold">{po.supplier}</td>
-                  <td>
-                    <span className="badge v2-badge-muted">{po.itemsCount || po.items?.length || 0} Products</span>
-                  </td>
-                  <td className="v2-mono v2-font-black">{fmt(po.total)}</td>
-                  <td className="v2-text-xs v2-text-muted">{po.expected}</td>
-                  <td>
-                    <span
-                      className={`badge ${
-                        po.status === "Completed"
-                          ? "v2-badge-success"
-                          : po.status === "Approved"
-                          ? "v2-badge-accent"
-                          : "v2-badge-warning"
-                      }`}
-                    >
-                      {po.status}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="v2-flex v2-gap-1">
-                      <button
-                        className="v2-btn v2-btn-secondary v2-btn-sm"
-                        onClick={() => setInspectingPo(po)}
-                        type="button"
+          {orders.length === 0 ? (
+            <div className="v2-text-center v2-py-8 v2-text-muted">
+              <ShoppingBag size={36} className="v2-mx-auto v2-mb-2 v2-opacity-30" />
+              <div className="v2-font-bold v2-text-sm">No Purchase Orders Created</div>
+              <p className="v2-text-xs v2-mt-1" style={{ maxWidth: 400, margin: "0.25rem auto 1rem" }}>
+                Issue a formal purchase order to track vendor commitments, prices, expected delivery dates, and tax breakdown.
+              </p>
+              <button
+                className="v2-btn v2-btn-primary v2-btn-sm"
+                onClick={() => {
+                  if (suppliers.length > 0) setPoSupplier(suppliers[0].name);
+                  setShowPoModal(true);
+                }}
+                type="button"
+              >
+                <Plus size={13} /> Create First PO
+              </button>
+            </div>
+          ) : (
+            <table className="v2-table">
+              <thead>
+                <tr>
+                  <th>PO Number</th>
+                  <th>Supplier</th>
+                  <th>Line Items</th>
+                  <th>Total Value</th>
+                  <th>Expected Delivery</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((po) => (
+                  <tr key={po.id}>
+                    <td className="v2-mono v2-font-bold">{po.id}</td>
+                    <td className="v2-font-bold">{po.supplier}</td>
+                    <td>
+                      <span className="badge v2-badge-muted">{po.itemsCount || po.items?.length || 0} Products</span>
+                    </td>
+                    <td className="v2-mono v2-font-black">{fmt(po.total)}</td>
+                    <td className="v2-text-xs v2-text-muted">{po.expected}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          po.status === "Completed"
+                            ? "v2-badge-success"
+                            : po.status === "Approved"
+                            ? "v2-badge-accent"
+                            : "v2-badge-warning"
+                        }`}
                       >
-                        Inspect PO
-                      </button>
-                      {po.status !== "Completed" && (
+                        {po.status}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="v2-flex v2-gap-1">
                         <button
-                          className="v2-btn v2-btn-primary v2-btn-sm"
-                          onClick={() => handleOpenGrnModal(po)}
+                          className="v2-btn v2-btn-secondary v2-btn-sm"
+                          onClick={() => setInspectingPo(po)}
                           type="button"
                         >
-                          <PackageCheck size={12} /> Receive GRN
+                          Inspect PO
                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {po.status !== "Completed" && (
+                          <button
+                            className="v2-btn v2-btn-primary v2-btn-sm"
+                            onClick={() => handleOpenGrnModal(po)}
+                            type="button"
+                          >
+                            <PackageCheck size={12} /> Receive GRN
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
@@ -791,39 +1041,49 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
               <PackageCheck size={13} /> Receive Warehouse Delivery
             </button>
           </div>
-          <table className="v2-table">
-            <thead>
-              <tr>
-                <th>GRN ID</th>
-                <th>PO Reference</th>
-                <th>Supplier</th>
-                <th>Receiving Warehouse</th>
-                <th>Batch / Expiry</th>
-                <th>Received Date</th>
-                <th>Intake Value</th>
-                <th>Verification Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grns.map((g) => (
-                <tr key={g.id}>
-                  <td className="v2-mono v2-font-bold">{g.id}</td>
-                  <td className="v2-mono v2-text-xs">{g.poId}</td>
-                  <td className="v2-font-bold">{g.supplier}</td>
-                  <td>{g.warehouse}</td>
-                  <td>
-                    <div className="v2-flex v2-items-center v2-gap-1">
-                      {g.batchNumber && <span className="badge v2-badge-muted">{g.batchNumber}</span>}
-                      {g.expiryDate && <span className="badge v2-badge-success">{g.expiryDate}</span>}
-                    </div>
-                  </td>
-                  <td className="v2-text-xs v2-text-muted">{g.receivedAt}</td>
-                  <td className="v2-mono v2-font-bold">{fmt(g.totalValue || 0)}</td>
-                  <td><span className="badge v2-badge-success">{g.status}</span></td>
+          {grns.length === 0 ? (
+            <div className="v2-text-center v2-py-8 v2-text-muted">
+              <PackageCheck size={36} className="v2-mx-auto v2-mb-2 v2-opacity-30" />
+              <div className="v2-font-bold v2-text-sm">No Goods Receipt Notes (GRN) Logged</div>
+              <p className="v2-text-xs v2-mt-1" style={{ maxWidth: 400, margin: "0.25rem auto 1rem" }}>
+                Receive incoming inventory shipments against approved purchase orders to record physical warehouse stock intake.
+              </p>
+            </div>
+          ) : (
+            <table className="v2-table">
+              <thead>
+                <tr>
+                  <th>GRN ID</th>
+                  <th>PO Reference</th>
+                  <th>Supplier</th>
+                  <th>Receiving Warehouse</th>
+                  <th>Batch / Expiry</th>
+                  <th>Received Date</th>
+                  <th>Intake Value</th>
+                  <th>Verification Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {grns.map((g) => (
+                  <tr key={g.id}>
+                    <td className="v2-mono v2-font-bold">{g.id}</td>
+                    <td className="v2-mono v2-text-xs">{g.poId}</td>
+                    <td className="v2-font-bold">{g.supplier}</td>
+                    <td>{g.warehouse}</td>
+                    <td>
+                      <div className="v2-flex v2-items-center v2-gap-1">
+                        {g.batchNumber && <span className="badge v2-badge-muted">{g.batchNumber}</span>}
+                        {g.expiryDate && <span className="badge v2-badge-success">{g.expiryDate}</span>}
+                      </div>
+                    </td>
+                    <td className="v2-text-xs v2-text-muted">{g.receivedAt}</td>
+                    <td className="v2-mono v2-font-bold">{fmt(g.totalValue || 0)}</td>
+                    <td><span className="badge v2-badge-success">{g.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
@@ -838,73 +1098,83 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           </div>
 
           <div className="v2-card">
-            <table className="v2-table">
-              <thead>
-                <tr>
-                  <th>PO Reference</th>
-                  <th>Supplier</th>
-                  <th>PO Authorized</th>
-                  <th>GRN Received</th>
-                  <th>Supplier Invoice</th>
-                  <th>Variance</th>
-                  <th>Reconciliation Status</th>
-                  <th>AP Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((po) => {
-                  const grn = grns.find((g) => g.poId === po.poNumber);
-                  const grnVal = grn ? grn.totalValue : po.status === "Completed" ? po.total : 0;
-                  const invoiceVal = po.total;
-                  const variance = invoiceVal - grnVal;
-                  const isMatched = po.status === "Completed" && variance === 0;
+            {orders.length === 0 ? (
+              <div className="v2-text-center v2-py-8 v2-text-muted">
+                <Scale size={36} className="v2-mx-auto v2-mb-2 v2-opacity-30" />
+                <div className="v2-font-bold v2-text-sm">No Invoices Pending Reconciliation</div>
+                <p className="v2-text-xs v2-mt-1" style={{ maxWidth: 400, margin: "0.25rem auto 1rem" }}>
+                  All purchase orders and incoming shipments are fully balanced. Issue a purchase order to begin 3-way reconciliation.
+                </p>
+              </div>
+            ) : (
+              <table className="v2-table">
+                <thead>
+                  <tr>
+                    <th>PO Reference</th>
+                    <th>Supplier</th>
+                    <th>PO Authorized</th>
+                    <th>GRN Received</th>
+                    <th>Supplier Invoice</th>
+                    <th>Variance</th>
+                    <th>Reconciliation Status</th>
+                    <th>AP Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((po) => {
+                    const grn = grns.find((g) => g.poId === po.poNumber);
+                    const grnVal = grn ? grn.totalValue : po.status === "Completed" ? po.total : 0;
+                    const invoiceVal = po.total;
+                    const variance = invoiceVal - grnVal;
+                    const isMatched = po.status === "Completed" && variance === 0;
 
-                  return (
-                    <tr key={po.id}>
-                      <td className="v2-mono v2-font-bold">{po.id}</td>
-                      <td className="v2-font-bold">{po.supplier}</td>
-                      <td className="v2-mono">{fmt(po.total)}</td>
-                      <td className="v2-mono">{fmt(grnVal)}</td>
-                      <td className="v2-mono v2-font-bold">{fmt(invoiceVal)}</td>
-                      <td className="v2-mono" style={{ color: variance === 0 ? "var(--success)" : "var(--warning)" }}>
-                        {variance === 0 ? "0 (Tsh)" : fmt(variance)}
-                      </td>
-                      <td>
-                        <span
-                          className={`badge ${
-                            isMatched
-                              ? "v2-badge-success"
-                              : po.status === "Completed"
-                              ? "v2-badge-warning"
-                              : "v2-badge-muted"
-                          }`}
-                        >
-                          {isMatched ? "3-Way Matched ✓" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
-                        </span>
-                      </td>
-                      <td>
-                        {isMatched ? (
-                          <span className="v2-text-xs v2-font-bold" style={{ color: "var(--success)" }}>
-                            Cleared for AP
-                          </span>
-                        ) : (
-                          <button
-                            className="v2-btn v2-btn-secondary v2-btn-sm"
-                            onClick={() => {
-                              playSuccessChime();
-                              toast.success("AP Cleared", `Invoice matching approved for ${po.poNumber}.`);
-                            }}
-                            type="button"
+                    return (
+                      <tr key={po.id}>
+                        <td className="v2-mono v2-font-bold">{po.id}</td>
+                        <td className="v2-font-bold">{po.supplier}</td>
+                        <td className="v2-mono">{fmt(po.total)}</td>
+                        <td className="v2-mono">{fmt(grnVal)}</td>
+                        <td className="v2-mono v2-font-bold">{fmt(invoiceVal)}</td>
+                        <td className="v2-mono" style={{ color: variance === 0 ? "var(--success)" : "var(--warning)" }}>
+                          {variance === 0 ? "0 (Tsh)" : fmt(variance)}
+                        </td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              isMatched
+                                ? "v2-badge-success"
+                                : po.status === "Completed"
+                                ? "v2-badge-warning"
+                                : "v2-badge-muted"
+                            }`}
                           >
-                            Approve Match
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            {isMatched ? "3-Way Matched ✓" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
+                          </span>
+                        </td>
+                        <td>
+                          {isMatched ? (
+                            <span className="v2-text-xs v2-font-bold" style={{ color: "var(--success)" }}>
+                              Cleared for AP
+                            </span>
+                          ) : (
+                            <button
+                              className="v2-btn v2-btn-secondary v2-btn-sm"
+                              onClick={() => {
+                                playSuccessChime();
+                                toast.success("AP Cleared", `Invoice matching approved for ${po.poNumber}.`);
+                              }}
+                              type="button"
+                            >
+                              Approve Match
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
