@@ -21,6 +21,7 @@ model Tenant {
   products           Product[]
   productVariants    ProductVariant[]
   categories         Category[]
+  brands             Brand[]
   unitsOfMeasure     UnitOfMeasure[]
   customers          Customer[]
   suppliers          Supplier[]
@@ -88,6 +89,7 @@ model Branch {
   products           Product[]
   productVariants    ProductVariant[]
   categories         Category[]
+  brands             Brand[]
   unitsOfMeasure     UnitOfMeasure[]
   customers          Customer[]
   suppliers          Supplier[]
@@ -189,12 +191,35 @@ model DeviceSession {
 }
 
 model Category {
+  id          String    @id @default(uuid())
+  tenantId    String
+  branchId    String
+  name        String
+  code        String
+  parentId    String?
+  description String?
+  color       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  products    Product[]
+
+  @@unique([tenantId, branchId, code])
+  @@index([tenantId, branchId])
+  @@map("categories")
+}
+
+model Brand {
   id        String    @id @default(uuid())
   tenantId  String
   branchId  String
   name      String
   code      String
-  parentId  String?
+  origin    String?
+  notes     String?
+  isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -203,7 +228,7 @@ model Category {
 
   @@unique([tenantId, branchId, code])
   @@index([tenantId, branchId])
-  @@map("categories")
+  @@map("brands")
 }
 
 model UnitOfMeasure {
@@ -317,7 +342,8 @@ model Product {
   updatedAt             DateTime              @updatedAt
   tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch                Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  categoryRel           Category?             @relation(fields: [categoryId], references: [id])
+  categoryRel           Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brandRel              Brand?                @relation(fields: [brandId], references: [id], onDelete: SetNull)
   variants              ProductVariant[]
   stockLedgers          StockLedger[]
   priceHistories        ProductPriceHistory[]
@@ -2760,4 +2786,4 @@ model TenantLegalDocument {
 
 
 
-
+

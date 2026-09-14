@@ -1,4 +1,4 @@
-# KwakoPos Core Architecture & Engineering Pillars
+# Kwakoko Business Operating System Core Architecture & Engineering Pillars
 
 ## Non-Negotiable Core Engineering Rules
 
@@ -20,7 +20,7 @@
 
 ---
 
-## KwakoPos Platform Pillars
+## Kwakoko Business Operating System Pillars
 
 ### Pillar 1: Policy-Driven Release & Software Supply-Chain Security
 - Zero manual versioning.
@@ -33,7 +33,7 @@
 - **Refine**: Code quality, modular design, type safety.
 - **Verify**: Backward compatibility, DB migration safety (5-phase Expand/Contract).
 - **Test**: 100% test suite execution across unit, integration, and sync suites.
-- **Certify**: Machine-readable invariant certification across all 15 KwakoPos core modules.
+- **Certify**: Machine-readable invariant certification across all Kwakoko Business Operating System core modules (including the KwakoPos POS capability).
 
 ### Pillar 3: Offline-First & Algebraic Ledger Integrity
 - IndexedDB outbox queue persistence for offline operations.

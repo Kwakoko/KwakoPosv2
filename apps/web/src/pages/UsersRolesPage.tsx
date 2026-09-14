@@ -737,7 +737,7 @@ export const UsersRolesPage: React.FC = () => {
           <div className="v2-card" style={{ width: 500, padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
               <h2 className="v2-text-lg v2-font-black">Add Staff Employee Account</h2>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsAddUserOpen(false)} type="button"><X size={15} /></button>
+              <button aria-label="Close add user dialog" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsAddUserOpen(false)} type="button"><X size={15} /></button>
             </div>
             <form onSubmit={handleAddUser} className="v2-space-y-3">
               <div className="v2-grid v2-grid-2 v2-gap-2">

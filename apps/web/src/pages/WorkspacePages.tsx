@@ -15,6 +15,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -347,7 +348,7 @@ export const FinancePage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("finance.title")}</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Download size={13} /> {t("finance.trialBalance")}</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.WorkspacePages.350.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.WorkspacePages.350.button"><Download size={13} /> {t("finance.trialBalance")}</button>
       </div>
       {error && <div className="badge v2-badge-danger v2-mb-4">{error}</div>}
       <div className="metrics-grid kpi-grid-4 v2-mb-4">

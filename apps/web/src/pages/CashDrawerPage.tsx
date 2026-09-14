@@ -1291,7 +1291,7 @@ Manager Sign-off:  _____________________
                   ? "Close Shift & Z-Report Settlement"
                   : `Record ${modalType.replace("_", " ")}`}
               </h2>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setModalType(null)} type="button"><X size={15} /></button>
+              <button aria-label="Close cash movement dialog" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setModalType(null)} type="button"><X size={15} /></button>
             </div>
             <form onSubmit={handlePostCashMovement} className="v2-space-y-3">
               {modalType === "OPEN_SHIFT" ? (

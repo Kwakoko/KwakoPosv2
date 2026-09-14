@@ -17,6 +17,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   Package, Layers, BarChart3, Tag, Clock, Plus, Search, Edit2, Trash2,
   AlertTriangle, ArrowLeftRight, ClipboardList, FileText, RefreshCw,
@@ -30,10 +31,13 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
+import { safeUUID } from "../services/apiClient.js";
 import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
+const catalogCode = (name: string) => name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || `CAT_${Date.now()}`;
+const isUuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 export interface CategoryRecord {
   id: string;
@@ -315,6 +319,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         variantsByProduct.set(variant.productId, list);
       }
 
+      const categoryById = new Map(categoriesMeta.map((c) => [c.id, c.name]));
+      const brandById = new Map(brandsMeta.map((b) => [b.id, b.name]));
       const loaded: InventoryItem[] = [];
       for (const prod of db.products.values()) {
         const pAny = prod as any;
@@ -331,8 +337,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: prod.id,
           name: prod.name,
           sku: prod.sku,
-          category: pAny.category || "General",
-          brand: pAny.brand || "General",
+          category: (pAny.categoryId && categoryById.get(pAny.categoryId)) || pAny.category || "General",
+          brand: (pAny.brandId && brandById.get(pAny.brandId)) || pAny.brand || "General",
           buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
           sellingPrice: Number(pAny.sellingPrice || pAny.price || 0),
           stock: pStock,
@@ -340,7 +346,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           status: pStatus,
           batchNumber: pAny.batchNumber || pAny.batch || "",
           expiryDate: pAny.expiryDate || pAny.expiry || "",
-          hasVariants: Boolean(vars && vars.length > 0),
+          hasVariants: Boolean(pAny.hasVariants),
           variants: vars,
         });
       }
@@ -635,7 +641,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         const label = v2 ? `${opt1Name}: ${v1} / ${opt2Name}: ${v2}` : `${opt1Name}: ${v1}`;
         const suffix = (v1 + (v2 ? `-${v2}` : "")).replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
         generated.push({
-          id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: safeUUID(),
           name: `${baseName} (${label})`,
           sku: `${baseSku}-${suffix}`,
           barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
@@ -655,7 +661,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     if (!newProd.name.trim()) return;
 
     const autoSku = `SKU-${newProd.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const prodId = `inv-${Date.now()}`;
+    const prodId = safeUUID();
 
     const isVariantProduct = hasVariantsToggle && inflowVariants.length > 0;
     const computedStock = isVariantProduct
@@ -670,12 +676,16 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
     const status: InventoryItem["status"] = computedStock === 0 ? "Out of Stock" : computedStock <= Number(newProd.reorderLevel) ? "Low Stock" : "Active";
 
+    const selectedCategory = categoriesMeta.find((c) => c.name.toLowerCase() === newProd.category.toLowerCase());
+    const selectedBrand = brandsMeta.find((b) => b.name.toLowerCase() === (newProd.brand.trim() || "General").toLowerCase());
     const newProductRecord = {
       id: prodId,
       name: newProd.name.trim(),
       sku: autoSku,
       category: newProd.category,
+      categoryId: selectedCategory && isUuid(selectedCategory.id) ? selectedCategory.id : undefined,
       brand: newProd.brand.trim() || "General",
+      brandId: selectedBrand && isUuid(selectedBrand.id) ? selectedBrand.id : undefined,
       sellingPrice: computedSelling,
       costPrice: computedBuying,
       buyingPrice: computedBuying,
@@ -722,6 +732,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           name: newProductRecord.name,
           sku: autoSku,
           category: newProductRecord.category,
+          categoryId: (newProductRecord as any).categoryId,
           brand: newProductRecord.brand,
           brandId: (newProductRecord as any).brandId,
           buyingPrice: Number(newProd.buyingPrice),
@@ -808,7 +819,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         }
       }
     } else {
-      const defaultVarId = `${prodId}-default`;
+      const defaultVarId = safeUUID();
       const defaultVariant = {
         id: defaultVarId,
         productId: prodId,
@@ -838,6 +849,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           name: newProductRecord.name,
           sku: autoSku,
           category: newProductRecord.category,
+          categoryId: (newProductRecord as any).categoryId,
           brand: newProductRecord.brand,
           brandId: (newProductRecord as any).brandId,
           buyingPrice: Number(newProd.buyingPrice),
@@ -951,7 +963,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       name: editProd.name.trim(),
       sku: prevItem.sku,
       category: editProd.category,
+      categoryId: (() => { const c = categoriesMeta.find((x) => x.name.toLowerCase() === editProd.category.toLowerCase()); return c && isUuid(c.id) ? c.id : undefined; })(),
       brand: editProd.brand.trim() || "General",
+      brandId: (() => { const b = brandsMeta.find((x) => x.name.toLowerCase() === (editProd.brand.trim() || "General").toLowerCase()); return b && isUuid(b.id) ? b.id : undefined; })(),
       costPrice: Number(editProd.buyingPrice),
       buyingPrice: Number(editProd.buyingPrice),
       sellingPrice: Number(editProd.sellingPrice),
@@ -976,7 +990,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         id: prevItem.id,
         name: updatedRecord.name,
         category: updatedRecord.category,
+        categoryId: updatedRecord.categoryId,
         brand: updatedRecord.brand,
+        brandId: updatedRecord.brandId,
         costPrice: Number(editProd.buyingPrice),
         buyingPrice: Number(editProd.buyingPrice),
         sellingPrice: Number(editProd.sellingPrice),
@@ -985,6 +1001,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         status: newStatus,
         batchNumber: editProd.batchNumber ? editProd.batchNumber.trim() : undefined,
         expiryDate: editProd.expiryDate ? editProd.expiryDate : undefined,
+        hasVariants: Boolean(existing?.hasVariants),
+        isActive: true,
       },
       idempotencyKey: `PROD-UPDATE-${prevItem.id}-${Date.now()}`,
       tenantId: currentTenantId || undefined,
@@ -1092,6 +1110,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         operationType: "UPDATE",
         payload: {
           id: target.id,
+          isActive: false,
           status: "Inactive",
           deletedAt: new Date().toISOString(),
         },
@@ -1110,247 +1129,63 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     void syncOutbox?.().catch(() => {});
   };
 
-  // ─── Categories & Brands Master Handlers ────────────────────────────────────
-  // ─── Categories Master Handlers ──────────────────────────────────────────
   const handleOpenEditCategory = (cat: CategoryRecord) => {
-    setEditingCategory(cat);
-    setNewCategoryName(cat.name);
-    setNewCategoryDesc(cat.description || "");
-    setNewCategoryColor(cat.color || "#10b981");
-    setCategoryCascadeRename(true);
-    setAddCategoryModal(true);
+    if (!isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; }
+    setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setCategoryCascadeRename(true); setAddCategoryModal(true);
   };
 
   const handleSaveCategory = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) {
-      toast.warning("Name Required", "Please enter a valid category name.");
-      return;
-    }
-
-    if (editingCategory) {
-      const oldName = editingCategory.name;
-      const updatedCat: CategoryRecord = {
-        ...editingCategory,
-        name: trimmed,
-        description: newCategoryDesc.trim() || undefined,
-        color: newCategoryColor,
-      };
-
-      const updatedList = categoriesMeta.map((c) =>
-        c.id === editingCategory.id || c.name.toLowerCase() === oldName.toLowerCase() ? updatedCat : c
-      );
-      if (!updatedList.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
-        updatedList.push(updatedCat);
-      }
-      setCategoriesMeta(updatedList);
-      db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      // Cascade rename to catalog products if requested
-      if (categoryCascadeRename && oldName.toLowerCase() !== trimmed.toLowerCase()) {
-        let count = 0;
-        for (const p of db.products.values()) {
-          const pAny = p as any;
-          if (pAny.category && pAny.category.toLowerCase() === oldName.toLowerCase()) {
-            db.saveProductLocal({ ...pAny, category: trimmed, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-            count++;
-          }
-        }
-        if (count > 0) {
-          toast.info("Products Updated", `Updated ${count} product(s) to new category "${trimmed}".`);
-        }
-      }
-
-      playSuccessChime();
-      toast.success("Category Updated", `Category "${trimmed}" saved.`);
-    } else {
-      const newCat: CategoryRecord = {
-        id: `cat-${Date.now()}`,
-        name: trimmed,
-        description: newCategoryDesc.trim() || undefined,
-        color: newCategoryColor,
-      };
-      const updatedList = [...categoriesMeta.filter((c) => c.name.toLowerCase() !== trimmed.toLowerCase()), newCat];
-      setCategoriesMeta(updatedList);
-      db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-      playSuccessChime();
-      toast.success("Category Added", `Category "${trimmed}" created.`);
-      setNewProd((prev) => ({ ...prev, category: trimmed }));
-      setEditProd((prev) => ({ ...prev, category: trimmed }));
-    }
-
-    void loadInventory();
-    setAddCategoryModal(false);
-    setEditingCategory(null);
-    setNewCategoryName("");
-    setNewCategoryDesc("");
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    e.preventDefault(); const name = newCategoryName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
+    const now = new Date().toISOString(); const id = editingCategory?.id && isUuid(editingCategory.id) ? editingCategory.id : safeUUID();
+    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
+    const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId }) : categoriesMeta;
+    const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId }); setCategoriesMeta(next);
+    db.enqueueOutbox({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    setAddCategoryModal(false); setEditingCategory(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
   };
-
-  const handleOpenDeleteCategory = (catName: string, assignedCount: number) => {
-    if (assignedCount > 0) {
-      const otherCats = allCategories.filter((c) => c.name.toLowerCase() !== catName.toLowerCase());
-      const fallback = otherCats.find((c) => c.name.toLowerCase() === "general")?.name || otherCats[0]?.name || "General";
-      setDeleteCategorySafeguard({
-        category: catName,
-        assignedCount,
-        fallbackCategory: fallback,
-      });
-    } else {
-      setDeleteCategorySafeguard({
-        category: catName,
-        assignedCount: 0,
-        fallbackCategory: "General",
-      });
-    }
+  const handleOpenDeleteCategory = (name: string, assignedCount: number) => {
+    const cat = allCategories.find((c) => c.name.toLowerCase() === name.toLowerCase()); const fallback = allCategories.find((c) => c.name.toLowerCase() === "general" && c.id !== cat?.id) || allCategories.find((c) => c.id !== cat?.id && isUuid(c.id));
+    if (!cat || !isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
+    if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement category first."); return; }
+    setDeleteCategorySafeguard({ category: cat.name, assignedCount, fallbackCategory: fallback?.name || "" });
   };
 
   const handleConfirmDeleteCategory = () => {
-    if (!deleteCategorySafeguard) return;
-    const { category: catName, assignedCount, fallbackCategory } = deleteCategorySafeguard;
-
-    if (assignedCount > 0 && fallbackCategory) {
-      let count = 0;
-      for (const p of db.products.values()) {
-        const pAny = p as any;
-        if (pAny.category && pAny.category.toLowerCase() === catName.toLowerCase()) {
-          db.saveProductLocal({ ...pAny, category: fallbackCategory, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-          count++;
-        }
-      }
-      toast.info("Products Reassigned", `Reassigned ${count} product(s) to "${fallbackCategory}".`);
-    }
-
-    const updatedList = categoriesMeta.filter((c) => c.name.toLowerCase() !== catName.toLowerCase());
-    setCategoriesMeta(updatedList);
-    db.saveConfigurationLocal("inventory_categories_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-    setDeleteCategorySafeguard(null);
-    void loadInventory();
-    toast.info("Category Removed", `Category "${catName}" deleted.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    if (!deleteCategorySafeguard || !currentTenantId || !currentBranchId) return;
+    const cat = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.category.toLowerCase()); const replacement = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.fallbackCategory.toLowerCase());
+    const replacementId = deleteCategorySafeguard.assignedCount > 0 ? replacement?.id : undefined;
+    if (!cat || !isUuid(cat.id) || (replacementId && !isUuid(replacementId))) return;
+    const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId });
+    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    db.enqueueOutbox({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); setDeleteCategorySafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
   };
 
-  // ─── Brands Master Handlers ──────────────────────────────────────────────
-  const handleOpenEditBrand = (brand: BrandRecord) => {
-    setEditingBrand(brand);
-    setNewBrandName(brand.name);
-    setNewBrandOrigin(brand.origin || "");
-    setNewBrandNotes(brand.notes || "");
-    setBrandCascadeRename(true);
-    setAddBrandModal(true);
-  };
-
+  const handleOpenEditBrand = (brand: BrandRecord) => { if (!isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; } setEditingBrand(brand); setNewBrandName(brand.name); setNewBrandOrigin(brand.origin || ""); setNewBrandNotes(brand.notes || ""); setBrandCascadeRename(true); setAddBrandModal(true); };
   const handleSaveBrand = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newBrandName.trim();
-    if (!trimmed) {
-      toast.warning("Name Required", "Please enter a valid brand name.");
-      return;
-    }
-
-    if (editingBrand) {
-      const oldName = editingBrand.name;
-      const updatedBrand: BrandRecord = {
-        ...editingBrand,
-        name: trimmed,
-        origin: newBrandOrigin.trim() || undefined,
-        notes: newBrandNotes.trim() || undefined,
-      };
-
-      const updatedList = brandsMeta.map((b) =>
-        b.id === editingBrand.id || b.name.toLowerCase() === oldName.toLowerCase() ? updatedBrand : b
-      );
-      if (!updatedList.some((b) => b.name.toLowerCase() === trimmed.toLowerCase())) {
-        updatedList.push(updatedBrand);
-      }
-      setBrandsMeta(updatedList);
-      db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      if (brandCascadeRename && oldName.toLowerCase() !== trimmed.toLowerCase()) {
-        let count = 0;
-        for (const p of db.products.values()) {
-          const pAny = p as any;
-          if (pAny.brand && pAny.brand.toLowerCase() === oldName.toLowerCase()) {
-            db.saveProductLocal({ ...pAny, brand: trimmed, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-            count++;
-          }
-        }
-        if (count > 0) {
-          toast.info("Products Updated", `Updated ${count} product(s) to new brand "${trimmed}".`);
-        }
-      }
-
-      playSuccessChime();
-      toast.success("Brand Updated", `Brand "${trimmed}" saved.`);
-    } else {
-      const newBrand: BrandRecord = {
-        id: `br-${Date.now()}`,
-        name: trimmed,
-        origin: newBrandOrigin.trim() || undefined,
-        notes: newBrandNotes.trim() || undefined,
-      };
-      const updatedList = [...brandsMeta.filter((b) => b.name.toLowerCase() !== trimmed.toLowerCase()), newBrand];
-      setBrandsMeta(updatedList);
-      db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-      playSuccessChime();
-      toast.success("Brand Added", `Brand "${trimmed}" created.`);
-      setNewProd((prev) => ({ ...prev, brand: trimmed }));
-      setEditProd((prev) => ({ ...prev, brand: trimmed }));
-    }
-
-    void loadInventory();
-    setAddBrandModal(false);
-    setEditingBrand(null);
-    setNewBrandName("");
-    setNewBrandOrigin("");
-    setNewBrandNotes("");
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    e.preventDefault(); const name = newBrandName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
+    const now = new Date().toISOString(); const id = editingBrand?.id && isUuid(editingBrand.id) ? editingBrand.id : safeUUID();
+    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), origin: newBrandOrigin.trim() || undefined, notes: newBrandNotes.trim() || undefined, isActive: true, updatedAt: now, createdAt: (editingBrand as any)?.createdAt || now };
+    const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId }) : brandsMeta;
+    const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId }); setBrandsMeta(next);
+    db.enqueueOutbox({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    setAddBrandModal(false); setEditingBrand(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
   };
 
-  const handleOpenDeleteBrand = (brandName: string, assignedCount: number) => {
-    if (assignedCount > 0) {
-      const otherBrands = allBrands.filter((b) => b.name.toLowerCase() !== brandName.toLowerCase());
-      const fallback = otherBrands.find((b) => b.name.toLowerCase() === "general")?.name || otherBrands[0]?.name || "General";
-      setDeleteBrandSafeguard({
-        brand: brandName,
-        assignedCount,
-        fallbackBrand: fallback,
-      });
-    } else {
-      setDeleteBrandSafeguard({
-        brand: brandName,
-        assignedCount: 0,
-        fallbackBrand: "General",
-      });
-    }
+  const handleOpenDeleteBrand = (name: string, assignedCount: number) => {
+    const brand = allBrands.find((b) => b.name.toLowerCase() === name.toLowerCase()); const fallback = allBrands.find((b) => b.name.toLowerCase() === "general" && b.id !== brand?.id) || allBrands.find((b) => b.id !== brand?.id && isUuid(b.id));
+    if (!brand || !isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
+    if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement brand first."); return; }
+    setDeleteBrandSafeguard({ brand: brand.name, assignedCount, fallbackBrand: fallback?.name || "" });
   };
 
   const handleConfirmDeleteBrand = () => {
-    if (!deleteBrandSafeguard) return;
-    const { brand: brandName, assignedCount, fallbackBrand } = deleteBrandSafeguard;
-
-    if (assignedCount > 0 && fallbackBrand) {
-      let count = 0;
-      for (const p of db.products.values()) {
-        const pAny = p as any;
-        if (pAny.brand && pAny.brand.toLowerCase() === brandName.toLowerCase()) {
-          db.saveProductLocal({ ...pAny, brand: fallbackBrand, updatedAt: new Date().toISOString() }, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-          count++;
-        }
-      }
-      toast.info("Products Reassigned", `Reassigned ${count} product(s) to brand "${fallbackBrand}".`);
-    }
-
-    const updatedList = brandsMeta.filter((b) => b.name.toLowerCase() !== brandName.toLowerCase());
-    setBrandsMeta(updatedList);
-    db.saveConfigurationLocal("inventory_brands_meta", updatedList, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-    setDeleteBrandSafeguard(null);
-    void loadInventory();
-    toast.info("Brand Removed", `Brand "${brandName}" deleted.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    if (!deleteBrandSafeguard || !currentTenantId || !currentBranchId) return;
+    const brand = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.brand.toLowerCase()); const replacement = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.fallbackBrand.toLowerCase()); const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
+    if (!brand || !isUuid(brand.id) || (replacementId && !isUuid(replacementId))) return;
+    const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId });
+    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    db.enqueueOutbox({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); setDeleteBrandSafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
   };
 
   return (
@@ -1562,7 +1397,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button">
+            <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.InventoryPage.1395.export-valuation-matrix", "Export Valuation Matrix", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.InventoryPage.1395.export-valuation-matrix">
               <Download size={13} /> Export Valuation Matrix
             </button>
           </div>
@@ -3333,7 +3168,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               return;
                             }
                             const newVar: ProductVariantData = {
-                              id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                              id: safeUUID(),
                               name: singleVarName.trim(),
                               sku: singleVarSku.trim() || `VAR-${variantModalProduct.sku.slice(-4)}-${Math.floor(100 + Math.random() * 900)}`,
                               barcode: singleVarBarcode.trim() || `890${Math.floor(100000000 + Math.random() * 900000000)}`,
@@ -4027,7 +3862,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   <Upload size={32} style={{ margin: "0 auto", color: "var(--muted)" }} />
                   <div className="v2-font-bold v2-text-sm">Product Image Gallery</div>
                   <p className="v2-text-xs v2-text-muted">Upload high-resolution parent product images and variant-specific product shots.</p>
-                  <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Plus size={13} /> Upload Image File</button>
+                  <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.InventoryPage.3860.upload-image-file", "Upload Image File", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.InventoryPage.3860.upload-image-file"><Plus size={13} /> Upload Image File</button>
                 </div>
               )}
 

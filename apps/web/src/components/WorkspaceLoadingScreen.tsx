@@ -332,7 +332,7 @@ export const WorkspaceLoadingScreen: React.FC<{
               color: "#ffffff",
             }}
           >
-            Kwako<span style={{ color: "#38bdf8" }}>Pos</span>
+            Kwako<span style={{ color: "#38bdf8" }}>ko</span>
           </span>
           <span
             style={{
@@ -347,7 +347,7 @@ export const WorkspaceLoadingScreen: React.FC<{
               textTransform: "uppercase",
             }}
           >
-            v2.2 Enterprise
+            BOS Enterprise
           </span>
         </div>
 
@@ -360,7 +360,7 @@ export const WorkspaceLoadingScreen: React.FC<{
             letterSpacing: "-0.01em",
           }}
         >
-          Kwakoko Business Operating System Core
+          Kwakoko Business Operating System • KwakoPos Engine Active
         </p>
 
         {/* Dynamic Boot Sequence Progress Bar */}

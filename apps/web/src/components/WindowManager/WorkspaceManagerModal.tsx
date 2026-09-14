@@ -55,7 +55,7 @@ export const WorkspaceManagerModal: React.FC<{ isOpen: boolean; onClose: () => v
             <Layers size={18} color="var(--color-primary, #3b82f6)" />
             <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>Desktop Workspaces</h3>
           </div>
-          <button className="btn btn-secondary" onClick={onClose} style={{ padding: "0.25rem 0.5rem" }}>
+          <button aria-label="Close workspace manager" className="btn btn-secondary" onClick={onClose} style={{ padding: "0.25rem 0.5rem" }}>
             <X size={14} />
           </button>
         </div>
@@ -104,6 +104,7 @@ export const WorkspaceManagerModal: React.FC<{ isOpen: boolean; onClose: () => v
                   </button>
                   {!ws.id.startsWith("ws-cashier") && !ws.id.startsWith("ws-manager") && (
                     <button
+                      aria-label="Delete workspace"
                       className="btn btn-secondary"
                       onClick={() => deleteWorkspace(ws.id)}
                       style={{ fontSize: "0.75rem", padding: "0.25rem 0.4rem", color: "var(--color-danger)" }}

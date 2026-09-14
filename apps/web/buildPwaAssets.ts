@@ -57,13 +57,19 @@ safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify(
     minSupportedClientVersion: releaseManifest.compatibility?.minSupportedClientVersion || "2.0.0",
     recommendedClientVersion: releaseManifest.compatibility?.recommendedClientVersion || "2.12.5",
   },
+  brand: {
+    parentBrand: "Kwakoko",
+    platform: "Kwakoko Business Operating System",
+    platformShort: "Kwakoko BOS",
+    posCapability: "KwakoPos",
+  },
 }, null, 2));
 
 // 2. Write public/manifest.json
 safeWriteFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
-  name: "KwakoPos 2.0 POS & Enterprise System",
-  short_name: "KwakoPos",
-  description: "Production Offline-First POS & Enterprise Business Operating System",
+  name: "Kwakoko Business Operating System",
+  short_name: "Kwakoko BOS",
+  description: "Kwakoko Business Operating System with offline-first KwakoPos Point of Sale capability",
   start_url: "/",
   display: "standalone",
   background_color: "#0f172a",
@@ -112,7 +118,7 @@ safeWriteFileSync(path.join(publicDir, "asset-manifest.json"), JSON.stringify(as
 
 // 4. Generate public/sw.js with atomic release strategy, handshake activation, and recovery window retention
 safeWriteFileSync(path.join(publicDir, "sw.js"), `/**
- * KwakoPos Enterprise PWA Upgrade-Safe Service Worker
+ * Kwakoko Business Operating System Upgrade-Safe Service Worker (with KwakoPos Capability)
  * Release: ${releaseId} • Version: ${version}
  * Cache: ${cacheName}
  */
@@ -219,7 +225,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => caches.match("/").then((cached) => cached || new Response("KwakoPos Offline Shell", {
+        .catch(() => caches.match("/").then((cached) => cached || new Response("Kwakoko Business Operating System Offline Shell", {
           status: 200,
           headers: { "Content-Type": "text/html" }
         })))
@@ -264,4 +270,4 @@ if (fs.existsSync(distDir)) {
   fs.cpSync(publicDir, distDir, { recursive: true });
 }
 
-console.log(`KwakoPos V2 PWA assets successfully prepared for authoritative release ${version} (${releaseId}); cache=${cacheName}`);
+console.log(`Kwakoko Business Operating System PWA assets successfully prepared for authoritative release ${version} (${releaseId}); cache=${cacheName}`);

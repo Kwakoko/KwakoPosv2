@@ -13,7 +13,7 @@ function makePillar(id: string, description: string, test: (engine: FullSystemCe
 }
 
 export const FULL_SYSTEM_CERTIFICATION_PILLARS: FullSystemCertificationPillar[] = [
-  makePillar("KFOS-001", "KFOS-CERT Full KwakoPos Operating System Certification Authority exists and is active", e => {
+  makePillar("KFOS-001", "KFOS-CERT Kwakoko Business Operating System Certification Authority exists and is active", e => {
     return e.getHealthSummary("SYSTEM").authorityOperational === true;
   }),
   makePillar("KFOS-002", "All applicable platform phases P1-P44 are mapped into certification framework", e => {
@@ -53,7 +53,7 @@ export const FULL_SYSTEM_CERTIFICATION_PILLARS: FullSystemCertificationPillar[] 
   ...Array.from({ length: 175 }).map((_, idx) => {
     const pNum = 6 + idx;
     const pId = `KFOS-${pNum.toString().padStart(3, "0")}`;
-    return makePillar(pId, `Full KwakoPos Operating System Certification Control #${pNum}`, e => e.getHealthSummary("SYSTEM").authorityOperational === true);
+    return makePillar(pId, `Kwakoko Business Operating System Certification Control #${pNum}`, e => e.getHealthSummary("SYSTEM").authorityOperational === true);
   }),
   makePillar("KFOS-182", "Master Platform Certification Closure: System fully authorized, sealed, and ready for production operations", e => {
     return e.getHealthSummary("SYSTEM").authorityOperational === true;

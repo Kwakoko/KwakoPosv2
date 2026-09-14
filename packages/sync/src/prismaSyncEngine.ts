@@ -76,7 +76,73 @@ export class PrismaSyncEngine {
           continue;
         }
 
-        if (op.entityType === "Product" && op.operationType === "CREATE") {
+        if (op.entityType === "Category" && op.operationType === "CREATE") {
+          const payload = op.payload as any;
+          const existingCategory = await prisma.category.findUnique({ where: { id: op.entityId } });
+          if (existingCategory) {
+            if (existingCategory.tenantId !== ctx.tenantId || existingCategory.branchId !== ctx.branchId) throw new Error("Category entity belongs to another tenant or branch");
+            await recordSyncOperation(ctx, req, op);
+            results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+            continue;
+          } else {
+            await prisma.category.create({ data: { ...payload, id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, code: String(payload.code || payload.name).trim().toUpperCase(), isActive: true } });
+          }
+        } else if (op.entityType === "Category" && op.operationType === "UPDATE") {
+          const existingCategory = await prisma.category.findUnique({ where: { id: op.entityId } });
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!existingCategory) throw new Error(`Category ${op.entityId} not found`);
+          if (existingCategory.tenantId !== ctx.tenantId || existingCategory.branchId !== ctx.branchId) throw new Error("Category entity belongs to another tenant or branch");
+          if (baseUpdatedAt && existingCategory.updatedAt.getTime() > new Date(baseUpdatedAt).getTime()) throw new Error("STALE_WRITE_CONFLICT: category changed on server after local edit began");
+          await prisma.category.update({ where: { id: op.entityId }, data: stripSyncControlFields(op.payload as any) });
+        } else if (op.entityType === "Category" && op.operationType === "DELETE") {
+          const existingCategory = await prisma.category.findUnique({ where: { id: op.entityId } });
+          if (!existingCategory) continue;
+          if (existingCategory.tenantId !== ctx.tenantId || existingCategory.branchId !== ctx.branchId) throw new Error("Category entity belongs to another tenant or branch");
+          const replacementId = (op.payload as any)?.replacementId as string | undefined;
+          await prisma.$transaction(async (tx) => {
+            const assigned = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId, isActive: true } });
+            if (assigned > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
+            if (replacementId) {
+              const replacement = await tx.category.findUnique({ where: { id: replacementId } });
+              if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement category is invalid");
+              await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId }, data: { categoryId: replacementId, category: replacement.name } });
+            }
+            await tx.category.update({ where: { id: op.entityId }, data: { isActive: false } });
+          });
+        } else if (op.entityType === "Brand" && op.operationType === "CREATE") {
+          const payload = op.payload as any;
+          const existingBrand = await prisma.brand.findUnique({ where: { id: op.entityId } });
+          if (existingBrand) {
+            if (existingBrand.tenantId !== ctx.tenantId || existingBrand.branchId !== ctx.branchId) throw new Error("Brand entity belongs to another tenant or branch");
+            await recordSyncOperation(ctx, req, op);
+            results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+            continue;
+          } else {
+            await prisma.brand.create({ data: { ...payload, id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, code: String(payload.code || payload.name).trim().toUpperCase(), isActive: true } });
+          }
+        } else if (op.entityType === "Brand" && op.operationType === "UPDATE") {
+          const existingBrand = await prisma.brand.findUnique({ where: { id: op.entityId } });
+          const baseUpdatedAt = getBaseUpdatedAt(op.payload);
+          if (!existingBrand) throw new Error(`Brand ${op.entityId} not found`);
+          if (existingBrand.tenantId !== ctx.tenantId || existingBrand.branchId !== ctx.branchId) throw new Error("Brand entity belongs to another tenant or branch");
+          if (baseUpdatedAt && existingBrand.updatedAt.getTime() > new Date(baseUpdatedAt).getTime()) throw new Error("STALE_WRITE_CONFLICT: brand changed on server after local edit began");
+          await prisma.brand.update({ where: { id: op.entityId }, data: stripSyncControlFields(op.payload as any) });
+        } else if (op.entityType === "Brand" && op.operationType === "DELETE") {
+          const existingBrand = await prisma.brand.findUnique({ where: { id: op.entityId } });
+          if (!existingBrand) continue;
+          if (existingBrand.tenantId !== ctx.tenantId || existingBrand.branchId !== ctx.branchId) throw new Error("Brand entity belongs to another tenant or branch");
+          const replacementId = (op.payload as any)?.replacementId as string | undefined;
+          await prisma.$transaction(async (tx) => {
+            const assigned = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: op.entityId, isActive: true } });
+            if (assigned > 0 && !replacementId) throw new Error("Brand has assigned products; replacementId is required");
+            if (replacementId) {
+              const replacement = await tx.brand.findUnique({ where: { id: replacementId } });
+              if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement brand is invalid");
+              await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: op.entityId }, data: { brandId: replacementId } });
+            }
+            await tx.brand.update({ where: { id: op.entityId }, data: { isActive: false } });
+          });
+        } else if (op.entityType === "Product" && op.operationType === "CREATE") {
           const existingProduct = await prisma.product.findUnique({ where: { id: op.entityId } });
           if (existingProduct) {
             if (existingProduct.tenantId !== ctx.tenantId || existingProduct.branchId !== ctx.branchId) throw new Error("Product entity belongs to another tenant or branch");
@@ -163,26 +229,32 @@ export class PrismaSyncEngine {
     const since = req.since ? new Date(req.since) : new Date(0);
     if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
     const anchor = new Date();
+    const priceHistories = await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     const products = (await this.productRepo.getProducts(ctx)).filter((p: any) => { const t = new Date(p.updatedAt).getTime(); return t >= since.getTime() && t <= anchor.getTime(); }).sort((a: any, b: any) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const variants = await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
     const ledger = (await this.stockRepo.getLedger(ctx)).filter((entry: any) => { const t = new Date(entry.createdAt).getTime(); return t >= since.getTime() && t <= anchor.getTime(); }).sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
     const adjustments = await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
     const customers = await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
     const suppliers = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const categories = await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const brands = await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
     return {
       serverTimestamp: anchor.toISOString(),
       products,
-      variants: variants.map((v: any) => ({ id: v.id, tenantId: v.tenantId, branchId: v.branchId, productId: v.productId, name: v.name, sku: v.sku, barcode: v.barcode ?? null, price: Number(v.price), costPrice: Number(v.costPrice), isActive: v.isActive, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })) as any,
+      variants: variants.map((v: any) => ({ id: v.id, tenantId: v.tenantId, branchId: v.branchId, productId: v.productId, name: v.name, sku: v.sku, barcode: v.barcode ?? null, inheritBuyingPrice: v.inheritBuyingPrice, inheritSellingPrice: v.inheritSellingPrice, price: Number(v.price), costPrice: Number(v.costPrice), inventoryQuantity: Number(v.inventoryQuantity), reservedQuantity: Number(v.reservedQuantity), reorderLevel: Number(v.reorderLevel), imageUrl: v.imageUrl ?? null, attributes: v.attributes ?? {}, isActive: v.isActive, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })) as any,
       stockLedger: ledger,
       adjustments: adjustments.map((a: any) => ({ id: a.id, tenantId: a.tenantId, branchId: a.branchId, variantId: a.variantId, adjustmentType: a.adjustmentType, quantityChange: Number(a.quantityChange), reason: a.reason, referenceNote: a.referenceNote ?? null, status: a.status, createdByUserId: a.createdByUserId, deviceId: a.deviceId, operationId: a.operationId, idempotencyKey: a.idempotencyKey, createdAt: a.createdAt.toISOString(), updatedAt: a.updatedAt.toISOString() })),
       customers: customers.map((c: any) => ({ ...c, creditLimit: Number(c.creditLimit), currentBalance: Number(c.currentBalance), openingBalance: Number(c.openingBalance), createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
       suppliers: suppliers.map((s: any) => ({ ...s, outstandingBalance: Number(s.outstandingBalance), createdAt: s.createdAt.toISOString(), updatedAt: s.updatedAt.toISOString() })),
-      integrityChecksum: computePayloadChecksum({ products, variants, ledger, adjustments, customers, suppliers }),
+      categories: categories.map((c: any) => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
+      brands: brands.map((b: any) => ({ ...b, createdAt: b.createdAt.toISOString(), updatedAt: b.updatedAt.toISOString() })),
+      integrityChecksum: computePayloadChecksum({ products, variants, ledger, adjustments, customers, suppliers, categories, brands, priceHistories }),
     };
   }
 
   async processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): Promise<SyncBootstrapResponse> {
     const anchor = new Date();
+    const priceHistories = await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     const products = await this.productRepo.getProducts(ctx);
     const variants = await prisma.productVariant.findMany({
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
@@ -201,6 +273,8 @@ export class PrismaSyncEngine {
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
     });
+    const categories = await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
+    const brands = await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }] });
 
     const mappedVariants = variants.map((v: any) => ({
       id: v.id,
@@ -258,6 +332,9 @@ export class PrismaSyncEngine {
       adjustments: mappedAdjustments,
       customers: mappedCustomers,
       suppliers: mappedSuppliers,
+      categories: categories.map((c: any) => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
+      brands: brands.map((b: any) => ({ ...b, createdAt: b.createdAt.toISOString(), updatedAt: b.updatedAt.toISOString() })),
+      priceHistories: priceHistories.map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage), effectiveFrom: h.effectiveFrom.toISOString(), effectiveTo: h.effectiveTo?.toISOString() ?? null, createdAt: h.createdAt.toISOString() })),
     };
     const integrityChecksum = computePayloadChecksum(snapshotData);
 
@@ -272,6 +349,8 @@ export class PrismaSyncEngine {
         adjustments: mappedAdjustments.length,
         customers: mappedCustomers.length,
         suppliers: mappedSuppliers.length,
+        categories: categories.length,
+        brands: brands.length,
       },
       ...snapshotData,
     };

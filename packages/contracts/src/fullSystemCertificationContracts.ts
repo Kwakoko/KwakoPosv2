@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // ============================================================
-// Phase 45 — Full KwakoPos Operating System Certification Contracts (KFOS-CERT v1.0.0)
+// Phase 45 — Full Kwakoko Business Operating System Certification Contracts (KFOS-CERT v1.0.0)
 // ============================================================
 
 export const FullSystemCertificationStatusEnum = z.enum([

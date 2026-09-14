@@ -25,6 +25,8 @@ export interface OutboxItem {
     | "Sale"
     | "Customer"
     | "Supplier"
+    | "Category"
+    | "Brand"
     | "PurchaseOrder"
     | "PurchaseReceipt"
     | "Payment"
@@ -86,6 +88,7 @@ const DB_NAME = "kwakopos-v2";
 export const AUTHORITATIVE_SCHEMA_VERSION = 4;
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
+  if (item.entityType === "Category" || item.entityType === "Brand") return 5;
   if (item.entityType === "Product" && item.operationType === "CREATE") return 10;
   if (item.entityType === "Product" && item.operationType === "UPDATE") return 20;
   if (item.entityType === "ProductVariant" && item.operationType === "CREATE") return 30;
@@ -446,7 +449,7 @@ export class LocalIndexedDbStore {
   saveProductWithVariantsLocal(product: Product, variants: ProductVariant[], ctx?: TenantScopedContext): void {
     const updatedProduct = {
       ...product,
-      hasVariants: variants.length > 0,
+      hasVariants: Boolean((product as any).hasVariants),
       variants,
     };
     this.saveProductLocal(updatedProduct, ctx);
@@ -579,6 +582,20 @@ export class LocalIndexedDbStore {
       }
     }
     return undefined;
+  }
+
+  saveCatalogCategoriesLocal(records: any[], ctx?: TenantScopedContext): void {
+    const current = Array.isArray(this.getConfigurationLocal("inventory_categories_meta", ctx)) ? this.getConfigurationLocal("inventory_categories_meta", ctx) : [];
+    const map = new Map(current.map((r: any) => [r.id, r]));
+    for (const r of records || []) { if (r.isActive === false) map.delete(r.id); else map.set(r.id, { ...r, isDefault: false }); }
+    this.saveConfigurationLocal("inventory_categories_meta", Array.from(map.values()), ctx);
+  }
+
+  saveCatalogBrandsLocal(records: any[], ctx?: TenantScopedContext): void {
+    const current = Array.isArray(this.getConfigurationLocal("inventory_brands_meta", ctx)) ? this.getConfigurationLocal("inventory_brands_meta", ctx) : [];
+    const map = new Map(current.map((r: any) => [r.id, r]));
+    for (const r of records || []) { if (r.isActive === false) map.delete(r.id); else map.set(r.id, { ...r, isDefault: false }); }
+    this.saveConfigurationLocal("inventory_brands_meta", Array.from(map.values()), ctx);
   }
 
   getProductsLocal(tenantId?: string): Product[] {
@@ -779,6 +796,9 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(delta.adjustments) ? delta.adjustments : [];
     const customers = Array.isArray(delta.customers) ? delta.customers : [];
     const suppliers = Array.isArray(delta.suppliers) ? delta.suppliers : [];
+    const categories = Array.isArray(delta.categories) ? delta.categories : [];
+    const brands = Array.isArray(delta.brands) ? delta.brands : [];
+    const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
     let appliedCount = 0;
 
     if (!this.nativeDb) {
@@ -814,6 +834,15 @@ export class LocalIndexedDbStore {
         if (this.protectServerRecord("Supplier", supplier.id)) continue;
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
+      }
+      for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
+      if (categories.length) {
+        const tenantId = String((categories[0] as any).tenantId || "");
+        this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : undefined);
+      }
+      if (brands.length) {
+        const tenantId = String((brands[0] as any).tenantId || "");
+        this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : undefined);
       }
       await this.flushPersistence();
       this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
@@ -877,6 +906,7 @@ export class LocalIndexedDbStore {
       this.suppliers.set(supplier.id, supplier);
       appliedCount += 1;
     }
+    for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
     tx.objectStore("syncMetadata").put(delta.serverTimestamp, "lastSyncTime");
 
     await new Promise<void>((resolve, reject) => {
@@ -885,6 +915,15 @@ export class LocalIndexedDbStore {
       tx.onabort = () => reject(tx.error || new Error("IndexedDB sync transaction aborted"));
     });
     this.syncMetadata.set("lastSyncTime", delta.serverTimestamp);
+    if (categories.length) {
+      const tenantId = String((categories[0] as any).tenantId || "");
+      this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : undefined);
+    }
+    if (brands.length) {
+      const tenantId = String((brands[0] as any).tenantId || "");
+      this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : undefined);
+    }
+    await this.flushPersistence();
     return appliedCount;
   }
 
@@ -926,6 +965,9 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
+    const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
+    const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
 
     for (const product of products) {
       if (
@@ -965,6 +1007,16 @@ export class LocalIndexedDbStore {
       if (this.protectServerRecord("Supplier", supplier.id)) continue;
       this.saveSupplierLocal(supplier, ctx);
       appliedCount += 1;
+    }
+
+    for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any, ctx); appliedCount += 1; }
+    if (categories.length) {
+      const tenantId = String((categories[0] as any).tenantId || ctx?.tenantId || "");
+      this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : ctx);
+    }
+    if (brands.length) {
+      const tenantId = String((brands[0] as any).tenantId || ctx?.tenantId || "");
+      this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : ctx);
     }
 
     // Ensure all parent products have deterministic stock derived from variants

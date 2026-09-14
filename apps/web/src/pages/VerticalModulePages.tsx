@@ -4,6 +4,8 @@
  * CSS: V2 design system classes only.
  */
 import React, { useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
+import { persistFleetFueling } from "../services/verticalMutationService.js";
 import {
   Egg, Truck, Users, Radio, Activity, AlertTriangle, DollarSign,
   Plus, Search, Download, Edit2, Eye, CheckCircle, Clock, BarChart2,
@@ -139,7 +141,7 @@ export const PoultryLivestockPage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
         {POULTRY_TABS.map((tab) => (
-          <button key={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
+          <button key={tab} aria-label={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
         ))}
       </div>
       {activeTab === "Flock Dashboard" ? <PoultryDashboard onNav={setActiveTab} /> : <PoultryStub title={activeTab} />}
@@ -255,7 +257,7 @@ const FleetStub: React.FC<{ title: string }> = ({ title }) => (
     {title === "Fuel Records" ? (
       <div className="v2-card">
         <div className="v2-card-header"><div className="v2-card-title">Fuel Ledger</div>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Record Fueling</button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => { void persistFleetFueling({ source: "FUEL_LEDGER", liters: 1, pricePerL: 0 }).then(() => runUiAction("ui.apps.web.src.pages.VerticalModulePages.258.record-fueling", "Record Fueling", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.VerticalModulePages.258.record-fueling"><Plus size={13} /> Record Fueling</button>
         </div>
         <table className="v2-table">
           <thead><tr><th>Record</th><th>Vehicle</th><th>Date</th><th>Liters</th><th>Price/L</th><th>Total</th><th>Station</th><th>Odometer</th></tr></thead>
@@ -287,7 +289,7 @@ export const FleetPage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
         {FLEET_TABS.map((tab) => (
-          <button key={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
+          <button key={tab} aria-label={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
         ))}
       </div>
       {activeTab === "Fleet Dashboard" ? <FleetDashboard onNav={setActiveTab} /> : <FleetStub title={activeTab} />}
@@ -400,7 +402,7 @@ export const WorkforcePage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
         {WORKFORCE_TABS.map((tab) => (
-          <button key={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
+          <button key={tab} aria-label={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
         ))}
       </div>
       {activeTab === "HR Dashboard" ? <HRDashboard onNav={setActiveTab} /> : <WorkforceStub title={activeTab} />}
@@ -521,7 +523,7 @@ export const TelecomPage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
         {TELECOM_TABS.map((tab) => (
-          <button key={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
+          <button key={tab} aria-label={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
         ))}
       </div>
       {activeTab === "Telecom Dashboard" ? <TelecomDashboard onNav={setActiveTab} /> : <TelecomStub title={activeTab} />}

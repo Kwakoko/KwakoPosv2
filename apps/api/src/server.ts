@@ -53,6 +53,10 @@ function getMimeType(filePath: string): string {
 import {
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
+  CreateCategoryRequestSchema,
+  UpdateCategoryRequestSchema,
+  CreateBrandRequestSchema,
+  UpdateBrandRequestSchema,
   CreateVariantRequestSchema,
   UpdateVariantRequestSchema,
   CreateStockAdjustmentRequestSchema,
@@ -124,6 +128,7 @@ import {
   ScopedMonetizationRepository,
   PrismaProductRepository,
   PrismaStockRepository,
+  PrismaCatalogRepository,
   PrismaFinanceRepository,
   PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
@@ -230,7 +235,7 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
 
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
-  /** Pre-loaded config â€” skips env re-read when provided. */
+  /** Pre-loaded config — skips env re-read when provided. */
   config?: ReturnType<typeof loadConfig>;
   /** Override persistence mode explicitly (true = Prisma, false = in-memory). */
   productionPersistence?: boolean;
@@ -303,6 +308,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   if (process.listenerCount("SIGINT") === 0) process.once("SIGINT", () => gracefulShutdown("SIGINT"));
 
   const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
+  const catalogRepo = productionPersistence ? new PrismaCatalogRepository() : null;
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
   const syncEngine = productionPersistence
     ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
@@ -592,7 +598,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // System endpoints
   server.get("/", async () => {
     return {
-      name: "KwakoPos 2.0 POS & Enterprise API Server",
+      name: "Kwakoko Business Operating System API Server",
       status: "online",
       version: config.APP_VERSION,
       environment: config.NODE_ENV,
@@ -1066,6 +1072,76 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreateProductRequestSchema.parse(req.body);
     const product = await productRepo.createProduct(ctx, validated);
     return reply.status(201).send({ success: true, data: product });
+  });
+
+  server.get("/api/v1/catalog/categories", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    return { success: true, data: await catalogRepo.listCategories(req.tenantContext!) };
+  });
+
+  server.post("/api/v1/catalog/categories", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const created = await catalogRepo.createCategory(req.tenantContext!, CreateCategoryRequestSchema.parse(req.body));
+      return reply.status(201).send({ success: true, data: created });
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_CREATE_FAILED", message: err?.message || "Unable to create category" } });
+    }
+  });
+
+  server.put("/api/v1/catalog/categories/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const updated = await catalogRepo.updateCategory(req.tenantContext!, (req.params as any).id, UpdateCategoryRequestSchema.parse(req.body));
+      return { success: true, data: updated };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_UPDATE_FAILED", message: err?.message || "Unable to update category" } });
+    }
+  });
+
+  server.delete("/api/v1/catalog/categories/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const result = await catalogRepo.deleteCategory(req.tenantContext!, (req.params as any).id, (req.body as any)?.replacementId);
+      return { success: true, data: result };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_DELETE_FAILED", message: err?.message || "Unable to delete category" } });
+    }
+  });
+
+  server.get("/api/v1/catalog/brands", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    return { success: true, data: await catalogRepo.listBrands(req.tenantContext!) };
+  });
+
+  server.post("/api/v1/catalog/brands", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const created = await catalogRepo.createBrand(req.tenantContext!, CreateBrandRequestSchema.parse(req.body));
+      return reply.status(201).send({ success: true, data: created });
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_CREATE_FAILED", message: err?.message || "Unable to create brand" } });
+    }
+  });
+
+  server.put("/api/v1/catalog/brands/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const updated = await catalogRepo.updateBrand(req.tenantContext!, (req.params as any).id, UpdateBrandRequestSchema.parse(req.body));
+      return { success: true, data: updated };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_UPDATE_FAILED", message: err?.message || "Unable to update brand" } });
+    }
+  });
+
+  server.delete("/api/v1/catalog/brands/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const result = await catalogRepo.deleteBrand(req.tenantContext!, (req.params as any).id, (req.body as any)?.replacementId);
+      return { success: true, data: result };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_DELETE_FAILED", message: err?.message || "Unable to delete brand" } });
+    }
   });
 
   server.get("/products", async (req) => {
@@ -3337,7 +3413,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // =========================================================================
-  // PHASE 16 â€” COMMERCIAL PRODUCT READINESS ENDPOINTS
+  // PHASE 16 — COMMERCIAL PRODUCT READINESS ENDPOINTS
   // =========================================================================
 
   server.get("/api/v1/commercial/summary", async (req, reply) => {
@@ -3375,7 +3451,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // =========================================================================
-  // PHASE 17 â€” PRODUCT-MARKET VALIDATION ENDPOINTS
+  // PHASE 17 — PRODUCT-MARKET VALIDATION ENDPOINTS
   // =========================================================================
 
   server.get("/api/v1/pmf/summary", async (req, reply) => {
@@ -3498,7 +3574,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
 
-  // Phase 18 â€” Enterprise Customer Onboarding (KEIF) Endpoints
+  // Phase 18 — Enterprise Customer Onboarding (KEIF) Endpoints
   server.post("/api/v1/enterprise-onboarding/projects", async (req, reply) => {
     const { globalEnterpriseOnboardingService } = await import("./services/enterpriseOnboardingService.js");
     const body = (req.body as any) || {};
@@ -3562,7 +3638,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: kit });
   });
 
-  // Phase 19 â€” Partner Ecosystem Scale (KPP) Endpoints
+  // Phase 19 — Partner Ecosystem Scale (KPP) Endpoints
   server.post("/api/v1/partner-ecosystem/partners/apply", async (req, reply) => {
     const { globalPartnerEcosystemService } = await import("./services/partnerEcosystemService.js");
     const body = (req.body as any) || {};
@@ -3616,7 +3692,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalPartnerEcosystemService.getCapacityMetrics(count) });
   });
 
-  // Phase 20 â€” Global Expansion (KGF) Endpoints
+  // Phase 20 — Global Expansion (KGF) Endpoints
   server.get("/api/v1/global-expansion/countries/:code", async (req, reply) => {
     const { globalGlobalExpansionService } = await import("./services/globalExpansionService.js");
     const { code } = req.params as { code: string };
@@ -3647,7 +3723,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalGlobalExpansionService.getDashboardMetrics() });
   });
 
-  // Phase 21 â€” AI-Native Business Operations Endpoints
+  // Phase 21 — AI-Native Business Operations Endpoints
   server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
     const body = (req.body as any) || {};
@@ -3687,7 +3763,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAiNativeService.getDashboardMetrics() });
   });
 
-  // Phase 22 â€” Autonomous Operations (KAOF) Endpoints
+  // Phase 22 — Autonomous Operations (KAOF) Endpoints
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
     const body = (req.body as any) || {};
@@ -3734,7 +3810,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
   });
 
-  // Phase 23 â€” KwakoPos Certification Program (KCA) Endpoints
+  // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
   server.post("/api/v1/certification-program/issue", async (req, reply) => {
     const { globalKwakoPosCertificationService } = await import("./services/kwakoposCertificationService.js");
     const body = (req.body as any) || {};
@@ -3795,7 +3871,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosCertificationService.getDashboardMetrics() });
   });
 
-  // Phase 24 â€” Platform Governance (KPGA) Endpoints
+  // Phase 24 — Platform Governance (KPGA) Endpoints
   server.post("/api/v1/platform-governance/adrs", async (req, reply) => {
     const { globalPlatformGovernanceService } = await import("./services/platformGovernanceService.js");
     const body = (req.body as any) || {};
@@ -3935,7 +4011,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkforceTrackingService.getDashboardMetrics() });
   });
 
-  // Phase 25 â€” KwakoPos System UI & Experience Architecture Endpoints
+  // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
   server.post("/api/v1/system-ui/navigation", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
     const body = (req.body as any) || {};
@@ -3980,7 +4056,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
-  // Phase 26 â€” KwakoPos Design System (KDS) Endpoints
+  // Phase 26 — KwakoPos Design System (KDS) Endpoints
   server.get("/api/v1/design-system/theme", async (req, reply) => {
     const { globalKwakoPosDesignSystemService } = await import("./services/kwakoposDesignSystemService.js");
     const mode = ((req.query as any)?.mode || "DARK") as any;
@@ -4002,7 +4078,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalKwakoPosDesignSystemService.getDashboardMetrics() });
   });
 
-  // Phase 27 â€” Core Operating UI Endpoints
+  // Phase 27 — Core Operating UI Endpoints
   server.get("/api/v1/core-operating-ui/dashboard", async (req, reply) => {
     const { globalCoreOperatingUiService } = await import("./services/coreOperatingUiService.js");
     const role = ((req.query as any)?.role || "EXECUTIVE") as any;
@@ -4029,7 +4105,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: res });
   });
 
-  // Phase 28 â€” Dynamic Module UI Endpoints
+  // Phase 28 — Dynamic Module UI Endpoints
   server.post("/api/v1/dynamic-module-ui/register", async (req, reply) => {
     const { globalDynamicModuleUiService } = await import("./services/dynamicModuleUiService.js");
     const body = (req.body as any) || {};
@@ -4061,7 +4137,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalDynamicModuleUiService.getDashboardMetrics() });
   });
 
-  // Phase 29 â€” Super Admin & Platform UI Endpoints
+  // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
     const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
@@ -4101,7 +4177,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Production Cleanliness & Tenant Store Purge Endpoints
   productionCleanlinessRoutes(server);
 
-  // Phase 30 â€” UI Certification Endpoints
+  // Phase 30 — UI Certification Endpoints
   server.get("/api/v1/ui-certification/overview", async (req, reply) => {
     const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
     return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
@@ -4126,7 +4202,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalUiCertificationService.getDashboardMetrics() });
   });
 
-  // Phase 31 â€” Workflow, Automation & Business Process OS Endpoints
+  // Phase 31 — Workflow, Automation & Business Process OS Endpoints
   server.get("/api/v1/workflow-automation/overview", async (req, reply) => {
     const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
     return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
@@ -4158,7 +4234,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalWorkflowAutomationService.getDashboardMetrics() });
   });
 
-  // Phase 32 â€” BI / Analytics OS Endpoints
+  // Phase 32 — BI / Analytics OS Endpoints
   server.get("/api/v1/bi-analytics/overview", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
@@ -4190,7 +4266,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
   });
 
-  // Phase 33 â€” AI Operating Layer OS Endpoints
+  // Phase 33 — AI Operating Layer OS Endpoints
   server.get("/api/v1/ai-operating-layer/overview", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
     return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
@@ -4253,7 +4329,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
 
-  // â”€â”€â”€ Phase 34 â€” Enterprise Approvals REST API (/api/v1/approvals/*) â”€â”€â”€
+  // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
   server.get("/api/v1/approvals/policies", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
@@ -4325,7 +4401,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
-  // â”€â”€â”€ Phase 35 â€” Finance & Treasury REST API (/api/v1/treasury/*) â”€â”€â”€
+  // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
@@ -4479,7 +4555,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
   });
 
-  // â”€â”€ Phase 36 â€” Supply Chain Operating Layer (KSCOL v1.0.0) â”€â”€
+  // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
   server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
     const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
@@ -4581,7 +4657,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
-  // â”€â”€ Phase 37 â€” Workforce Operating Layer (KWOL v1.0.0) â”€â”€
+  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
   server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);

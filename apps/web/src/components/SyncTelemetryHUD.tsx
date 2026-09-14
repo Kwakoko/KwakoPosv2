@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPos V2 — Real-Time Sync Telemetry & Security HUD
  * ─────────────────────────────────────────────────────────────────────────────
  * Ambient floating status capsule + diagnostics modal:
@@ -236,6 +236,7 @@ export const SyncTelemetryHUD: React.FC = () => {
               </div>
               <button
                 type="button"
+                aria-label="Close diagnostics"
                 className="v2-btn-icon-sm"
                 onClick={() => setShowDiagnostics(false)}
                 style={{

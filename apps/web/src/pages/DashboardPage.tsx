@@ -27,6 +27,7 @@ import {
   Printer, Award, Eye, User, Download, UserCheck, ShieldCheck
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
+import { KokoCompanion } from '../components/KokoCompanion.js';
 import * as XLSX from 'xlsx';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -591,10 +592,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const activeTables = todayOrders.filter(o => o.status === 'Pending' || (now - o.timestamp) < 2 * 60 * 60 * 1000).length;
 
     const validProductIds = new Set(products.map(p => p.id));
-    const activeProductVariants = products.length === 0 ? [] : productVariants.filter(v => validProductIds.has(v.productId));
+    const variantCountsByProduct = new Map<string, number>();
+    productVariants.forEach(v => {
+      if (validProductIds.has(v.productId)) {
+        variantCountsByProduct.set(v.productId, (variantCountsByProduct.get(v.productId) || 0) + 1);
+      }
+    });
+    const isMultiVariantProduct = (p: { id: string; hasVariants?: boolean }) => {
+      return Boolean(p.hasVariants || (variantCountsByProduct.get(p.id) || 0) > 1);
+    };
+    const variantProductIds = new Set(products.filter(p => isMultiVariantProduct(p)).map(p => p.id));
+    const activeProductVariants = products.length === 0 ? [] : productVariants.filter(v => variantProductIds.has(v.productId));
 
     const inventoryVal = products.reduce((sum, p) => {
-      if (p.hasVariants) {
+      if (variantProductIds.has(p.id)) {
         const pVariants = activeProductVariants.filter(v => v.productId === p.id);
         if (pVariants.length > 0) {
           return sum + pVariants.reduce((vSum, v) => vSum + ((v.price || p.price || 0) * (v.stock || 0)), 0);
@@ -603,12 +614,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       return sum + ((p.price || 0) * (p.stock || 0));
     }, 0);
 
-    const simpleLowStock  = products.filter(p => !p.hasVariants && p.stock > 0 && p.stock <= (p.reorderLevel ?? 10)).length;
+    const simpleLowStock  = products.filter(p => !variantProductIds.has(p.id) && p.stock > 0 && p.stock <= (p.reorderLevel ?? 10)).length;
     const variantLowStock = activeProductVariants.filter(v => v.stock > 0 && v.stock <= (v.reorderLevel ?? 5)).length;
     const lowStockCount   = products.length === 0 ? 0 : (simpleLowStock + variantLowStock);
 
     const outOfStockCount = products.length === 0 ? 0 : (
-      products.filter(p => !p.hasVariants && p.stock <= 0).length +
+      products.filter(p => !variantProductIds.has(p.id) && p.stock <= 0).length +
       activeProductVariants.filter(v => v.stock <= 0).length
     );
 

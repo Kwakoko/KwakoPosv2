@@ -667,7 +667,7 @@ export const SuperAdminComplianceTowerPage: React.FC<{ onNavigate?: (path: strin
             Statutory Legal Framework Status
           </h2>
           <p className="v2-text-sm v2-text-muted" style={{ marginBottom: "1.5rem" }}>
-            KwakoPos Operating System conforms with Tanzanian Law and East African Data Governance:
+            Kwakoko Business Operating System conforms with Tanzanian Law and East African Data Governance:
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1rem" }}>

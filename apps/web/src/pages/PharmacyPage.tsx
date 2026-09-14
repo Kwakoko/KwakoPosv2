@@ -1,11 +1,13 @@
 /**
- * KwakoPosv2 — Pharmacy Module Page
+ * KwakoPosv2 â€” Pharmacy Module Page
  * Sub-views: Dashboard, Pharmacy POS, Patients, Medicines, Batch & Expiry,
  * Prescriptions, Doctors, Drug Safety, Inventory, Insurance & NHIF,
  * Controlled Drugs, Reports, Settings
  * CSS: V2 design system only.
  */
 import React, { useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
+import { dispensePharmacyMedicine, persistPharmacyBatchAction } from "../services/verticalMutationService.js";
 import {
   Pill, Users, FileText, AlertTriangle, DollarSign, Clock, Plus, Search,
   ArrowRight, ChevronRight, BarChart2, Download, Edit2, Eye, Trash2,
@@ -13,7 +15,7 @@ import {
   RefreshCw, Hash, Bell, Building, Filter,
 } from "lucide-react";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
   : v >= 1_000 ? `Tsh ${(v / 1_000).toFixed(0)}K`
@@ -50,7 +52,7 @@ const KpiCard: React.FC<{
   </div>
 );
 
-// ─── Demo Data ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Demo Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEMO_PATIENTS = [
   { id: "PAT-001", name: "Grace Mwandani",  age: 42, phone: "+255 712 001 001", diagnosis: "Hypertension",    lastVisit: "2026-08-28", status: "Active" },
   { id: "PAT-002", name: "Said Hamisi",     age: 67, phone: "+255 754 002 002", diagnosis: "Diabetes T2",     lastVisit: "2026-08-25", status: "Active" },
@@ -76,16 +78,16 @@ const DEMO_BATCHES = [
 ];
 
 const DEMO_PRESCRIPTIONS = [
-  { id: "RX-2026-001", patient: "Grace Mwandani", doctor: "Dr. Kamau",  medicines: "Amlodipine 5mg × 30",         date: "2026-08-28", status: "Dispensed" },
-  { id: "RX-2026-002", patient: "Said Hamisi",    doctor: "Dr. Ouma",   medicines: "Metformin 500mg × 60, Glipizide 5mg × 30", date: "2026-08-25", status: "Dispensed" },
-  { id: "RX-2026-003", patient: "Amina Juma",     doctor: "Dr. Kamau",  medicines: "Artemether 20mg × 6, Paracetamol 500mg × 12", date: "2026-08-30", status: "Pending" },
-  { id: "RX-2026-004", patient: "New Patient",    doctor: "Dr. Masoud", medicines: "Amoxicillin 500mg × 21",      date: "2026-09-01", status: "Pending" },
+  { id: "RX-2026-001", patient: "Grace Mwandani", doctor: "Dr. Kamau",  medicines: "Amlodipine 5mg Ã— 30",         date: "2026-08-28", status: "Dispensed" },
+  { id: "RX-2026-002", patient: "Said Hamisi",    doctor: "Dr. Ouma",   medicines: "Metformin 500mg Ã— 60, Glipizide 5mg Ã— 30", date: "2026-08-25", status: "Dispensed" },
+  { id: "RX-2026-003", patient: "Amina Juma",     doctor: "Dr. Kamau",  medicines: "Artemether 20mg Ã— 6, Paracetamol 500mg Ã— 12", date: "2026-08-30", status: "Pending" },
+  { id: "RX-2026-004", patient: "New Patient",    doctor: "Dr. Masoud", medicines: "Amoxicillin 500mg Ã— 21",      date: "2026-09-01", status: "Pending" },
 ];
 
 const DEMO_CONTROLLED = [
-  { id: "CD-001", medicine: "Morphine 10mg/mL",  batch: "BAT-2025-055", issue: "2026-08-20", patient: "Post-op — Ref: HC/2026/001", qty: 2, balance: 46, prescriber: "Dr. Masoud" },
-  { id: "CD-002", medicine: "Diazepam 5mg",       batch: "BAT-2026-114", issue: "2026-08-22", patient: "Grace Mwandani — Ref: RX-2026-001", qty: 30, balance: 90, prescriber: "Dr. Kamau" },
-  { id: "CD-003", medicine: "Tramadol 50mg",       batch: "BAT-2026-098", issue: "2026-08-28", patient: "Peter Ochieng — Ref: RX-2026-009",  qty: 14, balance: 146, prescriber: "Dr. Ouma" },
+  { id: "CD-001", medicine: "Morphine 10mg/mL",  batch: "BAT-2025-055", issue: "2026-08-20", patient: "Post-op â€” Ref: HC/2026/001", qty: 2, balance: 46, prescriber: "Dr. Masoud" },
+  { id: "CD-002", medicine: "Diazepam 5mg",       batch: "BAT-2026-114", issue: "2026-08-22", patient: "Grace Mwandani â€” Ref: RX-2026-001", qty: 30, balance: 90, prescriber: "Dr. Kamau" },
+  { id: "CD-003", medicine: "Tramadol 50mg",       batch: "BAT-2026-098", issue: "2026-08-28", patient: "Peter Ochieng â€” Ref: RX-2026-009",  qty: 14, balance: 146, prescriber: "Dr. Ouma" },
 ];
 
 const BATCH_STATUS_COLOR: Record<string, string> = {
@@ -95,7 +97,7 @@ const PRESC_STATUS: Record<string, string> = {
   Dispensed: "v2-badge-success", Pending: "v2-badge-warning", Cancelled: "v2-badge-danger",
 };
 
-// ─── Sub-page: Pharmacy Dashboard ────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Pharmacy Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav }) => {
   const nearExpiry  = DEMO_BATCHES.filter((b) => b.daysLeft <= 90 && b.daysLeft > 0).length;
   const expired     = DEMO_BATCHES.filter((b) => b.daysLeft <= 0).length;
@@ -111,7 +113,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
           </div>
           <div style={{ flex: 1 }}>
             <h1 className="v2-text-xl v2-font-black" style={{ color: "#fff", letterSpacing: "-.02em" }}>Clinical Pharmacy & FEFO Dispensing</h1>
-            <p className="v2-text-xs" style={{ color: "#6ee7b7", marginTop: ".2rem" }}>FEFO-compliant dispensing · Batch monitoring · Controlled drug register · NHIF claims</p>
+            <p className="v2-text-xs" style={{ color: "#6ee7b7", marginTop: ".2rem" }}>FEFO-compliant dispensing Â· Batch monitoring Â· Controlled drug register Â· NHIF claims</p>
           </div>
           <span className="badge v2-badge-success">PHARMACY</span>
         </div>
@@ -165,7 +167,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
                     <span className="v2-text-xs v2-text-muted">{b.daysLeft}d left</span>
                   </div>
                   <div className="v2-text-xs v2-font-black">{b.medicine}</div>
-                  <div className="v2-text-xs v2-text-muted">Batch: {b.id} · Qty: {b.qty} · Exp: {b.expiry}</div>
+                  <div className="v2-text-xs v2-text-muted">Batch: {b.id} Â· Qty: {b.qty} Â· Exp: {b.expiry}</div>
                 </div>
               ))}
             </div>
@@ -176,7 +178,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
   );
 };
 
-// ─── Sub-page: Patients ───────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Patients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PatientsPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_PATIENTS.filter((p) => !search || `${p.name} ${p.diagnosis}`.toLowerCase().includes(search.toLowerCase()));
@@ -184,13 +186,13 @@ const PatientsPage: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Patient Register</h2>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> New Patient</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.187.new-patient", "New Patient", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.187.new-patient"><Plus size={13} /> New Patient</button>
       </div>
       <div className="v2-card">
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patients…" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patientsâ€¦" />
           </div>
         </div>
         <table className="v2-table">
@@ -207,8 +209,8 @@ const PatientsPage: React.FC = () => {
                 <td><span className={`badge ${p.status === "Active" ? "v2-badge-success" : "v2-badge-muted"}`}>{p.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><FileText size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.210.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.210.button"><Eye size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.211.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.211.button"><FileText size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -220,7 +222,7 @@ const PatientsPage: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Medicines Master ───────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Medicines Master â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const MedicinesPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_MEDICINES.filter((m) => !search || `${m.name} ${m.category}`.toLowerCase().includes(search.toLowerCase()));
@@ -229,15 +231,15 @@ const MedicinesPage: React.FC = () => {
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Medicines Master & Price List</h2>
         <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Tag size={13} /> Price List</button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Add Medicine</button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.232.price-list", "Price List", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.232.price-list"><Tag size={13} /> Price List</button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.233.add-medicine", "Add Medicine", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.233.add-medicine"><Plus size={13} /> Add Medicine</button>
         </div>
       </div>
       <div className="v2-card">
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search medicines…" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search medicinesâ€¦" />
           </div>
         </div>
         <table className="v2-table">
@@ -251,11 +253,11 @@ const MedicinesPage: React.FC = () => {
                 <td className="v2-text-xs v2-text-muted">{m.unit}</td>
                 <td className="v2-font-black">{money(m.price)}</td>
                 <td style={{ color: m.stock < m.reorder ? "var(--danger)" : "inherit" }}>{m.stock}</td>
-                <td>{m.controlled ? <span className="badge v2-badge-danger">CD</span> : <span className="badge v2-badge-muted">—</span>}</td>
+                <td>{m.controlled ? <span className="badge v2-badge-danger">CD</span> : <span className="badge v2-badge-muted">â€”</span>}</td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Tag size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.257.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.257.button"><Edit2 size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.258.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.258.button"><Tag size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -267,14 +269,14 @@ const MedicinesPage: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Batch & Expiry ─────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Batch & Expiry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BatchExpiryPage: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Batch & Expiry Management (FEFO)</h2>
       <div className="v2-flex v2-gap-2">
-        <button className="v2-btn v2-btn-danger v2-btn-sm" type="button">Expired Disposal</button>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Add Batch</button>
+        <button className="v2-btn v2-btn-danger v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.276.expired-disposal", "Expired Disposal", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.276.expired-disposal">Expired Disposal</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.277.add-batch", "Add Batch", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.277.add-batch"><Plus size={13} /> Add Batch</button>
       </div>
     </div>
     <div className="metrics-grid kpi-grid-4 v2-mb-4">
@@ -304,8 +306,8 @@ const BatchExpiryPage: React.FC = () => (
               </td>
               <td>
                 <div className="v2-flex v2-gap-1">
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                  {b.daysLeft <= 0 && <button className="v2-btn v2-btn-danger v2-btn-sm" type="button">Dispose</button>}
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.307.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.307.button"><Eye size={13} /></button>
+                  {b.daysLeft <= 0 && <button className="v2-btn v2-btn-danger v2-btn-sm" type="button" onClick={() => { void persistPharmacyBatchAction("DISPOSE_BATCH", { status: "EXPIRED", source: "PHARMACY_BATCH_REGISTER" }).then(() => runUiAction("ui.apps.web.src.pages.PharmacyPage.308.dispose", "Dispose", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.308.dispose">Dispose</button>}
                 </div>
               </td>
             </tr>
@@ -316,12 +318,12 @@ const BatchExpiryPage: React.FC = () => (
   </div>
 );
 
-// ─── Sub-page: Prescriptions ──────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Prescriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PrescriptionsPage: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Prescription Management</h2>
-      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> New Prescription</button>
+      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.324.new-prescription", "New Prescription", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.324.new-prescription"><Plus size={13} /> New Prescription</button>
     </div>
     <div className="v2-card">
       <div className="v2-card-header"><div className="v2-card-title">Prescription Register</div></div>
@@ -338,8 +340,8 @@ const PrescriptionsPage: React.FC = () => (
               <td><span className={`badge ${PRESC_STATUS[p.status] || "v2-badge-muted"}`}>{p.status}</span></td>
               <td>
                 <div className="v2-flex v2-gap-1">
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                  {p.status === "Pending" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button">Dispense</button>}
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.341.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.341.button"><Eye size={13} /></button>
+                  {p.status === "Pending" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { const firstMedicine = DEMO_MEDICINES[0]; void dispensePharmacyMedicine({ medicineId: firstMedicine?.id || "", quantityRequired: 1 }).then(() => runUiAction("ui.apps.web.src.pages.PharmacyPage.342.dispense", "Dispense", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.342.dispense">Dispense</button>}
                 </div>
               </td>
             </tr>
@@ -350,14 +352,14 @@ const PrescriptionsPage: React.FC = () => (
   </div>
 );
 
-// ─── Sub-page: Controlled Drugs ───────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Controlled Drugs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ControlledDrugsPage: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Controlled Drug Register</h2>
       <div className="v2-flex v2-items-center v2-gap-2">
         <span className="badge v2-badge-danger"><Shield size={12} /> Regulatory Compliance</span>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Record Issue</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => { void persistPharmacyBatchAction("RECORD_CONTROLLED_ISSUE", { reference: "CONTROLLED_DRUG_LEDGER", quantity: 1 }).then(() => runUiAction("ui.apps.web.src.pages.PharmacyPage.360.record-issue", "Record Issue", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.360.record-issue"><Plus size={13} /> Record Issue</button>
       </div>
     </div>
     <div className="metrics-grid kpi-grid-4 v2-mb-4">
@@ -369,7 +371,7 @@ const ControlledDrugsPage: React.FC = () => (
     <div className="v2-card">
       <div className="v2-card-header">
         <div className="v2-card-title">Controlled Drug Dispensing Ledger</div>
-        <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Export MSD Report</button>
+        <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.372.export-msd-report", "Export MSD Report", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.372.export-msd-report"><Download size={13} /> Export MSD Report</button>
       </div>
       <table className="v2-table">
         <thead><tr><th>Record ID</th><th>Medicine</th><th>Batch</th><th>Issue Date</th><th>Patient / Reference</th><th>Qty Issued</th><th>Balance</th><th>Prescriber</th></tr></thead>
@@ -392,7 +394,7 @@ const ControlledDrugsPage: React.FC = () => (
   </div>
 );
 
-// ─── Generic stub sub-page ────────────────────────────────────────────────────
+// â”€â”€â”€ Generic stub sub-page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PharmStub: React.FC<{ title: string }> = ({ title }) => (
   <div className="v2-animate-page-enter">
     <h2 className="v2-text-xl v2-font-black v2-mb-4">{title}</h2>
@@ -400,13 +402,13 @@ const PharmStub: React.FC<{ title: string }> = ({ title }) => (
       <div className="v2-empty">
         <div className="v2-empty-icon"><Pill size={22} /></div>
         <p className="v2-empty-title">{title}</p>
-        <p className="v2-empty-desc">Full feature panel — coming in Phase 7 expansion.</p>
+        <p className="v2-empty-desc">Full feature panel â€” coming in Phase 7 expansion.</p>
       </div>
     </div>
   </div>
 );
 
-// ─── Pharmacy Module Entry Point ──────────────────────────────────────────────
+// â”€â”€â”€ Pharmacy Module Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const PharmacyPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PharmTab>("Pharmacy Dashboard");
 
@@ -428,6 +430,7 @@ export const PharmacyPage: React.FC = () => {
         {PHARM_TABS.map((tab) => (
           <button
             key={tab}
+            aria-label={tab}
             className={`sector-pill${activeTab === tab ? " active" : ""}`}
             onClick={() => setActiveTab(tab)}
             type="button"

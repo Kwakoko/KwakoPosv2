@@ -848,7 +848,6 @@ export class ScopedStockRepository {
   }
 }
 
-export { PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
 import { ScopedCommercialRepository, registerStockRepositoryClass } from "./commercialRepositories.js";
 registerStockRepositoryClass(ScopedStockRepository);
 import { ScopedFinanceRepository } from "./financeRepositories.js";
@@ -1392,3 +1391,5 @@ export * from "./rollbackRepositories.js";
 
 
 
+
+export { PrismaCatalogRepository, PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
