@@ -2,6 +2,10 @@ import "./styles.css";
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.js";
+import { fontPersistenceEngine } from "./persistence/fontPersistenceEngine.js";
+
+// Enforce and persist system-wide typography adopted from legacy app
+fontPersistenceEngine.initialize();
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -52,7 +56,7 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   public render() {
     if (this.state.hasError) {
       return (
-        <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1.5rem", background: "#0f172a", color: "#f8fafc", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
+        <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1.5rem", background: "#0f172a", color: "#f8fafc", fontFamily: "var(--font-sans, 'Inter', sans-serif)" }}>
           <div style={{ maxWidth: 540, width: "100%", background: "#1e293b", border: "1px solid #f87171", borderRadius: "0.75rem", padding: "1.5rem", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.5)" }}>
             <div style={{ color: "#f87171", fontSize: "1.15rem", fontWeight: 800, marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <span>⚠️ Workspace Render Exception</span>
@@ -60,7 +64,7 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             <p style={{ color: "#94a3b8", fontSize: "0.88rem", marginBottom: "1rem", lineHeight: 1.5 }}>
               An unexpected error prevented the KwakoPos v2 React workspace interface from initializing.
             </p>
-            <div style={{ background: "rgba(248, 113, 113, 0.1)", border: "1px solid rgba(248, 113, 113, 0.25)", borderRadius: "0.5rem", padding: "0.85rem", fontSize: "0.82rem", color: "#f87171", fontFamily: "monospace", overflowX: "auto", marginBottom: "1.25rem" }}>
+            <div style={{ background: "rgba(248, 113, 113, 0.1)", border: "1px solid rgba(248, 113, 113, 0.25)", borderRadius: "0.5rem", padding: "0.85rem", fontSize: "0.82rem", color: "#f87171", fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)", overflowX: "auto", marginBottom: "1.25rem" }}>
               {this.state.error?.message || "Unknown rendering exception"}
             </div>
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>

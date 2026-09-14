@@ -16,7 +16,7 @@ export function renderCommercialCommandCenterDashboard(props: CommercialCommandC
   const { flagshipProfiles, tier2Verticals, tier3Count } = props;
 
   let html = `
-    <div style="font-family: 'Segoe UI', Inter, sans-serif; background: #0f172a; color: #f8fafc; padding: 32px; border-radius: 12px; max-width: 1280px; margin: 0 auto;">
+    <div style="font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; padding: 32px; border-radius: 12px; max-width: 1280px; margin: 0 auto;">
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; padding-bottom: 20px; margin-bottom: 28px;">
         <div>
           <h1 style="margin: 0; font-size: 28px; font-weight: 700; color: #38bdf8;">KWAKOPOS COMMERCIAL COMMAND CENTER</h1>

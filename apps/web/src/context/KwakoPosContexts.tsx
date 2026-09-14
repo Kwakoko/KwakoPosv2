@@ -833,7 +833,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
   const branchValue: BranchContextType = {
     currentBranchId,
-    currentBranchName: availableBranchesList.find((b) => b.id === currentBranchId)?.name || currentBranchId,
+    currentBranchName,
     availableBranches: availableBranchesList,
     switchBranch,
   };

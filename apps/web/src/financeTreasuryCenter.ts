@@ -56,7 +56,7 @@ export function renderTreasuryCommandCenterHtml(params: {
       --shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Inter',system-ui,sans-serif;background:var(--surface);color:var(--text);min-height:100vh}
+    body{font-family:'Inter', sans-serif;background:var(--surface);color:var(--text);min-height:100vh}
 
     /* Header */
     .hdr{background:linear-gradient(135deg,#0a0f1e 0%,#0d1932 60%,#1a0d2e 100%);

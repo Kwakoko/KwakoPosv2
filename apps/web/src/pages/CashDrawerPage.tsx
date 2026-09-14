@@ -103,6 +103,7 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
     const map: Record<string, DrawerTab> = {
       "Shift & Active Register": "active",
       "Cash Movement Ledger": "ledger",
+      "Denomination Calculator": "denominations",
       "Reconciliation & Variances": "reconciliation",
       "Safe & Bank Deposits": "safe",
       "No Sale & Event Logs": "nosale",

@@ -109,8 +109,8 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
     sidebar: [
       "Dashboard",
       { name: "POS", subItems: ["New Sale", "Sales History", "Returns"] },
-      { name: "Cash Drawer", subItems: ["Shift & Active Register", "Cash Movement Ledger", "Reconciliation & Variances", "Safe & Bank Deposits", "No Sale & Event Logs", "15 Financial Reports", "Security & RBAC Rules", "AI Cash Advisor"] },
-      { name: "Inventory", subItems: ["Inventory Overview", "Products", "Categories & Brands", "Stock Adjustment", "Stock Transfer", "Stock Alerts", "Stock Sync Engine", "Product Bundles & Kits", "Stock Count", "Ledger Drilldown", "Inventory Reports"] },
+      { name: "Cash Drawer", subItems: ["Shift & Active Register", "Cash Movement Ledger", "Denomination Calculator", "Reconciliation & Variances", "Safe & Bank Deposits", "No Sale & Event Logs", "15 Financial Reports", "Security & RBAC Rules", "AI Cash Advisor"] },
+      { name: "Inventory", subItems: ["Inventory Overview", "Products", "Categories & Brands", "Stock Adjustment", "Stock Transfer", "Stock Alerts", "Stock Sync Engine", "Product Bundles & Kits", "Stock Count", "Ledger Drilldown", "Wastage & Spillage", "Inventory Reports"] },
       { name: "Receipts", subItems: ["Receipt History", "Receipt Viewer", "Receipt Templates", "Receipt Analytics", "Receipt Verification", "Receipt Archive"] },
       "Customers",
       { name: "Purchasing", subItems: ["Suppliers", "Purchase Orders", "Goods Received", "Supplier Ledgers", "Warehouses"] },

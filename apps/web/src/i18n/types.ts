@@ -423,6 +423,7 @@ export interface TranslationDictionary {
     tabSync: string;
     tabIntegrations: string;
     tabAdvanced: string;
+    tabDeveloper: string;
     tabLocalization: string;
     businessName: string;
     tradingName: string;

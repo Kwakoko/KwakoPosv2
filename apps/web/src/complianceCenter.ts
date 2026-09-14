@@ -13,7 +13,7 @@ export interface ComplianceUiProps {
 
 export function renderComplianceCommandCenter(props: ComplianceUiProps): string {
   return `
-<div class="kcaol-command-center" style="background: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+<div class="kcaol-command-center" style="background: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <h2 style="margin: 0; font-size: 1.25rem; color: #10b981; font-weight: 700;">
       <span style="background: #059669; color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-right: 8px;">KCAOL v1.0.0</span>

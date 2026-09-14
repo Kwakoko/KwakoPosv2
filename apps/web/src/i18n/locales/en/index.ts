@@ -375,6 +375,7 @@ export const en: TranslationDictionary = {
     tabSync: "Sync & Offline",
     tabIntegrations: "Integrations",
     tabAdvanced: "Advanced",
+    tabDeveloper: "Developer Options",
     tabLocalization: "Language & Region",
     businessName: "Business Legal Name",
     tradingName: "Trading Name",

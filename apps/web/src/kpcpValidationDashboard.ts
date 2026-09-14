@@ -1,6 +1,6 @@
 export function renderKpcpValidationDashboard(): string {
   return `
-    <div style="font-family: system-ui, -apple-system, sans-serif; background: #060b14; color: #f8fafc; padding: 2rem; min-height: 100vh;">
+    <div style="font-family: 'Inter', sans-serif; background: #060b14; color: #f8fafc; padding: 2rem; min-height: 100vh;">
       <header style="border-bottom: 1px solid #1e293b; padding-bottom: 1rem; margin-bottom: 2rem;">
         <span style="background: #8b5cf6; color: #ffffff; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.875rem;">PHASE 17 PRODUCT-MARKET VALIDATION</span>
         <h1 style="font-size: 2.25rem; font-weight: 800; margin-top: 0.5rem; color: #ffffff;">KwakoPos PMF Intelligence & Portfolio Command Center</h1>

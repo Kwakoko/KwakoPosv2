@@ -1,6 +1,6 @@
 export function renderKpcpReliabilityDashboard(): string {
   return `
-    <div style="font-family: system-ui, -apple-system, sans-serif; background: #0b0f19; color: #f8fafc; padding: 2rem; min-height: 100vh;">
+    <div style="font-family: 'Inter', sans-serif; background: #0b0f19; color: #f8fafc; padding: 2rem; min-height: 100vh;">
       <header style="border-bottom: 1px solid #1e293b; padding-bottom: 1rem; margin-bottom: 2rem;">
         <span style="background: #10b981; color: #ffffff; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.875rem;">PHASE 15 PRODUCTION RELIABILITY (KPRS)</span>
         <h1 style="font-size: 2.25rem; font-weight: 800; margin-top: 0.5rem; color: #ffffff;">KwakoPos Site Reliability Engineering (SRE) Command Center</h1>

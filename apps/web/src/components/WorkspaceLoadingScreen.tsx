@@ -117,7 +117,7 @@ export const WorkspaceLoadingScreen: React.FC<{
         backgroundColor: "#0a0f1d",
         color: "#f8fafc",
         fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+          "'Inter', sans-serif",
         padding: "1.5rem",
         boxSizing: "border-box",
       }}

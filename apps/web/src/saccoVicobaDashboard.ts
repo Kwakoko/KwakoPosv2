@@ -1,6 +1,6 @@
 export function renderSaccoVicobaDashboard(): string {
   return `
-    <div style="font-family: system-ui, -apple-system, sans-serif; background: #064e3b; color: #ecfdf5; padding: 2rem; min-height: 100vh;">
+    <div style="font-family: 'Inter', sans-serif; background: #064e3b; color: #ecfdf5; padding: 2rem; min-height: 100vh;">
       <header style="border-bottom: 1px solid #047857; padding-bottom: 1rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
         <div>
           <span style="background: #10b981; color: #022c22; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 800; font-size: 0.875rem;">SACCO & VICOBA OPERATING SYSTEM MODULE</span>

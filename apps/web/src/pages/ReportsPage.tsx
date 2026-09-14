@@ -68,6 +68,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     if (!propActiveTab) return;
     const map: Record<string, ReportTab> = {
       "Sales": "sales",
+      "Profit": "profit",
       "Profit & Loss": "profit",
       "Cashier Performance": "cashier",
       "Payment Methods": "payment",
@@ -75,7 +76,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "Customers Report": "customers",
       "Returns & Refunds": "returns",
       "Branch Comparison": "branch",
+      "Tax": "tax",
       "Tax & TRA EFD": "tax",
+      "Discounts": "discount",
       "Discounts & Promos": "discount",
       "Expenses Report": "expenses",
       "Stock Movement": "movements",

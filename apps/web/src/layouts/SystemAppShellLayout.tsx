@@ -20,7 +20,7 @@ import {
   Truck, Tv, Users, Utensils, Wifi, WifiOff, Wine, Wrench,
   X, Zap, ChefHat, ClipboardList, Gauge, FileText, DollarSign,
   PawPrint, Calendar, Receipt, BarChart, Layers, Check, Eye, RotateCcw,
-  Volume2, VolumeX, Keyboard,
+  Volume2, VolumeX, Keyboard, ArrowUpDown, SlidersHorizontal, Lock,
   // ── Icon Upgrade 2026-09-09 ───────────────────────────────────────────────
   LayoutDashboard, ScanBarcode, Landmark, ContactRound,
   PackageSearch, Wallet, BadgeCheck, BrainCircuit, Settings2,
@@ -32,12 +32,19 @@ import {
 } from "../context/KwakoPosContexts.js";
 import {
   type IndustryModule,
-  type ModuleSector,
   MODULE_MANIFESTS,
   MODULE_SECTORS,
   ALL_MODULE_KEYS,
   getModulesBySector,
 } from "../modules/moduleRegistry.js";
+import {
+  getShortModuleName,
+  INDUSTRY_SECTORS,
+  MODULE_SECTOR_MAP,
+  MODULE_POPULARITY_RANK,
+  type IndustrySector,
+  type IndustrySortOption,
+} from "../utils/mobileFormatters.js";
 import { apiFetch } from "../services/apiClient.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 import { ImpersonationModal } from "../components/ImpersonationModal.js";
@@ -46,6 +53,9 @@ import { CommandPaletteModal } from "../components/UI/CommandPaletteModal.js";
 import { audioSynthesizer } from "../utils/useAudioFeedback.js";
 import { useToast } from "../context/ToastContext.js";
 import { isDemoModeActive, purgeSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { WindowManagerContainer } from "../components/WindowManager/WindowManagerContainer.js";
+import { SyncTelemetryHUD } from "../components/SyncTelemetryHUD.js";
+import { useWindowManager } from "../context/WindowManagerContext.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -121,161 +131,317 @@ function getInitials(name: string): string {
 }
 
 // ─── PopOut Button ────────────────────────────────────────────────────────────
-// V2 native component — UI port only, no legacy window manager dependency.
 export const PopOutButton: React.FC<{
   label?: string;
+  moduleId?: string;
+  route?: string;
+  windowTitle?: string;
   onClick?: () => void;
   className?: string;
-}> = ({ label = "Open in window", onClick, className = "" }) => (
-  <button
-    className={`popout-btn ${className}`}
-    onClick={onClick}
-    title={label}
-    aria-label={label}
-    type="button"
-  >
-    <ExternalLink size={13} aria-hidden="true" />
-  </button>
-);
+}> = ({ label = "Open in window", moduleId, route, windowTitle, onClick, className = "" }) => {
+  const { openWindow } = useWindowManager();
+  const handleClick = () => {
+    if (onClick) {
+      onClick();
+    } else if (moduleId || route) {
+      openWindow({
+        moduleId: moduleId || "window",
+        title: windowTitle || label,
+        route: route || `/${moduleId}`,
+      });
+    }
+  };
+
+  return (
+    <button
+      className={`popout-btn ${className}`}
+      onClick={handleClick}
+      title={label}
+      aria-label={label}
+      type="button"
+    >
+      <ExternalLink size={13} aria-hidden="true" />
+    </button>
+  );
+};
 
 // ─── Module Selector Panel ────────────────────────────────────────────────────
-
-const MODULE_SORT_OPTIONS = [
-  { key: "alpha", label: "A–Z" },
-  { key: "sector", label: "Sector" },
-  { key: "available", label: "Available" },
-];
 
 const ModuleSelectorPanel: React.FC<{
   onClose: () => void;
 }> = ({ onClose }) => {
   const {
     activeModule, setActiveModule,
-    canAccessModule, availableModules, isDevSuperuser,
-    searchModules: moduleSearch,
+    availableModules,
   } = useModule();
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeSector, setActiveSector] = useState<ModuleSector | "all">("all");
-  const [sortKey, setSortKey] = useState<"alpha" | "sector" | "available">("alpha");
+  const [moduleSearchText, setModuleSearchText] = useState("");
+  const [selectedSector, setSelectedSector] = useState<IndustrySector>("ALL");
+  const [moduleSortOption, setModuleSortOption] = useState<IndustrySortOption>("SUBSCRIBED");
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { searchRef.current?.focus(); }, []);
 
-  const modulesByFilter = useMemo(() => {
-    let keys = searchQuery.trim() ? moduleSearch(searchQuery) : ALL_MODULE_KEYS;
-    if (activeSector !== "all") keys = keys.filter((k) => MODULE_MANIFESTS[k].sector === activeSector);
-    if (sortKey === "alpha") keys = [...keys].sort((a, b) => MODULE_MANIFESTS[a].name.localeCompare(MODULE_MANIFESTS[b].name));
-    else if (sortKey === "sector") keys = [...keys].sort((a, b) => MODULE_MANIFESTS[a].sector.localeCompare(MODULE_MANIFESTS[b].sector));
-    else if (sortKey === "available") {
-      const avail = new Set(availableModules);
-      keys = [...keys].sort((a, b) => (avail.has(b) ? 1 : 0) - (avail.has(a) ? 1 : 0));
+  const allKeys = useMemo(() => Object.keys(MODULE_MANIFESTS) as IndustryModule[], []);
+
+  const filteredList = useMemo(() => {
+    let list = allKeys.filter((key) => {
+      // 1. Sector Filter
+      if (selectedSector !== "ALL") {
+        const sec = MODULE_SECTOR_MAP[key] || "TRADES";
+        if (sec !== selectedSector) return false;
+      }
+      // 2. Search Text Filter
+      if (moduleSearchText.trim()) {
+        const q = moduleSearchText.toLowerCase();
+        const rawName = (MODULE_MANIFESTS[key]?.name || key).toLowerCase();
+        const shortName = getShortModuleName(MODULE_MANIFESTS[key]?.name || key).toLowerCase();
+        return rawName.includes(q) || shortName.includes(q) || key.toLowerCase().includes(q);
+      }
+      return true;
+    });
+
+    // 3. Sorting
+    if (moduleSortOption === "ALPHABETICAL") {
+      list.sort((a, b) => {
+        const nameA = getShortModuleName(MODULE_MANIFESTS[a]?.name || a);
+        const nameB = getShortModuleName(MODULE_MANIFESTS[b]?.name || b);
+        return nameA.localeCompare(nameB);
+      });
+    } else if (moduleSortOption === "POPULAR") {
+      list.sort((a, b) => (MODULE_POPULARITY_RANK[a] || 99) - (MODULE_POPULARITY_RANK[b] || 99));
+    } else {
+      // SUBSCRIBED option: Subscribed first, then locked/other, then rank
+      list.sort((a, b) => {
+        const isSubA = availableModules.includes(a);
+        const isSubB = availableModules.includes(b);
+        if (isSubA && !isSubB) return -1;
+        if (!isSubA && isSubB) return 1;
+        return (MODULE_POPULARITY_RANK[a] || 99) - (MODULE_POPULARITY_RANK[b] || 99);
+      });
     }
-    return keys;
-  }, [searchQuery, activeSector, sortKey, availableModules, moduleSearch]);
 
-  const availableSet = new Set(availableModules);
-
-  const sectors = useMemo(() => Object.keys(getModulesBySector()) as ModuleSector[], []);
-
-  const handleSelect = (mod: IndustryModule) => {
-    if (!canAccessModule(mod)) return;
-    setActiveModule(mod);
-    onClose();
-  };
+    return list;
+  }, [allKeys, selectedSector, moduleSearchText, moduleSortOption, availableModules]);
 
   return (
-    <div className="dropdown-panel module-panel" role="dialog" aria-label="Module Selector">
-      {/* Search */}
-      <div className="module-panel-search">
-        <Search size={14} className="v2-text-muted" aria-hidden="true" />
-        <input
-          ref={searchRef}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search modules…"
-          aria-label="Search modules"
-        />
-        {searchQuery && (
-          <button className="topbar-icon-btn v2-btn-icon-sm" onClick={() => setSearchQuery("")} aria-label="Clear search">
-            <X size={13} />
-          </button>
-        )}
-      </div>
-
-      {/* Sector pills */}
-      <div className="module-sector-pills">
-        <button
-          className={`sector-pill${activeSector === "all" ? " active" : ""}`}
-          onClick={() => setActiveSector("all")}
-        >
-          All
-        </button>
-        {sectors.map((sector) => (
-          <button
-            key={sector}
-            className={`sector-pill${activeSector === sector ? " active" : ""}`}
-            onClick={() => setActiveSector(activeSector === sector ? "all" : sector)}
-          >
-            {sector}
-          </button>
-        ))}
-      </div>
-
-      {/* Sort */}
-      <div className="module-sort-row">
-        <span className="v2-text-xs v2-text-muted" style={{ lineHeight: "1.8" }}>Sort:</span>
-        {MODULE_SORT_OPTIONS.map((o) => (
-          <button
-            key={o.key}
-            className={`module-sort-btn${sortKey === o.key ? " active" : ""}`}
-            onClick={() => setSortKey(o.key as typeof sortKey)}
-          >
-            {o.label}
-          </button>
-        ))}
-        {isDevSuperuser && (
-          <span className="badge v2-badge-accent v2-text-xs" style={{ marginLeft: "auto" }}>DEV</span>
-        )}
-      </div>
-
-      {/* Module Grid */}
-      <div className="module-grid">
-        {modulesByFilter.length === 0 ? (
-          <div className="v2-empty" style={{ gridColumn: "1 / -1", padding: "1.5rem" }}>
-            <p className="v2-text-sm v2-text-muted">No modules match your search.</p>
+    <div
+      className="dropdown-panel module-panel"
+      role="dialog"
+      aria-label="Industry Modules"
+      style={{
+        position: "absolute",
+        right: 0,
+        top: "calc(100% + 8px)",
+        width: "20rem",
+        maxHeight: "min(calc(100vh - 90px), 520px)",
+        display: "flex",
+        flexDirection: "column",
+        padding: 0,
+        overflow: "hidden",
+        borderRadius: "1rem",
+        border: "1px solid var(--v2-border, #e2e8f0)",
+        background: "var(--v2-bg-card, #ffffff)",
+        boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2)",
+        zIndex: 1000,
+      }}
+    >
+      {/* Sticky Top Header & Search */}
+      <div style={{ padding: "0.75rem", borderBottom: "1px solid var(--v2-border, #e2e8f0)", background: "var(--v2-bg-secondary, #f8fafc)", display: "flex", flexDirection: "column", gap: "0.5rem", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+            <Layers size={14} style={{ color: "var(--v2-primary, #6366f1)" }} />
+            <span style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--v2-text, #1e293b)" }}>
+              Industry Modules
+            </span>
           </div>
-        ) : (
-          modulesByFilter.map((mod) => {
-            const manifest = MODULE_MANIFESTS[mod];
-            const isActive = activeModule === mod;
-            const isAccessible = availableSet.has(mod);
-            const isLocked = !isAccessible;
+          <span style={{
+            borderRadius: "9999px",
+            background: "rgba(99, 102, 241, 0.12)",
+            color: "var(--v2-primary, #6366f1)",
+            padding: "0.125rem 0.5rem",
+            fontSize: "9px",
+            fontWeight: 900,
+          }}>
+            {allKeys.length} Active
+          </span>
+        </div>
+
+        {/* Live Search Input */}
+        <div style={{ position: "relative", width: "100%" }}>
+          <Search size={13} style={{ position: "absolute", left: "0.625rem", top: "50%", transform: "translateY(-50%)", color: "var(--v2-text-muted, #94a3b8)", pointerEvents: "none" }} />
+          <input
+            ref={searchRef}
+            type="text"
+            value={moduleSearchText}
+            onChange={(e) => setModuleSearchText(e.target.value)}
+            placeholder="Search 30+ industry verticals..."
+            style={{
+              width: "100%",
+              paddingLeft: "2rem",
+              paddingRight: moduleSearchText ? "1.75rem" : "0.75rem",
+              paddingTop: "0.375rem",
+              paddingBottom: "0.375rem",
+              fontSize: "0.75rem",
+              borderRadius: "0.75rem",
+              border: "1px solid var(--v2-border, #e2e8f0)",
+              background: "var(--v2-bg, #ffffff)",
+              color: "var(--v2-text, #1e293b)",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          {moduleSearchText && (
+            <button
+              onClick={() => setModuleSearchText("")}
+              style={{ position: "absolute", right: "0.5rem", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--v2-text-muted, #94a3b8)", cursor: "pointer", padding: 0 }}
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Sort Order Selector */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", color: "var(--v2-text-muted, #94a3b8)", fontWeight: 700 }}>
+            <ArrowUpDown size={11} />
+            <span>Order:</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+            {(["SUBSCRIBED", "ALPHABETICAL", "POPULAR"] as IndustrySortOption[]).map((opt) => {
+              const active = moduleSortOption === opt;
+              const labels: Record<IndustrySortOption, string> = {
+                SUBSCRIBED: "Subscribed",
+                ALPHABETICAL: "A - Z",
+                POPULAR: "Popular",
+              };
+              return (
+                <button
+                  key={opt}
+                  onClick={() => setModuleSortOption(opt)}
+                  style={{
+                    padding: "0.15rem 0.5rem",
+                    borderRadius: "0.375rem",
+                    fontWeight: 800,
+                    fontSize: "10px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: active ? "var(--v2-primary, #6366f1)" : "var(--v2-bg-tertiary, rgba(0,0,0,0.06))",
+                    color: active ? "#ffffff" : "var(--v2-text-muted, #64748b)",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {labels[opt]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sector Filter Pills */}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", overflowX: "auto", paddingBottom: "2px", scrollbarWidth: "none" }}>
+          {INDUSTRY_SECTORS.map((sec) => {
+            const active = selectedSector === sec.id;
             return (
               <button
-                key={mod}
-                className={`module-card${isActive ? " active" : ""}${isLocked ? " locked" : ""}`}
-                onClick={() => handleSelect(mod)}
-                title={isLocked ? `${manifest.name} — Upgrade to access` : manifest.name}
-                disabled={isLocked}
-                type="button"
+                key={sec.id}
+                onClick={() => setSelectedSector(sec.id)}
+                style={{
+                  padding: "0.15rem 0.5rem",
+                  borderRadius: "0.5rem",
+                  fontSize: "9px",
+                  fontWeight: 800,
+                  whiteSpace: "nowrap",
+                  border: "none",
+                  cursor: "pointer",
+                  background: active ? "var(--v2-text, #0f172a)" : "var(--v2-bg-tertiary, rgba(0,0,0,0.05))",
+                  color: active ? "var(--v2-bg, #ffffff)" : "var(--v2-text-muted, #64748b)",
+                  transition: "all 0.15s ease",
+                  flexShrink: 0,
+                }}
               >
-                <div className="module-card-icon">
-                  <LucideIcon name={manifest.icon} size={16} />
-                </div>
-                <div className="module-card-info">
-                  <div className="module-card-name">{manifest.name}</div>
-                  <div className="module-card-sector">{manifest.sector}</div>
-                </div>
-                {isLocked ? (
-                  <span className="module-card-badge locked-badge">PRO</span>
-                ) : manifest.requiresSubscription ? (
-                  <span className="module-card-badge">✓</span>
-                ) : null}
-                {isActive && (
-                  <span className="module-card-check">
-                    <Check size={9} />
+                {sec.shortLabel}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Scrollable Modules List */}
+      <div style={{ overflowY: "auto", flex: 1, padding: "0.375rem", display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+        {filteredList.length === 0 ? (
+          <div style={{ padding: "1.5rem 1rem", textAlign: "center", color: "var(--v2-text-muted, #94a3b8)", fontSize: "0.75rem" }}>
+            <SlidersHorizontal size={20} style={{ margin: "0 auto 0.5rem auto", opacity: 0.5 }} />
+            <p style={{ fontWeight: 600, margin: 0 }}>No modules match your filter</p>
+            <button
+              onClick={() => {
+                setModuleSearchText("");
+                setSelectedSector("ALL");
+              }}
+              style={{ marginTop: "0.5rem", fontSize: "10px", fontWeight: 700, color: "var(--v2-primary, #6366f1)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+            >
+              Clear Search & Filters
+            </button>
+          </div>
+        ) : (
+          filteredList.map((modKey) => {
+            const isActive = activeModule === modKey;
+            const shortName = getShortModuleName(MODULE_MANIFESTS[modKey]?.name || modKey);
+            const sectorId = MODULE_SECTOR_MAP[modKey] || "TRADES";
+            const sectorDef = INDUSTRY_SECTORS.find((s) => s.id === sectorId);
+
+            return (
+              <button
+                key={modKey}
+                onClick={() => {
+                  setActiveModule(modKey);
+                  onClose();
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  textAlign: "left",
+                  borderRadius: "0.65rem",
+                  padding: "0.45rem 0.65rem",
+                  fontSize: "0.75rem",
+                  border: "none",
+                  cursor: "pointer",
+                  background: isActive ? "rgba(99, 102, 241, 0.12)" : "transparent",
+                  color: isActive ? "var(--v2-primary, #6366f1)" : "var(--v2-text, #1e293b)",
+                  fontWeight: isActive ? 700 : 500,
+                  transition: "background 0.15s ease",
+                  boxSizing: "border-box",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.background = "var(--v2-bg-secondary, #f1f5f9)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.background = "transparent";
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0, flex: 1 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.75rem" }}>
+                    {shortName}
                   </span>
+                  {selectedSector === "ALL" && (
+                    <span style={{
+                      fontSize: "8px",
+                      fontWeight: 800,
+                      padding: "0.1rem 0.35rem",
+                      borderRadius: "0.25rem",
+                      background: "var(--v2-bg-tertiary, rgba(0,0,0,0.06))",
+                      color: "var(--v2-text-muted, #94a3b8)",
+                      flexShrink: 0,
+                    }}>
+                      {sectorDef?.shortLabel}
+                    </span>
+                  )}
+                </div>
+                {isActive && (
+                  <span style={{ height: "6px", width: "6px", borderRadius: "9999px", background: "var(--v2-primary, #6366f1)", flexShrink: 0, marginLeft: "0.5rem" }} />
                 )}
               </button>
             );
@@ -308,8 +474,8 @@ const SidebarAccordion: React.FC<{
         type="button"
         aria-expanded={expanded}
       >
-        <span className="sidebar-item-icon">
-          <LucideIcon name={iconName || "ChevronRight"} size={14} />
+        <span className="sidebar-item-icon" style={{ "--icon-chip-color": getSidebarIconColor(name), "--icon-chip-bg": `${getSidebarIconColor(name)}1a`, "--icon-chip-bg-hover": `${getSidebarIconColor(name)}2e` } as React.CSSProperties}>
+          <LucideIcon name={iconName || "ChevronRight"} size={20} />
         </span>
         <span className="sidebar-item-label">{translateNavTab(name, t)}</span>
         <ChevronRight size={13} className="sidebar-chevron" aria-hidden="true" />
@@ -335,32 +501,33 @@ const SidebarAccordion: React.FC<{
 // Unknown tabs gracefully fall back to "ChevronRight".
 const SIDEBAR_ICON_MAP: Record<string, string> = {
   // ── Universal ────────────────────────────────────────────────────────────
-  "Dashboard":               "LayoutDashboard",
+  "Dashboard":               "BarChart2",
   "Settings":                "Settings2",
-  "Employees":               "BadgeCheck",
-  "Reports":                 "BarChart3",
+  "Employees":               "Users",
+  "Reports":                 "LineChart",
 
   // ── POS & Sales ──────────────────────────────────────────────────────────
-  "POS":                     "ScanBarcode",
-  "Point of Sale":           "ScanBarcode",
-  "New Sale":                "ScanBarcode",
+  "POS":                     "ShoppingCart",
+  "Point of Sale":           "ShoppingCart",
+  "New Sale":                "ShoppingCart",
   "Sales History":           "BarChart3",
   "Returns":                 "RotateCcw",
 
   // ── Cash Drawer ──────────────────────────────────────────────────────────
-  "Cash Drawer":             "Landmark",
+  "Cash Drawer":             "Wallet",
   "Shift & Active Register": "Clock",
   "Cash Movement Ledger":    "Banknote",
+  "Denomination Calculator": "Coins",
   "Reconciliation & Variances": "BarChart2",
   "Safe & Bank Deposits":    "Landmark",
   "No Sale & Event Logs":    "FileText",
   "15 Financial Reports":    "BarChart3",
   "Security & RBAC Rules":   "Shield",
-  "AI Cash Advisor":         "BrainCircuit",
+  "AI Cash Advisor":         "Sparkles",
 
   // ── Inventory & Stock ────────────────────────────────────────────────────
-  "Inventory":               "Boxes",
-  "Inventory Overview":      "Boxes",
+  "Inventory":               "Package",
+  "Inventory Overview":      "Package",
   "Products":                "Package2",
   "Categories & Brands":     "Tag",
   "Stock Adjustment":        "ClipboardList",
@@ -370,6 +537,7 @@ const SIDEBAR_ICON_MAP: Record<string, string> = {
   "Product Bundles & Kits":  "Layers",
   "Stock Count":             "ClipboardList",
   "Ledger Drilldown":        "TrendingUp",
+  "Wastage & Spillage":      "Trash2",
   "Inventory Reports":       "BarChart3",
   "Ingredients":             "Sprout",
 
@@ -383,15 +551,15 @@ const SIDEBAR_ICON_MAP: Record<string, string> = {
   "Receipt Archive":         "Layers",
 
   // ── Customers / CRM ──────────────────────────────────────────────────────
-  "Customers":               "ContactRound",
-  "Members":                 "ContactRound",
-  "Clients":                 "ContactRound",
+  "Customers":               "Users",
+  "Members":                 "Users",
+  "Clients":                 "Users",
   "Patients":                "ContactRound",
   "Tenants":                 "Building2",
-  "Debtors":                 "ContactRound",
+  "Debtors":                 "Users",
 
   // ── Purchasing / Procurement ─────────────────────────────────────────────
-  "Purchasing":              "PackageSearch",
+  "Purchasing":              "ShoppingCart",
   "Suppliers":               "Truck",
   "Purchase Orders":         "ClipboardList",
   "Goods Received":          "Package2",
@@ -411,8 +579,8 @@ const SIDEBAR_ICON_MAP: Record<string, string> = {
   "Transactions":            "BarChart2",
 
   // ── AI Engine ────────────────────────────────────────────────────────────
-  "AI Insights Engine":      "BrainCircuit",
-  "AI Insights":             "BrainCircuit",
+  "AI Insights Engine":      "Sparkles",
+  "AI Insights":             "Sparkles",
   "Business Health Score":   "Activity",
   "Sales Intelligence":      "TrendingUp",
   "Inventory Intelligence":  "Boxes",
@@ -588,18 +756,18 @@ function getSidebarIcon(name: string): string {
   if (SIDEBAR_ICON_MAP[normalised]) return SIDEBAR_ICON_MAP[normalised];
   // Keyword fallback for dynamic/future tabs
   const n = name.toLowerCase();
-  if (n.includes("dashboard"))                         return "LayoutDashboard";
-  if (n.includes("pos") || n.includes("checkout"))    return "ScanBarcode";
-  if (n.includes("cash") || n.includes("drawer"))     return "Landmark";
-  if (n.includes("inventory") || n.includes("stock")) return "Boxes";
+  if (n.includes("dashboard"))                         return "BarChart2";
+  if (n.includes("pos") || n.includes("checkout"))    return "ShoppingCart";
+  if (n.includes("cash") || n.includes("drawer"))     return "Wallet";
+  if (n.includes("inventory") || n.includes("stock")) return "Package";
   if (n.includes("receipt") || n.includes("invoice")) return "Receipt";
-  if (n.includes("customer") || n.includes("client")) return "ContactRound";
-  if (n.includes("employee") || n.includes("staff"))  return "BadgeCheck";
-  if (n.includes("purchase") || n.includes("supplier")) return "PackageSearch";
+  if (n.includes("customer") || n.includes("client")) return "Users";
+  if (n.includes("employee") || n.includes("staff"))  return "Users";
+  if (n.includes("purchase") || n.includes("supplier")) return "ShoppingCart";
   if (n.includes("expense"))                           return "Wallet";
-  if (n.includes("report") || n.includes("analytics")) return "BarChart3";
+  if (n.includes("report") || n.includes("analytics")) return "LineChart";
   if (n.includes("setting") || n.includes("config"))  return "Settings2";
-  if (n.includes("ai") || n.includes("insight"))      return "BrainCircuit";
+  if (n.includes("ai") || n.includes("insight"))      return "Sparkles";
   if (n.includes("vehicle") || n.includes("fleet"))   return "Truck";
   if (n.includes("driver"))                            return "Car";
   if (n.includes("fuel"))                              return "Fuel";
@@ -617,6 +785,99 @@ function getSidebarIcon(name: string): string {
   return "ChevronRight";
 }
 
+
+// ─── Sidebar Icon Colour Map ───────────────────────────────────────────────────
+// Each key maps an exact tab/section name → a CSS colour token (or hex).
+// These colours intentionally match the legacy KwakoPOS icon palette.
+const SIDEBAR_ICON_COLOR_MAP: Record<string, string> = {
+  // ── Universal ──────────────────────────────────────────────────────────────
+  "Dashboard":                  "#2563eb", // vivid blue
+  "Settings":                   "#64748b", // slate-grey
+  "Employees":                  "#7c3aed", // purple
+  "Reports":                    "#0891b2", // cyan
+
+  // ── POS & Sales ────────────────────────────────────────────────────────────
+  "POS":                        "#16a34a", // green
+  "Point of Sale":              "#16a34a",
+  "New Sale":                   "#16a34a",
+  "Sales History":              "#0891b2",
+
+  // ── Cash Drawer ────────────────────────────────────────────────────────────
+  "Cash Drawer":                "#059669", // emerald
+  "Shift & Active Register":    "#059669",
+  "Cash Movement Ledger":       "#b45309",
+  "Reconciliation & Variances": "#2563eb",
+  "Safe & Bank Deposits":       "#059669",
+
+  // ── Inventory ──────────────────────────────────────────────────────────────
+  "Inventory":                  "#d97706", // amber-orange
+  "Inventory Overview":         "#d97706",
+  "Products":                   "#d97706",
+  "Stock Adjustment":           "#dc2626",
+  "Stock Transfer":             "#7c3aed",
+  "Stock Alerts":               "#dc2626",
+
+  // ── Receipts ───────────────────────────────────────────────────────────────
+  "Receipts":                   "#2563eb",
+  "Receipt History":            "#2563eb",
+
+  // ── Customers / CRM ────────────────────────────────────────────────────────
+  "Customers":                  "#db2777", // pink
+  "Members":                    "#db2777",
+  "Clients":                    "#db2777",
+  "Patients":                   "#db2777",
+
+  // ── Purchasing ─────────────────────────────────────────────────────────────
+  "Purchasing":                 "#7c3aed", // purple
+  "Suppliers":                  "#7c3aed",
+  "Purchase Orders":            "#7c3aed",
+
+  // ── Expenses ───────────────────────────────────────────────────────────────
+  "Expenses":                   "#f59e0b", // yellow-amber
+
+  // ── Finance ────────────────────────────────────────────────────────────────
+  "Finance":                    "#059669",
+  "Loans":                      "#059669",
+
+  // ── AI Engine ──────────────────────────────────────────────────────────────
+  "AI Insights Engine":         "#a855f7", // violet
+  "AI Insights":                "#a855f7",
+  "Business Health Score":      "#a855f7",
+
+  // ── Reports ────────────────────────────────────────────────────────────────
+  "Sales":                      "#0891b2",
+  "Profit":                     "#059669",
+  "Tax":                        "#64748b",
+
+  // ── Fleet & Transport ──────────────────────────────────────────────────────
+  "Vehicles":                   "#2563eb",
+  "Fleet":                      "#2563eb",
+  "Drivers":                    "#16a34a",
+  "Fuel Management":            "#f59e0b",
+  "Maintenance":                "#dc2626",
+};
+
+/** Return the icon accent colour for a sidebar tab name */
+function getSidebarIconColor(name: string): string {
+  if (SIDEBAR_ICON_COLOR_MAP[name]) return SIDEBAR_ICON_COLOR_MAP[name];
+  const n = name.toLowerCase();
+  if (n.includes("dashboard"))                         return "#2563eb";
+  if (n.includes("pos") || n.includes("checkout"))    return "#16a34a";
+  if (n.includes("cash") || n.includes("drawer"))     return "#059669";
+  if (n.includes("inventory") || n.includes("stock")) return "#d97706";
+  if (n.includes("receipt") || n.includes("invoice")) return "#2563eb";
+  if (n.includes("customer") || n.includes("client")) return "#db2777";
+  if (n.includes("employee") || n.includes("staff"))  return "#7c3aed";
+  if (n.includes("purchase") || n.includes("supplier")) return "#7c3aed";
+  if (n.includes("expense"))                           return "#f59e0b";
+  if (n.includes("report") || n.includes("analytics")) return "#0891b2";
+  if (n.includes("setting") || n.includes("config"))  return "#64748b";
+  if (n.includes("ai") || n.includes("insight"))      return "#a855f7";
+  if (n.includes("vehicle") || n.includes("fleet"))   return "#2563eb";
+  if (n.includes("fuel"))                              return "#f59e0b";
+  if (n.includes("maintenance"))                       return "#dc2626";
+  return "#6366f1"; // indigo default
+}
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
@@ -665,7 +926,7 @@ export const Sidebar: React.FC<{
   return (
     <div className="sidebar">
       {isMobile && (
-        <div className="v2-flex v2-items-center v2-justify-between" style={{ padding: ".75rem .55rem", borderBottom: "1px solid var(--surface-border)" }}>
+        <div className="v2-flex v2-items-center v2-justify-between" style={{ padding: "0.75rem", borderBottom: "1px solid var(--surface-border)" }}>
           <span className="v2-text-sm v2-font-black v2-text-accent">
             {isSuperAdminUser && !impersonatedTenant ? "Platform Control Tower" : manifest.name}
           </span>
@@ -773,6 +1034,21 @@ export const Sidebar: React.FC<{
               <span className="sidebar-item-label">Rollback Auth Center</span>
             </button>
 
+            <button
+              className={`sidebar-item${currentPath === "/super-admin/certification" || activeTab === "KPCP Certification" ? " active" : ""}`}
+              onClick={() => {
+                onNavigate("/super-admin/certification");
+                setActiveTab("KPCP Certification");
+                if (isMobile) onCloseMobile?.();
+              }}
+              type="button"
+            >
+              <span className="sidebar-item-icon" style={{ color: "#38bdf8" }}>
+                <Sparkles size={14} />
+              </span>
+              <span className="sidebar-item-label">KPCP Certification Tower</span>
+            </button>
+
             {/* Tenant Isolation notice & explicit inspection launchpad */}
             <div style={{ marginTop: "1.2rem", padding: "0.85rem", borderRadius: "8px", background: "rgba(245, 158, 11, 0.07)", border: "1px dashed rgba(245, 158, 11, 0.3)" }}>
               <div style={{ fontSize: "0.7rem", fontWeight: 800, color: "var(--warning)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.25rem" }}>
@@ -787,7 +1063,7 @@ export const Sidebar: React.FC<{
                   width: "100%",
                   fontSize: "0.74rem",
                   fontWeight: 700,
-                  background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                  background: "#f59e0b",
                   color: "#0f172a",
                   display: "inline-flex",
                   alignItems: "center",
@@ -852,11 +1128,6 @@ export const Sidebar: React.FC<{
         {/* TENANT STORE MODULE TABS (Visible to Tenant Users, OR Super Admin during active tenant inspection) */}
         {(!isSuperAdminUser || Boolean(impersonatedTenant)) && (
           <>
-            <div className="sidebar-section-label">
-              <LucideIcon name={manifest.icon} size={11} />
-              {isSuperAdminUser ? `Inspecting Store (${activeModule})` : activeModule}
-            </div>
-
             {sidebarItems.map((item, i) => {
               if (typeof item === "string") {
                 const isActive = activeTab === item;
@@ -867,8 +1138,8 @@ export const Sidebar: React.FC<{
                     onClick={() => handleTabSelect(item)}
                     type="button"
                   >
-                    <span className="sidebar-item-icon">
-                      <LucideIcon name={getSidebarIcon(item)} size={14} />
+                    <span className="sidebar-item-icon" style={{ "--icon-chip-color": getSidebarIconColor(item), "--icon-chip-bg": `${getSidebarIconColor(item)}1a`, "--icon-chip-bg-hover": `${getSidebarIconColor(item)}2e` } as React.CSSProperties}>
+                      <LucideIcon name={getSidebarIcon(item)} size={20} />
                     </span>
                     <span className="sidebar-item-label">{translateNavTab(item, t)}</span>
                   </button>
@@ -1659,7 +1930,7 @@ export const TopBar: React.FC<{
     if (!curr[name]) map[name](true);
   };
 
-  const branchDisplay = currentBranchName || currentBranchId || "Branch";
+  const branchDisplay = impersonatedTenant?.branchName || currentBranchName || currentBranchId || "Main HQ";
   const tenantDisplay = currentTenantName || currentTenantId || "Tenant";
 
   return (
@@ -1681,23 +1952,76 @@ export const TopBar: React.FC<{
           <AlignLeft size={18} />
         </button>
 
-        {/* Brand */}
-        <a
-          href="/"
-          className="topbar-brand"
-          onClick={(e) => {
-            e.preventDefault();
-            if (isSuperAdminUser && !impersonatedTenant) {
-              onNavigate("/super-admin");
-            } else {
-              onNavigate("/");
-            }
-          }}
-          aria-label="KwakoPos home"
-        >
-          <div className="topbar-brand-logo" aria-hidden="true">K</div>
-          <span>KwakoPos</span>
-        </a>
+        {/* Workspace / Tenant Info Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", minWidth: 0 }}>
+          <div
+            style={{
+              width: "2.25rem",
+              height: "2.25rem",
+              borderRadius: "0.75rem",
+              overflow: "hidden",
+              border: "1px solid var(--v2-border, #e2e8f0)",
+              background: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            }}
+          >
+            <img
+              src="/kwakopos-logo.png"
+              alt={tenantDisplay}
+              style={{ width: "100%", height: "100%", objectFit: "contain", padding: "2px" }}
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = "none";
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, lineHeight: 1.2 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "0.875rem",
+                fontWeight: 800,
+                color: "var(--v2-text, #0f172a)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "220px",
+              }}
+            >
+              {isSuperAdminUser && !impersonatedTenant
+                ? "Platform Control Tower"
+                : (getShortModuleName(manifest.name) || tenantDisplay)}
+            </h2>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "0.68rem",
+                fontWeight: 600,
+                color: "var(--v2-text-muted, #94a3b8)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "240px",
+              }}
+              className="topbar-subtitle"
+            >
+              {isSuperAdminUser && !impersonatedTenant ? (
+                "Global System Administration"
+              ) : (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", maxWidth: "100%" }}>
+                  <MapPin size={11} style={{ flexShrink: 0, color: "var(--v2-primary, #3b82f6)" }} aria-hidden="true" />
+                  <span style={{ fontWeight: 700, color: "var(--v2-text, #0f172a)" }}>{branchDisplay}</span>
+                  <span style={{ opacity: 0.5 }}>•</span>
+                  <span>{(user?.role || "TENANT OWNER").replace(/_/g, " ")}</span>
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
 
         {isSuperAdminUser && !impersonatedTenant && (
           <button
@@ -1720,7 +2044,7 @@ export const TopBar: React.FC<{
             title="Super Admin Platform Control Tower"
           >
             <Shield size={12} />
-            <span>PLATFORM CONTROL TOWER</span>
+            <span>PLATFORM</span>
           </button>
         )}
 
@@ -1745,37 +2069,6 @@ export const TopBar: React.FC<{
           </div>
         )}
 
-        <div className="topbar-divider" />
-
-        {/* Module selector: Only show store modules if not Super Admin OR if Super Admin is in Impersonation */}
-        {(!isSuperAdminUser || impersonatedTenant) ? (
-          <div style={{ position: "relative" }}>
-            <button
-              id="topbar-module-selector"
-              className="module-selector-btn"
-              onClick={() => togglePanel("module")}
-              aria-haspopup="true"
-              aria-expanded={showModule}
-              type="button"
-            >
-              <span className="module-icon">
-                <LucideIcon name={manifest.icon} size={15} />
-              </span>
-              <span className="module-name">{manifest.name}</span>
-              <ChevronDown size={13} className="chevron" aria-hidden="true" />
-            </button>
-            {showModule && (
-              <ModuleSelectorPanel onClose={() => setShowModule(false)} />
-            )}
-          </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontSize: "0.78rem", color: "var(--v2-text-secondary, #94a3b8)", fontWeight: 600 }}>
-              Platform Control Plane
-            </span>
-          </div>
-        )}
-
         {/* Search */}
         <button
           className="topbar-search-btn"
@@ -1790,6 +2083,29 @@ export const TopBar: React.FC<{
 
         {/* Right actions */}
         <div className="topbar-right">
+          {/* Industry Module Selector dropdown (Placed directly before branch context) */}
+          {(!isSuperAdminUser || impersonatedTenant) && (
+            <div style={{ position: "relative" }} id="topbar-industry-module-container">
+              <button
+                id="topbar-module-selector"
+                className="module-selector-btn"
+                onClick={() => togglePanel("module")}
+                aria-haspopup="true"
+                aria-expanded={showModule}
+                type="button"
+                title="Switch Industry Module"
+              >
+                <Layers size={14} style={{ color: "var(--v2-primary, #6366f1)" }} />
+                <span className="module-name v2-truncate" style={{ maxWidth: 125, fontWeight: 700 }}>
+                  {getShortModuleName(activeModule)}
+                </span>
+                <ChevronDown size={12} className="chevron" aria-hidden="true" />
+              </button>
+              {showModule && (
+                <ModuleSelectorPanel onClose={() => setShowModule(false)} />
+              )}
+            </div>
+          )}
           {/* Tenant / Branch context or Inspect / Exit Impersonation */}
           {isSuperAdminUser && !impersonatedTenant ? (
             <button
@@ -2034,10 +2350,13 @@ export const TopBar: React.FC<{
         </div>
       </header>
 
-      {/* Mobile CSS override to show the menu button */}
+      {/* Mobile CSS override to show the menu button and handle responsive subtitle */}
       <style>{`
         @media (max-width: 768px) {
           #topbar-mobile-menu-btn { display: flex !important; }
+        }
+        @media (max-width: 640px) {
+          .topbar-subtitle { display: none !important; }
         }
       `}</style>
     </>
@@ -2196,7 +2515,12 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
           onClick={() => setIsMobileSidebarOpen(false)}
           aria-hidden="true"
         />
-        <div className={`sidebar-mobile-drawer${isMobileSidebarOpen ? " open" : ""}`} role="navigation" aria-label="Mobile navigation">
+        <div
+          className={`sidebar-mobile-drawer${isMobileSidebarOpen ? " open" : ""}`}
+          role="navigation"
+          aria-label="Mobile navigation"
+          aria-hidden={!isMobileSidebarOpen}
+        >
           <Sidebar
             currentPath={currentPath}
             onNavigate={onNavigate}
@@ -2212,7 +2536,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
             <div
               className="impersonation-banner"
               style={{
-                background: "linear-gradient(90deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.08))",
+                background: "rgba(239, 68, 68, 0.12)",
                 border: "1px solid rgba(239, 68, 68, 0.4)",
                 borderRadius: "8px",
                 padding: "0.6rem 1rem",
@@ -2284,6 +2608,9 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
           onNavigate("/dashboard");
         }}
       />
+
+      <WindowManagerContainer />
+      <SyncTelemetryHUD />
 
       <AppVersionFooter
         appVersion={release.appVersion}

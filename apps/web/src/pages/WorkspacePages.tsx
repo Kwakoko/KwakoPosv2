@@ -54,6 +54,15 @@ export { PosPage } from "./PosPage.js";
 export { InventoryPage } from "./InventoryPage.js";
 export { DashboardPage } from "./DashboardPage.js";
 export { ExpensesPage } from "./ExpensesPage.js";
+export { VerticalCommandCenterPage } from "./VerticalCommandCenterPage.js";
+export {
+  Skeleton,
+  SkeletonKPI,
+  SkeletonTable,
+  SkeletonTableRow,
+  SkeletonCard,
+  SkeletonDashboard,
+} from "../components/UI/Skeleton.js";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────

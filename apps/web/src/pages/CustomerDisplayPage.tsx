@@ -108,7 +108,7 @@ export const CustomerDisplayPage: React.FC = () => {
         minHeight: "100vh",
         backgroundColor: "#0b1120",
         color: "#f8fafc",
-        fontFamily: "var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif)",
+        fontFamily: "var(--font-sans, 'Inter', sans-serif)",
         display: "flex",
         flexDirection: "column",
         userSelect: "none",

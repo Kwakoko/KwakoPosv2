@@ -24,8 +24,9 @@ import {
 import { apiFetch, changeSuperAdminPassword } from "../services/apiClient.js";
 import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
+import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";
 
-type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness";
+type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness" | "certification";
 const money = (v: number) => `Tsh ${(v / 1_000_000).toFixed(1)}M`;
 
 interface PlatformOverview {
@@ -36,8 +37,14 @@ interface PlatformOverview {
   totalUsers?: number;
 }
 
-export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNavigate }) => {
-  const [activeTab, setActiveTab] = useState<AdminTab>("tenants");
+export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; initialTab?: AdminTab }> = ({ onNavigate, initialTab }) => {
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => {
+    if (initialTab) return initialTab;
+    if (typeof window !== "undefined" && window.location.pathname.includes("certification")) {
+      return "certification";
+    }
+    return "tenants";
+  });
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState<boolean | null>(null);
@@ -211,6 +218,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
           { id: "security", label: "Security & MFA Controls", icon: Lock },
           { id: "sql-studio", label: "SQL Studio & DB", icon: Terminal },
           { id: "cleanliness", label: "Production Cleanliness", icon: Sparkles },
+          { id: "certification", label: "KPCP Platform Certification", icon: Shield },
         ].map((t) => (
           <button
             key={t.id}
@@ -314,7 +322,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
         </div>
       )}
 
-      {activeTab !== "tenants" && activeTab !== "security" && activeTab !== "sql-studio" && (
+      {activeTab !== "tenants" && activeTab !== "security" && activeTab !== "sql-studio" && activeTab !== "cleanliness" && activeTab !== "certification" && (
         <div className="v2-card" style={{ padding: "1.2rem" }}>
           <div className="v2-flex v2-items-center v2-gap-2">
             <Eye size={16} />
@@ -326,6 +334,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void }> =
 
       {activeTab === "sql-studio" && <SuperAdminSqlStudio />}
       {activeTab === "cleanliness" && <SuperAdminCleanlinessStudio />}
+      {activeTab === "certification" && <SuperAdminCertificationStudio />}
 
       {/* Rotate Password Modal */}
       {showRotateModal && (
