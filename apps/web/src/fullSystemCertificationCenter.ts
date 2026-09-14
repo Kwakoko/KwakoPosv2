@@ -1,5 +1,5 @@
 // ============================================================
-// Phase 45 — Full KwakoPos Operating System Certification Tower UI (KFOS-CERT v1.0.0)
+// Phase 45 — Full Kwakoko Business Operating System Certification Tower UI (KFOS-CERT v1.0.0)
 // ============================================================
 
 export interface FullSystemCertificationUiProps {

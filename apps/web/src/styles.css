@@ -95,6 +95,18 @@
   --muted:          #94a3b8;
   --muted-light:    #64748b;
   --placeholder:    #475569;
+  /* Kwakoko Visual Identity v1.0 */
+  --kwakoko-forest: #0B5D4A;
+  --kwakoko-deep: #071F1A;
+  --koko-gold: #D4A72C;
+  --koko-sand: #F3EBDD;
+  --kwakoko-cloud: #F7FAF8;
+  --kwakoko-ink: #10231D;
+  --kwakoko-slate: #5B6B63;
+  --kwakoko-signal-blue: #2F80ED;
+  --kwakoko-success: #138A63;
+  --kwakoko-warning: #C88719;
+  --kwakoko-danger: #C94A4A;
 
   --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   --gradient-accent:  linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
@@ -1097,6 +1109,7 @@ html[data-theme='dark'] .sidebar-subitem:hover,
 }
 .sidebar-mobile-overlay.open { display: block; }
 .sidebar-mobile-drawer {
+  display: none;
   position: fixed;
   top: 0;
   left: 0;
@@ -1104,13 +1117,20 @@ html[data-theme='dark'] .sidebar-subitem:hover,
   width: var(--sidebar-width);
   background: var(--surface);
   z-index: 220;
-  display: flex;
   flex-direction: column;
   transform: translateX(-100%);
-  transition: transform var(--transition-spring);
+  transition: transform var(--transition-spring), visibility var(--transition-spring);
+  visibility: hidden;
+  pointer-events: none;
+  box-shadow: none;
+}
+.sidebar-mobile-drawer.open {
+  display: flex;
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
   box-shadow: var(--shadow-xl);
 }
-.sidebar-mobile-drawer.open { transform: translateX(0); }
 
 /* ── Main Content Area ───────────────────────────────────────────────────── */
 .main-content {
@@ -1894,6 +1914,7 @@ th { background: var(--bg); color: var(--muted); font-size: .7rem; text-transfor
 
 @media (max-width: 768px) {
   .sidebar { display: none; }
+  .sidebar-mobile-drawer { display: flex; }
   .main-content { padding: 1rem; padding-bottom: calc(var(--bottom-nav-height) + 1rem); }
   .bottom-nav { display: flex; }
   .topbar-search-btn { display: none; }
@@ -2343,6 +2364,25 @@ html[data-theme='dark'] .app-version-footer,
   will-change: transform;
 }
 
+/* ── Kwakoko Design System accessibility baseline ─────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
-
-
+/* Canonical semantic aliases for component-level design-system usage. */
+:root {
+  --ds-brand-primary: var(--kwakoko-forest);
+  --ds-brand-deep: var(--kwakoko-deep);
+  --ds-brand-accent: var(--koko-gold);
+  --ds-feedback-info: var(--kwakoko-signal-blue);
+  --ds-feedback-success: var(--kwakoko-success);
+  --ds-feedback-warning: var(--kwakoko-warning);
+  --ds-feedback-danger: var(--kwakoko-danger);
+  --ds-focus-ring: var(--kwakoko-signal-blue);
+  --ds-touch-target-min: 44px;
+}

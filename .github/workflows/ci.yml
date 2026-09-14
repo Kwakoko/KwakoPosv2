@@ -41,6 +41,10 @@ jobs:
         run: npm run build
       - name: Unit Tests
         run: npm run test:unit
+      - name: Brand Architecture Verification
+        run: npm run brand:verify
+      - name: Experience Integrity Verification
+        run: npm run experience:verify
       - name: Integration Tests
         run: npm run test:integration
       - name: Sync Convergence Tests

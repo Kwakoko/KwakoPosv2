@@ -317,7 +317,7 @@ describe("Legal Governance Repository & Document Seeds", () => {
     const swDoc = repo.getDocumentBySlug("terms-of-service", "sw");
     expect(swDoc).not.toBeNull();
     expect(swDoc?.activeVersion.language).toBe("sw");
-    expect(swDoc?.activeVersion.title).toContain("Masharti Makuu ya Huduma ya KwakoPos");
+    expect(swDoc?.activeVersion.title).toContain("Masharti Makuu ya Huduma ya Kwakoko Business Operating System");
   });
 
   it("validates that all seeded documents have tamper-verified SHA-256 hashes", () => {

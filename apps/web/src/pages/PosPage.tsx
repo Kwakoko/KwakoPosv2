@@ -1484,6 +1484,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               {categories.map((cat) => (
                 <button
                   key={cat}
+                  aria-label={cat}
                   onClick={() => setSelectedCategory(cat)}
                   type="button"
                   className={`v2-btn v2-btn-sm ${selectedCategory === cat ? "v2-btn-primary" : "v2-btn-ghost"}`}
@@ -1678,6 +1679,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                       <Plus size={11} />
                     </button>
                     <button
+                      aria-label="Remove item from cart"
                       className="v2-btn v2-btn-ghost v2-btn-sm"
                       style={{ color: "var(--danger)" }}
                       onClick={(e) => {
@@ -1798,6 +1800,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                 return (
                   <button
                     key={method}
+                    aria-label={labelMap[method] || method}
                     className={`v2-btn v2-btn-sm ${paymentMethod === method ? "v2-btn-primary" : "v2-btn-secondary"}`}
                     onClick={() => setPaymentMethod(method)}
                     type="button"

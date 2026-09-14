@@ -21,6 +21,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   BarChart2, TrendingUp, DollarSign, Download, RefreshCw,
   Filter, PieChart, Users, Package, Scale,
@@ -301,7 +302,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             <option value="all">All Branches</option>
             <option value="hq">HQ Main Branch</option>
           </select>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button">
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.ReportsPage.304.export-csv", "Export CSV", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.ReportsPage.304.export-csv">
             <Download size={13} /> Export CSV
           </button>
         </div>

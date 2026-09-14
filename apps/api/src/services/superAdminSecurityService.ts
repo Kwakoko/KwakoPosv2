@@ -321,7 +321,7 @@ export async function verifySuperAdminMfa(userId: string, code: string): Promise
 export function generateWebAuthnChallenge(userId: string): { challenge: string; rp: { name: string; id: string }; user: { id: string; name: string } } {
   return {
     challenge: randomBytes(32).toString("base64url"),
-    rp: { name: "KwakoPos Platform", id: "kwakopos.com" },
+    rp: { name: "Kwakoko Business Operating System", id: "kwakopos.com" },
     user: { id: userId, name: "admin@kwakoko.co.tz" },
   };
 }

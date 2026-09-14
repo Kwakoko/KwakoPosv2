@@ -30,6 +30,7 @@
     "superadmin:totp": "tsx scripts/security/show-totp.ts",
     "superadmin:qr": "tsx scripts/security/show-qr.ts",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
+    "brand:verify": "tsx scripts/release/verify-brand-integrity.ts",
     "version:check": "tsx scripts/release/version-drift-gate.ts",
     "version:sync": "tsx scripts/release/sync-workspace-versions.ts",
     "release:sync-versions": "tsx scripts/release/sync-workspace-versions.ts",
@@ -123,7 +124,13 @@
     "certify:phase46": "tsx scripts/certification/phase46-support-operations-certification.ts",
     "lint": "eslint . --ext .js,.cjs,.mjs",
     "dev:api": "npm run dev --workspace=apps/api",
-    "dev:web": "npm run dev --workspace=apps/web"
+    "dev:web": "npm run dev --workspace=apps/web",
+    "experience:verify": "tsx scripts/release/verify-experience-integrity.ts",
+    "design:verify": "tsx scripts/release/verify-design-system.ts",
+    "certify:ui-action-parity": "tsx scripts/certification/ui-action-parity-gate.ts",
+    "workflow:verify": "tsx scripts/release/verify-workflow-integrity.ts",
+    "certify:action-service": "tsx scripts/certification/action-service-parity-gate.ts",
+    "ai-governance:verify": "tsx scripts/release/verify-ai-agent-governance.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

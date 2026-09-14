@@ -4,15 +4,141 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
-    <meta name="description" content="KwakoPos 2.0 POS & Enterprise Business Operating System" />
+    <meta name="description" content="Kwakoko Business Operating System — Enterprise Multi-Tenant Platform with Offline-First KwakoPos Capability" />
     <link rel="manifest" href="/manifest.json" />
-    <title>KwakoPos 2.0</title>
+    <title>Kwakoko Business Operating System</title>
     <!-- Inter & JetBrains Mono Fonts (Adopted from Legacy - Self-Hosted & Precached) -->
     <link rel="preload" href="/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/inter-semibold.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #0f172a;
+        color: #f8fafc;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      #root {
+        width: 100%;
+        min-height: 100%;
+      }
+      .shell-premount-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        width: 100%;
+        padding: 2rem;
+        background: radial-gradient(ellipse at 50% 40%, #1e293b 0%, #0f172a 100%);
+        user-select: none;
+        text-align: center;
+      }
+      .shell-brand-icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+        box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.45), 0 0 0 1px rgba(56, 189, 248, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+        font-weight: 900;
+        font-size: 1.75rem;
+        letter-spacing: -0.05em;
+        margin-bottom: 1.25rem;
+        position: relative;
+        animation: shell-pulse 2.4s ease-in-out infinite;
+      }
+      .shell-brand-icon::after {
+        content: '';
+        position: absolute;
+        inset: -6px;
+        border-radius: 22px;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, transparent 70%);
+        z-index: -1;
+      }
+      .shell-title {
+        font-size: 1.25rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #f8fafc;
+        margin-bottom: 0.35rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        justify-content: center;
+      }
+      .shell-badge {
+        display: inline-block;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 2px 7px;
+        border-radius: 9999px;
+        background: rgba(56, 189, 248, 0.12);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+      }
+      .shell-subtitle {
+        font-size: 0.82rem;
+        color: #94a3b8;
+        margin-bottom: 1.75rem;
+        max-width: 340px;
+        line-height: 1.45;
+      }
+      .shell-progress-track {
+        width: 140px;
+        height: 3px;
+        background: rgba(51, 65, 85, 0.6);
+        border-radius: 9999px;
+        overflow: hidden;
+        position: relative;
+      }
+      .shell-progress-bar {
+        position: absolute;
+        top: 0;
+        left: -50%;
+        width: 50%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent 0%, #38bdf8 50%, #0284c7 100%);
+        border-radius: 9999px;
+        animation: shell-progress 1.5s ease-in-out infinite;
+      }
+      @keyframes shell-progress {
+        0% { left: -50%; width: 40%; }
+        50% { width: 60%; }
+        100% { left: 100%; width: 40%; }
+      }
+      @keyframes shell-pulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.45), 0 0 0 1px rgba(56, 189, 248, 0.3); }
+        50% { transform: scale(1.03); box-shadow: 0 14px 30px -4px rgba(2, 132, 199, 0.6), 0 0 0 2px rgba(56, 189, 248, 0.45); }
+      }
+    </style>
   </head>
   <body>
-    <div id="root">KwakoPos 2.0 System Shell</div>
+    <div id="root">
+      <div class="shell-premount-container" role="status" aria-label="Kwakoko Business Operating System Shell">
+        <div class="shell-brand-icon" aria-hidden="true">K</div>
+        <div class="shell-title">
+          <span>Kwakoko Business Operating System</span>
+        </div>
+        <div class="shell-subtitle">Enterprise Operating System • KwakoPos POS Subsystem</div>
+        <div class="shell-progress-track" aria-hidden="true">
+          <div class="shell-progress-bar"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

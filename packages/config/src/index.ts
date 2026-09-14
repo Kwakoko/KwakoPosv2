@@ -192,3 +192,11 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<str
 
 export * from "./semverEngine.js";
 export * from "./authoritativeRelease.js";
+export * from "./brandHierarchy.js";
+export * from "./kokoAmbassador.js";
+export * from "./brandPositioning.js";
+
+export * from './visualIdentity.js';
+export * from "./brandVoice.js";
+export * from "./experienceGovernance.js";
+export * from "./designSystem.js";

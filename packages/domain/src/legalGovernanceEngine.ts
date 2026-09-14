@@ -286,7 +286,7 @@ export class LegalGovernanceEngine {
     const lines: string[] = [
       "# Third-Party Open Source Software & Licenses Notice",
       "",
-      "KwakoPos / Kwakoko Business Operating System incorporates open source software components.",
+      "Kwakoko Business Operating System (incorporating the KwakoPos Point-of-Sale capability), developed by Kwakoko Technologies Ltd, incorporates open source software components.",
       "Below is the complete inventory of licenses, attributions, and copyright notices.",
       "",
       "---",

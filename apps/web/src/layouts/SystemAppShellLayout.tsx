@@ -319,6 +319,7 @@ const ModuleSelectorPanel: React.FC<{
               return (
                 <button
                   key={opt}
+                  aria-label={opt}
                   onClick={() => setModuleSortOption(opt)}
                   style={{
                     padding: "0.15rem 0.5rem",
@@ -346,6 +347,7 @@ const ModuleSelectorPanel: React.FC<{
             return (
               <button
                 key={sec.id}
+                aria-label={sec.label || sec.id}
                 onClick={() => setSelectedSector(sec.id)}
                 style={{
                   padding: "0.15rem 0.5rem",
@@ -484,6 +486,7 @@ const SidebarAccordion: React.FC<{
         {subItems.map((sub) => (
           <button
             key={sub}
+            aria-label={translateNavTab(sub, t)}
             className={`sidebar-subitem${activeTab === sub ? " active" : ""}`}
             onClick={() => onSelectTab(sub)}
             type="button"
@@ -1225,9 +1228,9 @@ export const AppVersionFooter: React.FC<{
   return (
     <footer className="app-version-footer">
       <div className="app-version-footer-inner">
-        <span className="app-version-brand">KwakoPos</span>
+        <span className="app-version-brand">Kwakoko BOS</span>
         <span className="footer-dot">·</span>
-        <span>{appVersion || "v2.12.5"}</span>
+        <span>KwakoPos {appVersion || "v2.12.5"}</span>
         {gitSha && (
           <>
             <span className="footer-dot">·</span>
@@ -1254,7 +1257,7 @@ export const AppVersionFooter: React.FC<{
         <span className="footer-dot">·</span>
         <button type="button" onClick={() => navigate("/legal")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, textDecoration: "underline" }}>Security</button>
         <span className="footer-dot">·</span>
-        <span className="v2-text-muted">{new Date().getFullYear()} ©</span>
+        <span className="v2-text-muted">© {new Date().getFullYear()} Kwakoko Technologies Ltd</span>
       </div>
     </footer>
   );

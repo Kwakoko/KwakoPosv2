@@ -34,6 +34,12 @@ export interface AuthoritativeReleaseIdentity {
   maximumSupportedClientVersion: string;
   certification: "PASS" | "FAIL" | "PENDING";
   compatibility: CompatibilityMetadata;
+  brand: {
+    parentBrand: string;
+    platform: string;
+    platformShort: string;
+    posCapability: string;
+  };
 }
 
 export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
@@ -66,6 +72,12 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
     recommendedClientVersion: "2.12.5",
     maximumSupportedClientVersion: "3.0.0",
     migrationSet: ["1->2", "2->3", "3->4", "4->3", "4->2", "3->2", "2->1"],
+  },
+  brand: {
+    parentBrand: "Kwakoko",
+    platform: "Kwakoko Business Operating System",
+    platformShort: "Kwakoko BOS",
+    posCapability: "KwakoPos",
   },
 };
 

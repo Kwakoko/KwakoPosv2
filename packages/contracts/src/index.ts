@@ -216,17 +216,64 @@ export const CategorySchema = z.object({
   name: z.string().min(1),
   code: z.string().min(1),
   parentId: z.string().uuid().nullable().optional(),
+  description: z.string().nullable().optional(),
+  color: z.string().nullable().optional(),
+  isActive: z.boolean().default(true),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
 export type Category = z.infer<typeof CategorySchema>;
 
 export const CreateCategoryRequestSchema = z.object({
+  id: z.string().uuid().optional(),
   name: z.string().min(1),
   code: z.string().min(1),
-  parentId: z.string().uuid().optional(),
+  parentId: z.string().uuid().nullable().optional(),
+  description: z.string().optional(),
+  color: z.string().optional(),
 });
 export type CreateCategoryRequest = z.infer<typeof CreateCategoryRequestSchema>;
+export const UpdateCategoryRequestSchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().min(1).optional(),
+  parentId: z.string().uuid().nullable().optional(),
+  description: z.string().optional(),
+  color: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateCategoryRequest = z.infer<typeof UpdateCategoryRequestSchema>;
+
+export const BrandSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  origin: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Brand = z.infer<typeof BrandSchema>;
+
+export const CreateBrandRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  origin: z.string().optional(),
+  notes: z.string().optional(),
+});
+export type CreateBrandRequest = z.infer<typeof CreateBrandRequestSchema>;
+
+export const UpdateBrandRequestSchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().min(1).optional(),
+  origin: z.string().optional(),
+  notes: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateBrandRequest = z.infer<typeof UpdateBrandRequestSchema>;
 
 export const UnitOfMeasureSchema = z.object({
   id: z.string().uuid(),
@@ -2801,6 +2848,7 @@ export * from "./coreEngineContracts.js";
 export * from "./inventoryBatchContracts.js";
 export * from "./stockCountContracts.js";
 export * from "./syncConflictContracts.js";
+export * from "./brandHierarchyContracts.js";
 
 
 
@@ -2823,4 +2871,6 @@ export * from "./syncConflictContracts.js";
 
 
 
-
+
+export * from "./kokoAmbassadorContracts.js";
+export * from "./brandVoiceContracts.js";

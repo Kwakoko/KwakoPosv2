@@ -43,12 +43,12 @@ export const CANONICAL_LEGAL_DOCUMENTS: CanonicalDocumentDefinition[] = [
   {
     slug: "privacy-policy",
     documentType: "PRIVACY_POLICY",
-    titleEn: "KwakoPos Universal Platform Privacy Policy",
-    titleSw: "Sera ya Faragha ya Mfumo wa KwakoPos",
+    titleEn: "Kwakoko Business Operating System Privacy Policy",
+    titleSw: "Sera ya Faragha ya Kwakoko Business Operating System",
     descriptionEn: "Comprehensive transparency on personal data collection, synchronization, storage, and subject rights under Tanzania PDPA 2022 and GDPR.",
     descriptionSw: "Ufafanuzi kamili kuhusu ukusanyaji wa taarifa binafsi, usawazishaji, hifadhi na haki za mtumiaji kwa mujibu wa Sheria ya Ulinzi wa Taarifa Binafsi 2022.",
     contentEn: `## 1. Introduction & Scope
-KwakoPos ("the Platform"), operated by Kwakoko Technologies Ltd, provides offline-first enterprise point-of-sale, enterprise resource planning, and industry operating solutions across the United Republic of Tanzania, the East African Community, and globally. This Privacy Policy governs how personal, commercial, and telemetry data is collected, processed, replicated, and protected.
+Kwakoko Business Operating System ("the Platform"), operated by Kwakoko Technologies Ltd (incorporating the KwakoPos Point-of-Sale capability), provides offline-first enterprise point-of-sale, enterprise resource planning, and industry operating solutions across the United Republic of Tanzania, the East African Community, and globally. This Privacy Policy governs how personal, commercial, and telemetry data is collected, processed, replicated, and protected.
 
 ## 2. Categories of Data Collected
 - **Platform Identity Data**: Name, official phone number, business email, encrypted credential hashes, role assignments.
@@ -57,7 +57,7 @@ KwakoPos ("the Platform"), operated by Kwakoko Technologies Ltd, provides offlin
 - **Support & Audit Data**: Operational action history, SHA-256 hashed ledger mutations, and support ticket inquiries.
 
 ## 3. Data Storage & Offline-First Synchronization
-KwakoPos utilizes client-side storage (IndexedDB and Service Workers) to enable continuous offline operations. Data committed offline is stored locally in tenant-scoped partitioned namespaces and cryptographically synchronized to PostgreSQL cloud servers upon network availability.
+The Kwakoko Business Operating System utilizes client-side storage (IndexedDB and Service Workers, powering the offline KwakoPos transaction outbox) to enable continuous offline operations. Data committed offline is stored locally in tenant-scoped partitioned namespaces and cryptographically synchronized to PostgreSQL cloud servers upon network availability.
 
 ## 4. Legal Basis for Processing
 Processing is grounded in: (a) Performance of a commercial contract (b) Compliance with legal obligations under Tanzania Tax Administration Act and Personal Data Protection Act No. 5 of 2022 (c) Legitimate operational security interests.
@@ -65,7 +65,7 @@ Processing is grounded in: (a) Performance of a commercial contract (b) Complian
 ## 5. Your Data Protection Rights
 Under Tanzania PDPA 2022 and international data protection standards, data subjects hold rights of Access, Rectification, Erasure (subject to mandatory tax retention minimums), Data Portability, and Consent Withdrawal.`,
     contentSw: `## 1. Utangulizi na Upeo
-KwakoPos ("Mfumo"), unaoendeshwa na Kwakoko Technologies Ltd, unatoa huduma za kisasa za usimamizi wa mauzo na biashara zinazofanya kazi hata bila intaneti kote Tanzania na Afrika Mashariki. Sera hii ya Faragha inaeleza jinsi taarifa binafsi na za kibiashara zinavyokusanywa, kulindwa na kusawazishwa.
+Kwakoko Business Operating System ("Mfumo"), unaoendeshwa na Kwakoko Technologies Ltd (ikiwemo uwezo wa mauzo wa KwakoPos), unatoa huduma za kisasa za usimamizi wa mauzo na biashara zinazofanya kazi hata bila intaneti kote Tanzania na Afrika Mashariki. Sera hii ya Faragha inaeleza jinsi taarifa binafsi na za kibiashara zinavyokusanywa, kulindwa na kusawazishwa.
 
 ## 2. Aina za Taarifa Zinazokusanywa
 - **Taarifa za Utambulisho**: Majina, nambari ya simu, barua pepe ya biashara, na vitambulisho vya mfumo.
@@ -82,18 +82,18 @@ Kwa mujibu wa Sheria ya Ulinzi wa Taarifa Binafsi ya Tanzania ya Mwaka 2022, una
   {
     slug: "data-protection-policy",
     documentType: "DATA_PROTECTION_POLICY",
-    titleEn: "KwakoPos Enterprise Data Protection & Security Policy",
+    titleEn: "Kwakoko Business Operating System Data Protection & Security Policy",
     titleSw: "Sera ya Ulinzi wa Taarifa na Usalama wa Mfumo",
     descriptionEn: "Technical and organizational measures (TOMs) governing encryption, tenant isolation, and data lifecycle management.",
     descriptionSw: "Miongozo ya kiufundi na kiusalama inayohakikisha usimbaji fiche na utengano wa taarifa za kila mfanyabiashara.",
     contentEn: `## 1. Data Protection Architecture
-KwakoPos implements Privacy-by-Design and Security-by-Default across all engineering components:
+The Kwakoko Business Operating System implements Privacy-by-Design and Security-by-Default across all engineering components:
 - **Tenant Isolation**: Rigid row-level and contextual tenant partitioning (tenant_id mandatory verification on every API request and database query).
 - **Encryption**: TLS 1.3 enforced in transit with strict cipher suites; AES-256 encryption at rest for sensitive configurations and database disks.
 - **Least Privilege Access**: Granular Role-Based Access Control (RBAC) preventing unauthorized access across stores, branches, or tenants.
 - **Audit Logging**: Immutable, SHA-256 hash-chained audit trails recording all security, configuration, and data modification events.`,
     contentSw: `## 1. Muundo wa Ulinzi wa Taarifa
-KwakoPos inazingatia misingi mikali ya usalama:
+Mfumo wa Kwakoko Business Operating System unazingatia misingi mikali ya usalama:
 - **Utengano wa Wafanyabiashara**: Kila biashara imetengwa kikamilifu kuzuia muingiliano wa taarifa.
 - **Usimbaji Fiche (Encryption)**: Taarifa zote zinasimbwa kwa njia ya TLS 1.3 zikiwa safarini na AES-256 zikiwa zimehifadhiwa.
 - **Udhibiti wa Ufikiaji**: Mfumo wa majukumu (RBAC) unahakikisha kila mfanyakazi anaona kile anachoruhusiwa tu.`,
@@ -102,32 +102,32 @@ KwakoPos inazingatia misingi mikali ya usalama:
   {
     slug: "terms-of-service",
     documentType: "TERMS_OF_SERVICE",
-    titleEn: "KwakoPos Master Terms of Service",
-    titleSw: "Masharti Makuu ya Huduma ya KwakoPos",
+    titleEn: "Kwakoko Business Operating System Master Terms of Service",
+    titleSw: "Masharti Makuu ya Huduma ya Kwakoko Business Operating System",
     descriptionEn: "Legal contract governing platform subscriptions, uptime, multi-tenant obligations, and operational boundaries.",
     descriptionSw: "Mkataba wa kisheria unaosimamia matumizi ya mfumo, usajili, upatikanaji wa huduma na wajibu wa pande zote.",
     contentEn: `## 1. Commercial Agreement
-By creating a tenant account or accessing KwakoPos, you agree to these Terms of Service between your business entity and Kwakoko Technologies Ltd.
+By creating a tenant account or accessing the Kwakoko Business Operating System (including the KwakoPos capability), you agree to these Terms of Service between your business entity and Kwakoko Technologies Ltd.
 
 ## 2. Permitted Commercial Use
-KwakoPos grants a non-exclusive, revocable, non-transferable subscription license to operate point-of-sale, accounting, workforce, inventory, and industry vertical modules within authorized capacity limits.
+Kwakoko Technologies Ltd grants a non-exclusive, revocable, non-transferable subscription license to operate the Kwakoko Business Operating System (including the KwakoPos cashier module, accounting, workforce, inventory, and industry vertical modules) within authorized capacity limits.
 
 ## 3. Financial & Tax Responsibilities
-The tenant remains solely responsible for the legal accuracy of their prices, fiscal receipt declarations to the Tanzania Revenue Authority (TRA), and local statutory compliance. KwakoPos acts as an independent software provider.`,
+The tenant remains solely responsible for the legal accuracy of their prices, fiscal receipt declarations to the Tanzania Revenue Authority (TRA), and local statutory compliance. Kwakoko Technologies Ltd acts as an independent software provider.`,
     contentSw: `## 1. Mkataba wa Kibiashara
-Kwa kujiandikisha au kutumia mfumo wa KwakoPos, unakubaliana na masharti haya kati ya biashara yako na Kwakoko Technologies Ltd.
+Kwa kujiandikisha au kutumia mfumo wa Kwakoko Business Operating System (pamoja na moduli ya KwakoPos), unakubaliana na masharti haya kati ya biashara yako na Kwakoko Technologies Ltd.
 
 ## 2. Matumizi Yanayoruhusiwa
-Unaruhusiwa kutumia mfumo huu kusimamia mauzo, hesabu, wafanyakazi, na shughuli zote za biashara yako kulingana na kifurushi ulicholipia.
+Kwakoko Technologies Ltd inakupa leseni ya kutumia mfumo wa Kwakoko Business Operating System kwenye vituo na matawi yaliyoidhinishwa.
 
 ## 3. Wajibu wa Kodi na Fedha
-Mfanyabiashara anawajibika kikamilifu na usahihi wa mauzo yake na kodi za mamlaka husika (kama vile TRA). KwakoPos ni mtoa huduma wa kiteknolojia pekee.`,
+Mfanyabiashara anawajibika kikamilifu na usahihi wa mauzo yake na kodi za mamlaka husika (kama vile TRA). Kwakoko Technologies Ltd ni mtoa huduma wa kiteknolojia pekee.`,
     isMandatory: true,
   },
   {
     slug: "terms-of-use",
     documentType: "TERMS_OF_USE",
-    titleEn: "KwakoPos Acceptable Terms of Use for Operators",
+    titleEn: "Kwakoko Business Operating System Operator Terms of Use",
     titleSw: "Masharti ya Matumizi kwa Watumiaji na Waendeshaji",
     descriptionEn: "Rules of conduct for individual cashiers, branch managers, technicians, and system operators.",
     descriptionSw: "Kanuni na miongozo ya nidhamu kwa wahudumu wa duka, mameneja na waendeshaji wote wa mfumo.",
@@ -151,7 +151,7 @@ Ni marufuku kufuta, kughushi au kubadilisha taarifa za mauzo au fedha zilizoreko
     descriptionEn: "Software license terms governing PWA installation, desktop runtime, and client-side device usage.",
     descriptionSw: "Masharti ya leseni ya programu inayowekwa kwenye kompyuta, simu na vifaa vya mauzo.",
     contentEn: `## 1. Grant of License
-Kwakoko Technologies Ltd grants you a non-exclusive license to install and run the KwakoPos Progressive Web App (PWA) on designated commercial point-of-sale terminals, tablets, and authorized workstations.
+Kwakoko Technologies Ltd grants you a non-exclusive license to install and run the Kwakoko Business Operating System Progressive Web App (PWA) and KwakoPos POS capability on designated commercial point-of-sale terminals, tablets, and authorized workstations.
 
 ## 2. Restrictions
 You shall not: (a) Reverse engineer, decompile, or disassemble any component of the application (b) Circumvent license key validation (c) Modify client security boundaries.`,
@@ -165,12 +165,12 @@ Huruhusiwi kubomoa, kuiga au kufanyia mabadiliko haramu mfumo huu bila idhini ya
   {
     slug: "software-license",
     documentType: "SOFTWARE_LICENSE",
-    titleEn: "KwakoPos Commercial Software License",
-    titleSw: "Leseni ya Kibiashara ya Programu ya KwakoPos",
+    titleEn: "Kwakoko Business Operating System Commercial Software License",
+    titleSw: "Leseni ya Kibiashara ya Programu ya Kwakoko Business Operating System",
     descriptionEn: "Commercial software intellectual property ownership and enterprise multi-branch deployment rules.",
-    descriptionSw: "Umiliki wa kisheria wa programu ya KwakoPos na utaratibu wa ufungaji kwenye matawi ya biashara.",
+    descriptionSw: "Umiliki wa kisheria wa programu ya Kwakoko Business Operating System na utaratibu wa ufungaji kwenye matawi ya biashara.",
     contentEn: `## 1. Intellectual Property
-All source code, UI designs, domain models, mathematical scoring engines, and brand assets of KwakoPos remain the exclusive intellectual property of Kwakoko Technologies Ltd.
+All source code, UI designs, domain models, mathematical scoring engines, and brand assets of the Kwakoko Business Operating System and KwakoPos capability remain the exclusive intellectual property of Kwakoko Technologies Ltd.
 
 ## 2. Subscription Validity
 This license remains valid strictly during active paid subscription tiers. Upon subscription termination, client write access ceases while read-only data access is maintained for regulatory compliance.`,
@@ -189,7 +189,7 @@ Leseni hii inafanya kazi kulingana na usajili wa kila mwezi au mwaka. Usajili un
     descriptionEn: "Prohibited conduct, anti-fraud regulations, abuse prevention, and rate-limiting rules.",
     descriptionSw: "Mambo yaliyopigwa marufuku, kuzuia ulaghai, matumizi mabaya ya mtandao na ulinzi wa mfumo.",
     contentEn: `## 1. Prohibited Activities
-You may not use KwakoPos to:
+You may not use the Kwakoko Business Operating System or KwakoPos capability to:
 - Process unlawful, fraudulent, or counterfeit goods.
 - Conduct denial-of-service, automated scraping, or unauthorized vulnerability scans.
 - Transmit malicious sync payloads or poison local IndexedDB caches.
@@ -209,7 +209,7 @@ Huruhusiwi kutumia mfumo huu:
     descriptionEn: "Clear disclosure on IndexedDB, CacheStorage, localStorage, and Service Worker usage.",
     descriptionSw: "Ufafanuzi kuhusu matumizi ya vidakuzi, kumbukumbu ya simu/kompyuta na teknolojia ya kufanya kazi bila intaneti.",
     contentEn: `## 1. What We Store Locally
-KwakoPos is designed as an offline-first Progressive Web App. To provide continuous operation during power or network outages, we store:
+The Kwakoko Business Operating System (with KwakoPos) is designed as an offline-first Progressive Web App. To provide continuous operation during power or network outages, we store:
 - **IndexedDB**: Local offline transaction outbox, product catalog cache, customer directory.
 - **Service Worker Cache**: Application shell assets (HTML, CSS, JS, icons) for fast zero-latency loading.
 - **LocalStorage**: Visual theme preferences, active branch selection, and temporary sync cursors.
@@ -265,12 +265,12 @@ Mfanyabiashara (Tenant) ndiye mmiliki mkuu na msimamizi wa taarifa za wateja na 
     descriptionEn: "Public registry of authorized cloud infrastructure, payment gateways, and communications providers.",
     descriptionSw: "Orodha wazi ya watoa huduma za seva, malipo na mawasiliano wanaotumika kwenye mfumo.",
     contentEn: `## 1. Authorized Subprocessors
-KwakoPos contracts with vetted cloud and telecommunications infrastructure providers:
+Kwakoko Technologies Ltd contracts with vetted cloud and telecommunications infrastructure providers:
 - **Google Cloud Platform (GCP)**: Cloud hosting, database replication, and storage (EU/US/Johannesburg regions).
 - **Tanzania National Mobile Money Providers (M-Pesa, TigoPesa, AirtelMoney, HaloPesa)**: Real-time collection webhooks.
 - **TRA VFD/EFDMS Gateway**: Mandatory fiscal receipt registration.`,
     contentSw: `## 1. Wachakataji Wasaidizi Walioidhinishwa
-KwakoPos inafanya kazi na mifumo ya kuaminika:
+Kwakoko Technologies Ltd inafanya kazi na mifumo ya kuaminika:
 - **Google Cloud Platform (GCP)**: Uhifadhi salama wa seva na mifumo ya data.
 - **Mitandao ya Simu (M-Pesa, TigoPesa, n.k.)**: Kuchakata miamala ya malipo ya kidijitali.
 - **Mamlaka ya Mapato Tanzania (TRA)**: Kusajili stakabadhi rasmi za mashine za kielektroniki.`,
@@ -284,7 +284,7 @@ KwakoPos inafanya kazi na mifumo ya kuaminika:
     descriptionEn: "Comprehensive security architecture, cryptographic controls, and threat monitoring specifications.",
     descriptionSw: "Muundo kamili wa ulinzi, usimbaji fiche na ufuatiliaji wa vitisho vya kimtandao.",
     contentEn: `## 1. Security Architecture
-KwakoPos adheres to the principle of Defense-in-Depth. Technical safeguards include argon2 password hashing, strict CSP headers, automated vulnerability scanning, and SHA-256 tamper-evident database logs.`,
+The Kwakoko Business Operating System adheres to the principle of Defense-in-Depth. Technical safeguards include argon2 password hashing, strict CSP headers, automated vulnerability scanning, and SHA-256 tamper-evident database logs.`,
     contentSw: `## 1. Usalama wa Ndani wa Mfumo
 Ulinzi wa mfumo unajumuisha usimbaji fiche wa manenosiri kwa kiwango cha kisasa (Argon2), ukaguzi wa mara kwa mara wa usalama, na kuzuia mashambulizi ya kimtandao.`,
     isMandatory: false,
@@ -297,9 +297,9 @@ Ulinzi wa mfumo unajumuisha usimbaji fiche wa manenosiri kwa kiwango cha kisasa 
     descriptionEn: "Safe harbor rules for security researchers and reporting protocol for system vulnerabilities.",
     descriptionSw: "Utaratibu salama na wa kisheria kwa wataalamu wa usalama kuripoti hitilafu wanazoziona.",
     contentEn: `## 1. Safe Harbor Commitment
-KwakoPos encourages ethical security research. If you conduct vulnerability testing within this policy's scope without harming production data, Kwakoko Technologies will not initiate legal action against you. Contact: security@kwakopos.com.`,
+Kwakoko Technologies Ltd encourages ethical security research. If you conduct vulnerability testing within this policy's scope without harming production data, Kwakoko Technologies will not initiate legal action against you. Contact: security@kwakoko.com.`,
     contentSw: `## 1. Kuripoti kwa Nia Njema
-Tunawakaribisha wataalamu wa TEHAMA kuripoti mapungufu ya kiusalama kwa njia ya heshima na usiri kupitia: security@kwakopos.com.`,
+Tunawakaribisha wataalamu wa TEHAMA kuripoti mapungufu ya kiusalama kwa njia ya heshima na usiri kupitia: security@kwakoko.com.`,
     isMandatory: false,
   },
   {

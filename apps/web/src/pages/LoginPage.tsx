@@ -19,6 +19,7 @@ import { login, SuperAdminSetupRequiredError, MfaRequiredError } from "../servic
 import { SuperAdminSetupModal } from "../components/SuperAdminSetupModal.js";
 import { useTranslation, useAuth } from "../context/KwakoPosContexts.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
+import { KokoCompanion } from "../components/KokoCompanion.js";
 
 const manifestVersion = "2.12.5";
 
@@ -119,8 +120,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           <div className="v2-flex v2-items-center v2-gap-3 v2-mb-4">
             <div className="v2-auth-logo" aria-hidden="true">K</div>
             <div>
-              <span className="v2-text-xl v2-font-black v2-auth-brand">KwakoPos v2.0</span>
-              <span className="badge v2-badge-accent v2-ml-2">ENTERPRISE</span>
+              <span className="v2-text-xl v2-font-black v2-auth-brand">Kwakoko</span>
+              <span className="badge v2-badge-accent v2-ml-2">BOS ENTERPRISE</span>
+              <div className="v2-text-xs v2-text-muted" style={{ fontWeight: 600 }}>Business Operating System • KwakoPos</div>
             </div>
           </div>
           <h1 id="auth-title" className="v2-text-2xl v2-font-black v2-auth-title">
@@ -129,6 +131,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           <p className="v2-text-sm v2-text-muted v2-mb-6 v2-auth-lead">
             {t("auth.subtitle")}
           </p>
+          <KokoCompanion context="onboarding" compact />
           <div className="v2-space-y-4">
             {[
               { icon: Shield, title: t("auth.featureOfflineSyncTitle"), desc: t("auth.featureOfflineSyncDesc") },

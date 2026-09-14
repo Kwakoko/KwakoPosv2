@@ -202,6 +202,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           {action && (
             <button
               type="button"
+              aria-label={action.label}
               onClick={action.onClick}
               className="v2-btn v2-btn-primary"
               style={{
@@ -221,6 +222,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           {secondaryAction && (
             <button
               type="button"
+              aria-label={secondaryAction.label}
               onClick={secondaryAction.onClick}
               className="v2-btn v2-btn-ghost"
               style={{

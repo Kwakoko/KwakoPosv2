@@ -1,16 +1,14 @@
 /**
- * KwakoPosv2 Module Registry
+ * Kwakoko Business Operating System — Industry Module Registry
  * ─────────────────────────────────────────────────────────────────────────────
- * Single source of truth for all industry module manifests.
+ * Single source of truth for all industry-specific business modules operating
+ * beneath the Kwakoko Business Operating System platform.
  *
- * Resolution pipeline:
- *   Module Registry → Tenant Entitlement → Subscription → Feature Flag → RBAC
- *   → Module Availability → Navigation → Route → Workspace
- *
- * RULES:
- *  - Dexie is NEVER the authority for entitlement/auth decisions.
- *  - Unknown modules default to NOT authorized (fail-closed).
- *  - Modules register here; they do not hard-code themselves into the shell.
+ * Brand Hierarchy:
+ *   Level 1: Kwakoko (Authoritative Parent Technology Brand)
+ *   Level 2: Kwakoko Business Operating System (Flagship Platform)
+ *   Level 3: Industry-Specific Business Modules (operate beneath platform)
+ *   Level 4: KwakoPos (POS Capability and cashier checkout subsystem)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -81,6 +79,8 @@ export interface ModuleManifest {
   requiresSubscription?: boolean;
   /** Version tag shown in the module selector UI */
   version?: string;
+  /** Parent platform identity under the brand hierarchy */
+  parentPlatform?: string;
 }
 
 // ─── Sector Metadata ────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
-  "name": "KwakoPos 2.0 POS & Enterprise System",
-  "short_name": "KwakoPos",
-  "description": "Production Offline-First POS & Enterprise Business Operating System",
+  "name": "Kwakoko Business Operating System",
+  "short_name": "Kwakoko BOS",
+  "description": "Kwakoko Business Operating System with offline-first KwakoPos Point of Sale capability",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",

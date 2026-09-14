@@ -1352,6 +1352,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                     {poLines.length > 1 && (
                       <button
                         type="button"
+                        aria-label="Remove purchase order line"
                         className="v2-btn v2-btn-ghost v2-btn-sm"
                         style={{ color: "var(--danger)" }}
                         onClick={() => setPoLines((prev) => prev.filter((_, i) => i !== idx))}
