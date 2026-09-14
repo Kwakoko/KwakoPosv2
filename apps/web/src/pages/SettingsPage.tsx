@@ -504,6 +504,179 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         </div>
       )}
 
+      {/* Developer Options & Sample Data */}
+      {activeTab === "developer" && (
+        <div className="v2-space-y-4">
+          <div
+            className="v2-card"
+            style={{
+              border: isDemoActive ? "1px solid rgba(245, 158, 11, 0.4)" : "1px solid var(--surface-border)",
+              background: isDemoActive ? "linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%)" : undefined,
+            }}
+          >
+            <div className="v2-card-header" style={{ borderBottom: "1px solid var(--surface-border)" }}>
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                  <Sparkles size={18} style={{ color: "#f59e0b" }} />
+                  <span>Developer Options: Sandbox &amp; Sample Retail Data</span>
+                </div>
+                <span
+                  style={{
+                    fontSize: "0.7rem",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    background: isDemoActive ? "rgba(245, 158, 11, 0.2)" : "var(--surface-3)",
+                    color: isDemoActive ? "#f59e0b" : "var(--text-muted)",
+                    border: isDemoActive ? "1px solid rgba(245, 158, 11, 0.4)" : "1px solid var(--surface-border)",
+                  }}
+                >
+                  {isDemoActive ? "⚡ Demo Mode Active" : "Production Mode Clean"}
+                </span>
+              </div>
+            </div>
+
+            <div className="v2-card-body v2-space-y-4">
+              <div className="v2-text-xs v2-text-muted">
+                Populate your workspace with a complete, localized retail simulation dataset (fast-moving products, barcode variants, suppliers, customer accounts, realistic sales ledger, and active cash drawer float). All sample records are cleanly tagged and isolated for testing and onboarding.
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "1.25rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--surface-border)",
+                  gap: "1rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
+                    {isDemoActive ? "Reset / Reload Sample Retail Data" : "Load Sample Retail Data"}
+                  </div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                    Injects Azam Flour, Coca Cola, ASAS Milk, Korie Oil, VIP customers, sales ledger, and active shift.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="v2-btn v2-btn-sm"
+                  disabled={isLoadingSample}
+                  style={{
+                    background: "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
+                    color: "#ffffff",
+                    border: "none",
+                    fontWeight: 800,
+                    fontSize: "12px",
+                    padding: "8px 18px",
+                    borderRadius: "8px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    cursor: isLoadingSample ? "not-allowed" : "pointer",
+                    boxShadow: "0 2px 6px rgba(245, 158, 11, 0.3)",
+                    transition: "all 0.15s ease",
+                    opacity: isLoadingSample ? 0.7 : 1,
+                  }}
+                  onClick={async () => {
+                    setIsLoadingSample(true);
+                    try {
+                      const res = await loadSampleData(db, currentTenantId || undefined);
+                      setIsDemoActive(true);
+                      toast.success(
+                        "Sample Data Loaded",
+                        `Injected ${res.products} products, ${res.customers} customers, ${res.sales} sales, and ${res.expenses} expense records.`
+                      );
+                    } catch (err: any) {
+                      toast.error("Failed to load sample data", err?.message || String(err));
+                    } finally {
+                      setIsLoadingSample(false);
+                    }
+                  }}
+                >
+                  <Sparkles size={14} className={isLoadingSample ? "animate-spin" : ""} />
+                  <span>{isLoadingSample ? "Loading Sample Data..." : isDemoActive ? "Re-load Sample Data" : "Load Sample Data"}</span>
+                </button>
+              </div>
+
+              {isDemoActive && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "1rem",
+                    borderRadius: "var(--radius-md, 0.55rem)",
+                    background: "rgba(248, 113, 113, 0.08)",
+                    border: "1px solid rgba(248, 113, 113, 0.3)",
+                    gap: "1rem",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div className="v2-font-bold v2-text-sm" style={{ color: "var(--danger)" }}>
+                      1-Click Purge All Sample Data
+                    </div>
+                    <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
+                      Instantly purges all tagged demo products, customers, suppliers, sales, and demo expenses back to 100% pristine zero data.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="v2-btn v2-btn-danger v2-btn-sm"
+                    onClick={async () => {
+                      await purgeSampleData(db, currentTenantId || undefined);
+                      setIsDemoActive(false);
+                      toast.success(
+                        "Sample Data Purged",
+                        "All demo products, sales, customers, and active shift data have been wiped."
+                      );
+                    }}
+                  >
+                    <Trash2 size={13} /> Purge All Sample Data
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Database Diagnostics & Developer Telemetry */}
+          <div className="v2-card">
+            <div className="v2-card-header">
+              <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                <Database size={16} className="v2-text-accent" />
+                <span>Developer Diagnostics &amp; System Telemetry</span>
+              </div>
+            </div>
+            <div className="v2-card-body v2-space-y-3">
+              <div className="v2-text-xs v2-text-muted">
+                Offline IndexedDB storage engine is operating under authoritative schema version 4.
+                Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong> ({currentTenantId}).
+              </div>
+              <div className="v2-grid v2-grid-3 v2-gap-3">
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Active Products</div>
+                  <div className="v2-text-base v2-font-bold">{db?.products?.size || 0} items</div>
+                </div>
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Stored Sales Records</div>
+                  <div className="v2-text-base v2-font-bold">{db?.sales?.size || 0} records</div>
+                </div>
+                <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
+                  <div className="v2-text-xs v2-text-muted">Customer Accounts</div>
+                  <div className="v2-text-base v2-font-bold">{db?.customers?.size || 0} accounts</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Advanced Settings & Danger Zone */}
       {activeTab === "advanced" && (
         <div className="v2-space-y-4">
@@ -536,115 +709,41 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             </div>
           </div>
 
-          {/* Training Sandbox & Sample Retail Data */}
-          <div
-            className="v2-card"
-            style={{
-              border: isDemoActive ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid var(--surface-border)",
-              background: isDemoActive ? "linear-gradient(180deg, rgba(56, 189, 248, 0.05) 0%, transparent 100%)" : undefined,
-            }}
-          >
-            <div className="v2-card-header" style={{ borderBottom: "1px solid var(--surface-border)" }}>
-              <div className="v2-flex v2-items-center v2-justify-between">
-                <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
-                  <Sparkles size={18} style={{ color: isDemoActive ? "var(--accent)" : "var(--muted)" }} />
-                  <span>Store Data &amp; Training Sandbox Engine</span>
-                </div>
-                <span
-                  style={{
-                    fontSize: "0.7rem",
-                    fontWeight: 800,
-                    textTransform: "uppercase",
-                    padding: "2px 8px",
-                    borderRadius: "4px",
-                    background: isDemoActive ? "rgba(56, 189, 248, 0.2)" : "var(--surface-3)",
-                    color: isDemoActive ? "var(--accent)" : "var(--text-muted)",
-                    border: isDemoActive ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid var(--surface-border)",
-                  }}
-                >
-                  {isDemoActive ? "⚡ Demo Mode Active" : "Production Mode Clean"}
-                </span>
-              </div>
-            </div>
-
-            <div className="v2-card-body v2-space-y-4">
-              <div className="v2-text-xs v2-text-muted">
-                Quickly populate your store with a complete, localized retail simulation dataset (fast-moving products, variants, barcode mappings, wholesale &amp; VIP customers, suppliers, realistic completed sales, operational petty cash vouchers, and an active drawer shift). All sample data is isolated and can be cleanly purged at any time with 1 click before going live.
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "1rem",
-                  borderRadius: "var(--radius-md, 0.55rem)",
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--surface-border)",
-                  gap: "1rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
-                    {isDemoActive ? "Reset / Reload Sample Retail Data" : "Load Realistic Retail Demo Dataset"}
-                  </div>
-                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
-                    Injects Azam Flour, Coca Cola, ASAS Milk, Korie Oil, VIP customers, sales ledger, and active shift.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-primary v2-btn-sm"
-                  onClick={async () => {
-                    const res = await loadSampleData(db, currentTenantId || undefined);
-                    toast.success(
-                      "Sample Data Loaded",
-                      `Injected ${res.products} products, ${res.customers} customers, ${res.sales} sales, and ${res.expenses} expense records.`
-                    );
-                  }}
-                >
-                  <Sparkles size={13} /> {isDemoActive ? "Re-load Sample Data" : "Load Sample Retail Data"}
-                </button>
-              </div>
-
-              {isDemoActive && (
+          {/* Developer Options & Sample Data Shortcut */}
+          <div className="v2-card v2-p-4" style={{ background: "var(--surface-2)", border: "1px solid var(--surface-border)" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-gap-3" style={{ flexWrap: "wrap" }}>
+              <div className="v2-flex v2-items-center v2-gap-3">
                 <div
                   style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "10px",
+                    background: "rgba(245, 158, 11, 0.15)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "1rem",
-                    borderRadius: "var(--radius-md, 0.55rem)",
-                    background: "rgba(248, 113, 113, 0.08)",
-                    border: "1px solid rgba(248, 113, 113, 0.3)",
-                    gap: "1rem",
-                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    color: "#f59e0b",
+                    flexShrink: 0,
                   }}
                 >
-                  <div>
-                    <div className="v2-font-bold v2-text-sm" style={{ color: "var(--danger)" }}>
-                      1-Click Purge All Sample Data
-                    </div>
-                    <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
-                      Instantly purges all tagged demo products, customers, suppliers, sales, and demo expenses back to 100% pristine zero data.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="v2-btn v2-btn-danger v2-btn-sm"
-                    onClick={async () => {
-                      await purgeSampleData(db, currentTenantId || undefined);
-                      toast.success(
-                        "Sample Data Purged",
-                        "All demo products, sales, customers, and active shift data have been wiped."
-                      );
-                    }}
-                  >
-                    <Trash2 size={13} /> Purge All Sample Data
-                  </button>
+                  <Sparkles size={18} />
                 </div>
-              )}
+                <div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>Developer Options &amp; Sample Retail Data</div>
+                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "2px" }}>
+                    Configure the retail training sandbox, load sample retail datasets, or purge test records.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="v2-btn v2-btn-secondary v2-btn-sm"
+                onClick={() => setActiveTab("developer")}
+                style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>Open Developer Options</span>
+                <span>&rarr;</span>
+              </button>
             </div>
           </div>
 
