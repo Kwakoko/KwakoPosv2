@@ -47,7 +47,7 @@ export function renderSupplyChainControlTowerHtml(params: {
       --radius-sm: 8px;
     }
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Inter',system-ui,sans-serif;background:var(--surface);color:var(--text);min-height:100vh}
+    body{font-family:'Inter', sans-serif;background:var(--surface);color:var(--text);min-height:100vh}
 
     .hdr{background:linear-gradient(135deg,#090d16 0%,#0d1930 60%,#1e1b4b 100%);
       border-bottom:1px solid var(--border);padding:20px 32px;

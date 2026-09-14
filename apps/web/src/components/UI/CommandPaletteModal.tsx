@@ -21,6 +21,15 @@ import {
   Settings,
   Shield,
   CornerDownLeft,
+  Utensils,
+  Cpu,
+  Hammer,
+  Coins,
+  Landmark,
+  Wrench,
+  Building,
+  Wine,
+  Building2,
 } from "lucide-react";
 import { useSync, useTheme, useModule } from "../../context/KwakoPosContexts.js";
 import { EmptyState } from "./EmptyState.js";
@@ -177,6 +186,149 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           onClose();
         },
         keywords: ["super", "admin", "platform", "tower", "sql", "cleanliness"],
+      },
+      {
+        id: "cmd-certification",
+        name: "Open KPCP Platform Certification Studio",
+        category: "Navigation",
+        icon: <Shield size={15} className="v2-text-accent" />,
+        action: () => {
+          onNavigate("/super-admin/certification");
+          onClose();
+        },
+        keywords: ["certification", "kpcp", "audit", "compliance", "matrix", "benchmark", "p95"],
+      },
+      {
+        id: "cmd-compliance",
+        name: "Open Compliance Tower & Regulatory Center",
+        category: "Navigation",
+        icon: <Shield size={15} className="v2-text-warning" />,
+        action: () => {
+          onNavigate("/super-admin/compliance");
+          onClose();
+        },
+        keywords: ["compliance", "regulatory", "audit", "tra", "tax", "efd"],
+      },
+      {
+        id: "cmd-rollback",
+        name: "Open Rollback & Disaster Recovery Center",
+        category: "Navigation",
+        icon: <Shield size={15} className="v2-text-danger" />,
+        action: () => {
+          onNavigate("/super-admin/rollback");
+          onClose();
+        },
+        keywords: ["rollback", "recovery", "disaster", "auth", "emergency"],
+      },
+      {
+        id: "cmd-restaurant",
+        name: "Restaurant & Kitchen Operations (KDS)",
+        category: "Navigation",
+        icon: <Utensils size={15} className="v2-text-warning" />,
+        action: () => {
+          onNavigate("/restaurant");
+          onClose();
+        },
+        keywords: ["restaurant", "kitchen", "kds", "tables", "menu", "cafe"],
+      },
+      {
+        id: "cmd-electronics",
+        name: "Electronics & High-Value Serial/IMEI Matrix",
+        category: "Navigation",
+        icon: <Cpu size={15} className="v2-text-info" />,
+        action: () => {
+          onNavigate("/electronics");
+          onClose();
+        },
+        keywords: ["electronics", "imei", "serial", "warranty", "gadgets"],
+      },
+      {
+        id: "cmd-hardware",
+        name: "Hardware Store & Dimensional Materials",
+        category: "Navigation",
+        icon: <Hammer size={15} className="v2-text-warning" />,
+        action: () => {
+          onNavigate("/hardware");
+          onClose();
+        },
+        keywords: ["hardware", "materials", "cutting", "timber", "contractor"],
+      },
+      {
+        id: "cmd-microfinance",
+        name: "Microfinance & Loan Portfolio Center",
+        category: "Navigation",
+        icon: <Coins size={15} className="v2-text-success" />,
+        action: () => {
+          onNavigate("/microfinance");
+          onClose();
+        },
+        keywords: ["microfinance", "loans", "repayment", "par30", "collateral"],
+      },
+      {
+        id: "cmd-sacco",
+        name: "SACCO / VICOBA Cooperative Banking",
+        category: "Navigation",
+        icon: <Landmark size={15} className="v2-text-accent" />,
+        action: () => {
+          onNavigate("/sacco");
+          onClose();
+        },
+        keywords: ["sacco", "vicoba", "shares", "savings", "dividends", "cooperative"],
+      },
+      {
+        id: "cmd-garage",
+        name: "Auto Garage & Mechanic Job Cards",
+        category: "Navigation",
+        icon: <Wrench size={15} className="v2-text-warning" />,
+        action: () => {
+          onNavigate("/garage");
+          onClose();
+        },
+        keywords: ["garage", "mechanic", "repairs", "vehicles", "jobcard"],
+      },
+      {
+        id: "cmd-construction",
+        name: "Construction Project & Site Hub",
+        category: "Navigation",
+        icon: <Building size={15} className="v2-text-info" />,
+        action: () => {
+          onNavigate("/construction");
+          onClose();
+        },
+        keywords: ["construction", "boq", "site", "projects", "subcontractors"],
+      },
+      {
+        id: "cmd-wholesale",
+        name: "Wholesale & Carton Logistics Hub",
+        category: "Navigation",
+        icon: <Package size={15} className="v2-text-accent" />,
+        action: () => {
+          onNavigate("/wholesale");
+          onClose();
+        },
+        keywords: ["wholesale", "bulk", "carton", "pallets", "distribution"],
+      },
+      {
+        id: "cmd-bar",
+        name: "Bar, Pub & Lounge Operations",
+        category: "Navigation",
+        icon: <Wine size={15} className="v2-text-danger" />,
+        action: () => {
+          onNavigate("/bar");
+          onClose();
+        },
+        keywords: ["bar", "pub", "lounge", "tabs", "bottles", "wastage"],
+      },
+      {
+        id: "cmd-real-estate",
+        name: "Real Estate Portfolio & Lease Management",
+        category: "Navigation",
+        icon: <Building2 size={15} className="v2-text-success" />,
+        action: () => {
+          onNavigate("/real-estate");
+          onClose();
+        },
+        keywords: ["real estate", "property", "lease", "rent", "tenants", "noi"],
       },
       {
         id: "cmd-persistence",

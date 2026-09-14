@@ -41,6 +41,7 @@ import {
   WorkforcePage,
   TelecomPage,
   HelpPage,
+  VerticalCommandCenterPage,
 } from "./pages/WorkspacePages.js";
 import { CustomerDisplayPage } from "./pages/CustomerDisplayPage.js";
 
@@ -137,9 +138,12 @@ const TAB_TO_PATH: Record<string, string> = {
   "Developer Options": "/settings",
   "Help & Manuals": "/help",
   "Change Log": "/settings",
-  // Other Pages
+  // Super Admin & Platform Towers
   Finance: "/finance",
   "Super Admin": "/super-admin",
+  "Super Admin Certification": "/super-admin/certification",
+  "Certification Studio": "/super-admin/certification",
+  "KPCP Certification": "/super-admin/certification",
   "Support Control Tower": "/super-admin/support",
   "Compliance Tower": "/super-admin/compliance",
   "Rollback Center": "/super-admin/rollback",
@@ -159,6 +163,80 @@ const TAB_TO_PATH: Record<string, string> = {
   "Support & Operations": "/support",
   Legal: "/legal",
   Privacy: "/privacy",
+  // Vertical Industry Hubs & Sub-items
+  Restaurant: "/restaurant",
+  Tables: "/restaurant",
+  "Kitchen Display": "/restaurant",
+  Orders: "/restaurant",
+  "Open Orders": "/restaurant",
+  "Completed Orders": "/restaurant",
+  "Cancelled Orders": "/restaurant",
+  "Menu Management": "/restaurant",
+  "Food Items": "/restaurant",
+  Recipes: "/restaurant",
+  Ingredients: "/restaurant",
+  Reservations: "/restaurant",
+  Electronics: "/electronics",
+  "Serial / IMEI": "/electronics",
+  "Serial & IMEI Tracker": "/electronics",
+  "Warranty Claims": "/electronics",
+  "Device Repairs": "/electronics",
+  "Trade-Ins": "/electronics",
+  Hardware: "/hardware",
+  "Dimensional Stock": "/hardware",
+  "Cutting & Timber": "/hardware",
+  "Contractor Accounts": "/hardware",
+  "Paint Mixing": "/hardware",
+  Microfinance: "/microfinance",
+  "Loan Products": "/microfinance",
+  Disbursements: "/microfinance",
+  Repayments: "/microfinance",
+  "PAR30 Risk": "/microfinance",
+  Collateral: "/microfinance",
+  SACCO: "/sacco",
+  Members: "/sacco",
+  Groups: "/sacco",
+  Savings: "/sacco",
+  Deposits: "/sacco",
+  Withdrawals: "/sacco",
+  Statements: "/sacco",
+  Loans: "/sacco",
+  "Loan Applications": "/sacco",
+  Approval: "/sacco",
+  "Loan Reports": "/sacco",
+  Shares: "/sacco",
+  Meetings: "/sacco",
+  Fines: "/sacco",
+  Garage: "/garage",
+  "Job Cards": "/garage",
+  "Repair Orders": "/garage",
+  "Vehicle Directory": "/garage",
+  Mechanics: "/garage",
+  "Service History": "/garage",
+  Construction: "/construction",
+  Projects: "/construction",
+  "Project Stages": "/construction",
+  BOQ: "/construction",
+  "Site Logs": "/construction",
+  Subcontractors: "/construction",
+  Wholesale: "/wholesale",
+  "Bulk Orders": "/wholesale",
+  "Break-Pack Units": "/wholesale",
+  "Price Tiers": "/wholesale",
+  "Pallet Management": "/wholesale",
+  "Dispatch & Vans": "/wholesale",
+  Bar: "/bar",
+  "Bar & Lounge": "/bar",
+  "Open Tabs": "/bar",
+  "Bottle Matrix": "/bar",
+  "Happy Hour": "/bar",
+  "Wastage Variance": "/bar",
+  "Real Estate": "/real-estate",
+  Properties: "/real-estate",
+  "Units & Leases": "/real-estate",
+  "Rent Ledger": "/real-estate",
+  "Service Charges": "/real-estate",
+  "Tenant Arrears": "/real-estate",
 };
 
 const PATH_TO_CANONICAL_TAB: Record<string, string> = {
@@ -173,6 +251,7 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/settings": "Settings",
   "/users": "Users & Roles",
   "/super-admin": "Super Admin",
+  "/super-admin/certification": "Super Admin",
   "/super-admin/support": "Support Control Tower",
   "/super-admin/compliance": "Compliance Tower",
   "/super-admin/rollback": "Rollback Auth Center",
@@ -194,6 +273,16 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/support": "Support & Operations",
   "/legal": "Legal",
   "/privacy": "Privacy",
+  "/restaurant": "Restaurant",
+  "/electronics": "Electronics",
+  "/hardware": "Hardware",
+  "/microfinance": "Microfinance",
+  "/sacco": "SACCO",
+  "/garage": "Garage",
+  "/construction": "Construction",
+  "/wholesale": "Wholesale",
+  "/bar": "Bar",
+  "/real-estate": "Real Estate",
 };
 
 const STANDALONE_PATHS = new Set([
@@ -201,6 +290,7 @@ const STANDALONE_PATHS = new Set([
   "/legal",
   "/privacy",
   "/super-admin",
+  "/super-admin/certification",
   "/super-admin/support",
   "/super-admin/compliance",
   "/super-admin/rollback",
@@ -208,6 +298,7 @@ const STANDALONE_PATHS = new Set([
 
 const ALLOWED_SUPER_ADMIN_PATHS = new Set([
   "/super-admin",
+  "/super-admin/certification",
   "/super-admin/support",
   "/super-admin/compliance",
   "/super-admin/rollback",
@@ -375,6 +466,28 @@ const AuthenticatedApp: React.FC = () => {
         return <SuperAdminComplianceTowerPage onNavigate={handleNavigate} />;
       case "/super-admin/rollback":
         return <SuperAdminRollbackCenterPage />;
+      case "/super-admin/certification":
+        return <SuperAdminPage onNavigate={handleNavigate} initialTab="certification" />;
+      case "/restaurant":
+        return <VerticalCommandCenterPage moduleType="restaurant" onNavigate={handleNavigate} />;
+      case "/electronics":
+        return <VerticalCommandCenterPage moduleType="electronics" onNavigate={handleNavigate} />;
+      case "/hardware":
+        return <VerticalCommandCenterPage moduleType="hardware" onNavigate={handleNavigate} />;
+      case "/microfinance":
+        return <VerticalCommandCenterPage moduleType="microfinance" onNavigate={handleNavigate} />;
+      case "/sacco":
+        return <VerticalCommandCenterPage moduleType="sacco" onNavigate={handleNavigate} />;
+      case "/garage":
+        return <VerticalCommandCenterPage moduleType="garage" onNavigate={handleNavigate} />;
+      case "/construction":
+        return <VerticalCommandCenterPage moduleType="construction" onNavigate={handleNavigate} />;
+      case "/wholesale":
+        return <VerticalCommandCenterPage moduleType="wholesale" onNavigate={handleNavigate} />;
+      case "/bar":
+        return <VerticalCommandCenterPage moduleType="bar" onNavigate={handleNavigate} />;
+      case "/real-estate":
+        return <VerticalCommandCenterPage moduleType="real-estate" onNavigate={handleNavigate} />;
       case "/":
       case "/dashboard":
         return <DashboardPage onNavigate={handleNavigate} />;

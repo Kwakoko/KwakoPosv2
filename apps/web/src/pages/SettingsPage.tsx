@@ -31,7 +31,7 @@ import { loadSampleData, purgeSampleData, isDemoModeActive, DEMO_DATA_EVENT } fr
 
 type SettingsTab =
   | "profile" | "localization" | "pos" | "tax" | "inventory"
-  | "security" | "notifications" | "sync" | "integrations" | "advanced";
+  | "security" | "notifications" | "sync" | "integrations" | "developer" | "advanced";
 
 export interface SettingsPageProps {
   activeTab?: string;
@@ -52,17 +52,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   useEffect(() => {
     if (!propActiveTab) return;
     const map: Record<string, SettingsTab> = {
-      "General Settings": "profile",
-      "POS Settings": "pos",
-      "Tax & Currency": "tax",
-      "Printers & Hardware": "pos",
-      "Barcode & Labels": "inventory",
-      "Payment Gateways": "integrations",
-      "Backup & Restore": "advanced",
-      "Audit Trail": "advanced",
-      "Branch Management": "profile",
-      "Custom Fields": "advanced",
-      "Fiscal Device (TRA)": "tax",
+      // Exact sidebar sub-item strings (moduleRegistry.ts)
+      "Business Profile & Identity": "profile",
+      "POS Configurations":          "pos",
+      "Inventory Rules":             "inventory",
+      "Tax & Billing":               "tax",
+      "Security Policies":           "security",
+      "Terminals & Sessions":        "pos",
+      "Trash Can & Recovery":        "advanced",
+      "Subscriptions & Billing":     "profile",
+      "Developer Options":           "developer",
+      "Developer":                   "developer",
+      "developer":                   "developer",
+      "Help & Manuals":              "profile",
+      "Change Log":                  "advanced",
+      // Legacy / alternative aliases
+      "General Settings":            "profile",
+      "POS Settings":                "pos",
+      "Tax & Currency":              "tax",
+      "Printers & Hardware":         "pos",
+      "Barcode & Labels":            "inventory",
+      "Payment Gateways":            "integrations",
+      "Backup & Restore":            "advanced",
+      "Audit Trail":                 "advanced",
+      "Branch Management":           "profile",
+      "Custom Fields":               "advanced",
+      "Fiscal Device (TRA)":         "tax",
     };
     if (map[propActiveTab]) {
       setActiveTab(map[propActiveTab]);
@@ -70,6 +85,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   }, [propActiveTab]);
 
   const [isDemoActive, setIsDemoActive] = useState(() => isDemoModeActive(db));
+  const [isLoadingSample, setIsLoadingSample] = useState(false);
+
+  useEffect(() => {
+    const handleDemoChange = () => setIsDemoActive(isDemoModeActive(db));
+    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    return () => window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+  }, [db]);
 
   // Form states across tabs
   const [profile, setProfile] = useState(() => {
@@ -182,6 +204,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     { id: "notifications", label: t("settings.tabNotifications"), icon: Bell },
     { id: "sync", label: t("settings.tabSync"), icon: RefreshCw },
     { id: "integrations", label: t("settings.tabIntegrations"), icon: Zap },
+    { id: "developer", label: t("settings.tabDeveloper"), icon: Sliders },
     { id: "advanced", label: t("settings.tabAdvanced"), icon: Database },
   ];
 

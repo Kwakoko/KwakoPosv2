@@ -181,7 +181,7 @@ export const SuperAdminSetupModal: React.FC<SuperAdminSetupModalProps> = ({
           flexDirection: "column",
           color: "#f8fafc",
           fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+            "'Inter', sans-serif",
           margin: "auto",
         }}
       >

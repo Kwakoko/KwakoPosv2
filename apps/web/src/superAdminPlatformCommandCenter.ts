@@ -6,7 +6,7 @@ export function renderSuperAdminPlatformCommandCenter(): string {
   <meta charset="UTF-8">
   <title>KwakoPos Super Admin & Platform Control Tower</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
+    body { font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
     .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1rem; margin-bottom: 2rem; }
     .title { font-size: 1.75rem; font-weight: 700; color: #ef4444; }
     .badge { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 600; background: #991b1b; color: #fca5a5; }

@@ -26,11 +26,17 @@ import {
   BusinessConsultingPage,
   LawFirmPage,
   PharmacyPage,
+  PoultryLivestockPage,
   FleetPage,
   WorkforcePage,
   TelecomPage,
   HelpPage,
+  SuperAdminPage,
+  VerticalCommandCenterPage,
 } from "../../pages/WorkspacePages.js";
+import { SuperAdminCertificationStudio } from "../SuperAdminCertificationStudio.js";
+import { SuperAdminComplianceTowerPage } from "../../pages/SuperAdminComplianceTowerPage.js";
+import { SuperAdminRollbackCenterPage } from "../../pages/SuperAdminRollbackCenterPage.js";
 
 interface ErrorBoundaryProps {
   windowId: string;
@@ -100,6 +106,21 @@ export const WindowContentRenderer: React.FC<{ window: KwakokoWindow }> = ({ win
     if (key.includes("diagnostic")) return <DiagnosticsPage />;
     if (key.includes("law")) return <LawFirmPage />;
     if (key.includes("pharmacy")) return <PharmacyPage />;
+    if (key.includes("certification") || key.includes("kpcp")) return <SuperAdminCertificationStudio />;
+    if (key.includes("compliance")) return <SuperAdminComplianceTowerPage />;
+    if (key.includes("rollback")) return <SuperAdminRollbackCenterPage />;
+    if (key.includes("super-admin") || key.includes("superadmin")) return <SuperAdminPage />;
+    if (key.includes("restaurant") || key.includes("kitchen")) return <VerticalCommandCenterPage moduleType="restaurant" />;
+    if (key.includes("electronics") || key.includes("imei")) return <VerticalCommandCenterPage moduleType="electronics" />;
+    if (key.includes("hardware") || key.includes("timber")) return <VerticalCommandCenterPage moduleType="hardware" />;
+    if (key.includes("microfinance")) return <VerticalCommandCenterPage moduleType="microfinance" />;
+    if (key.includes("sacco") || key.includes("vicoba")) return <VerticalCommandCenterPage moduleType="sacco" />;
+    if (key.includes("garage") || key.includes("mechanic")) return <VerticalCommandCenterPage moduleType="garage" />;
+    if (key.includes("construction") || key.includes("boq")) return <VerticalCommandCenterPage moduleType="construction" />;
+    if (key.includes("wholesale") || key.includes("carton")) return <VerticalCommandCenterPage moduleType="wholesale" />;
+    if (key.includes("bar") || key.includes("lounge")) return <VerticalCommandCenterPage moduleType="bar" />;
+    if (key.includes("real-estate") || key.includes("lease")) return <VerticalCommandCenterPage moduleType="real-estate" />;
+    if (key.includes("poultry") || key.includes("livestock")) return <PoultryLivestockPage />;
     if (key.includes("fleet")) return <FleetPage />;
     if (key.includes("workforce")) return <WorkforcePage />;
     if (key.includes("telecom")) return <TelecomPage />;

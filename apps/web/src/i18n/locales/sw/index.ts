@@ -375,6 +375,7 @@ export const sw: TranslationDictionary = {
     tabSync: "Usawazishaji & Nje ya Mtandao",
     tabIntegrations: "Mifumo Iliyounganishwa",
     tabAdvanced: "Mipangilio ya Kina",
+    tabDeveloper: "Chaguo za Msanidi",
     tabLocalization: "Lugha & Kanda",
     businessName: "Jina Rasmi la Biashara",
     tradingName: "Jina la Kibiashara",

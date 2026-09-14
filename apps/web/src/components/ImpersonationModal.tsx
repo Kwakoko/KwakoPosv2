@@ -111,7 +111,7 @@ export const ImpersonationModal: React.FC<{
                 width: 40,
                 height: 40,
                 borderRadius: 10,
-                background: "linear-gradient(135deg, rgba(245,158,11,0.2), rgba(217,119,6,0.1))",
+                background: "rgba(245, 158, 11, 0.15)",
                 border: "1px solid rgba(245,158,11,0.3)",
                 display: "grid",
                 placeItems: "center",
@@ -256,7 +256,7 @@ export const ImpersonationModal: React.FC<{
                 type="submit"
                 className="v2-btn v2-btn-primary v2-btn-sm"
                 style={{
-                  background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                  background: "#f59e0b",
                   color: "#0f172a",
                   fontWeight: 800,
                   display: "inline-flex",

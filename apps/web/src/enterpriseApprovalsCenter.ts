@@ -52,7 +52,7 @@ export function renderEnterpriseApprovalsCenterHtml(params: {
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'Inter', system-ui, sans-serif;
+      font-family: 'Inter', sans-serif;
       background: var(--kds-surface);
       color: var(--kds-text-primary);
       min-height: 100vh;

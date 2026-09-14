@@ -12,7 +12,7 @@ export interface NotificationUiProps {
 
 export function renderNotificationCommandCenter(props: NotificationUiProps): string {
   return `
-<div class="kncol-command-center" style="background: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+<div class="kncol-command-center" style="background: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <h2 style="margin: 0; font-size: 1.25rem; color: #a855f7; font-weight: 700;">
       <span style="background: #9333ea; color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-right: 8px;">KNCOL v1.0.0</span>

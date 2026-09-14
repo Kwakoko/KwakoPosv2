@@ -76,10 +76,21 @@ safeWriteFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
 }, null, 2));
 
 // 3. Write public/asset-manifest.json with content hashes
+const fontAssets = [
+  "/fonts/inter-regular.woff2",
+  "/fonts/inter-medium.woff2",
+  "/fonts/inter-semibold.woff2",
+  "/fonts/inter-bold.woff2",
+  "/fonts/jetbrains-mono-regular.woff2",
+  "/fonts/jetbrains-mono-medium.woff2",
+  "/fonts/jetbrains-mono-semibold.woff2",
+  "/fonts/jetbrains-mono-bold.woff2",
+];
 const coreAssets = [
   "/",
   "/manifest.json",
   "/release-manifest.json",
+  ...fontAssets,
 ];
 const assetManifest = {
   version,
@@ -115,7 +126,8 @@ const PRECACHE_ASSETS = [
   "/",
   "/manifest.json",
   "/release-manifest.json",
-  "/asset-manifest.json"
+  "/asset-manifest.json",
+  ${fontAssets.map((f) => JSON.stringify(f)).join(",\n  ")}
 ];
 
 // Staged install: pre-cache immutable assets into new generation without premature skipWaiting
@@ -245,5 +257,11 @@ self.addEventListener("fetch", (event) => {
   );
 });
 `);
+
+// If dist directory exists, sync public assets and fonts into dist
+const distDir = path.join(dir, "dist");
+if (fs.existsSync(distDir)) {
+  fs.cpSync(publicDir, distDir, { recursive: true });
+}
 
 console.log(`KwakoPos V2 PWA assets successfully prepared for authoritative release ${version} (${releaseId}); cache=${cacheName}`);

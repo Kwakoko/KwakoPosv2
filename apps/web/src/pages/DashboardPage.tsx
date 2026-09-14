@@ -1408,73 +1408,45 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   // ── Onboarding ─────────────────────────────────────────────────────────────
 
   const renderOnboarding = () => (
-    <div className="bg-white dark:bg-darkbg-card rounded-2xl border border-slate-200 dark:border-darkbg-border p-6 sm:p-8 shadow-sm">
-      <div className="max-w-3xl mx-auto text-center py-2">
-        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-4 shadow-lg">
+    <div className="bg-white dark:bg-darkbg-card rounded-2xl border border-slate-200 dark:border-darkbg-border p-8 shadow-sm">
+      <div className="max-w-2xl mx-auto text-center py-4">
+        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-lg">
           <Sparkles className="h-7 w-7 text-white" />
         </div>
-        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! 👋</h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-lg mx-auto leading-relaxed">
-          Your workspace is ready. Get started by adding your retail products, or load pre-configured sample data to explore live POS checkout, till balancing, and financial analytics right away.
+        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! 🎉</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+          Your clean workspace is ready. Follow these quick steps to set up your business and start taking sales.
         </p>
-
-        {/* Quick Action CTAs */}
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
-          <button
-            type="button"
-            onClick={handleLoadDemoData}
-            disabled={isLoadingSample}
-            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-xs font-bold text-white shadow-sm hover:shadow-md active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap disabled:opacity-60"
-            title="Instantly populates 6 retail products, variants, sales transactions, and cash drawer float"
-          >
-            <Sparkles className={`h-4 w-4 shrink-0 ${isLoadingSample ? 'animate-spin' : ''}`} />
-            <span>{isLoadingSample ? 'Seeding Demo Data...' : '⚡ Load Sample Demo Data'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNav('Inventory')}
-            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-sm hover:shadow-md active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap"
-          >
-            <Package className="h-4 w-4 shrink-0" />
-            <span>+ Add First Product</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNav('POS')}
-            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg hover:bg-slate-100 dark:hover:bg-darkbg-border/40 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-xs active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap"
-          >
-            <ShoppingCart className="h-4 w-4 shrink-0" />
-            <span>Launch POS Terminal</span>
-          </button>
-        </div>
-
-        {/* 4-Step Quick Launch Checklist */}
-        <div className="grid gap-3.5 mt-8 text-left sm:grid-cols-2">
+        <div className="grid gap-4 mt-8 text-left sm:grid-cols-2">
           {[
-            { step: '01', title: 'Add Products & Variants', desc: 'Define your inventory catalog, barcode SKUs, and retail pricing.', label: 'Go to Inventory', tab: 'Inventory', Icon: Package, gradient: 'from-blue-500 to-cyan-500' },
-            { step: '02', title: 'Register Suppliers', desc: 'Configure vendor contacts, purchase orders, and lead times.', label: 'Go to Purchasing', tab: 'Purchasing', Icon: Truck, gradient: 'from-amber-500 to-orange-500' },
-            { step: '03', title: 'Cash Drawer & Till Float', desc: 'Set opening drawer float and real-time cash reconciliation.', label: 'Open Cash Drawer', tab: 'CashDrawer', Icon: Wallet, gradient: 'from-emerald-500 to-teal-500' },
-            { step: '04', title: 'Launch POS Checkout', desc: 'Scan items, apply discounts, tender payments, and print receipts.', label: 'Open POS Terminal', tab: 'POS', Icon: ShoppingCart, gradient: 'from-indigo-500 to-purple-500' },
+            { step: '01', title: 'Add Products', desc: 'Define your inventory items, categories & attributes.', label: 'Go to Inventory', tab: 'Inventory', Icon: Package, gradient: 'from-blue-500 to-cyan-500' },
+            { step: '02', title: 'Register Suppliers', desc: 'Configure suppliers and default warehouse settings.', label: 'Go to Purchasing', tab: 'Purchasing', Icon: Truck, gradient: 'from-amber-500 to-orange-500' },
+            { step: '03', title: 'Add Customers', desc: 'Register customers for CRM tracking and credit billing.', label: 'Go to Customers', tab: 'Customers', Icon: Users, gradient: 'from-emerald-500 to-teal-500' },
+            { step: '04', title: 'Launch POS Checkout', desc: 'Open the sales terminal, scan items, and cash out.', label: 'Open POS Terminal', tab: 'POS', Icon: DollarSign, gradient: 'from-indigo-500 to-purple-500' },
           ].map(({ step, title, desc, label, tab, Icon, gradient }) => (
             <div
               key={step}
-              className="p-4 border border-slate-100 dark:border-darkbg-border rounded-2xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between bg-slate-50/50 dark:bg-darkbg/30"
+              className="p-5 border border-slate-100 dark:border-darkbg-border rounded-2xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between bg-slate-50/50 dark:bg-darkbg/30"
+              style={{
+                border: '1px solid var(--surface-border, #e2e8f0)',
+                background: 'var(--surface-2, rgba(248, 250, 252, 0.5))',
+              }}
             >
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black text-slate-300 dark:text-slate-600 tracking-widest">STEP {step}</span>
-                  <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-sm`}>
-                    <Icon className="h-3.5 w-3.5 text-white" />
+                  <div className={`h-9 w-9 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-sm`}>
+                    <Icon className="h-4 w-4 text-white" />
                   </div>
                 </div>
-                <h4 className="text-xs font-black text-slate-800 dark:text-white mt-2.5">{title}</h4>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5 leading-relaxed">{desc}</p>
+                <h4 className="text-sm font-black text-slate-800 dark:text-white mt-3">{title}</h4>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 leading-relaxed">{desc}</p>
               </div>
               <button
-                onClick={() => handleNav(tab)}
-                className="mt-4 flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:gap-2 transition-all"
-                style={{ background: "transparent", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", padding: 0 }}
                 type="button"
+                onClick={() => handleNav(tab)}
+                className="mt-5 flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:gap-2.5 transition-all cursor-pointer"
+                style={{ background: 'transparent', border: 'none', padding: 0 }}
               >
                 <span>{label}</span>
                 <ArrowRight className="h-3 w-3" />
@@ -1644,21 +1616,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <span>Export Report</span>
           </button>
 
-          {/* Action Button: Load Sample Data (Shown when catalog has 0 products) */}
-          {products.length === 0 && (
-            <button
-              type="button"
-              onClick={handleLoadDemoData}
-              disabled={isLoadingSample}
-              className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-xs font-bold text-white shadow-sm hover:shadow-md active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
-              style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-              title="Populate catalog, sales, customers and till with sample demo data"
-            >
-              <Sparkles className={`h-4 w-4 shrink-0 ${isLoadingSample ? 'animate-spin' : ''}`} />
-              <span>{isLoadingSample ? 'Loading Demo...' : 'Load Sample Data'}</span>
-            </button>
-          )}
-
           {/* Primary Action Button: Launch POS (Matches OK Reference) */}
           <button
             type="button"
@@ -1671,9 +1628,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
-
-      {/* ── First-Run Welcome & Quick Setup Hero Banner (When catalog has no products yet) ── */}
-      {products.length === 0 && renderOnboarding()}
 
       {/* ── KPI Cards ───────────────────────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -3101,6 +3055,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Onboarding Banner (When workspace has no products/sales yet - Legacy Parity) ── */}
+      {(products.length === 0 || isCleanTenant) && renderOnboarding()}
 
       {/* ── Slide-Over Receipt Drawer ─────────────────────────────────── */}
       <Sheet

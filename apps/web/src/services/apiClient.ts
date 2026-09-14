@@ -98,7 +98,7 @@ export function setAccessToken(token: string | null): void { accessToken = token
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, allowRefresh = true): Promise<T> {
   const url = typeof input === "string" && input.startsWith("/") && typeof window === "undefined"
-    ? `http://127.0.0.1:${process.env.PORT || 3000}${input}`
+    ? `http://127.0.0.1:${(globalThis as any).process?.env?.PORT || 3000}${input}`
     : input;
   const response = await fetch(url, {
     ...init,

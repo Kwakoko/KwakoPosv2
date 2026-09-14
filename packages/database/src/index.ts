@@ -728,7 +728,7 @@ export class ScopedStockRepository {
     if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
     else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, resolvedVariantId);
 
-    const movementType = changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS";
+    const movementType = req.movementType || (changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS");
 
     const adjustment: StockAdjustment = {
       id: adjustmentId,

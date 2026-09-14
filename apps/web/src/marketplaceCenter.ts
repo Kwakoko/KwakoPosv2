@@ -12,7 +12,7 @@ export interface MarketplaceUiProps {
 
 export function renderMarketplaceCommandCenter(props: MarketplaceUiProps): string {
   return `
-<div class="kmkol-command-center" style="background: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+<div class="kmkol-command-center" style="background: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
     <h2 style="margin: 0; font-size: 1.25rem; color: #ec4899; font-weight: 700;">
       <span style="background: #db2777; color: white; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-right: 8px;">KMKOL v1.0.0</span>

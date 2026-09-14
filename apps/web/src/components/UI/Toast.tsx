@@ -289,12 +289,12 @@ const ConfirmDialogRenderer: React.FC<{
       ? "var(--warning, #fbbf24)"
       : "var(--accent, #38bdf8)";
 
-  const accentGradient =
+  const accentColor =
     variant === "danger"
-      ? "var(--gradient-danger, linear-gradient(135deg, #ef4444 0%, #f87171 100%))"
+      ? "var(--danger, #ef4444)"
       : variant === "warning"
-      ? "var(--gradient-warning, linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%))"
-      : "var(--gradient-accent, linear-gradient(135deg, #38bdf8 0%, #818cf8 100%))";
+      ? "var(--warning, #f59e0b)"
+      : "var(--primary, #0F62FE)";
 
   return (
     <div
@@ -342,7 +342,7 @@ const ConfirmDialogRenderer: React.FC<{
         }}
       >
         {/* Top accent line */}
-        <div style={{ height: "4px", width: "100%", background: accentGradient }} />
+        <div style={{ height: "3px", width: "100%", background: accentColor }} />
 
         <div style={{ padding: "1.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>

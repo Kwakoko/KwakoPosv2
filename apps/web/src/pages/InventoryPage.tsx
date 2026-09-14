@@ -29,6 +29,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { Sheet } from "../components/UI/Sheet.js";
+import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -145,6 +146,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "Product Bundles & Kits": "recipes",
       "Stock Count": "count",
       "Ledger Drilldown": "ledger",
+      "Wastage & Spillage": "wastage",
       "Inventory Reports": "reports",
     };
     if (map[propActiveTab]) {
@@ -287,6 +289,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const loadInventory = useCallback(async () => {
     try {
       await db.ready;
+      const ledgerStockByVariant = new Map<string, number>();
+      for (const ledger of db.stockLedger.values()) {
+        const l = ledger as any;
+        if (currentTenantId && l.tenantId && l.tenantId !== currentTenantId) continue;
+        if (currentBranchId && l.branchId && l.branchId !== currentBranchId) continue;
+        if (!l.variantId) continue;
+        const delta = Number(l.quantityChange ?? l.quantity ?? 0);
+        ledgerStockByVariant.set(l.variantId, (ledgerStockByVariant.get(l.variantId) || 0) + delta);
+      }
       const variantsByProduct = new Map<string, ProductVariantData[]>();
       for (const variant of db.productVariants.values()) {
         const list = variantsByProduct.get(variant.productId) || [];
@@ -298,7 +309,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           attributes: (variant as any).attributes || {},
           buyingPrice: Number((variant as any).buyingPrice || (variant as any).costPrice || 0),
           sellingPrice: Number(variant.price || (variant as any).sellingPrice || 0),
-          stock: Number(variant.inventoryQuantity ?? (variant as any).stock ?? 0),
+          stock: Number(ledgerStockByVariant.get(variant.id) ?? 0),
           reorderLevel: Number((variant as any).reorderLevel || 5),
         });
         variantsByProduct.set(variant.productId, list);
@@ -308,10 +319,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       for (const prod of db.products.values()) {
         const pAny = prod as any;
         if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive") continue;
-        const pStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? 0);
+        const vars = variantsByProduct.get(prod.id);
+        const pStock = vars?.length
+          ? vars.reduce((sum, v) => sum + Number(v.stock || 0), 0)
+          : Array.from(db.stockLedger.values())
+              .filter((l: any) => (!currentTenantId || !l.tenantId || l.tenantId === currentTenantId) && (!currentBranchId || !l.branchId || l.branchId === currentBranchId) && l.productId === prod.id)
+              .reduce((sum, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
         const pReorder = Number(pAny.reorderLevel ?? 10);
         const pStatus: InventoryItem["status"] = pStock === 0 ? "Out of Stock" : pStock <= pReorder ? "Low Stock" : "Active";
-        const vars = variantsByProduct.get(prod.id);
         loaded.push({
           id: prod.id,
           name: prod.name,
@@ -664,9 +679,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       sellingPrice: computedSelling,
       costPrice: computedBuying,
       buyingPrice: computedBuying,
-      stock: computedStock,
-      totalStock: computedStock,
-      availableStock: computedStock,
+      stock: 0,
+      totalStock: 0,
+      availableStock: 0,
       reorderLevel: Number(newProd.reorderLevel),
       status,
       hasVariants: isVariantProduct,
@@ -689,8 +704,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         costPrice: Number(v.buyingPrice || 0),
         sellingPrice: Number(v.sellingPrice || 0),
         price: Number(v.sellingPrice || 0),
-        inventoryQuantity: Number(v.stock || 0),
-        stock: Number(v.stock || 0),
+        inventoryQuantity: 0,
+        stock: 0,
         reorderLevel: Number(v.reorderLevel || 5),
         isActive: true,
         tenantId: currentTenantId || undefined,
@@ -719,8 +734,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             barcode: v.barcode || undefined,
             price: Number(v.sellingPrice || 0),
             costPrice: Number(v.buyingPrice || 0),
-            inventoryQuantity: Number(v.inventoryQuantity || 0),
-            stock: Number(v.stock || 0),
+            inventoryQuantity: 0,
+            stock: 0,
             reorderLevel: Number(v.reorderLevel || 5),
             attributes: v.attributes || {},
             isActive: true,
@@ -755,15 +770,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           branchId: currentBranchId || undefined,
         });
 
-        if (Number(v.inventoryQuantity) > 0) {
+        if (Number(v.stock) > 0) {
           db.saveStockLedgerLocal({
             id: `led-${v.id}`,
             productId: prodId,
             variantId: v.id,
             sku: v.sku,
             name: v.name,
-            quantity: Number(v.inventoryQuantity),
-            balanceAfter: Number(v.inventoryQuantity),
+            quantity: Number(v.stock),
+            balanceAfter: Number(v.stock),
             reason: "MANUAL_VARIANT_CREATION",
             movementType: "OPENING_STOCK",
             timestamp: new Date().toISOString(),
@@ -779,7 +794,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               variantId: v.id,
               sku: v.sku,
               adjustmentType: "INCREASE",
-              quantityChange: Number(v.inventoryQuantity),
+              movementType: "OPENING_STOCK",
+              quantityChange: Number(v.stock),
               reason: "MANUAL_VARIANT_CREATION",
               deviceId: "web-client",
               operationId: `adj-${v.id}`,
@@ -803,8 +819,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         costPrice: Number(newProd.buyingPrice),
         buyingPrice: Number(newProd.buyingPrice),
         sellingPrice: Number(newProd.sellingPrice),
-        inventoryQuantity: Number(newProd.stock),
-        stock: Number(newProd.stock),
+        inventoryQuantity: 0,
+        stock: 0,
         reorderLevel: Number(newProd.reorderLevel || 5),
         isActive: true,
         tenantId: currentTenantId || undefined,
@@ -827,7 +843,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           buyingPrice: Number(newProd.buyingPrice),
           sellingPrice: Number(newProd.sellingPrice),
           hasVariants: false,
-          variants: [defaultVariant],
+          variants: [{ ...defaultVariant, inventoryQuantity: 0, stock: 0 }],
         },
         idempotencyKey: `PROD-CREATE-${prodId}`,
         tenantId: currentTenantId || undefined,
@@ -838,7 +854,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         entityType: "ProductVariant",
         entityId: defaultVarId,
         operationType: "CREATE",
-        payload: defaultVariant,
+        payload: { ...defaultVariant, inventoryQuantity: 0, stock: 0 },
         idempotencyKey: `VAR-CREATE-${defaultVarId}`,
         tenantId: currentTenantId || undefined,
         branchId: currentBranchId || undefined,
@@ -868,6 +884,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             variantId: defaultVarId,
             sku: `${autoSku}-STD`,
             adjustmentType: "INCREASE",
+            movementType: "OPENING_STOCK",
             quantityChange: Number(newProd.stock),
             reason: "MANUAL_PRODUCT_CREATION",
             deviceId: "web-client",
@@ -2218,354 +2235,26 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       )}
 
 
-      {/* --- Add Product Modal --- */}
-      {addProductModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: hasVariantsToggle ? 780 : 520, maxWidth: "96vw", maxHeight: "92vh", overflowY: "auto", padding: "1.5rem" }}>
-            <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-              <div>
-                <h2 className="v2-text-lg v2-font-black">Register New Product</h2>
-                <p className="v2-text-xs v2-text-muted">Multi-location catalog master with variant matrix support</p>
-              </div>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setAddProductModal(false)} type="button">✕</button>
-            </div>
-
-            <form onSubmit={handleCreateProduct} className="v2-space-y-4">
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT FULL NAME *</label>
-                <input
-                  className="v2-input"
-                  value={newProd.name}
-                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
-                  placeholder="e.g. Premium White Sugar or Men's Oxford Shirt"
-                  required
-                />
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-3">
-                <div>
-                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
-                    <label className="v2-text-xs v2-font-bold v2-text-muted">CATEGORY</label>
-                    <button
-                      type="button"
-                      className="v2-btn v2-btn-ghost v2-btn-xs"
-                      onClick={() => setAddCategoryModal(true)}
-                      style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
-                    >
-                      + New Cat
-                    </button>
-                  </div>
-                  <select className="v2-input" value={newProd.category} onChange={(e) => setNewProd({ ...newProd, category: e.target.value })}>
-                    {allCategories.map((c) => (
-                      <option key={c.id || c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
-                    <label className="v2-text-xs v2-font-bold v2-text-muted">BRAND / MAKE</label>
-                    <button
-                      type="button"
-                      className="v2-btn v2-btn-ghost v2-btn-xs"
-                      onClick={() => {
-                        setEditingBrand(null);
-                        setNewBrandName("");
-                        setNewBrandOrigin("");
-                        setNewBrandNotes("");
-                        setAddBrandModal(true);
-                      }}
-                      style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
-                    >
-                      + New Brand
-                    </button>
-                  </div>
-                  <select
-                    className="v2-input"
-                    value={newProd.brand || "General"}
-                    onChange={(e) => setNewProd({ ...newProd, brand: e.target.value })}
-                  >
-                    <option value="General">General (Unbranded)</option>
-                    {allBrands
-                      .filter((b) => b.name.toLowerCase() !== "general")
-                      .map((b) => (
-                        <option key={b.id || b.name} value={b.name}>{b.name}</option>
-                      ))}
-                    {newProd.brand && newProd.brand !== "General" && !allBrands.some((b) => b.name.toLowerCase() === newProd.brand.toLowerCase()) && (
-                      <option value={newProd.brand}>{newProd.brand}</option>
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              {/* In-Flow Variant Builder Toggle & Matrix Studio */}
-              <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)", border: "1px solid var(--surface-border)" }}>
-                <label className="v2-flex v2-items-center v2-justify-between" style={{ cursor: "pointer", userSelect: "none" }}>
-                  <div className="v2-flex v2-items-center v2-gap-2">
-                    <input
-                      type="checkbox"
-                      checked={hasVariantsToggle}
-                      onChange={(e) => {
-                        const active = e.target.checked;
-                        setHasVariantsToggle(active);
-                        if (active && inflowVariants.length === 0) {
-                          generateInflowCombinations();
-                        }
-                      }}
-                    />
-                    <span className="v2-font-bold v2-text-sm">This product has variants (e.g. Multiple Sizes, Colors, Packs, or Flavours)</span>
-                  </div>
-                  <span className="badge v2-badge-primary">World-Class Variant Matrix</span>
-                </label>
-
-                {hasVariantsToggle && (
-                  <div className="v2-mt-3 v2-space-y-3">
-                    <div className="v2-grid v2-grid-2 v2-gap-2">
-                      <div>
-                        <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 1 (e.g. Size, Pack, Weight)</label>
-                        <input
-                          className="v2-input v2-input-sm"
-                          value={varOption1Name}
-                          onChange={(e) => setVarOption1Name(e.target.value)}
-                          placeholder="e.g. Size"
-                        />
-                      </div>
-                      <div>
-                        <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
-                        <input
-                          className="v2-input v2-input-sm"
-                          value={varOption1Values}
-                          onChange={(e) => setVarOption1Values(e.target.value)}
-                          placeholder="Small, Medium, Large"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="v2-grid v2-grid-2 v2-gap-2">
-                      <div>
-                        <label className="v2-text-xs v2-font-bold v2-text-muted">OPTION 2 (Optional, e.g. Color, Flavour)</label>
-                        <input
-                          className="v2-input v2-input-sm"
-                          value={varOption2Name}
-                          onChange={(e) => setVarOption2Name(e.target.value)}
-                          placeholder="e.g. Color"
-                        />
-                      </div>
-                      <div>
-                        <label className="v2-text-xs v2-font-bold v2-text-muted">VALUES (Comma separated)</label>
-                        <input
-                          className="v2-input v2-input-sm"
-                          value={varOption2Values}
-                          onChange={(e) => setVarOption2Values(e.target.value)}
-                          placeholder="Red, Blue, Black (or leave empty)"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="v2-flex v2-items-center v2-justify-between v2-pt-1">
-                      <button
-                        type="button"
-                        className="v2-btn v2-btn-secondary v2-btn-xs"
-                        onClick={() => generateInflowCombinations()}
-                      >
-                        <Zap size={12} /> Regenerate Combinations Matrix
-                      </button>
-                      <span className="v2-text-xs v2-text-muted">
-                        <strong>{inflowVariants.length}</strong> variant{inflowVariants.length === 1 ? "" : "s"} &bull; Total Variant Stock: <strong>{inflowVariants.reduce((s, v) => s + (Number(v.stock) || 0), 0)}</strong> units
-                      </span>
-                    </div>
-
-                    {/* Matrix Grid */}
-                    <div style={{ maxHeight: "220px", overflowY: "auto", border: "1px solid var(--surface-border)", borderRadius: "var(--radius-xs)" }}>
-                      <table className="v2-table v2-table-sm" style={{ margin: 0, fontSize: "11px" }}>
-                        <thead>
-                          <tr>
-                            <th>Variant Name</th>
-                            <th>SKU Code</th>
-                            <th>Barcode</th>
-                            <th>Cost</th>
-                            <th>Retail</th>
-                            <th>Stock</th>
-                            <th></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {inflowVariants.length === 0 ? (
-                            <tr>
-                              <td colSpan={7} className="v2-text-center v2-text-muted v2-py-3">
-                                No variant combinations yet. Click 'Regenerate Combinations Matrix' above.
-                              </td>
-                            </tr>
-                          ) : (
-                            inflowVariants.map((v, vIdx) => (
-                              <tr key={v.id}>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs"
-                                    value={v.name}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, name: val } : item));
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    value={v.sku}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, sku: val } : item));
-                                    }}
-                                    style={{ width: "130px" }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    value={v.barcode || ""}
-                                    placeholder="Scan or auto"
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, barcode: val } : item));
-                                    }}
-                                    style={{ width: "110px" }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    type="number"
-                                    value={v.buyingPrice || ""}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, buyingPrice: val } : item));
-                                    }}
-                                    style={{ width: "70px" }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    type="number"
-                                    value={v.sellingPrice || ""}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, sellingPrice: val } : item));
-                                    }}
-                                    style={{ width: "70px" }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    type="number"
-                                    value={v.stock || ""}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setInflowVariants(prev => prev.map((item, idx) => idx === vIdx ? { ...item, stock: val } : item));
-                                    }}
-                                    style={{ width: "55px" }}
-                                  />
-                                </td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="v2-btn v2-btn-ghost v2-btn-icon-xs"
-                                    style={{ color: "var(--danger)" }}
-                                    title="Remove variant combination"
-                                    onClick={() => setInflowVariants(prev => prev.filter((_, idx) => idx !== vIdx))}
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-3">
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">
-                    BUYING COST PRICE (TSH) {hasVariantsToggle && <span className="badge v2-badge-muted">Variant Default</span>}
-                  </label>
-                  <input
-                    className="v2-input"
-                    type="number"
-                    value={hasVariantsToggle && inflowVariants[0] ? inflowVariants[0].buyingPrice : (newProd.buyingPrice || "")}
-                    onChange={(e) => setNewProd({ ...newProd, buyingPrice: Number(e.target.value) })}
-                    required={!hasVariantsToggle}
-                  />
-                </div>
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">
-                    SELLING RETAIL PRICE (TSH) {hasVariantsToggle && <span className="badge v2-badge-muted">Variant Default</span>}
-                  </label>
-                  <input
-                    className="v2-input"
-                    type="number"
-                    value={hasVariantsToggle && inflowVariants[0] ? inflowVariants[0].sellingPrice : (newProd.sellingPrice || "")}
-                    onChange={(e) => setNewProd({ ...newProd, sellingPrice: Number(e.target.value) })}
-                    required={!hasVariantsToggle}
-                  />
-                </div>
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-3">
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">
-                    INITIAL STOCK QTY {hasVariantsToggle && <span className="badge v2-badge-success">Sum of Variants</span>}
-                  </label>
-                  <input
-                    className="v2-input"
-                    type="number"
-                    disabled={hasVariantsToggle}
-                    value={hasVariantsToggle ? inflowVariants.reduce((s, v) => s + (Number(v.stock) || 0), 0) : (newProd.stock || "")}
-                    onChange={(e) => setNewProd({ ...newProd, stock: Number(e.target.value) })}
-                    required={!hasVariantsToggle}
-                  />
-                </div>
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">REORDER THRESHOLD</label>
-                  <input className="v2-input" type="number" value={newProd.reorderLevel || ""} onChange={(e) => setNewProd({ ...newProd, reorderLevel: Number(e.target.value) })} required />
-                </div>
-              </div>
-
-              <div className="v2-grid v2-grid-2 v2-gap-3">
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">BATCH / LOT NUMBER</label>
-                  <input
-                    className="v2-input"
-                    placeholder="e.g. LOT-2026-09"
-                    value={newProd.batchNumber || ""}
-                    onChange={(e) => setNewProd({ ...newProd, batchNumber: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">EXPIRY DATE (FEFO)</label>
-                  <input
-                    className="v2-input"
-                    type="date"
-                    value={newProd.expiryDate || ""}
-                    onChange={(e) => setNewProd({ ...newProd, expiryDate: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setAddProductModal(false)} type="button">Cancel</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
-                  {hasVariantsToggle && inflowVariants.length > 0 ? `Save Product & ${inflowVariants.length} Variants` : "Save Product"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* --- Production 5-Step Product Registration Wizard UI --- */}
+      <ProductRegistrationWizardModal
+        isOpen={addProductModal}
+        onClose={() => setAddProductModal(false)}
+        allCategories={allCategories}
+        allBrands={allBrands}
+        onOpenAddCategory={() => setAddCategoryModal(true)}
+        onOpenAddBrand={() => {
+          setEditingBrand(null);
+          setNewBrandName("");
+          setNewBrandOrigin("");
+          setNewBrandNotes("");
+          setAddBrandModal(true);
+        }}
+        currentTenantId={currentTenantId}
+        currentBranchId={currentBranchId}
+        db={db}
+        syncOutbox={syncOutbox}
+        onProductCreated={loadInventory}
+      />
 
       {/* --- Edit Product Slide-Over Drawer (Sheet) --- */}
       <Sheet

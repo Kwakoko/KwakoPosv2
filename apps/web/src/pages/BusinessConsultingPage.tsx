@@ -172,7 +172,7 @@ export const BusinessConsultingPage: React.FC = () => {
 
   // Timer interval
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (isTimerRunning) {
       interval = setInterval(() => setTimerSeconds((s) => s + 1), 1000);
     }

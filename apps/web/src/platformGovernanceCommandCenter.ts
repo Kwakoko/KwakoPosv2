@@ -6,7 +6,7 @@ export function renderPlatformGovernanceCommandCenter(): string {
   <meta charset="UTF-8">
   <title>KwakoPos Platform Governance Control Tower (KPGA)</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
+    body { font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }
     .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1rem; margin-bottom: 2rem; }
     .title { font-size: 1.75rem; font-weight: 700; color: #38bdf8; }
     .badge { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 600; background: #166534; color: #4ade80; }

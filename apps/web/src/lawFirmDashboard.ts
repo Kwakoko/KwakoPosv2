@@ -1,6 +1,6 @@
 export function renderLawFirmDashboard(): string {
   return `
-    <div style="font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; min-height: 100vh;">
+    <div style="font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; min-height: 100vh;">
       <header style="border-bottom: 1px solid #1e293b; padding-bottom: 1rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
         <div>
           <span style="background: #6366f1; color: #ffffff; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 700; font-size: 0.875rem;">LAW FIRM OPERATING SYSTEM MODULE</span>
