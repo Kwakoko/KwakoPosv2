@@ -248,6 +248,7 @@ export class PrismaSyncEngine {
       suppliers: suppliers.map((s: any) => ({ ...s, outstandingBalance: Number(s.outstandingBalance), createdAt: s.createdAt.toISOString(), updatedAt: s.updatedAt.toISOString() })),
       categories: categories.map((c: any) => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
       brands: brands.map((b: any) => ({ ...b, createdAt: b.createdAt.toISOString(), updatedAt: b.updatedAt.toISOString() })),
+      priceHistories: priceHistories.map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage), effectiveFrom: h.effectiveFrom.toISOString(), effectiveTo: h.effectiveTo?.toISOString() ?? null, createdAt: h.createdAt.toISOString() })),
       integrityChecksum: computePayloadChecksum({ products, variants, ledger, adjustments, customers, suppliers, categories, brands, priceHistories }),
     };
   }
@@ -284,6 +285,13 @@ export class PrismaSyncEngine {
       name: v.name,
       sku: v.sku,
       barcode: v.barcode ?? null,
+      inheritBuyingPrice: v.inheritBuyingPrice,
+      inheritSellingPrice: v.inheritSellingPrice,
+      inventoryQuantity: Number(v.inventoryQuantity),
+      reservedQuantity: Number(v.reservedQuantity),
+      reorderLevel: Number(v.reorderLevel),
+      imageUrl: v.imageUrl ?? null,
+      attributes: v.attributes ?? {},
       price: Number(v.price),
       costPrice: Number(v.costPrice),
       isActive: v.isActive,

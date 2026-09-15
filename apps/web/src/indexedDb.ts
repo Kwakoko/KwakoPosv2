@@ -221,15 +221,35 @@ export class LocalIndexedDbStore {
         throw err;
       });
 
-      // Hydrate all stores that exist in the open database
+      // Hydrate only critical operational stores on the startup-critical path.
+      // Historical/administrative stores are warmed progressively after the ready gate.
       if (this.nativeDb) {
-        const activeStores = Array.from(this.nativeDb.objectStoreNames) as NativeStore[];
-        await Promise.all(
-          activeStores.map((store) => {
+        const startupStores: NativeStore[] = [
+          "products", "productVariants", "stockBalance", "sales", "payments",
+          "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata",
+        ];
+        const activeStores = startupStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
+        for (const store of activeStores) {
+          const targetMap = this.getTargetMap(store);
+          if (targetMap) await this.hydrateMap(store, targetMap);
+        }
+
+        const deferredStores = (Array.from(this.nativeDb.objectStoreNames) as NativeStore[])
+          .filter((store) => !startupStores.includes(store));
+        const warmDeferredStores = async () => {
+          for (const store of deferredStores) {
             const targetMap = this.getTargetMap(store);
-            return targetMap ? this.hydrateMap(store, targetMap) : Promise.resolve();
-          }),
-        );
+            if (!targetMap) continue;
+            await this.hydrateMap(store, targetMap);
+            await new Promise<void>((resolve) => {
+              if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 250 });
+              else setTimeout(resolve, 0);
+            });
+          }
+        };
+        void warmDeferredStores().catch((error) => {
+          console.warn("[IndexedDB] Background store warm failed:", error);
+        });
       }
 
       const storedSchema = this.syncMetadata.get("schemaVersion");
@@ -289,23 +309,12 @@ export class LocalIndexedDbStore {
     if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const tx = this.nativeDb!.transaction(store, "readonly");
-      const request = tx.objectStore(store).getAll();
-      const keyRequest = tx.objectStore(store).getAllKeys();
-      let values: T[] | null = null;
-      let keys: IDBValidKey[] | null = null;
-      const finish = () => {
-        if (!values || !keys) return;
-        for (let index = 0; index < Math.min(keys.length, values.length); index++) {
-          target.set(String(keys[index]), values[index]);
-        }
-      };
+      const request = tx.objectStore(store).openCursor();
       request.onsuccess = () => {
-        values = request.result as T[];
-        finish();
-      };
-      keyRequest.onsuccess = () => {
-        keys = keyRequest.result as IDBValidKey[];
-        finish();
+        const cursor = request.result;
+        if (!cursor) return;
+        target.set(String(cursor.primaryKey), cursor.value as T);
+        cursor.continue();
       };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error || new Error(`IndexedDB read failed: ${store}`));
@@ -816,6 +825,7 @@ export class LocalIndexedDbStore {
         this.saveVariantLocal(variant);
         appliedCount += 1;
       }
+      for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
       for (const entry of ledger) {
         this.saveStockLedgerLocal(entry);
         appliedCount += 1;
