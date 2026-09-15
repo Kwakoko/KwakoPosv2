@@ -24,28 +24,28 @@ export function renderPlatformGovernanceCommandCenter(): string {
       <div class="title">KwakoPos Platform Governance Control Tower (KPGA)</div>
       <div style="color: #94a3b8; font-size: 0.875rem; margin-top: 0.25rem;">Architectural Integrity, API Governance, Fitness Rules & Deprecation Registry</div>
     </div>
-    <div class="badge">ONE CORE INVARIANT: 100% PASSING</div>
+    <div class="badge">ONE CORE INVARIANT: RUNTIME EVIDENCE REQUIRED</div>
   </div>
 
   <div class="grid">
     <div class="card">
       <div class="card-title">Architecture Fitness Score</div>
-      <div class="metric">100.0 %</div>
+      <div class="metric">Runtime evidence required</div>
       <div style="color: #4ade80; font-size: 0.875rem; margin-top: 0.5rem;">Automated CI/CD Fitness Gates Active</div>
     </div>
     <div class="card">
       <div class="card-title">Governed API Contracts</div>
-      <div class="metric">1,240 Endpoints</div>
+      <div class="metric">Runtime evidence required</div>
       <div style="color: #38bdf8; font-size: 0.875rem; margin-top: 0.5rem;">Zero Breaking Changes Allowed Without Notice</div>
     </div>
     <div class="card">
       <div class="card-title">Architecture Decision Records</div>
-      <div class="metric">48 ADRs</div>
+      <div class="metric">Runtime evidence required</div>
       <div style="color: #4ade80; font-size: 0.875rem; margin-top: 0.5rem;">Version-Controlled ADR Registry</div>
     </div>
     <div class="card">
       <div class="card-title">Platform Complexity Score</div>
-      <div class="metric">25 / 100</div>
+      <div class="metric">Runtime evidence required</div>
       <div style="color: #4ade80; font-size: 0.875rem; margin-top: 0.5rem;">Complexity Budget Within Approved Envelope</div>
     </div>
   </div>

@@ -1,0 +1,22 @@
+﻿name: Kwakoko Security & Trust Governance
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  security-trust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm }
+      - run: npm ci
+      - run: npm run security-trust:verify
+      - run: npx vitest run tests/unit/security-trust-governance.test.ts
+      - run: npm run ai-governance:verify

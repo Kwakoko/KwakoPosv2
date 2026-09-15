@@ -1,0 +1,34 @@
+name: Kwakoko Performance & Global Scale Governance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance-scale-governance:
+    name: Performance & Global Scale Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Performance / Scale Governance
+        run: npm run performance-scale:verify
+      - name: Performance Contract Tests
+        run: npx vitest run tests/unit/performance-scale-governance.test.ts tests/unit/production-reliability-governance.test.ts
+      - name: Existing Performance Certification
+        run: npm run certify:performance
+      - name: Config Build
+        run: npm --workspace=@kwakopos2/config run build
+      - name: Repository Diff Hygiene
+        run: git diff --check

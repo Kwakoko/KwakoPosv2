@@ -1,0 +1,25 @@
+﻿name: Privacy & Data Governance
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  privacy-data-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run privacy-data:verify
+      - run: npx vitest run tests/unit/privacy-data-governance.test.ts
+      - run: npm --workspace=@kwakopos2/config run build
+      - run: git diff --check

@@ -200,3 +200,16 @@ export * from './visualIdentity.js';
 export * from "./brandVoice.js";
 export * from "./experienceGovernance.js";
 export * from "./designSystem.js";
+
+export * from "./performanceScaleGovernance.js";
+export * from './integrationApiEcosystemGovernance.js';
+export * from './productionReliabilityGovernance.js';
+export * from './performanceScaleGovernance.js';
+export * from './commercialProductReadinessGovernance.js';
+export * from './enterpriseCustomerReadinessGovernance.js';
+export * from "./marketplacePartnerGovernance.js";
+export * from "./biAnalyticsGovernance.js";
+
+export * from "./aiOperatingLayerGovernance.js";
+export * from "./autonomousOperationsGovernance.js";
+export * from "./platformGovernanceControlPlane.js";

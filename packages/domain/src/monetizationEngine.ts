@@ -585,6 +585,12 @@ export class RevenueAnalyticsEngine {
     const paymentSuccessRatePct =
       totalPayments > 0 ? Number(((successfulPayments / totalPayments) * 100).toFixed(2)) : 100;
 
+    const beginningRecurringRevenue = Math.max(0, mrr);
+    const retainedBase = Math.max(0, beginningRecurringRevenue - cancelledSubscriptionsCount);
+    const netRevenueRetentionPct = beginningRecurringRevenue > 0
+      ? Number(((retainedBase / beginningRecurringRevenue) * 100).toFixed(2))
+      : 0;
+
     return {
       mrr,
       arr,
@@ -594,7 +600,7 @@ export class RevenueAnalyticsEngine {
       trialTenants,
       trialConversionRatePct,
       grossChurnRatePct,
-      netRevenueRetentionPct: 105.0, // Healthy retention benchmark
+      netRevenueRetentionPct,
       paymentSuccessRatePct,
       pluginRevenueMonthly,
       usageRevenueMonthly,

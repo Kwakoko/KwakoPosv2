@@ -558,13 +558,13 @@ export class PrismaStockRepository {
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
     const result = await prisma.$transaction(async (tx: any) => {
+      const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId } });
+      const quantityBefore = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
       let changeQty = req.quantityChange;
       if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
-      if (req.adjustmentType === "SET") {
-        const ledgerRows = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId } });
-        const currentStock = calculateAvailableStock(ledgerRows.map(ledgerShape));
-        changeQty = req.quantityChange - currentStock;
-      }
+      if (req.adjustmentType === "SET") changeQty = req.quantityChange - quantityBefore;
+      const quantityAfter = quantityBefore + changeQty;
+      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
 
       const adjustment = await tx.stockAdjustment.create({
         data: {
@@ -586,19 +586,26 @@ export class PrismaStockRepository {
 
       const ledger = await tx.stockLedger.create({
         data: {
+          id: req.ledgerId || undefined,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
           productId: variant.productId,
           variantId: resolvedVariantId,
-          movementType: "ADJUSTMENT",
+          movementType: req.movementType || (changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS"),
+          referenceType: "ADJUSTMENT",
+          referenceId: adjustment.id,
+          quantityBefore,
           quantityChange: changeQty,
           quantity: changeQty,
-          referenceType: "StockAdjustment",
-          referenceId: adjustment.id,
+          quantityAfter,
+          unitCost: req.unitCost ?? 0,
+          totalCost: Math.abs(changeQty) * (req.unitCost ?? 0),
+          userId: req.userId ?? ctx.userId,
           occurredAt: new Date(),
           deviceId: req.deviceId,
           operationId: req.operationId,
           idempotencyKey: req.idempotencyKey,
+          notes: req.notes ?? req.referenceNote ?? null,
         },
       });
 
