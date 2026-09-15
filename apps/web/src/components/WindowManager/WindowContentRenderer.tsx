@@ -6,8 +6,40 @@
 import React, { Component, lazy, Suspense, type ReactNode } from "react";
 import type { KwakokoWindow } from "../../types/windowManager.js";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-const lazyWorkspacePage = (key: string) =>
-  lazy<React.ComponentType<any>>(() => import("../../pages/WorkspacePages.js").then((module: any) => ({ default: module[key] as React.ComponentType<any> })));
+const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>): React.ComponentType<any> =>
+  lazy(loader) as React.ComponentType<any>;
+const lazyWorkspacePage = (key: string) => {
+  switch (key) {
+    case "DashboardPage": return lazyPage(() => import("../../pages/DashboardPage.js").then((m) => ({ default: m.DashboardPage })));
+    case "PosPage": return lazyPage(() => import("../../pages/PosPage.js").then((m) => ({ default: m.PosPage })));
+    case "InventoryPage": return lazyPage(() => import("../../pages/InventoryPage.js").then((m) => ({ default: m.InventoryPage })));
+    case "CustomersPage": return lazyPage(() => import("../../pages/CustomersPage.js").then((m) => ({ default: m.CustomersPage })));
+    case "PurchasingPage": return lazyPage(() => import("../../pages/PurchasingPage.js").then((m) => ({ default: m.PurchasingPage })));
+    case "ReportsPage": return lazyPage(() => import("../../pages/ReportsPage.js").then((m) => ({ default: m.ReportsPage })));
+    case "SettingsPage": return lazyPage(() => import("../../pages/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
+    case "UsersPage": return lazyPage(() => import("../../pages/UsersRolesPage.js").then((m) => ({ default: m.UsersRolesPage })));
+    case "SuperAdminPage": return lazyPage(() => import("../../pages/SuperAdminPage.js").then((m) => ({ default: m.SuperAdminPage })));
+    case "CashDrawerPage": return lazyPage(() => import("../../pages/CashDrawerPage.js").then((m) => ({ default: m.CashDrawerPage })));
+    case "ReceiptsPage": return lazyPage(() => import("../../pages/ReceiptsPage.js").then((m) => ({ default: m.ReceiptsPage })));
+    case "TrashPage": return lazyPage(() => import("../../pages/TrashPage.js").then((m) => ({ default: m.TrashPage })));
+    case "PersistenceTestPage": return lazyPage(() => import("../../pages/PersistenceTestPage.js").then((m) => ({ default: m.PersistenceTestPage })));
+    case "BusinessConsultingPage": return lazyPage(() => import("../../pages/BusinessConsultingPage.js").then((m) => ({ default: m.BusinessConsultingPage })));
+    case "LawFirmPage": return lazyPage(() => import("../../pages/LawFirmPage.js").then((m) => ({ default: m.LawFirmPage })));
+    case "PharmacyPage": return lazyPage(() => import("../../pages/PharmacyPage.js").then((m) => ({ default: m.PharmacyPage })));
+    case "HelpPage": return lazyPage(() => import("../../pages/HelpPage.js").then((m) => ({ default: m.HelpPage })));
+    case "ExpensesPage": return lazyPage(() => import("../../pages/ExpensesPage.js").then((m) => ({ default: m.ExpensesPage })));
+    case "VerticalCommandCenterPage": return lazyPage(() => import("../../pages/VerticalCommandCenterPage.js").then((m) => ({ default: m.VerticalCommandCenterPage })));
+    case "PoultryLivestockPage":
+    case "FleetPage":
+    case "WorkforcePage":
+    case "TelecomPage":
+    case "FinancePage":
+    case "DiagnosticsPage":
+    case "AiPage":
+      return lazyPage(() => import("../../pages/WorkspacePages.js").then((m: any) => ({ default: m[key] })));
+    default: throw new Error(`Unknown workspace page: ${key}`);
+  }
+};
 
 const DashboardPage = lazyWorkspacePage("DashboardPage");
 const PosPage = lazyWorkspacePage("PosPage");
@@ -36,8 +68,8 @@ const HelpPage = lazyWorkspacePage("HelpPage");
 const SuperAdminPage = lazyWorkspacePage("SuperAdminPage");
 const VerticalCommandCenterPage = lazyWorkspacePage("VerticalCommandCenterPage");
 import { SuperAdminCertificationStudio } from "../SuperAdminCertificationStudio.js";
-import { SuperAdminComplianceTowerPage } from "../../pages/SuperAdminComplianceTowerPage.js";
-import { SuperAdminRollbackCenterPage } from "../../pages/SuperAdminRollbackCenterPage.js";
+const SuperAdminComplianceTowerPage = lazyPage(() => import("../../pages/SuperAdminComplianceTowerPage.js").then((m) => ({ default: m.SuperAdminComplianceTowerPage })));
+const SuperAdminRollbackCenterPage = lazyPage(() => import("../../pages/SuperAdminRollbackCenterPage.js").then((m) => ({ default: m.SuperAdminRollbackCenterPage })));
 
 interface ErrorBoundaryProps {
   windowId: string;
