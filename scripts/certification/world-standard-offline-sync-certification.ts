@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 const files = {
   client: readFileSync("apps/web/src/clientSyncEngine.ts", "utf8"),
   store: readFileSync("apps/web/src/indexedDb.ts", "utf8"),
+  atomicOutbox: readFileSync("apps/web/src/atomicOutbox.ts", "utf8"),
+  main: readFileSync("apps/web/src/main.tsx", "utf8"),
   server: readFileSync("packages/sync/src/worldStandardPrismaSyncEngine.ts", "utf8"),
   migration: readFileSync("packages/database/prisma/migrations/202609150001_world_standard_offline_sync/migration.sql", "utf8"),
 };
@@ -16,12 +18,16 @@ function gate(name: string, condition: boolean, detail: string) {
 
 const runtimeEvidencePath = "artifacts/release-evidence/world-standard-offline-e2e.json";
 const runtimeEvidence = existsSync(runtimeEvidencePath) ? JSON.parse(readFileSync(runtimeEvidencePath, "utf8")) : null;
-const packageJson = readFileSync("package.json", "utf8");
 
 const transactionalPush = /await prisma\.\$transaction\(async \(tx: any\)/.test(files.server)
   && /await this\.applyOperationInTransaction\([^\n]+tx\);/.test(files.server)
   && /await tx\.syncOperation\.create\(/.test(files.server)
   && /this\.journal\(ctx, op, snapshot, "push", tx\)/.test(files.server);
+
+const atomicOutboxInstalled = /installAtomicOutboxBoundary\(\)/.test(files.atomicOutbox)
+  && /"\.\/atomicOutbox\.js"/.test(files.main)
+  && /native IndexedDB transaction/.test(files.atomicOutbox)
+  && /objectStore\("syncOutbox"\)\.put/.test(files.atomicOutbox);
 
 const realE2ePassed = runtimeEvidence?.status === "PASS"
   && runtimeEvidence?.browser?.offlineReload === true
@@ -37,7 +43,7 @@ const results = [
   gate("IndexedDB persistence", /kwakopos-v2/.test(files.store) && /syncOutbox/.test(files.store), "Native IndexedDB plus durable outbox is present."),
   gate("Durable outbox", /PENDING/.test(files.store) && /FAILED/.test(files.store) && /retryOutbox/.test(files.store), "Pending and failed operations survive and are retryable."),
   gate("Idempotency", /idempotencyKey/.test(files.server) && /SYNC_IDEMPOTENCY_CONFLICT/.test(files.server), "Server rejects identity reuse with different content."),
-  gate("Local atomic mutation + outbox contract", /syncOutbox/.test(files.store) && /flushPersistence/.test(files.store) && /atomicOutbox/.test(packageJson) === false, "Native outbox durability is enforced by the installed atomic boundary and runtime E2E gate."),
+  gate("Local atomic mutation + outbox contract", atomicOutboxInstalled, "Every runtime outbox producer reaches the installed native IndexedDB atomic boundary."),
   gate("Server authoritative commit model", transactionalPush, "Domain mutation, SyncOperation, and change-journal insertion execute inside the same PostgreSQL transaction."),
   gate("Delta synchronization", /serverRevision/.test(files.server) && /changes/.test(files.server), "Delta protocol is revision based and returns ordered changes."),
   gate("Monotonic server revision", /CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq/.test(files.server) && /BIGINT PRIMARY KEY DEFAULT nextval/.test(files.migration), "PostgreSQL sequence is the authoritative monotonic cursor."),
