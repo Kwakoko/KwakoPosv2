@@ -151,6 +151,37 @@ describe("Legal & Compliance Governance Platform Integration Tests", () => {
       expect(json.data.requiredDocuments.length).toBeGreaterThan(0);
     });
 
+    it("blocks authenticated business workspace APIs while statutory consent is pending", async () => {
+      const res = await server.inject({
+        method: "GET",
+        url: "/api/v1/catalog/categories",
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(403);
+      const json = JSON.parse(res.payload);
+      expect(json.success).toBe(false);
+      expect(json.error.code).toBe("LEGAL_ACCEPTANCE_REQUIRED");
+      expect(Array.isArray(json.error.requiredDocuments)).toBe(true);
+      expect(json.error.requiredDocuments.length).toBeGreaterThan(0);
+    });
+
+    it("allows legal status and acceptance endpoints while the workspace is blocked", async () => {
+      const statusRes = await server.inject({
+        method: "GET",
+        url: "/api/legal/acceptance/status",
+        headers: authHeaders,
+      });
+      expect(statusRes.statusCode).toBe(200);
+
+      const docRes = await server.inject({
+        method: "GET",
+        url: "/api/legal/documents/terms-of-service",
+        headers: authHeaders,
+      });
+      expect(docRes.statusCode).toBe(200);
+    });
+
     it("POST /api/legal/acceptance/submit records consent with cryptographic evidence hash", async () => {
       const res = await server.inject({
         method: "POST",

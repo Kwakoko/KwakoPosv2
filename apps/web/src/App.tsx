@@ -294,6 +294,22 @@ const STANDALONE_PATHS = new Set([
   "/super-admin/support",
   "/super-admin/compliance",
   "/super-admin/rollback",
+  "/law-firm",
+  "/pharmacy",
+  "/poultry-livestock",
+  "/fleet",
+  "/workforce",
+  "/telecom",
+  "/restaurant",
+  "/electronics",
+  "/hardware",
+  "/microfinance",
+  "/sacco",
+  "/garage",
+  "/construction",
+  "/wholesale",
+  "/bar",
+  "/real-estate",
 ]);
 
 const ALLOWED_SUPER_ADMIN_PATHS = new Set([
@@ -317,6 +333,10 @@ const AuthenticatedApp: React.FC = () => {
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() =>
     Boolean(getStoredSession()?.user)
   );
+  const [legalGate, setLegalGate] = useState<"checking" | "pending" | "compliant" | "error">(() =>
+    getStoredSession()?.user ? "checking" : "compliant"
+  );
+  const [legalGateNonce, setLegalGateNonce] = useState(0);
 
   const isSuperAdmin = Boolean(
     user && (user.role === "SUPER_ADMIN" || user.email === "admin@kwakoko.co.tz")
@@ -331,10 +351,25 @@ const AuthenticatedApp: React.FC = () => {
   }, [setActiveTab]);
 
   useEffect(() => {
-    if (user || isAuthenticated) {
-      setHasEnteredWorkspace(true);
+    if (!(user && isAuthenticated)) {
+      setLegalGate("compliant");
+      return;
     }
-  }, [user, isAuthenticated]);
+    let cancelled = false;
+    setLegalGate("checking");
+    apiFetch<{ success: boolean; data: { isCompliant: boolean; requiredDocuments: unknown[] } }>("/api/legal/acceptance/status")
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.success || !res.data) return setLegalGate("error");
+        setLegalGate(res.data.isCompliant ? "compliant" : "pending");
+      })
+      .catch(() => { if (!cancelled) setLegalGate("error"); });
+    return () => { cancelled = true; };
+  }, [user, isAuthenticated, legalGateNonce]);
+
+  useEffect(() => {
+    if ((user || isAuthenticated) && legalGate === "compliant") setHasEnteredWorkspace(true);
+  }, [user, isAuthenticated, legalGate]);
 
   useEffect(() => {
     const onPop = () => {
@@ -409,6 +444,22 @@ const AuthenticatedApp: React.FC = () => {
         />
       );
     }
+  }
+
+  // Fail-closed statutory consent gate: never render the authenticated workspace before server verification.
+  if (isAuthenticated && user && legalGate !== "compliant") {
+    if (legalGate === "error") {
+      return (
+        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "2rem", background: "var(--surface-sunken, #f8fafc)" }}>
+          <div className="v2-card" style={{ maxWidth: "560px", width: "100%", padding: "2rem", textAlign: "center" }}>
+            <h2 className="v2-text-lg v2-font-black" style={{ marginTop: 0 }}>Statutory Consent Verification Required</h2>
+            <p className="v2-text-sm v2-text-muted">KwakoPos cannot open your workspace until statutory consent status is verified. Service or network failure is treated as non-compliance.</p>
+            <button className="v2-btn v2-btn-primary" type="button" onClick={() => setLegalGateNonce((n) => n + 1)}>Retry Verification</button>
+          </div>
+        </div>
+      );
+    }
+    return <LegalAcceptanceModal isOpen={true} onAccepted={() => setLegalGate("compliant")} />;
   }
 
   // Standalone Customer-Facing Secondary Display Window (runs without admin shell)
@@ -555,7 +606,6 @@ const AuthenticatedApp: React.FC = () => {
           {renderView()}
         </ProductionErrorBoundary>
       </SystemAppShellLayout>
-      <LegalAcceptanceModal />
     </>
   );
 };

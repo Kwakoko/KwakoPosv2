@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { ShieldCheck, Lock, CheckCircle2, AlertTriangle, FileText, ChevronRight, X, ArrowRight } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { ShieldCheck, Lock, CheckCircle2, AlertTriangle, FileText, ChevronRight } from "lucide-react";
 import { apiFetch } from "../services/apiClient.js";
 
 interface PendingDoc {
@@ -11,38 +11,6 @@ interface PendingDoc {
 }
 
 // ─── Module-level guard utilities (no component state dependency) ─────────────
-
-const DISMISSED_KEY = "kwakopos:v2:legal-dismissed";
-
-/** Returns today's date as YYYY-MM-DD in local time */
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Stable, sorted fingerprint of pending docs — detects genuinely new/updated doc sets */
-function docsFingerprint(docs: PendingDoc[]): string {
-  return docs.map((d) => `${d.documentId}@${d.requiredVersion}`).sort().join("|");
-}
-
-/** Persist today's date + doc fingerprint so repeated refreshes skip the modal */
-function markDismissed(docs: PendingDoc[]): void {
-  try {
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify({ date: todayStr(), fingerprint: docsFingerprint(docs) }));
-  } catch { /* ignore quota/private-mode errors */ }
-}
-
-/** Returns true if the exact same pending-doc set was already dismissed today */
-function wasAlreadyDismissedToday(docs: PendingDoc[]): boolean {
-  try {
-    const raw = localStorage.getItem(DISMISSED_KEY);
-    if (!raw) return false;
-    const { date, fingerprint } = JSON.parse(raw) as { date: string; fingerprint: string };
-    return date === todayStr() && fingerprint === docsFingerprint(docs);
-  } catch {
-    return false;
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,22 +26,6 @@ export const LegalAcceptanceModal: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleEscape = useCallback(() => {
-    // "Skip & Remind Me Later" — suppress for the rest of today only
-    if (pendingDocs.length > 0) markDismissed(pendingDocs);
-    setIsOpen(false);
-    if (onAccepted) onAccepted();
-  }, [onAccepted, pendingDocs]);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        handleEscape();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, handleEscape]);
 
   const checkStatus = () => {
     apiFetch<{
@@ -84,13 +36,12 @@ export const LegalAcceptanceModal: React.FC<{
         if (res.success && res.data) {
           if (!res.data.isCompliant && res.data.requiredDocuments.length > 0) {
             const docs = res.data.requiredDocuments;
-            // Guard: do NOT pop the modal again if dismissed within the same calendar day
-            if (wasAlreadyDismissedToday(docs)) return;
             setPendingDocs(docs);
             setIsOpen(true);
             setCurrentIndex(0);
           } else {
             setIsOpen(false);
+            if (forcedOpen) onAccepted?.();
           }
         }
       })
@@ -101,6 +52,7 @@ export const LegalAcceptanceModal: React.FC<{
 
   // Run status check only once per component mount (triggered by forcedOpen change or initial mount)
   useEffect(() => {
+    if (forcedOpen) setIsOpen(true);
     checkStatus();
   }, [forcedOpen]);
 
@@ -204,7 +156,19 @@ export const LegalAcceptanceModal: React.FC<{
     }
   };
 
-  if (!isOpen || !activePending) return null;
+  if (!isOpen) return null;
+  if (!activePending) {
+    return (
+      <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15, 23, 42, 0.78)", zIndex: 9999, display: "grid", placeItems: "center", padding: "1rem" }}>
+        <div className="v2-card" style={{ width: "100%", maxWidth: "560px", padding: "2rem", textAlign: "center", background: "#fff", borderRadius: "12px" }}>
+          <ShieldCheck size={28} style={{ color: "var(--color-primary, #3b82f6)" }} />
+          <h2 className="v2-text-lg v2-font-black">Verifying Statutory Consent</h2>
+          <p className="v2-text-sm v2-text-muted">Your workspace remains locked until mandatory legal consent has been verified by the KwakoPos server.</p>
+          {error && <p className="v2-text-sm" style={{ color: "#dc2626" }}>{error}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -246,25 +210,6 @@ export const LegalAcceptanceModal: React.FC<{
               <span className="v2-badge v2-badge-primary">
                 {currentIndex + 1} of {pendingDocs.length}
               </span>
-              <button
-                type="button"
-                onClick={handleEscape}
-                title="Dismiss & Proceed to Workspace (Esc)"
-                aria-label="Close modal"
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-muted, #64748b)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "4px",
-                  borderRadius: "6px",
-                }}
-              >
-                <X size={18} />
-              </button>
             </div>
           </div>
           <p className="v2-text-xs v2-text-muted" style={{ margin: "0.25rem 0 0 0" }}>
@@ -331,27 +276,6 @@ export const LegalAcceptanceModal: React.FC<{
                   {error}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={handleEscape}
-                style={{
-                  background: "rgba(239, 68, 68, 0.15)",
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
-                  color: "#dc2626",
-                  borderRadius: "6px",
-                  padding: "0.35rem 0.75rem",
-                  fontSize: "0.75rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  marginLeft: "auto",
-                }}
-              >
-                <span>Proceed to Workspace Anyway</span>
-                <ArrowRight size={13} />
-              </button>
             </div>
           )}
 
@@ -375,14 +299,6 @@ export const LegalAcceptanceModal: React.FC<{
         {/* Modal Footer */}
         <div style={{ padding: "1rem 1.5rem", borderTop: "1px solid var(--surface-border, #e2e8f0)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", background: "var(--surface-sunken, #f8fafc)", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <button
-              type="button"
-              className="v2-btn v2-btn-ghost"
-              onClick={handleEscape}
-              style={{ fontSize: "0.78rem", padding: "0.45rem 0.75rem", color: "var(--text-muted, #64748b)" }}
-            >
-              Skip &amp; Remind Me Later
-            </button>
             {pendingDocs.length > 1 && (
               <button
                 type="button"

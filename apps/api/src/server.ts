@@ -8,6 +8,7 @@ import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
+import { globalLegalGovernanceService } from "./services/legalGovernanceService.js";
 import { rollbackAuthorizationRoutes } from "./routes/rollbackAuthorizationRoutes.js";
 import { superAdminDatabaseRoutes } from "./routes/superAdminDatabaseRoutes.js";
 import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoutes.js";
@@ -538,6 +539,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           if (authenticatedPath.startsWith("/admin/")) {
             requireAdminContext(req);
           }
+          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+            const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
+            if (!legalStatus.isCompliant) {
+              return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+            }
+          }
           return;
         }
       }
@@ -563,6 +570,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const authenticatedPath = req.url.split("?")[0];
       if (authenticatedPath.startsWith("/admin/")) {
         requireAdminContext(req);
+      }
+      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+        const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
+        if (!legalStatus.isCompliant) {
+          return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+        }
       }
       const platformReleasePath =
         authenticatedPath.startsWith("/api/admin/releases/") ||
