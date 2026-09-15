@@ -18,6 +18,12 @@ const configureProxy = (proxy: any) => {
 };
 
 export default defineConfig({
+  build: {
+    // Keep Vite's warning threshold aligned with the enforced production
+    // bundle budget. Chunks above 750 KB remain a release-blocking failure
+    // in scripts/release/check-bundle-size.ts.
+    chunkSizeWarningLimit: 500,
+  },
   server: {
     host: true,
     port: 5173,
@@ -61,4 +67,3 @@ export default defineConfig({
     },
   },
 });
-
