@@ -15,7 +15,7 @@ test.describe("Super Admin First-Login & Lifecycle E2E", () => {
 
     // Attempt initial login with bootstrap credential
     await page.getByLabel(/email/i).fill(superAdminEmail);
-    await page.getByLabel(/password/i).fill(initialPassword);
+    await page.locator("input#password").fill(initialPassword);
     await page.getByRole("button", { name: /sign in/i }).click();
 
     // Mandatory Security Initialization Modal must appear (due to HTTP 428)

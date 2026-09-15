@@ -138,7 +138,11 @@
     "commercial-readiness:verify": "tsx scripts/release/verify-commercial-product-readiness.ts",
     "enterprise-readiness:verify": "tsx scripts/release/verify-enterprise-customer-readiness.ts",
     "integration-api:verify": "tsx scripts/release/verify-integration-api-ecosystem.ts",
-    "marketplace-partner:verify": "tsx scripts/release/verify-marketplace-partner-governance.ts"
+    "marketplace-partner:verify": "tsx scripts/release/verify-marketplace-partner-governance.ts",
+    "bi-analytics:verify": "tsx scripts/release/verify-bi-analytics-governance.ts",
+    "ai-operating:verify": "tsx scripts/release/verify-ai-operating-layer-governance.ts",
+    "autonomous-operations:verify": "tsx scripts/release/verify-autonomous-operations-governance.ts",
+    "platform-governance:verify": "tsx scripts/release/verify-platform-governance-control-plane.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

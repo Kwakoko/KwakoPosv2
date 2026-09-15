@@ -1,0 +1,20 @@
+name: Autonomous Operations Governance
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  autonomous-operations-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run autonomous-operations:verify
+      - run: npm run test:unit -- tests/unit/autonomous-operations-governance.test.ts tests/unit/autonomous-operations.test.ts
+      - run: npm run build --workspace=packages/config
