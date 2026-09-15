@@ -12,7 +12,7 @@ on:
 jobs:
   offline-sync-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -39,7 +39,15 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run db:migrate
-      - run: npm run certify:offline-sync
       - run: npm run build
       - run: npm run test:sync
       - run: npx playwright install --with-deps chromium
+      - run: npm run certify:offline-sync
+      - run: npm run certify:offline-e2e
+      - name: Upload offline sync evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-standard-offline-sync-evidence
+          path: artifacts/release-evidence/
+          if-no-files-found: warn
