@@ -402,6 +402,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
       const retailPriceNum = Number(sellingPrice) || 0;
       const reorderLevelNum = Number(reorderLevel) || 10;
 
+      const selectedCategory = allCategories.find((c) => c.name.trim().toLowerCase() === category.trim().toLowerCase());
+      const selectedBrand = allBrands.find((b) => b.name.trim().toLowerCase() === (brand.trim() || "General").toLowerCase());
+
       // Invariant: Product catalog stock values are strictly 0.
       // Stock quantity is projected solely from StockLedger movements.
       const productRecord = {
@@ -411,7 +414,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
         name: name.trim(),
         sku: baseSku,
         category: category.trim(),
+        categoryId: selectedCategory?.id && selectedCategory.id !== "default" ? selectedCategory.id : undefined,
         brand: brand.trim() || "General",
+        brandId: selectedBrand?.id && selectedBrand.id !== "default" ? selectedBrand.id : undefined,
         productType,
         buyingPrice: costPriceNum,
         sellingPrice: retailPriceNum,

@@ -704,12 +704,17 @@ export type StockAdjustment = z.infer<typeof StockAdjustmentSchema>;
 
 export const CreateStockAdjustmentRequestSchema = z.object({
   id: z.string().uuid().optional(),
+  productId: z.string().uuid().optional(),
   variantId: z.string().uuid(),
   adjustmentType: z.enum(["INCREASE", "DECREASE", "SET"]),
   movementType: StockMovementTypeEnum.optional(),
   quantityChange: z.number(),
   reason: z.string().min(1),
   referenceNote: z.string().optional(),
+  unitCost: z.number().nonnegative().optional(),
+  ledgerId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  notes: z.string().optional(),
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
@@ -1211,6 +1216,7 @@ export const SyncDeltaResponseSchema = z.object({
   suppliers: z.array(SupplierSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
+  priceHistories: z.array(ProductPriceHistorySchema).optional(),
   settings: z.array(z.record(z.unknown())).optional(),
   integrityChecksum: z.string().optional(),
 });
@@ -1237,6 +1243,7 @@ export const SyncBootstrapResponseSchema = z.object({
   suppliers: z.array(SupplierSchema),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
+  priceHistories: z.array(ProductPriceHistorySchema).optional(),
   settings: z.array(z.record(z.unknown())).optional(),
 });
 export type SyncBootstrapResponse = z.infer<typeof SyncBootstrapResponseSchema>;

@@ -32,6 +32,7 @@ import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGenerat
 import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { safeUUID } from "../services/apiClient.js";
+import { queueAddStock } from "../services/inventoryStockService.js";
 import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -98,6 +99,7 @@ export interface ProductVariantData {
   sellingPrice: number;
   stock: number;
   reorderLevel: number;
+  updatedAt?: string;
   batchNumber?: string;
   expiryDate?: string;
 }
@@ -131,7 +133,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const { currentTenantId, currentTenantName } = useTenant();
   const { currentBranchId, currentBranchName, availableBranches } = useBranch();
   const { activeModule } = useModule();
-  const { db, syncOutbox } = useSync();
+  const { db, syncOutbox, syncEngine } = useSync();
   const toast = useToast();
   const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
   const [activeTab, setActiveTab] = useState<InventoryTab>("dashboard");
@@ -315,6 +317,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           sellingPrice: Number(variant.price || (variant as any).sellingPrice || 0),
           stock: Number(ledgerStockByVariant.get(variant.id) ?? 0),
           reorderLevel: Number((variant as any).reorderLevel || 5),
+          updatedAt: (variant as any).updatedAt,
         });
         variantsByProduct.set(variant.productId, list);
       }
@@ -1095,7 +1098,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         payload: {
           id: target.id,
           status: "Inactive",
+          isActive: false,
           deletedAt: archived.deletedAt,
+          _baseUpdatedAt: existing.updatedAt,
         },
         idempotencyKey: `PROD-ARCHIVE-${target.id}-${Date.now()}`,
         tenantId: currentTenantId || undefined,
@@ -1211,6 +1216,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           </button>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
             <Upload size={13} /> Bulk CSV Import
+          </button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => { setActiveTab("ledger"); setAdjSku(items[0]?.variants?.[0]?.sku || items[0]?.sku || ""); setStockAdjModal(true); }} type="button">
+            <PackageOpen size={13} /> Add Stock
           </button>
           <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
             <Plus size={13} /> Add Product
@@ -1927,7 +1935,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </select>
             </div>
             <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setStockAdjModal(true)} type="button">
-              <Plus size={13} /> Record Stock Adjustment
+              <PackageOpen size={13} /> Add Stock
             </button>
           </div>
 
@@ -3767,10 +3775,33 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       );
                                       setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                                       setVariantModalProduct(updatedProduct);
+                                      const existingVariant = db.productVariants.get(v.id) as any;
+                                      db.enqueueOutbox({ entityType: "ProductVariant", entityId: v.id, operationType: "UPDATE", payload: {
+                                        id: v.id, name: inlineVariantEdit.name.trim(), sku: inlineVariantEdit.sku.trim(),
+                                        barcode: inlineVariantEdit.barcode.trim() || undefined, price: Number(inlineVariantEdit.sellingPrice),
+                                        costPrice: Number(inlineVariantEdit.buyingPrice), reorderLevel: Number(inlineVariantEdit.reorderLevel),
+                                        attributes: existingVariant?.attributes || v.attributes || {}, isActive: true,
+                                        _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt,
+                                      }, idempotencyKey: `VAR-UPDATE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
+                                      const stockDiff = Number(inlineVariantEdit.stock) - Number(v.stock || 0);
+                                      if (stockDiff !== 0) {
+                                        const adjOpId = `adj-variant-edit-${Date.now()}-${v.id}`;
+                                        db.saveStockLedgerLocal({ id: adjOpId, productId: variantModalProduct.id, variantId: v.id,
+                                          sku: inlineVariantEdit.sku.trim(), name: inlineVariantEdit.name.trim(), quantity: stockDiff, quantityChange: stockDiff,
+                                          balanceAfter: Number(inlineVariantEdit.stock), reason: "VARIANT_INLINE_EDIT", movementType: "ADJUSTMENT",
+                                          timestamp: new Date().toISOString(), tenantId: currentTenantId || "default", branchId: currentBranchId || "default" } as any,
+                                          { tenantId: currentTenantId || "default", branchId: currentBranchId || "default" });
+                                        db.enqueueOutbox({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
+                                          payload: { productId: variantModalProduct.id, variantId: v.id, sku: inlineVariantEdit.sku.trim(),
+                                            adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE", movementType: "ADJUSTMENT", quantityChange: stockDiff,
+                                            reason: "VARIANT_INLINE_EDIT", deviceId: "web-client", operationId: adjOpId },
+                                          idempotencyKey: adjOpId, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
+                                      }
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
                                       toast.success("Variant Updated", `Variant "${inlineVariantEdit.name}" saved.`);
                                       window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      void syncOutbox?.().catch(() => {});
                                     }}
                                   >
                                     <Check size={11} />
@@ -3826,6 +3857,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                     onClick={() => {
                                       if (!confirm(`Delete variant "${v.name}"? Parent stock will automatically adjust.`)) return;
                                       db.deleteVariantLocal(v.id);
+                                       const existingVariant = db.productVariants.get(v.id) as any;
+                                       db.enqueueOutbox({ entityType: "ProductVariant", entityId: v.id, operationType: "DELETE",
+                                         payload: { id: v.id, _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt },
+                                         idempotencyKey: `VAR-DELETE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
                                       const updatedList = (variantModalProduct.variants || []).filter((x) => x.id !== v.id);
                                       const sumStock = updatedList.reduce((acc, item) => acc + (Number(item.stock) || 0), 0);
                                       const updatedProduct = {
@@ -3841,6 +3876,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       playSuccessChime();
                                       toast.success("Variant Deleted", `Removed "${v.name}". Parent SKU stock recalculated.`);
                                       window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      void syncOutbox?.().catch(() => {});
                                     }}
                                   >
                                     <Trash2 size={12} />
@@ -3949,177 +3985,112 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           </div>
         </div>
       )}
-      {/* --- Record Stock Adjustment Modal --- */}
+      {/* --- Add Stock Modal --- */}
       {stockAdjModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 480, padding: "1.5rem" }}>
+          <div className="v2-card" style={{ width: 520, maxWidth: "calc(100vw - 2rem)", padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
               <div>
-                <h2 className="v2-text-base v2-font-black">Record Stock Adjustment</h2>
-                <div className="v2-text-xs v2-text-muted">Post a canonical inventory movement entry to the stock audit ledger</div>
+                <h2 className="v2-text-base v2-font-black">Add Stock</h2>
+                <div className="v2-text-xs v2-text-muted">Create one durable stock movement and queue it for server synchronization.</div>
               </div>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">✕</button>
             </div>
-
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                const targetItem = items.find((i) => i.sku === adjSku) || items[0];
-                if (!targetItem) return;
-
-                const isGain = adjType === "ADJUSTMENT_GAIN" || adjType === "OPENING_STOCK";
-                const qtyChange = isGain ? Math.abs(adjQty) : -Math.abs(adjQty);
-                const prevStock = targetItem.stock;
-                const newStock = Math.max(0, prevStock + qtyChange);
-
-                const nowStr = new Date().toISOString().replace("T", " ").slice(0, 16);
-                const refCode = `ADJ-${Date.now().toString().slice(-6)}`;
-                const fullReason = `${adjReasonCode}${adjNotes ? ` - ${adjNotes}` : ""}`;
-
-                const newEntry = {
-                  id: `led-${Date.now()}`,
-                  date: nowStr,
-                  sku: targetItem.sku,
-                  name: targetItem.name,
-                  type: adjType,
-                  qty: qtyChange,
-                  quantity: qtyChange,
-                  qtyBefore: prevStock,
-                  balance: newStock,
-                  balanceAfter: newStock,
-                  unitCost: targetItem.buyingPrice,
-                  totalCost: Math.abs(qtyChange) * targetItem.buyingPrice,
-                  ref: refCode,
-                  reason: fullReason,
-                  notes: fullReason,
-                  user: "Current Operator",
-                  movementType: adjType,
-                  timestamp: new Date().toISOString(),
-                  tenantId: currentTenantId || "default",
-                };
-
-                // Persist ledger entry
-                db.saveStockLedgerLocal(newEntry as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-
-                const adjOpId = `adj-modal-${Date.now()}-${targetItem.id}`;
-                db.enqueueOutbox({
-                  entityType: "StockAdjustment",
-                  entityId: adjOpId,
-                  operationType: "CREATE",
-                  payload: {
+                const targetItem = items.find((i) => i.sku === adjSku) || items.find((i) => i.variants?.some((v) => v.sku === adjSku)) || items[0];
+                const targetVariant = targetItem?.variants?.find((v) => v.sku === adjSku) || targetItem?.variants?.[0];
+                if (!targetItem || !targetVariant || !currentTenantId || !currentBranchId) {
+                  toast.warning("Stock Target Required", "Select a valid product variant and tenant branch context before adding stock.");
+                  return;
+                }
+                const quantity = Number(adjQty);
+                const unitCost = Number(targetVariant.buyingPrice ?? targetItem.buyingPrice ?? 0);
+                if (!Number.isFinite(quantity) || quantity <= 0) {
+                  toast.warning("Invalid Quantity", "Enter a stock quantity greater than zero.");
+                  return;
+                }
+                if (!adjReasonCode) {
+                  toast.warning("Reason Required", "Select a stock-in reason before posting.");
+                  return;
+                }
+                try {
+                  const result = await queueAddStock(db, {
+                    tenantId: currentTenantId,
+                    branchId: currentBranchId,
                     productId: targetItem.id,
-                    variantId: targetItem.id,
-                    sku: targetItem.sku,
-                    adjustmentType: qtyChange > 0 ? "INCREASE" : "DECREASE",
-                    quantityChange: Math.abs(qtyChange),
-                    reason: fullReason,
-                    deviceId: "web-client",
-                    operationId: adjOpId,
-                    idempotencyKey: `ADJ-${adjOpId}`,
-                  },
-                  idempotencyKey: `ADJ-${adjOpId}`,
-                  tenantId: currentTenantId || undefined,
-                  branchId: currentBranchId || undefined,
-                });
-
-                // Persist updated product stock
-                let existing = db.products.get(targetItem.id) as any;
-                if (!existing) {
-                  for (const p of db.products.values()) {
-                    if (p.id === targetItem.id || p.sku === targetItem.sku) {
-                      existing = p;
-                      break;
-                    }
-                  }
+                    variantId: targetVariant.id,
+                    sku: targetVariant.sku,
+                    productName: targetItem.name,
+                    quantity,
+                    unitCost,
+                    reason: adjReasonCode,
+                    notes: adjNotes,
+                    movementType: adjType === "OPENING_STOCK" ? "OPENING_STOCK" : "ADJUSTMENT_GAIN",
+                    deviceId: syncEngine.deviceId,
+                  });
+                  await loadInventory();
+                  playSuccessChime();
+                  toast.success("Stock Added", String(quantity) + " " + (targetVariant.name || targetItem.name) + " added. New local ledger balance: " + String(result.quantityAfter) + ".");
+                  window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                  void syncOutbox().catch(() => {});
+                  setStockAdjModal(false);
+                  setAdjNotes("");
+                  setAdjQty(1);
+                } catch (error) {
+                  toast.warning("Stock Not Posted", error instanceof Error ? error.message : "Unable to queue stock movement.");
                 }
-                if (existing) {
-                  db.saveProductLocal({
-                    ...existing,
-                    stock: newStock,
-                    availableStock: newStock,
-                    totalStock: newStock,
-                    status: newStock === 0 ? "Out of Stock" : newStock <= targetItem.reorderLevel ? "Low Stock" : "Active",
-                    updatedAt: new Date().toISOString(),
-                  } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-                }
-
-                setLedger((prev) => [newEntry, ...prev]);
-                setItems((prev) =>
-                  prev.map((i) =>
-                    i.sku === targetItem.sku
-                      ? { ...i, stock: newStock, status: newStock === 0 ? "Out of Stock" : newStock <= i.reorderLevel ? "Low Stock" : "Active" }
-                      : i
-                  )
-                );
-
-                playSuccessChime();
-                toast.success("Adjustment Recorded", `Stock updated to ${newStock} for ${targetItem.name}.`);
-                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
-                void syncOutbox?.().catch(() => {});
-
-                setStockAdjModal(false);
-                setAdjNotes("");
               }}
               className="v2-space-y-3"
             >
               <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">SELECT TARGET SKU *</label>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT / VARIANT *</label>
                 <select className="v2-input" value={adjSku} onChange={(e) => setAdjSku(e.target.value)}>
-                  {items.map((i) => (
-                    <option key={i.id} value={i.sku}>
-                      {i.name} ({i.sku}) — Stock: {i.stock}
-                    </option>
-                  ))}
+                  {items.flatMap((item) => (item.variants && item.variants.length > 0 ? item.variants.map((variant) => (
+                    <option key={variant.id} value={variant.sku}>{item.name} — {variant.name} ({variant.sku})</option>
+                  )) : [<option key={item.id} value={item.sku}>{item.name} ({item.sku})</option>]))}
                 </select>
               </div>
-
               <div className="v2-grid v2-grid-2 v2-gap-2">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">MOVEMENT TYPE</label>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">STOCK-IN TYPE</label>
                   <select className="v2-input" value={adjType} onChange={(e) => setAdjType(e.target.value as any)}>
-                    <option value="ADJUSTMENT_GAIN">ADJUSTMENT GAIN (+)</option>
-                    <option value="ADJUSTMENT_LOSS">ADJUSTMENT LOSS (-)</option>
-                    <option value="WASTAGE_SPILL">WASTAGE / SPILLAGE (-)</option>
-                    <option value="OPENING_STOCK">OPENING STOCK (+)</option>
+                    <option value="ADJUSTMENT_GAIN">Stock Addition</option>
+                    <option value="OPENING_STOCK">Opening Stock</option>
                   </select>
                 </div>
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">QUANTITY DELTA</label>
-                  <input className="v2-input" type="number" min="1" value={adjQty} onChange={(e) => setAdjQty(Number(e.target.value))} required />
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">QUANTITY *</label>
+                  <input className="v2-input" type="number" min="1" step="any" value={adjQty} onChange={(e) => setAdjQty(Number(e.target.value))} required />
                 </div>
               </div>
-
               <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">ADJUSTMENT REASON CODE *</label>
-                <select
-                  className="v2-input"
-                  value={adjReasonCode}
-                  onChange={(e) => setAdjReasonCode(e.target.value)}
-                >
-                  <option value="PHYSICAL_COUNT_VARIANCE">Physical Inventory Count Variance</option>
-                  <option value="DAMAGED_IN_STORE">Damaged / Breakage in Store</option>
-                  <option value="EXPIRED_GOODS">Expired Goods (FEFO Purge)</option>
-                  <option value="SUPPLIER_RETURN">Supplier Return (Defective/Mishandled)</option>
-                  <option value="INTERNAL_CONSUMPTION">Internal Store Consumption / Sampling</option>
-                  <option value="OPENING_RECONCILIATION">Initial Balance Reconciliation</option>
-                  <option value="OTHER">Other (Document in Audit Notes)</option>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">STOCK-IN REASON *</label>
+                <select className="v2-input" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
+                  <option value="PURCHASE_RECEIVED">Purchase / Supplier Receipt</option>
+                  <option value="PHYSICAL_COUNT_GAIN">Physical Count Gain</option>
+                  <option value="OPENING_RECONCILIATION">Opening Balance Reconciliation</option>
+                  <option value="CUSTOMER_RETURN">Customer Return</option>
+                  <option value="INTERNAL_TRANSFER_RECEIVED">Internal Transfer Received</option>
+                  <option value="OTHER">Other Approved Stock-In</option>
                 </select>
               </div>
-
               <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT EXPLANATION &amp; NOTES</label>
-                <input className="v2-input" placeholder="e.g. Broken packaging discovered during weekly cycle count" value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
+                <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT NOTES</label>
+                <input className="v2-input" placeholder="Reference, supplier document, count sheet, etc." value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
               </div>
-
-              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">Cancel</button>
-                <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Post Stock Adjustment</button>
+              <div className="v2-flex v2-items-center v2-justify-between v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
+                <div className="v2-text-xs v2-text-muted">Local ledger is committed before sync; server uses the same ledger identity for idempotent convergence.</div>
+                <div className="v2-flex v2-gap-2">
+                  <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">Cancel</button>
+                  <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit"><PackageOpen size={13} /> Add Stock</button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
-
       {/* --- Barcode Label Sheet Generator Modal (40x30mm & A4 24-Up) --- */}
       <BarcodeLabelGeneratorModal
         isOpen={isBarcodeModalOpen}
