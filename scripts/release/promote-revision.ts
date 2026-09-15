@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import https from "https";
-import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion } from "@kwakopos2/domain";
+import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion, assessProductionRelease } from "@kwakopos2/domain";
 import { CandidateDeploymentEvidence } from "./deploy-candidate.js";
 
 export interface PromotionEvidence {
@@ -44,7 +44,7 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     : 100;
 
   console.log("----------------------------------------------------------------");
-  console.log(` STEP 5 — Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
+  console.log(` STEP 5 â€” Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
   console.log("----------------------------------------------------------------");
 
   const isProdCert = process.env.NODE_ENV === "production-certification";
@@ -66,7 +66,14 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
 
   const project = process.env.GCP_PROJECT || String(execSync("gcloud config get-value project", { encoding: "utf8" })).trim();
   const region = process.env.GCP_REGION || String(execSync("gcloud config get-value compute/region", { encoding: "utf8" })).trim();
-  if (!project || project === "(unset)") throw new Error("RELEASE_BLOCKED: GCP project is not configured");
+  if (targetTrafficPercent > 0) {
+    const gateFile = path.resolve(process.cwd(), "artifacts", "release-evidence", "kwakopos-production-release-gate.json");
+    if (!fs.existsSync(gateFile)) throw new Error("RELEASE_BLOCKED: Step 25 production release gate evidence is missing");
+    const gateEvidence = JSON.parse(fs.readFileSync(gateFile, "utf8"));
+    const stage = targetTrafficPercent === 1 ? "PERCENT_1" : targetTrafficPercent === 5 ? "PERCENT_5" : targetTrafficPercent === 25 ? "PERCENT_25" : targetTrafficPercent === 50 ? "PERCENT_50" : "PERCENT_100";
+    const assessment = assessProductionRelease(gateEvidence, stage as any);
+    if (assessment.decision !== "PASS") throw new Error(`RELEASE_BLOCKED: Step 25 gate decision ${assessment.decision}: ${assessment.failedGates.join(", ")}`);
+  }  if (!project || project === "(unset)") throw new Error("RELEASE_BLOCKED: GCP project is not configured");
   if (!region || region === "(unset)") throw new Error("RELEASE_BLOCKED: GCP region is not configured");
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
   const digest = candidate.containerDigest || candidate.imageDigest;
@@ -176,3 +183,4 @@ if (process.argv[1] && process.argv[1].endsWith("promote-revision.ts")) {
     process.exit(1);
   });
 }
+import { assessProductionRelease } from "@kwakopos2/domain";
