@@ -471,22 +471,38 @@ export async function loadSampleData(
     for (const v of sampleVariants) {
       db.saveVariantLocal(v as any, ctx);
       variantCount += 1;
-    }
 
-    // Generate initial stock ledger entry for audit trail
-    db.saveStockLedgerLocal(
-      {
-        id: `led-${p.id}`,
-        productId: p.id,
-        quantity: p.stock,
-        balanceAfter: p.stock,
-        reason: "DEMO_INITIAL_STOCK",
-        movementType: "INITIAL_COUNT",
-        timestamp: new Date().toISOString(),
-        tenantId: tenantId || "demo-tenant",
-      } as any,
-      ctx,
-    );
+      const vStock = Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0);
+      if (vStock > 0) {
+        db.saveStockLedgerLocal(
+          {
+            id: `led-${v.id}`,
+            productId: p.id,
+            variantId: v.id,
+            sku: v.sku,
+            name: v.name,
+            quantityBefore: 0,
+            quantityChange: vStock,
+            quantity: vStock,
+            quantityAfter: vStock,
+            balanceAfter: vStock,
+            unitCost: Number((v as any).costPrice ?? p.buyingPrice ?? 0),
+            totalCost: vStock * Number((v as any).costPrice ?? p.buyingPrice ?? 0),
+            referenceType: "OPENING_STOCK",
+            referenceId: `INIT-${v.id}`,
+            reason: "DEMO_INITIAL_STOCK",
+            movementType: "OPENING_STOCK",
+            timestamp: new Date().toISOString(),
+            occurredAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            tenantId: tenantId || "demo-tenant",
+            branchId: (p as any).branchId || undefined,
+            synced: true,
+          } as any,
+          ctx,
+        );
+      }
+    }
 
     // Enqueue Product to outbox for multi-device convergence
     db.enqueueOutbox({
@@ -669,7 +685,7 @@ export function reconcileLocalInventoryToOutbox(
   // 2. For any product in db.products not in outbox, enqueue it
   for (const [prodId, prod] of db.products.entries()) {
     const pAny = prod as any;
-    if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive") continue;
+    if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive" || pAny.synced || pAny.reconciledToOutbox) continue;
     if (!trackedProductIds.has(prodId)) {
       // Find variants for this product
       const variants: any[] = [];
@@ -755,6 +771,7 @@ export function reconcileLocalInventoryToOutbox(
           });
         }
       }
+      pAny.reconciledToOutbox = true;
       reconciled += 1;
     }
   }

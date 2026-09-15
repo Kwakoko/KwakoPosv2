@@ -221,3 +221,4 @@ export * from "./privacyDataGovernance.js";
 export * from "./dataLifecycleDrGovernance.js";
 export * from "./workflowGovernance.js";
 export * from "./aiAgentGovernance.js";
+export * from "./liveProductionEvidenceGovernance.js";

@@ -623,6 +623,13 @@ export class PrismaStockRepository {
   }
 
   async getAvailableStock(ctx: TenantContext, variantId: string): Promise<number> {
+    const variant = await prisma.productVariant.findUnique({
+      where: { id: variantId },
+      select: { inventoryQuantity: true, reservedQuantity: true, tenantId: true, branchId: true },
+    });
+    if (variant && variant.tenantId === ctx.tenantId && variant.branchId === ctx.branchId) {
+      return Math.max(0, Number(variant.inventoryQuantity) - Number(variant.reservedQuantity || 0));
+    }
     const rows = await prisma.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId } });
     return calculateAvailableStock(rows.map(ledgerShape));
   }

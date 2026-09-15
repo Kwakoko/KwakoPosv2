@@ -32,7 +32,7 @@ import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGenerat
 import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { safeUUID } from "../services/apiClient.js";
-import { queueAddStock } from "../services/inventoryStockService.js";
+import { queueAddStock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -307,6 +307,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       const variantsByProduct = new Map<string, ProductVariantData[]>();
       for (const variant of db.productVariants.values()) {
         const list = variantsByProduct.get(variant.productId) || [];
+        const hasLedger = ledgerStockByVariant.has(variant.id);
+        const ledgerStock = ledgerStockByVariant.get(variant.id);
+        const matQuantity = Number((variant as any).inventoryQuantity ?? (variant as any).stock ?? 0);
+        const effectiveVariantStock = hasLedger ? Number(ledgerStock ?? 0) : matQuantity;
         list.push({
           id: variant.id,
           name: variant.name,
@@ -315,7 +319,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           attributes: (variant as any).attributes || {},
           buyingPrice: Number((variant as any).buyingPrice || (variant as any).costPrice || 0),
           sellingPrice: Number(variant.price || (variant as any).sellingPrice || 0),
-          stock: Number(ledgerStockByVariant.get(variant.id) ?? 0),
+          stock: effectiveVariantStock,
           reorderLevel: Number((variant as any).reorderLevel || 5),
           updatedAt: (variant as any).updatedAt,
         });
@@ -329,11 +333,18 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         const pAny = prod as any;
         if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive") continue;
         const vars = variantsByProduct.get(prod.id);
-        const pStock = vars?.length
-          ? vars.reduce((sum, v) => sum + Number(v.stock || 0), 0)
-          : Array.from(db.stockLedger.values())
-              .filter((l: any) => (!currentTenantId || !l.tenantId || l.tenantId === currentTenantId) && (!currentBranchId || !l.branchId || l.branchId === currentBranchId) && l.productId === prod.id)
-              .reduce((sum, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
+        let pStock = 0;
+        if (vars && vars.length > 0) {
+          pStock = vars.reduce((sum, v) => sum + Number(v.stock || 0), 0);
+        } else {
+          const ledgerEntries = Array.from(db.stockLedger.values())
+            .filter((l: any) => (!currentTenantId || !l.tenantId || l.tenantId === currentTenantId) && (!currentBranchId || !l.branchId || l.branchId === currentBranchId) && l.productId === prod.id);
+          if (ledgerEntries.length > 0) {
+            pStock = ledgerEntries.reduce((sum, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
+          } else {
+            pStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? 0);
+          }
+        }
         const pReorder = Number(pAny.reorderLevel ?? 10);
         const pStatus: InventoryItem["status"] = pStock === 0 ? "Out of Stock" : pStock <= pReorder ? "Low Stock" : "Active";
         loaded.push({
@@ -435,7 +446,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     void loadInventory();
     const handleSync = () => { void loadInventory(); };
     window.addEventListener(DEMO_DATA_EVENT, handleSync);
-    return () => window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+    window.addEventListener(STOCK_CHANGED_EVENT, handleSync);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+      window.removeEventListener(STOCK_CHANGED_EVENT, handleSync);
+    };
   }, [loadInventory]);
 
   const allCategories = useMemo(() => {

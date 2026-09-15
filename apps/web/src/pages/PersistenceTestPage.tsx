@@ -29,6 +29,7 @@ import { useAuth, useTenant, useSync } from "../context/KwakoPosContexts.js";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { hlcEngine } from "../services/hlcEngine.js";
 import { apiFetch } from "../services/apiClient.js";
+import { queueAddStock, recordPosSaleDeductions, getEffectiveStock } from "../services/inventoryStockService.js";
 
 interface TestCase {
   id: string;
@@ -307,24 +308,49 @@ export const PersistenceTestPage: React.FC = () => {
         appendLog(testId, "Confirmed exclusion from active POS catalog while preserved for Trash Can restoration.");
         updateTestStatus(testId, "PASSED", Math.round(performance.now() - start));
       } else if (testId === "test-8") {
-        appendLog(testId, "Initializing immutable stock ledger replay verification...");
-        const movements = [
-          { delta: 10, type: "INITIAL_STOCK" },
-          { delta: -3, type: "POS_SALE" },
-          { delta: -2, type: "POS_SALE" },
-        ];
+        appendLog(testId, "Initializing real IndexedDB stock ledger & unified inventory verification...");
+        const db = new LocalIndexedDbStore();
+        await db.ready;
+        const testVarId = `var-bench-${Date.now()}`;
+        const testProdId = `prd-bench-${Date.now()}`;
+        const tenantId = currentTenantId || "tenant-bench";
+        const branchId = "branch-bench";
 
-        let computedStock = 0;
-        for (const m of movements) {
-          computedStock += m.delta;
-          appendLog(testId, `Event: ${m.type} (${m.delta > 0 ? "+" : ""}${m.delta}) -> Running balance: ${computedStock}`);
-        }
+        appendLog(testId, "1. Ingesting initial stock (10 units) via queueAddStock...");
+        await queueAddStock(db, {
+          tenantId,
+          branchId,
+          productId: testProdId,
+          variantId: testVarId,
+          sku: "SKU-BENCH-01",
+          productName: "Bench Test Item",
+          quantity: 10,
+          unitCost: 1000,
+          reason: "BENCHMARK_OPENING_STOCK",
+          movementType: "OPENING_STOCK",
+          deviceId: "bench-device",
+        });
 
-        if (computedStock === 5) {
-          appendLog(testId, `Stock ledger replay derived exact quantity: ${computedStock} (Expected: 5).`);
+        const stockAfterAdd = getEffectiveStock(db, testVarId, testProdId, tenantId, branchId);
+        appendLog(testId, `Stock after intake: ${stockAfterAdd.stock} units (Ledger: ${stockAfterAdd.ledgerBalance}, Variant: ${stockAfterAdd.inventoryQuantity}).`);
+
+        appendLog(testId, "2. Processing POS sale deduction (3 units) via recordPosSaleDeductions...");
+        recordPosSaleDeductions(db, {
+          saleId: `sale-bench-${Date.now()}`,
+          items: [{ productId: testProdId, variantId: testVarId, qty: 3, unitCost: 1000 }],
+          tenantId,
+          branchId,
+          deviceId: "bench-pos",
+        });
+
+        const stockAfterSale = getEffectiveStock(db, testVarId, testProdId, tenantId, branchId);
+        appendLog(testId, `Stock after sale: ${stockAfterSale.stock} units (Ledger: ${stockAfterSale.ledgerBalance}, Variant: ${stockAfterSale.inventoryQuantity}).`);
+
+        if (stockAfterSale.stock === 7 && stockAfterSale.ledgerBalance === 7 && stockAfterSale.inventoryQuantity === 7) {
+          appendLog(testId, `✓ Perfect Convergence: Derived ${stockAfterSale.stock} units across Variant, Product, and StockLedger stores.`);
           updateTestStatus(testId, "PASSED", Math.round(performance.now() - start));
         } else {
-          appendLog(testId, `Discrepancy: Derived ${computedStock} instead of 5.`);
+          appendLog(testId, `Discrepancy: Derived stock is ${stockAfterSale.stock} (Expected: 7).`);
           updateTestStatus(testId, "FAILED", Math.round(performance.now() - start));
         }
       } else if (testId === "test-9") {

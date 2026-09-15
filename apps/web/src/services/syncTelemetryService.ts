@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPos V2 — Real-Time Sync Telemetry & Health Monitoring Service
  * ─────────────────────────────────────────────────────────────────────────────
  * Tracks sync latency, outbox queue depth, network topology,
@@ -161,7 +161,7 @@ export class SyncTelemetryService {
     if (typeof window === "undefined") return;
     this.pollTimer = setInterval(() => {
       void this.refreshOutboxCount();
-    }, 6000);
+    }, 30000);
   }
 }
 

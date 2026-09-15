@@ -15,6 +15,7 @@ import { SuperAdminComplianceTowerPage } from "./pages/SuperAdminComplianceTower
 import { SuperAdminRollbackCenterPage } from "./pages/SuperAdminRollbackCenterPage.js";
 import { LegalAcceptanceModal } from "./components/LegalAcceptanceModal.js";
 import { WorkspaceLoadingScreen } from "./components/WorkspaceLoadingScreen.js";
+import { SkeletonDashboard } from "./components/UI/Skeleton.js";
 const lazyWorkspacePage = (key: string) =>
   lazy<React.ComponentType<any>>(() => import("./pages/WorkspacePages.js").then((module: any) => ({ default: module[key] })));
 
@@ -604,7 +605,13 @@ const AuthenticatedApp: React.FC = () => {
     <>
       <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
         <ProductionErrorBoundary>
-          <Suspense fallback={<WorkspaceLoadingScreen />}>
+          <Suspense
+            fallback={
+              <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
+                <SkeletonDashboard />
+              </div>
+            }
+          >
             {renderView()}
           </Suspense>
         </ProductionErrorBoundary>
