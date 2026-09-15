@@ -1,1 +1,1 @@
-export { WorldStandardPrismaSyncEngine as PrismaSyncEngine } from "./worldStandardPrismaSyncEngine.js";
+export { TenantScopedSyncEngine as PrismaSyncEngine } from "./tenantScopedSyncEngine.js";
