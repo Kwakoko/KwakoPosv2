@@ -30,6 +30,8 @@
     "superadmin:unlock": "tsx scripts/security/unlock-super-admin.ts",
     "superadmin:totp": "tsx scripts/security/show-totp.ts",
     "superadmin:qr": "tsx scripts/security/show-qr.ts",
+    "certify:offline-sync": "tsx scripts/certification/world-standard-offline-sync-certification.ts",
+    "certify:offline-e2e": "tsx scripts/certification/world-standard-offline-e2e.ts",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
     "brand:verify": "tsx scripts/release/verify-brand-integrity.ts",
     "version:check": "tsx scripts/release/version-drift-gate.ts",
