@@ -23,6 +23,7 @@
     "test:integration": "vitest run tests/integration",
     "test:sync": "vitest run tests/sync",
     "certify:offline-sync": "tsx scripts/certification/world-standard-offline-sync-certification.ts",
+    "certify:offline-e2e": "tsx scripts/certification/world-standard-offline-e2e.ts",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
     "release:sync-versions": "tsx scripts/release/sync-workspace-versions.ts",
     "release:validate-commits": "tsx scripts/release/validate-semver.ts",
