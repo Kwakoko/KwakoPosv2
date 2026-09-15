@@ -22,6 +22,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:sync": "vitest run tests/sync",
+    "certify:offline-sync": "tsx scripts/certification/world-standard-offline-sync-certification.ts",
+    "certify:offline-e2e": "tsx scripts/certification/world-standard-offline-e2e.ts",
     "kwakopos-version": "tsx scripts/cli/kwakopos-version.ts",
     "release:sync-versions": "tsx scripts/release/sync-workspace-versions.ts",
     "release:validate-commits": "tsx scripts/release/validate-semver.ts",
@@ -107,10 +109,7 @@
     "production:certify:deployed": "tsx scripts/release/certify-deployed.ts",
     "production:browser": "tsx scripts/release/canonical-cross-client-test.ts",
     "synthetic": "tsx scripts/ops/synthetic-monitor.ts",
-    "certify:phase46": "tsx scripts/certification/phase46-support-operations-certification.ts",
-    "lint": "eslint . --ext .js,.cjs,.mjs",
-    "dev:api": "npm run dev --workspace=apps/api",
-    "dev:web": "npm run dev --workspace=apps/web"
+    "certify:phase46": "tsx scripts/certification/phase46-support-operations-certification.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
