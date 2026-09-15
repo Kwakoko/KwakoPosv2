@@ -52,7 +52,7 @@ async function cleanup(tenantId: string): Promise<void> {
 
 async function browserSeed(page: any, operationId: string, tenantId: string, branchId: string): Promise<void> {
   await page.evaluate(({ operationId, tenantId, branchId }) => new Promise<void>((resolve, reject) => {
-    const req = indexedDB.open("kwakopos-v2", 3);
+    const req = indexedDB.open("kwakopos-v2");
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const name of ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata"]) {
@@ -92,7 +92,7 @@ async function browserRead(page: any): Promise<{ outbox: number; product: boolea
 
 async function writeServerChange(page: any, change: any): Promise<void> {
   await page.evaluate((change) => new Promise<void>((resolve, reject) => {
-    const req = indexedDB.open("kwakopos-v2", 3);
+    const req = indexedDB.open("kwakopos-v2");
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       const db = req.result;
@@ -127,6 +127,7 @@ async function run(): Promise<void> {
     if (offlineState.outbox !== 1 || !offlineState.product) throw new Error("REAL_OFFLINE_RELOAD_FAILED");
 
     const sw = await pageA.evaluate(async () => (await navigator.serviceWorker?.getRegistrations?.() || []).length > 0);
+    if (!sw) throw new Error("PWA_SERVICE_WORKER_NOT_REGISTERED");
     const beforeUpgrade = await browserRead(pageA);
     await pageA.evaluate(() => localStorage.setItem("kwakopos:e2e:upgrade", "pending-outbox-preservation"));
     await pageA.reload({ waitUntil: "domcontentloaded" });
@@ -161,7 +162,7 @@ async function run(): Promise<void> {
     if (replay.results[0]?.status !== "ALREADY_PROCESSED") throw new Error("IDEMPOTENT_REPLAY_FAILED");
 
     const delta = await engine.processDelta(tenantContext, { since: "rev:0" } as any) as any;
-    const change = (delta.changes || []).find((x: any) => x.operationId === stockOperation.operationId || x.entityId === stockOperation.entityId);
+    const change = (delta.changes || []).find((x: any) => x.entityId === stockOperation.entityId);
     if (!change) throw new Error("REVISION_REPLAY_FAILED");
     await writeServerChange(pageA, change);
     await writeServerChange(pageB, change);
