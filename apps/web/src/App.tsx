@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts.js";
-import { getStoredSession } from "./services/apiClient.js";
+import { apiFetch, getStoredSession } from "./services/apiClient.js";
 import { WindowManagerProvider } from "./context/WindowManagerContext.js";
 import { ToastProvider } from "./components/UI/Toast.js";
 import { ProductionErrorBoundary } from "./components/UI/ProductionErrorBoundary.js";
@@ -15,34 +15,35 @@ import { SuperAdminComplianceTowerPage } from "./pages/SuperAdminComplianceTower
 import { SuperAdminRollbackCenterPage } from "./pages/SuperAdminRollbackCenterPage.js";
 import { LegalAcceptanceModal } from "./components/LegalAcceptanceModal.js";
 import { WorkspaceLoadingScreen } from "./components/WorkspaceLoadingScreen.js";
-import {
-  DashboardPage,
-  PosPage,
-  InventoryPage,
-  CustomersPage,
-  PurchasingPage,
-  FinancePage,
-  ReportsPage,
-  SettingsPage,
-  UsersPage,
-  SuperAdminPage,
-  DiagnosticsPage,
-  ExpensesPage,
-  AiPage,
-  CashDrawerPage,
-  ReceiptsPage,
-  TrashPage,
-  PersistenceTestPage,
-  BusinessConsultingPage,
-  LawFirmPage,
-  PharmacyPage,
-  PoultryLivestockPage,
-  FleetPage,
-  WorkforcePage,
-  TelecomPage,
-  HelpPage,
-  VerticalCommandCenterPage,
-} from "./pages/WorkspacePages.js";
+const lazyWorkspacePage = (key: string) =>
+  lazy<React.ComponentType<any>>(() => import("./pages/WorkspacePages.js").then((module: any) => ({ default: module[key] })));
+
+const DashboardPage = lazyWorkspacePage("DashboardPage");
+const PosPage = lazyWorkspacePage("PosPage");
+const InventoryPage = lazyWorkspacePage("InventoryPage");
+const CustomersPage = lazyWorkspacePage("CustomersPage");
+const PurchasingPage = lazyWorkspacePage("PurchasingPage");
+const FinancePage = lazyWorkspacePage("FinancePage");
+const ReportsPage = lazyWorkspacePage("ReportsPage");
+const SettingsPage = lazyWorkspacePage("SettingsPage");
+const UsersPage = lazyWorkspacePage("UsersPage");
+const SuperAdminPage = lazyWorkspacePage("SuperAdminPage");
+const DiagnosticsPage = lazyWorkspacePage("DiagnosticsPage");
+const ExpensesPage = lazyWorkspacePage("ExpensesPage");
+const AiPage = lazyWorkspacePage("AiPage");
+const CashDrawerPage = lazyWorkspacePage("CashDrawerPage");
+const ReceiptsPage = lazyWorkspacePage("ReceiptsPage");
+const TrashPage = lazyWorkspacePage("TrashPage");
+const PersistenceTestPage = lazyWorkspacePage("PersistenceTestPage");
+const BusinessConsultingPage = lazyWorkspacePage("BusinessConsultingPage");
+const LawFirmPage = lazyWorkspacePage("LawFirmPage");
+const PharmacyPage = lazyWorkspacePage("PharmacyPage");
+const PoultryLivestockPage = lazyWorkspacePage("PoultryLivestockPage");
+const FleetPage = lazyWorkspacePage("FleetPage");
+const WorkforcePage = lazyWorkspacePage("WorkforcePage");
+const TelecomPage = lazyWorkspacePage("TelecomPage");
+const HelpPage = lazyWorkspacePage("HelpPage");
+const VerticalCommandCenterPage = lazyWorkspacePage("VerticalCommandCenterPage");
 import { CustomerDisplayPage } from "./pages/CustomerDisplayPage.js";
 
 const TAB_TO_PATH: Record<string, string> = {
@@ -603,7 +604,9 @@ const AuthenticatedApp: React.FC = () => {
     <>
       <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
         <ProductionErrorBoundary>
-          {renderView()}
+          <Suspense fallback={<WorkspaceLoadingScreen />}>
+            {renderView()}
+          </Suspense>
         </ProductionErrorBoundary>
       </SystemAppShellLayout>
     </>

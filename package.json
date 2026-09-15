@@ -130,7 +130,15 @@
     "certify:ui-action-parity": "tsx scripts/certification/ui-action-parity-gate.ts",
     "workflow:verify": "tsx scripts/release/verify-workflow-integrity.ts",
     "certify:action-service": "tsx scripts/certification/action-service-parity-gate.ts",
-    "ai-governance:verify": "tsx scripts/release/verify-ai-agent-governance.ts"
+    "ai-governance:verify": "tsx scripts/release/verify-ai-agent-governance.ts",
+    "security-trust:verify": "tsx scripts/release/verify-security-trust.ts",
+    "privacy-data:verify": "tsx scripts/release/verify-privacy-data-governance.ts",
+    "lifecycle-dr:verify": "tsx scripts/release/verify-data-lifecycle-dr-governance.ts",
+    "performance-scale:verify": "tsx scripts/release/verify-performance-scale-governance.ts",
+    "commercial-readiness:verify": "tsx scripts/release/verify-commercial-product-readiness.ts",
+    "enterprise-readiness:verify": "tsx scripts/release/verify-enterprise-customer-readiness.ts",
+    "integration-api:verify": "tsx scripts/release/verify-integration-api-ecosystem.ts",
+    "marketplace-partner:verify": "tsx scripts/release/verify-marketplace-partner-governance.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

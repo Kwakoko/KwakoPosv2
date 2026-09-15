@@ -429,6 +429,8 @@ const LegalDocuments: React.FC = () => (
 
 // â”€â”€â”€ Sub-page: Billing & Retainers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalBilling: React.FC = () => {
+  const [paidInvoices, setPaidInvoices] = useState<Set<string>>(() => new Set());
+  const [paymentNotice, setPaymentNotice] = useState("");
   const totalBilled  = DEMO_BILLING.reduce((s, b) => s + b.amount, 0);
   const totalUnpaid  = DEMO_BILLING.filter((b) => b.status !== "PAID").reduce((s, b) => s + b.amount, 0);
   return (
@@ -446,6 +448,7 @@ const LegalBilling: React.FC = () => {
         <KpiCard label="Retainer Fund"   value={money(45200000)}      icon={<ShieldAlert size={18} />} accent="#4ade80" />
         <KpiCard label="Billable Hours"  value={`${DEMO_BILLING.reduce((s, b) => s + b.hours, 0)} hrs`} icon={<Clock size={18} />} accent="#818cf8" />
       </div>
+      {paymentNotice && <div className="v2-card v2-mb-3" role="status"><div className="v2-card-body v2-text-sm v2-font-bold">{paymentNotice}</div></div>}
       <div className="v2-card">
         <div className="v2-card-header"><div className="v2-card-title">Invoice Register</div>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.449.export", "Export", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.449.export"><Download size={13} /> Export</button>
@@ -453,7 +456,9 @@ const LegalBilling: React.FC = () => {
         <table className="v2-table">
           <thead><tr><th>Invoice #</th><th>Client</th><th>Description</th><th>Hours</th><th>Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            {DEMO_BILLING.map((b) => (
+            {DEMO_BILLING.map((b) => {
+              const isPaid = b.status === "PAID" || paidInvoices.has(b.id);
+              return (
               <tr key={b.id}>
                 <td className="v2-mono v2-text-xs">{b.id}</td>
                 <td className="v2-font-bold">{b.client}</td>
@@ -461,15 +466,16 @@ const LegalBilling: React.FC = () => {
                 <td>{b.hours}h</td>
                 <td className="v2-font-black">{money(b.amount)}</td>
                 <td className="v2-text-xs v2-text-muted">{b.date}</td>
-                <td><span className={`badge ${STATUS_BADGE[b.status] || "v2-badge-muted"}`}>{b.status}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[isPaid ? "PAID" : b.status] || "v2-badge-muted"}`}>{isPaid ? "PAID" : b.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
                     <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.465.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.465.button"><Eye size={13} /></button>
-                    {b.status !== "PAID" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { void recordLawFirmPayment(b.id, b.amount).then(() => runUiAction("ui.apps.web.src.pages.LawFirmPage.466.record-payment", "Record Payment", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.LawFirmPage.466.record-payment">Record Payment</button>}
+                    {!isPaid && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { void recordLawFirmPayment(b.id, b.amount).then((result) => { setPaidInvoices((prev) => new Set(prev).add(b.id)); setPaymentNotice(`Payment recorded for ${b.id} (${result.source})`); void runUiAction("ui.apps.web.src.pages.LawFirmPage.466.record-payment", "Record Payment", "MUTATION_INTENT"); }).catch((error) => { setPaymentNotice(error instanceof Error ? error.message : "Payment failed"); }); }} data-action-id="ui.apps.web.src.pages.LawFirmPage.466.record-payment">Record Payment</button>}
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
