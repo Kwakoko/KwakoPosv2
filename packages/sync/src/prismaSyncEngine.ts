@@ -204,6 +204,14 @@ export class PrismaSyncEngine {
           } else {
             await prisma.supplier.create({ data: { ...payload, id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
           }
+        } else if (op.entityType.startsWith("Plugin:") && op.operationType === "CREATE") {
+          const payload = op.payload as any;
+          const pluginId = String(payload.pluginId || "");
+          const allowedPlugins = new Set(["law-firm", "pharmacy", "vehicle-fleet"]);
+          if (!allowedPlugins.has(pluginId)) throw new Error(`Unsupported plugin sync operation: ${pluginId}`);
+          if (payload.tenantId && String(payload.tenantId) !== ctx.tenantId) throw new Error("Plugin payload tenant mismatch");
+          if (payload.branchId && String(payload.branchId) !== ctx.branchId) throw new Error("Plugin payload branch mismatch");
+          // Generic plugin mutation persistence: retain the immutable payload in sync_operations.
         } else {
           throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
         }
