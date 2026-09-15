@@ -16,6 +16,7 @@
     "apps/web"
   ],
   "scripts": {
+    "production-release:verify": "tsx scripts/release/verify-production-release-authority.ts",
     "start": "node index.js",
     "dev": "tsx scripts/dev.ts",
     "build": "npm run build --workspaces --if-present",

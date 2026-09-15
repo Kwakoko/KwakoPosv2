@@ -1,0 +1,19 @@
+name: Kwakoko Release Certification Governance
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  release-certification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run release-certification:verify
+      - run: npm exec vitest run tests/unit/release-certification-governance.test.ts
+      - run: npm run build --workspace=packages/config
