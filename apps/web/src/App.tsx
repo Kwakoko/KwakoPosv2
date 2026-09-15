@@ -1,23 +1,56 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>): React.ComponentType<any> =>
+  lazy(loader) as React.ComponentType<any>;
 import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts.js";
 import { apiFetch, getStoredSession } from "./services/apiClient.js";
 import { WindowManagerProvider } from "./context/WindowManagerContext.js";
 import { ToastProvider } from "./components/UI/Toast.js";
 import { ProductionErrorBoundary } from "./components/UI/ProductionErrorBoundary.js";
-import { LoginPage } from "./pages/LoginPage.js";
-import { SystemAppShellLayout } from "./layouts/SystemAppShellLayout.js";
-import { TenantOnboardingPage } from "./pages/TenantOnboardingPage.js";
-import { SupportOperationsPage } from "./pages/SupportOperationsPage.js";
-import { SuperAdminSupportControlTowerPage } from "./pages/SuperAdminSupportControlTowerPage.js";
-import { LegalCenterPage } from "./pages/LegalCenterPage.js";
-import { PrivacyCenterPage } from "./pages/PrivacyCenterPage.js";
-import { SuperAdminComplianceTowerPage } from "./pages/SuperAdminComplianceTowerPage.js";
-import { SuperAdminRollbackCenterPage } from "./pages/SuperAdminRollbackCenterPage.js";
+const LoginPage = lazyPage(() => import("./pages/LoginPage.js").then((m) => ({ default: m.LoginPage })));
+const SystemAppShellLayout = lazyPage(() => import("./layouts/SystemAppShellLayout.js").then((m) => ({ default: m.SystemAppShellLayout })));
+const TenantOnboardingPage = lazyPage(() => import("./pages/TenantOnboardingPage.js").then((m) => ({ default: m.TenantOnboardingPage })));
+const SupportOperationsPage = lazyPage(() => import("./pages/SupportOperationsPage.js").then((m) => ({ default: m.SupportOperationsPage })));
+const SuperAdminSupportControlTowerPage = lazyPage(() => import("./pages/SuperAdminSupportControlTowerPage.js").then((m) => ({ default: m.SuperAdminSupportControlTowerPage })));
+const LegalCenterPage = lazyPage(() => import("./pages/LegalCenterPage.js").then((m) => ({ default: m.LegalCenterPage })));
+const PrivacyCenterPage = lazyPage(() => import("./pages/PrivacyCenterPage.js").then((m) => ({ default: m.PrivacyCenterPage })));
+const SuperAdminComplianceTowerPage = lazyPage(() => import("./pages/SuperAdminComplianceTowerPage.js").then((m) => ({ default: m.SuperAdminComplianceTowerPage })));
+const SuperAdminRollbackCenterPage = lazyPage(() => import("./pages/SuperAdminRollbackCenterPage.js").then((m) => ({ default: m.SuperAdminRollbackCenterPage })));
 import { LegalAcceptanceModal } from "./components/LegalAcceptanceModal.js";
 import { WorkspaceLoadingScreen } from "./components/WorkspaceLoadingScreen.js";
 import { SkeletonDashboard } from "./components/UI/Skeleton.js";
-const lazyWorkspacePage = (key: string) =>
-  lazy<React.ComponentType<any>>(() => import("./pages/WorkspacePages.js").then((module: any) => ({ default: module[key] })));
+
+const lazyWorkspacePage = (key: string) => {
+  switch (key) {
+    case "DashboardPage": return lazyPage(() => import("./pages/DashboardPage.js").then((m) => ({ default: m.DashboardPage })));
+    case "PosPage": return lazyPage(() => import("./pages/PosPage.js").then((m) => ({ default: m.PosPage })));
+    case "InventoryPage": return lazyPage(() => import("./pages/InventoryPage.js").then((m) => ({ default: m.InventoryPage })));
+    case "CustomersPage": return lazyPage(() => import("./pages/CustomersPage.js").then((m) => ({ default: m.CustomersPage })));
+    case "PurchasingPage": return lazyPage(() => import("./pages/PurchasingPage.js").then((m) => ({ default: m.PurchasingPage })));
+    case "ReportsPage": return lazyPage(() => import("./pages/ReportsPage.js").then((m) => ({ default: m.ReportsPage })));
+    case "SettingsPage": return lazyPage(() => import("./pages/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
+    case "SuperAdminPage": return lazyPage(() => import("./pages/SuperAdminPage.js").then((m) => ({ default: m.SuperAdminPage })));
+    case "ExpensesPage": return lazyPage(() => import("./pages/ExpensesPage.js").then((m) => ({ default: m.ExpensesPage })));
+    case "BusinessConsultingPage": return lazyPage(() => import("./pages/BusinessConsultingPage.js").then((m) => ({ default: m.BusinessConsultingPage })));
+    case "LawFirmPage": return lazyPage(() => import("./pages/LawFirmPage.js").then((m) => ({ default: m.LawFirmPage })));
+    case "PharmacyPage": return lazyPage(() => import("./pages/PharmacyPage.js").then((m) => ({ default: m.PharmacyPage })));
+    case "CashDrawerPage": return lazyPage(() => import("./pages/CashDrawerPage.js").then((m) => ({ default: m.CashDrawerPage })));
+    case "ReceiptsPage": return lazyPage(() => import("./pages/ReceiptsPage.js").then((m) => ({ default: m.ReceiptsPage })));
+    case "TrashPage": return lazyPage(() => import("./pages/TrashPage.js").then((m) => ({ default: m.TrashPage })));
+    case "PersistenceTestPage": return lazyPage(() => import("./pages/PersistenceTestPage.js").then((m) => ({ default: m.PersistenceTestPage })));
+    case "HelpPage": return lazyPage(() => import("./pages/HelpPage.js").then((m) => ({ default: m.HelpPage })));
+    case "VerticalCommandCenterPage": return lazyPage(() => import("./pages/VerticalCommandCenterPage.js").then((m) => ({ default: m.VerticalCommandCenterPage })));
+    case "UsersPage":
+    case "DiagnosticsPage":
+    case "AiPage":
+    case "FinancePage":
+    case "PoultryLivestockPage":
+    case "FleetPage":
+    case "WorkforcePage":
+    case "TelecomPage":
+      return lazyPage(() => import("./pages/WorkspacePages.js").then((m: any) => ({ default: m[key] })));
+    default: throw new Error(`Unknown workspace page: ${key}`);
+  }
+};
 
 const DashboardPage = lazyWorkspacePage("DashboardPage");
 const PosPage = lazyWorkspacePage("PosPage");
@@ -45,7 +78,7 @@ const WorkforcePage = lazyWorkspacePage("WorkforcePage");
 const TelecomPage = lazyWorkspacePage("TelecomPage");
 const HelpPage = lazyWorkspacePage("HelpPage");
 const VerticalCommandCenterPage = lazyWorkspacePage("VerticalCommandCenterPage");
-import { CustomerDisplayPage } from "./pages/CustomerDisplayPage.js";
+const CustomerDisplayPage = lazyPage(() => import("./pages/CustomerDisplayPage.js").then((m) => ({ default: m.CustomerDisplayPage })));
 
 const TAB_TO_PATH: Record<string, string> = {
   Dashboard: "/",
@@ -603,8 +636,15 @@ const AuthenticatedApp: React.FC = () => {
 
   return (
     <>
-      <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
-        <ProductionErrorBoundary>
+      <Suspense
+        fallback={
+          <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
+            <SkeletonDashboard />
+          </div>
+        }
+      >
+        <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
+          <ProductionErrorBoundary>
           <Suspense
             fallback={
               <div style={{ padding: "1.5rem", width: "100%", maxWidth: "1600px", margin: "0 auto" }}>
@@ -614,8 +654,9 @@ const AuthenticatedApp: React.FC = () => {
           >
             {renderView()}
           </Suspense>
-        </ProductionErrorBoundary>
-      </SystemAppShellLayout>
+          </ProductionErrorBoundary>
+        </SystemAppShellLayout>
+      </Suspense>
     </>
   );
 };

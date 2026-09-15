@@ -14,12 +14,8 @@
  * Icons: lucide-react.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
-import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-} from "recharts";
 import {
   Activity, AlertTriangle, ArrowRight, BarChart2, Bell, Box, Briefcase,
   Calendar, Car, CheckCircle, ChevronRight, Clock, Coins, DollarSign,
@@ -36,95 +32,21 @@ import {
 } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/apiClient.js";
 
-// Dedicated full-module files — re-exported here for unified import in App.tsx
-export { LawFirmPage } from "./LawFirmPage.js";
-export { PharmacyPage } from "./PharmacyPage.js";
-export { ReportsPage } from "./ReportsPage.js";
-export { UsersRolesPage } from "./UsersRolesPage.js";
-export { SuperAdminPage } from "./SuperAdminPage.js";
-export { CashDrawerPage } from "./CashDrawerPage.js";
-export { ReceiptsPage } from "./ReceiptsPage.js";
-export { TrashPage } from "./TrashPage.js";
-export { PersistenceTestPage } from "./PersistenceTestPage.js";
-export { BusinessConsultingPage } from "./BusinessConsultingPage.js";
-export { HelpPage } from "./HelpPage.js";
-export { CustomersPage } from "./CustomersPage.js";
-export { PurchasingPage } from "./PurchasingPage.js";
-export { SettingsPage } from "./SettingsPage.js";
-export { PosPage } from "./PosPage.js";
-export { InventoryPage } from "./InventoryPage.js";
-export { DashboardPage } from "./DashboardPage.js";
-export { ExpensesPage } from "./ExpensesPage.js";
-export { VerticalCommandCenterPage } from "./VerticalCommandCenterPage.js";
-export {
-  Skeleton,
-  SkeletonKPI,
-  SkeletonTable,
-  SkeletonTableRow,
-  SkeletonCard,
-  SkeletonDashboard,
-} from "../components/UI/Skeleton.js";
-
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface WorkspaceProps { onNavigate: (path: string) => void; }
-
-type Variant  = { id: string; productId: string; name: string; sku: string; barcode?: string | null; price: number; costPrice: number; isActive: boolean };
-type Product  = { id: string; name: string; sku: string; category?: string; isActive?: boolean; variants?: Variant[] };
-type Customer = { id: string; customerCode: string; name: string; phone?: string | null; email?: string | null; currentBalance?: number; status?: string };
-type Sale     = { id: string; saleNumber: string; grandTotal: number; soldAt: string; paymentStatus: string };
-type Purchase = { id: string; purchaseOrderNumber?: string; totalCost?: number; status?: string; supplierName?: string };
-type CartItem = { productId: string; variantId: string; name: string; price: number; qty: number };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const money = (v: number) =>
-  v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
-  : v >= 1_000   ? `Tsh ${(v / 1_000).toFixed(0)}K`
-  : `Tsh ${Math.round(v).toLocaleString()}`;
-
-const errMsg = (e: unknown) => e instanceof Error ? e.message : "Unable to load data";
+type Sale = { id: string; saleNumber: string; grandTotal: number; soldAt: string; paymentStatus: string };
 
 function useApiList<T>(url: string) {
   const [data, setData] = useState<T[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const reload = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await apiFetch<{ success: boolean; data: T[] }>(url);
       setData(Array.isArray(res.data) ? res.data : []);
       setError(null);
-    } catch (e) { setError(errMsg(e)); }
-    finally { setLoading(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Unable to load data"); }
   }, [url]);
   useEffect(() => { void reload(); }, [reload]);
-  return { data, error, loading, reload };
+  return { data, error, reload };
 }
-
-// ─── Recharts Custom Tooltip ──────────────────────────────────────────────────
-
-const ChartTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
-  if (!active || !payload?.length) return null;
-  const isMoney = (name: string) => ["Revenue", "Profit", "Sales", "Cost", "Savings", "Loans"].includes(name);
-  return (
-    <div className="v2-card" style={{ minWidth: 150, padding: ".65rem .85rem" }}>
-      <p className="v2-text-xs v2-font-black" style={{ marginBottom: ".4rem", color: "var(--text-secondary)" }}>{label}</p>
-      {payload.map((p, i) => (
-        <div key={i} className="v2-flex v2-items-center v2-justify-between v2-gap-4" style={{ marginTop: ".2rem" }}>
-          <span className="v2-text-xs v2-flex v2-items-center v2-gap-1" style={{ color: p.color }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: p.color, display: "inline-block" }} />
-            {p.name}
-          </span>
-          <span className="v2-text-xs v2-font-black" style={{ color: "var(--text)" }}>
-            {isMoney(p.name) ? money(p.value) : p.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-};
 
 // ─── Shared Components ────────────────────────────────────────────────────────
 
@@ -192,29 +114,6 @@ const KpiCard: React.FC<{
 );
 
 // Demo chart seed data (used when API returns empty arrays)
-const DEMO_REVENUE = [
-  { name: "Mon", Revenue: 2800000, Profit: 820000 },
-  { name: "Tue", Revenue: 3200000, Profit: 960000 },
-  { name: "Wed", Revenue: 2600000, Profit: 740000 },
-  { name: "Thu", Revenue: 4100000, Profit: 1280000 },
-  { name: "Fri", Revenue: 5400000, Profit: 1720000 },
-  { name: "Sat", Revenue: 6200000, Profit: 2020000 },
-  { name: "Sun", Revenue: 3900000, Profit: 1140000 },
-];
-
-const DEMO_PIE = [
-  { name: "Cash", value: 52, color: "#3b82f6" },
-  { name: "M-Pesa", value: 31, color: "#10b981" },
-  { name: "Card",   value: 17, color: "#f59e0b" },
-];
-
-const DEMO_TOP_PRODUCTS = [
-  { name: "Coca Cola 500ml",   Revenue: 1820000, Units: 364 },
-  { name: "Azam Flour 2kg",    Revenue: 1450000, Units: 290 },
-  { name: "Unga wa Ngano 1kg", Revenue: 980000,  Units: 245 },
-  { name: "Maziwa 1L",         Revenue: 750000,  Units: 300 },
-  { name: "Sukari 1kg",        Revenue: 620000,  Units: 155 },
-];
 
 // DashboardPage is exported from ./DashboardPage.js
 
