@@ -69,18 +69,19 @@ function patchInstance(db: PatchedStore): void {
       status: "PENDING",
     };
 
-    // The business payload and its durable outbox entry are committed by one native
-    // IndexedDB transaction. A crash cannot leave one without the other.
     db.syncOutbox.set(opId, outboxItem);
     const targetStore = STORE_BY_ENTITY[entityType];
-    if (targetStore === "products") db.products.set(entityId, payload as any);
-    else if (targetStore === "productVariants") db.productVariants.set(entityId, payload as any);
-    else if (targetStore === "stockAdjustments") db.stockAdjustments.set(entityId, payload as any);
-    else if (targetStore === "stockLedger") db.stockLedger.set(entityId, payload as any);
-    else if (targetStore === "productPriceHistory") db.productPriceHistory.set(entityId, payload as any);
-    else if (targetStore === "customers") db.customers.set(entityId, payload as any);
-    else if (targetStore === "suppliers") db.suppliers.set(entityId, payload as any);
-    else if (targetStore === "receipts") db.receipts.set(entityId, payload);
+    const deleting = operationType === "DELETE";
+    const map = targetStore === "products" ? db.products
+      : targetStore === "productVariants" ? db.productVariants
+      : targetStore === "stockAdjustments" ? db.stockAdjustments
+      : targetStore === "stockLedger" ? db.stockLedger
+      : targetStore === "productPriceHistory" ? db.productPriceHistory
+      : targetStore === "customers" ? db.customers
+      : targetStore === "suppliers" ? db.suppliers
+      : targetStore === "receipts" ? db.receipts
+      : null;
+    if (map) deleting ? map.delete(entityId) : map.set(entityId, payload as any);
 
     const marker = JSON.stringify({ operationId: opId, entityType, entityId, operationType, payload, committedAt: new Date().toISOString() });
     db.__kwakoAtomicTail = db.__kwakoAtomicTail!.catch(() => undefined).then(() => new Promise<void>((resolve, reject) => {
@@ -94,7 +95,10 @@ function patchInstance(db: PatchedStore): void {
           const tx = nativeDb.transaction(uniqueStores, "readwrite");
           tx.objectStore("syncOutbox").put(outboxItem, opId);
           tx.objectStore("syncMetadata").put(marker, `${ATOMIC_MARKER_PREFIX}${opId}`);
-          if (targetStore) tx.objectStore(targetStore).put(payload, entityId);
+          if (targetStore) {
+            if (deleting) tx.objectStore(targetStore).delete(entityId);
+            else tx.objectStore(targetStore).put(payload, entityId);
+          }
           tx.oncomplete = () => { nativeDb.close(); resolve(); };
           tx.onerror = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_FAILED"); nativeDb.close(); reject(error); };
           tx.onabort = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_ABORTED"); nativeDb.close(); reject(error); };
