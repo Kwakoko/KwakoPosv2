@@ -270,7 +270,7 @@ const MedicinesPage: React.FC = () => {
 };
 
 // â”€â”€â”€ Sub-page: Batch & Expiry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BatchExpiryPage: React.FC = () => (
+const BatchExpiryPage: React.FC<{ onMutation?: (message: string) => void }> = ({ onMutation }) => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Batch & Expiry Management (FEFO)</h2>
@@ -307,7 +307,7 @@ const BatchExpiryPage: React.FC = () => (
               <td>
                 <div className="v2-flex v2-gap-1">
                   <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.307.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.307.button"><Eye size={13} /></button>
-                  {b.daysLeft <= 0 && <button className="v2-btn v2-btn-danger v2-btn-sm" type="button" onClick={() => { void persistPharmacyBatchAction("DISPOSE_BATCH", { status: "EXPIRED", source: "PHARMACY_BATCH_REGISTER" }).then(() => runUiAction("ui.apps.web.src.pages.PharmacyPage.308.dispose", "Dispose", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.308.dispose">Dispose</button>}
+                  {b.daysLeft <= 0 && <button className="v2-btn v2-btn-danger v2-btn-sm" type="button" onClick={() => { void persistPharmacyBatchAction("DISPOSE_BATCH", { status: "EXPIRED", source: "PHARMACY_BATCH_REGISTER" }).then((id) => { onMutation?.(`Batch disposal queued (${id})`); return runUiAction("ui.apps.web.src.pages.PharmacyPage.308.dispose", "Dispose", "MUTATION_INTENT"); }); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.308.dispose">Dispose</button>}
                 </div>
               </td>
             </tr>
@@ -319,7 +319,7 @@ const BatchExpiryPage: React.FC = () => (
 );
 
 // â”€â”€â”€ Sub-page: Prescriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const PrescriptionsPage: React.FC = () => (
+const PrescriptionsPage: React.FC<{ onMutation?: (message: string) => void }> = ({ onMutation }) => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Prescription Management</h2>
@@ -341,7 +341,7 @@ const PrescriptionsPage: React.FC = () => (
               <td>
                 <div className="v2-flex v2-gap-1">
                   <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.341.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.341.button"><Eye size={13} /></button>
-                  {p.status === "Pending" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { const firstMedicine = DEMO_MEDICINES[0]; void dispensePharmacyMedicine({ medicineId: firstMedicine?.id || "", quantityRequired: 1 }).then(() => runUiAction("ui.apps.web.src.pages.PharmacyPage.342.dispense", "Dispense", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.342.dispense">Dispense</button>}
+                  {p.status === "Pending" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { const firstMedicine = DEMO_MEDICINES[0]; void dispensePharmacyMedicine({ medicineId: firstMedicine?.id || "", quantityRequired: 1 }).then((result) => { onMutation?.(`Dispense recorded (${result.source})`); return runUiAction("ui.apps.web.src.pages.PharmacyPage.342.dispense", "Dispense", "MUTATION_INTENT"); }); }} data-action-id="ui.apps.web.src.pages.PharmacyPage.342.dispense">Dispense</button>}
                 </div>
               </td>
             </tr>
@@ -411,14 +411,15 @@ const PharmStub: React.FC<{ title: string }> = ({ title }) => (
 // â”€â”€â”€ Pharmacy Module Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const PharmacyPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PharmTab>("Pharmacy Dashboard");
+  const [mutationNotice, setMutationNotice] = useState<string>("");
 
   const renderTab = () => {
     switch (activeTab) {
       case "Pharmacy Dashboard":  return <PharmDashboard onNav={setActiveTab} />;
       case "Patients":            return <PatientsPage />;
       case "Medicines":           return <MedicinesPage />;
-      case "Batch & Expiry":      return <BatchExpiryPage />;
-      case "Prescriptions":       return <PrescriptionsPage />;
+      case "Batch & Expiry":      return <BatchExpiryPage onMutation={setMutationNotice} />;
+      case "Prescriptions":       return <PrescriptionsPage onMutation={setMutationNotice} />;
       case "Controlled Drugs":    return <ControlledDrugsPage />;
       default:                    return <PharmStub title={activeTab} />;
     }
@@ -439,6 +440,7 @@ export const PharmacyPage: React.FC = () => {
           </button>
         ))}
       </div>
+      {mutationNotice && <div className="v2-card v2-mb-3" role="status"><div className="v2-card-body v2-text-sm v2-font-bold">{mutationNotice}</div></div>}
       {renderTab()}
     </div>
   );
