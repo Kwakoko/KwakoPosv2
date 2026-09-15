@@ -1,4 +1,5 @@
 import "./styles.css";
+import "./atomicOutbox.js";
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.js";
