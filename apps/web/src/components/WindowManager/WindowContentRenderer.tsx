@@ -3,37 +3,38 @@
  * ──────────────────────────────────────
  * Maps window routes/modules to their authoritative view components.
  */
-import React, { Component, type ReactNode } from "react";
+import React, { Component, lazy, Suspense, type ReactNode } from "react";
 import type { KwakokoWindow } from "../../types/windowManager.js";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import {
-  DashboardPage,
-  PosPage,
-  InventoryPage,
-  CustomersPage,
-  PurchasingPage,
-  FinancePage,
-  ReportsPage,
-  SettingsPage,
-  UsersPage,
-  DiagnosticsPage,
-  ExpensesPage,
-  AiPage,
-  CashDrawerPage,
-  ReceiptsPage,
-  TrashPage,
-  PersistenceTestPage,
-  BusinessConsultingPage,
-  LawFirmPage,
-  PharmacyPage,
-  PoultryLivestockPage,
-  FleetPage,
-  WorkforcePage,
-  TelecomPage,
-  HelpPage,
-  SuperAdminPage,
-  VerticalCommandCenterPage,
-} from "../../pages/WorkspacePages.js";
+const lazyWorkspacePage = (key: string) =>
+  lazy<React.ComponentType<any>>(() => import("../../pages/WorkspacePages.js").then((module: any) => ({ default: module[key] as React.ComponentType<any> })));
+
+const DashboardPage = lazyWorkspacePage("DashboardPage");
+const PosPage = lazyWorkspacePage("PosPage");
+const InventoryPage = lazyWorkspacePage("InventoryPage");
+const CustomersPage = lazyWorkspacePage("CustomersPage");
+const PurchasingPage = lazyWorkspacePage("PurchasingPage");
+const FinancePage = lazyWorkspacePage("FinancePage");
+const ReportsPage = lazyWorkspacePage("ReportsPage");
+const SettingsPage = lazyWorkspacePage("SettingsPage");
+const UsersPage = lazyWorkspacePage("UsersPage");
+const DiagnosticsPage = lazyWorkspacePage("DiagnosticsPage");
+const ExpensesPage = lazyWorkspacePage("ExpensesPage");
+const AiPage = lazyWorkspacePage("AiPage");
+const CashDrawerPage = lazyWorkspacePage("CashDrawerPage");
+const ReceiptsPage = lazyWorkspacePage("ReceiptsPage");
+const TrashPage = lazyWorkspacePage("TrashPage");
+const PersistenceTestPage = lazyWorkspacePage("PersistenceTestPage");
+const BusinessConsultingPage = lazyWorkspacePage("BusinessConsultingPage");
+const LawFirmPage = lazyWorkspacePage("LawFirmPage");
+const PharmacyPage = lazyWorkspacePage("PharmacyPage");
+const PoultryLivestockPage = lazyWorkspacePage("PoultryLivestockPage");
+const FleetPage = lazyWorkspacePage("FleetPage");
+const WorkforcePage = lazyWorkspacePage("WorkforcePage");
+const TelecomPage = lazyWorkspacePage("TelecomPage");
+const HelpPage = lazyWorkspacePage("HelpPage");
+const SuperAdminPage = lazyWorkspacePage("SuperAdminPage");
+const VerticalCommandCenterPage = lazyWorkspacePage("VerticalCommandCenterPage");
 import { SuperAdminCertificationStudio } from "../SuperAdminCertificationStudio.js";
 import { SuperAdminComplianceTowerPage } from "../../pages/SuperAdminComplianceTowerPage.js";
 import { SuperAdminRollbackCenterPage } from "../../pages/SuperAdminRollbackCenterPage.js";
@@ -131,7 +132,9 @@ export const WindowContentRenderer: React.FC<{ window: KwakokoWindow }> = ({ win
   return (
     <WindowErrorBoundary windowId={win.id}>
       <div style={{ height: "100%", overflowY: "auto", padding: "0.75rem" }}>
-        {renderModule()}
+        <Suspense fallback={<div style={{ minHeight: 180, display: "grid", placeItems: "center" }}>Loading module?</div>}>
+          {renderModule()}
+        </Suspense>
       </div>
     </WindowErrorBoundary>
   );

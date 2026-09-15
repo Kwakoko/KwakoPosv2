@@ -14,6 +14,12 @@ interface PendingDoc {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+const markDismissed = (docs: PendingDoc[]) => {
+  try {
+    window.sessionStorage.setItem("kwakopos:v2:legal-dismissed", JSON.stringify(docs.map((doc) => doc.documentId)));
+  } catch { /* ignore storage failures */ }
+};
+
 export const LegalAcceptanceModal: React.FC<{
   isOpen?: boolean;
   onAccepted?: () => void;

@@ -28,11 +28,6 @@ import {
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
 import { KokoCompanion } from '../components/KokoCompanion.js';
-import * as XLSX from 'xlsx';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, Cell, PieChart, Pie, BarChart, Bar
-} from 'recharts';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -232,6 +227,12 @@ export interface DashboardPageProps {
   onNavigate?: (path: string) => void;
 }
 
+type RechartsModule = typeof import("recharts");
+
+const ChartFallback = (props: any) => (
+  <div style={{ width: "100%", minHeight: 180 }} aria-hidden="true" {...props} />
+);
+
 // ─── Main Dashboard Component ────────────────────────────────────────────────
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
@@ -264,6 +265,31 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [chartActiveMetric, setChartActiveMetric] = useState<'all' | 'revenue' | 'profit' | 'cogs'>('all');
   const [isZReportOpen, setIsZReportOpen] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [rechartsModule, setRechartsModule] = useState<RechartsModule | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void import("recharts").then((module) => {
+      if (active) setRechartsModule(module);
+    }).catch((error) => {
+      console.error("[DashboardPage] Failed to load analytics charts:", error);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const AreaChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.AreaChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Area = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Area, props) : null, [rechartsModule]);
+  const XAxis = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.XAxis, props) : null, [rechartsModule]);
+  const YAxis = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.YAxis, props) : null, [rechartsModule]);
+  const CartesianGrid = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.CartesianGrid, props) : null, [rechartsModule]);
+  const Tooltip = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Tooltip, props) : null, [rechartsModule]);
+  const ResponsiveContainer = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.ResponsiveContainer, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Legend = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Legend, props) : null, [rechartsModule]);
+  const Cell = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Cell, props) : null, [rechartsModule]);
+  const PieChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.PieChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Pie = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Pie, props) : null, [rechartsModule]);
+  const BarChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.BarChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Bar = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Bar, props) : null, [rechartsModule]);
 
   const handleLoadDemoData = async () => {
     if (isLoadingSample || !db) return;
@@ -1224,8 +1250,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   }, [activeShiftSession, validOrders]);
 
   // ── 1-Click Multi-Tab Executive Financial Audit Report Exporter (.xlsx) ───
-  const exportDashboardSummaryCSV = useCallback(() => {
+  const exportDashboardSummaryCSV = useCallback(async () => {
     try {
+      const XLSX = await import("xlsx");
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10);
       const timeStr = now.toLocaleTimeString();
@@ -1233,7 +1260,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       const wb = XLSX.utils.book_new();
 
       // Universal number formatting engine for professional accounting & Excel presentation
-      const formatWorksheetNumbers = (ws: XLSX.WorkSheet, currencyCols?: number[], countCols?: number[]) => {
+      const formatWorksheetNumbers = (ws: import("xlsx").WorkSheet, currencyCols?: number[], countCols?: number[]) => {
         if (!ws['!ref']) return;
         const range = XLSX.utils.decode_range(ws['!ref']);
         // 1. Column-specific overrides for data rows (row >= 1)
@@ -2316,7 +2343,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 <YAxis
                   fontSize={10}
                   stroke="#94A3B8"
-                  tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}
+                  tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}
                 />
                 <Tooltip
                   content={({ active, payload, label }: any) => {
@@ -2486,7 +2513,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                         outerRadius={68}
                         paddingAngle={paymentChannelSummary.items.length > 1 ? 3 : 0}
                         dataKey="value"
-                        onMouseEnter={(_, index) => setActivePaymentIndex(index)}
+                        onMouseEnter={(_entry: unknown, index: number) => setActivePaymentIndex(index)}
                         onMouseLeave={() => setActivePaymentIndex(null)}
                       >
                         {paymentChannelSummary.items.map((entry, i) => (
