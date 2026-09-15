@@ -68,7 +68,7 @@ export const SyncTelemetryHUD: React.FC = () => {
     syncTelemetryService.recordSyncStart();
     const start = performance.now();
     try {
-      await syncOutbox();
+      await syncOutbox({ force: true });
       const duration = Math.round(performance.now() - start);
       syncTelemetryService.recordSyncComplete(duration, true);
       await syncTelemetryService.refreshOutboxCount();

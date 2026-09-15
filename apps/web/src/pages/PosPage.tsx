@@ -28,6 +28,7 @@ import { apiFetch, safeUUID } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
 
@@ -116,16 +117,22 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         }
         const mapped = Array.from(db.products.values())
           .filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive")
-          .map((product: any) => ({
-            id: product.id,
-            name: product.name,
-            sku: product.sku,
-            category: product.category || "General",
-            price: Number(product.sellingPrice || product.price || 0),
-            stock: Number(product.availableStock ?? product.totalStock ?? product.stock ?? 0),
-            barcode: product.barcode || product.barcode_value || "",
-            variants: variantsByProduct.get(product.id),
-          }));
+          .map((product: any) => {
+            const vars = variantsByProduct.get(product.id);
+            const effectiveStock = vars && vars.length > 0
+              ? vars.reduce((sum, v) => sum + Number(v.stock || 0), 0)
+              : Number(product.availableStock ?? product.totalStock ?? product.stock ?? 0);
+            return {
+              id: product.id,
+              name: product.name,
+              sku: product.sku,
+              category: product.category || "General",
+              price: Number(product.sellingPrice || product.price || 0),
+              stock: effectiveStock,
+              barcode: product.barcode || product.barcode_value || "",
+              variants: vars,
+            };
+          });
         if (active) setProducts(mapped);
       } catch (error) {
         console.error("[POS] Failed to hydrate authoritative catalog", error);
@@ -134,9 +141,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
     void hydrateCatalog();
     window.addEventListener(DEMO_DATA_EVENT, hydrateCatalog);
+    window.addEventListener(STOCK_CHANGED_EVENT, hydrateCatalog);
     return () => {
       active = false;
       window.removeEventListener(DEMO_DATA_EVENT, hydrateCatalog);
+      window.removeEventListener(STOCK_CHANGED_EVENT, hydrateCatalog);
     };
   }, [db]);
 
@@ -1025,51 +1034,24 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       createdAt: saleRecord.createdAt,
     } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
 
-    // 3. Decrement inventory in db.products and write StockLedger entries
-    for (const item of cart) {
-      if (item.isCustom) continue;
-      const prod = item.product;
-      let existing = db.products.get(prod.id) as any;
-      if (!existing) {
-        for (const p of db.products.values()) {
-          if (p.id === prod.id || p.sku === prod.sku) {
-            existing = p;
-            break;
-          }
-        }
-      }
-      if (existing) {
-        const prevAvail = Number(existing.availableStock ?? existing.totalStock ?? existing.stock ?? 0);
-        const prevTotal = Number(existing.totalStock ?? existing.stock ?? 0);
-        const nextAvail = Math.max(0, prevAvail - item.qty);
-        const nextTotal = Math.max(0, prevTotal - item.qty);
-        const updatedProd = {
-          ...existing,
-          availableStock: nextAvail,
-          totalStock: nextTotal,
-          stock: nextAvail,
-          updatedAt: new Date().toISOString(),
-        };
-        db.saveProductLocal(updatedProd, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-
-        db.saveStockLedgerLocal({
-          id: `led-${saleId}-${prod.id}`,
-          productId: prod.id,
+    // 3. Decrement inventory in db.products, db.productVariants, and db.stockLedger via unified stock service
+    recordPosSaleDeductions(db, {
+      saleId,
+      items: cart
+        .filter((item) => !item.isCustom)
+        .map((item) => ({
+          productId: item.product.id,
           variantId: item.variantId,
-          sku: prod.sku,
-          name: existing.name || prod.name,
-          quantity: -item.qty,
-          balanceAfter: nextAvail,
-          unitCost: Number(existing.costPrice || existing.buyingPrice || 0),
-          totalCost: item.qty * Number(existing.costPrice || existing.buyingPrice || 0),
-          ref: saleId,
-          reason: `POS_SALE_${saleId}`,
-          movementType: "SALE",
-          timestamp: new Date().toISOString(),
-          tenantId: currentTenantId || "default",
-        } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-      }
-    }
+          qty: item.qty,
+          unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0),
+          name: item.product.name,
+          sku: item.product.sku,
+        })),
+      tenantId: currentTenantId || "tenant-default",
+      branchId: currentBranchId || "branch-default",
+      userId: user?.id,
+      deviceId: "pos-terminal",
+    });
 
     // 4. Update local products state so POS counter stock displays decrease immediately
     setProducts((prev) =>
@@ -1143,37 +1125,36 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         return sum + (item?.price || 0) * qty;
       }, 0);
 
-    // Restock inventory in local catalog & IndexedDB
+    // Restock inventory in local catalog & IndexedDB via unified stock service
+    const refundItemsList = Object.entries(returnItems)
+      .filter(([_, qty]) => (qty as number) > 0)
+      .map(([key, qty]) => {
+        const found = selectedOrderToReturn.items.find(
+          (i: any) => (i.variantId || i.product?.id || i.productId) === key
+        );
+        return {
+          productId: found?.product?.id || found?.productId || key,
+          variantId: found?.variantId,
+          qty: qty as number,
+          unitCost: found?.costPrice || found?.unitCost || 0,
+        };
+      });
+
+    if (refundItemsList.length > 0) {
+      recordPosSaleRefundRestock(db, {
+        saleId: selectedOrderToReturn.id,
+        items: refundItemsList,
+        tenantId: currentTenantId || "tenant-default",
+        branchId: currentBranchId || "branch-default",
+        userId: user?.id,
+        deviceId: "pos-terminal",
+      });
+    }
+
     setProducts((prev) =>
       prev.map((p) => {
         const returnedQty = returnItems[p.id] || 0;
-        if (returnedQty > 0) {
-          const updatedStock = p.stock + returnedQty;
-          try {
-            const existing = db.products.get(p.id) as any;
-            if (existing) {
-              const updatedProd = {
-                ...existing,
-                availableStock: (Number(existing.availableStock ?? existing.totalStock ?? existing.stock ?? 0)) + returnedQty,
-                totalStock: (Number(existing.totalStock ?? existing.stock ?? 0)) + returnedQty,
-                stock: updatedStock,
-              };
-              db.saveProductLocal(updatedProd, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-              db.saveStockLedgerLocal({
-                id: `led-ret-${Date.now()}-${p.id}`,
-                productId: p.id,
-                quantity: returnedQty,
-                balanceAfter: updatedStock,
-                reason: "RETURN_RESTOCK",
-                movementType: "RETURN",
-                timestamp: new Date().toISOString(),
-                tenantId: currentTenantId || "default",
-              } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-            }
-          } catch {}
-          return { ...p, stock: updatedStock };
-        }
-        return p;
+        return returnedQty > 0 ? { ...p, stock: p.stock + returnedQty } : p;
       })
     );
 

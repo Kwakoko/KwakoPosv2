@@ -21,3 +21,6 @@ test-results/
 /apps/web/public/sw.js
 # Generated release manifest at repository root
 /release-manifest.json
+
+# Temporary scripts and fixtures
+tmp-*

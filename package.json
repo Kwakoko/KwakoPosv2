@@ -143,7 +143,9 @@
     "bi-analytics:verify": "tsx scripts/release/verify-bi-analytics-governance.ts",
     "ai-operating:verify": "tsx scripts/release/verify-ai-operating-layer-governance.ts",
     "autonomous-operations:verify": "tsx scripts/release/verify-autonomous-operations-governance.ts",
-    "platform-governance:verify": "tsx scripts/release/verify-platform-governance-control-plane.ts"
+    "platform-governance:verify": "tsx scripts/release/verify-platform-governance-control-plane.ts",
+    "production:evidence:verify": "tsx scripts/release/verify-live-production-evidence.ts",
+    "production:evidence:execute": "tsx scripts/release/prove-production-release.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

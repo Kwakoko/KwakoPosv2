@@ -1,5 +1,5 @@
 import React, {
-  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from "react";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { ClientSyncEngine } from "../clientSyncEngine.js";
@@ -214,7 +214,7 @@ interface SyncContextType {
   toggleOfflineSimulation: () => void;
   isSyncing: boolean;
   pendingOutboxCount: number;
-  syncOutbox: () => Promise<void>;
+  syncOutbox: (options?: { quiet?: boolean; force?: boolean }) => Promise<any>;
   db: LocalIndexedDbStore;
   syncEngine: ClientSyncEngine;
   syncError: string | null;
@@ -453,8 +453,14 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     };
     refreshCount();
-    const interval = setInterval(refreshCount, 4000);
-    return () => clearInterval(interval);
+    window.addEventListener("kwakopos:outbox-enqueued", refreshCount);
+    window.addEventListener(DEMO_DATA_EVENT, refreshCount);
+    const interval = setInterval(refreshCount, 20000);
+    return () => {
+      window.removeEventListener("kwakopos:outbox-enqueued", refreshCount);
+      window.removeEventListener(DEMO_DATA_EVENT, refreshCount);
+      clearInterval(interval);
+    };
   }, [db]);
 
   const login = async (email: string, password: string, mfaCode?: string): Promise<AuthUser> => {
@@ -653,21 +659,43 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const syncOutbox = useCallback(async () => {
+  const isSyncInProgressRef = useRef(false);
+  const lastSyncTimeRef = useRef<number>(Date.now());
+  const consecutiveFailuresRef = useRef<number>(0);
+  const hasBootReconciledRef = useRef(false);
+  const outboxDebounceTimerRef = useRef<any>(null);
+
+  const syncOutbox = useCallback(async (options?: { quiet?: boolean; force?: boolean }) => {
     if (!isOnline) return;
+    if (isSyncInProgressRef.current) return;
+    isSyncInProgressRef.current = true;
+
     const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
     const targetBranchId = user?.branchId || currentBranchId || "branch-default";
     const targetUserId = user?.id || "user-default";
 
-    setIsSyncing(true);
+    // Only set visual isSyncing if not quiet, or if pending items actually exist, or if forced
+    const pendingCount = db.getPendingOutbox().length;
+    const shouldShowVisualSync = !options?.quiet || pendingCount > 0 || options?.force;
+
+    if (shouldShowVisualSync) {
+      setIsSyncing(true);
+    }
     setSyncError(null);
+
     try {
       await db.ready;
-      try {
-        reconcileLocalInventoryToOutbox(db, targetTenantId, targetBranchId);
-      } catch (reconErr) {
-        console.warn("[Sync] Local inventory reconciliation error:", reconErr);
+
+      // Reconcile local inventory only once on boot or when explicitly forced, never on every background tick
+      if (!hasBootReconciledRef.current || options?.force) {
+        hasBootReconciledRef.current = true;
+        try {
+          reconcileLocalInventoryToOutbox(db, targetTenantId, targetBranchId);
+        } catch (reconErr) {
+          console.warn("[Sync] Local inventory reconciliation error:", reconErr);
+        }
       }
+
       const token = getAccessToken();
       const authHeaders: Record<string, string> = {
         "x-tenant-id": targetTenantId,
@@ -703,7 +731,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         },
         targetTenantId,
       );
-      setLastSyncedAt(Date.now());
+
+      const now = Date.now();
+      lastSyncTimeRef.current = now;
+      consecutiveFailuresRef.current = 0;
+      setLastSyncedAt(now);
       setPendingOutboxCount(db.getPendingOutbox().length);
 
       if (result && (result.pulled > 0 || result.pushed > 0)) {
@@ -719,10 +751,13 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           /* ignore broadcast errors in isolated test workers */
         }
       }
+      return result;
     } catch (error) {
+      consecutiveFailuresRef.current += 1;
       setSyncError(error instanceof Error ? error.message : "Synchronization failed");
       throw error;
     } finally {
+      isSyncInProgressRef.current = false;
       setIsSyncing(false);
     }
   }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine]);
@@ -737,8 +772,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const data = event.data;
       if (!data) return;
       if (data.type === "OUTBOX_MUTATION") {
-        if (isOnline && !isSyncing) {
-          void syncOutbox().catch(() => {});
+        if (isOnline && !isSyncInProgressRef.current) {
+          void syncOutbox({ quiet: true }).catch(() => {});
         }
       } else if (data.type === "SYNC_CONVERGED") {
         window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
@@ -747,53 +782,108 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => {
       bc.close();
     };
-  }, [isOnline, isSyncing, syncOutbox]);
+  }, [isOnline, syncOutbox]);
 
-  // 2. Instant trigger on local outbox enqueue
+  // 2. Debounced trigger on local outbox enqueue (400ms debounce batches rapid user actions)
   useEffect(() => {
     const handleOutboxQueued = () => {
-      if (isOnline && !isSyncing) {
-        void syncOutbox().catch(() => {});
+      if (!isOnline) return;
+      setPendingOutboxCount(db.getPendingOutbox().length);
+      if (outboxDebounceTimerRef.current) {
+        clearTimeout(outboxDebounceTimerRef.current);
       }
+      outboxDebounceTimerRef.current = setTimeout(() => {
+        if (!isSyncInProgressRef.current) {
+          void syncOutbox({ quiet: false }).catch(() => {});
+        }
+      }, 400);
     };
     window.addEventListener("kwakopos:outbox-enqueued", handleOutboxQueued);
     return () => {
       window.removeEventListener("kwakopos:outbox-enqueued", handleOutboxQueued);
+      if (outboxDebounceTimerRef.current) {
+        clearTimeout(outboxDebounceTimerRef.current);
+      }
     };
-  }, [isOnline, isSyncing, syncOutbox]);
+  }, [isOnline, db, syncOutbox]);
 
-  // 3. Multi-device background convergence heartbeat (6s), initial boot sync, and focus reconnection
+  // 3. Multi-device background convergence heartbeat (30s active, 5m hidden, exponential backoff)
   useEffect(() => {
     if (!isOnline) return;
 
-    // Initial convergence sync after boot / session ready
+    // Initial boot sync after 600ms
     const initTimer = setTimeout(() => {
-      void syncOutbox().catch(() => {});
+      void syncOutbox({ quiet: true }).catch(() => {});
     }, 600);
 
-    // Periodic heartbeat to pull server delta and push pending outbox
-    const interval = setInterval(() => {
-      if (!isSyncing) {
-        void syncOutbox().catch(() => {});
-      }
-    }, 6000);
+    let timerId: any = null;
 
-    // Focus & Online reconnection triggers
-    const handleWindowFocus = () => {
-      if (!isSyncing) {
-        void syncOutbox().catch(() => {});
+    const scheduleNextHeartbeat = () => {
+      if (timerId) clearTimeout(timerId);
+
+      // Tab visibility: 5m if hidden, 30s if active foreground
+      const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+      const baseInterval = isHidden ? 300000 : 30000;
+
+      // Exponential backoff if consecutive errors occurred
+      const backoffDelay = consecutiveFailuresRef.current > 0
+        ? Math.min(60000, 5000 * Math.pow(2, consecutiveFailuresRef.current - 1))
+        : 0;
+
+      const nextInterval = Math.max(baseInterval, backoffDelay);
+
+      timerId = setTimeout(() => {
+        if (!isSyncInProgressRef.current) {
+          void syncOutbox({ quiet: true })
+            .catch(() => {})
+            .finally(() => {
+              scheduleNextHeartbeat();
+            });
+        } else {
+          scheduleNextHeartbeat();
+        }
+      }, nextInterval);
+    };
+
+    scheduleNextHeartbeat();
+
+    // Visibility change handler: immediately probe if returning after >= 15s away
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        const elapsed = Date.now() - lastSyncTimeRef.current;
+        if (elapsed >= 15000 && !isSyncInProgressRef.current) {
+          void syncOutbox({ quiet: true }).catch(() => {});
+        }
+        scheduleNextHeartbeat();
+      } else {
+        scheduleNextHeartbeat();
       }
     };
-    window.addEventListener("focus", handleWindowFocus);
-    window.addEventListener("online", handleWindowFocus);
+
+    // Focus & Online reconnection triggers
+    const handleReconnection = () => {
+      if (!isSyncInProgressRef.current) {
+        void syncOutbox({ quiet: true }).catch(() => {});
+      }
+      scheduleNextHeartbeat();
+    };
+
+    window.addEventListener("focus", handleReconnection);
+    window.addEventListener("online", handleReconnection);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     return () => {
       clearTimeout(initTimer);
-      clearInterval(interval);
-      window.removeEventListener("focus", handleWindowFocus);
-      window.removeEventListener("online", handleWindowFocus);
+      if (timerId) clearTimeout(timerId);
+      window.removeEventListener("focus", handleReconnection);
+      window.removeEventListener("online", handleReconnection);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
     };
-  }, [isOnline, isSyncing, syncOutbox]);
+  }, [isOnline, syncOutbox]);
 
   const availableTenantsList = useMemo(() => {
     if (impersonatedTenant) return [{ id: impersonatedTenant.tenantId, name: `${impersonatedTenant.tenantName} (Audit)` }];

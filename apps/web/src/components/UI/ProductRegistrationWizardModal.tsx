@@ -25,6 +25,7 @@ import type { LocalIndexedDbStore } from "../../indexedDb.js";
 import { useToast } from "../../context/ToastContext.js";
 import { useAudioFeedback } from "../../utils/useAudioFeedback.js";
 import { DEMO_DATA_EVENT } from "../../services/sampleDataService.js";
+import { STOCK_CHANGED_EVENT } from "../../services/inventoryStockService.js";
 
 export type ProductType = "STANDARD" | "COMPOSITE" | "SERVICE" | "SERIALIZED";
 export type TrackingType = "TRACKED" | "BATCH_EXPIRY" | "SERIALIZED" | "NON_TRACKED";
@@ -445,27 +446,35 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
 
       if (hasVariants && variants.length > 0) {
         // --- Multi-Variant Product Registration ---
-        const variantsToSave = variants.map((v) => ({
-          id: v.id,
-          productId: prodId,
-          name: v.name.trim(),
-          sku: v.sku.trim(),
-          barcode: v.barcode ? v.barcode.trim() : "",
-          attributes: v.attributes || {},
-          buyingPrice: Number(v.buyingPrice) || 0,
-          costPrice: Number(v.buyingPrice) || 0,
-          sellingPrice: Number(v.sellingPrice) || 0,
-          price: Number(v.sellingPrice) || 0,
-          inventoryQuantity: 0,
-          stock: 0,
-          reorderLevel: Number(v.reorderLevel) || 5,
-          isActive: true,
-          tenantId: currentTenantId || undefined,
-          createdAt: now,
-          updatedAt: now,
-        }));
+        const totalOpening = variants.reduce((sum, v) => sum + (Number(v.openingStock) || 0), 0);
+        productRecord.stock = totalOpening;
+        productRecord.totalStock = totalOpening;
+        productRecord.availableStock = totalOpening;
 
-        // 1. Persist Product and Variants locally with zero stock
+        const variantsToSave = variants.map((v) => {
+          const vOpeningStock = Number(v.openingStock) || 0;
+          return {
+            id: v.id,
+            productId: prodId,
+            name: v.name.trim(),
+            sku: v.sku.trim(),
+            barcode: v.barcode ? v.barcode.trim() : "",
+            attributes: v.attributes || {},
+            buyingPrice: Number(v.buyingPrice) || 0,
+            costPrice: Number(v.buyingPrice) || 0,
+            sellingPrice: Number(v.sellingPrice) || 0,
+            price: Number(v.sellingPrice) || 0,
+            inventoryQuantity: vOpeningStock,
+            stock: vOpeningStock,
+            reorderLevel: Number(v.reorderLevel) || 5,
+            isActive: true,
+            tenantId: currentTenantId || undefined,
+            createdAt: now,
+            updatedAt: now,
+          };
+        });
+
+        // 1. Persist Product and Variants locally with initial stock
         db.saveProductWithVariantsLocal(
           productRecord as any,
           variantsToSave as any,
@@ -479,7 +488,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           operationType: "CREATE",
           payload: {
             ...productRecord,
-            variants: variantsToSave.map((v) => ({ ...v, inventoryQuantity: 0, stock: 0 })),
+            variants: variantsToSave,
           },
           idempotencyKey: `PROD-CREATE-${prodId}`,
           tenantId: currentTenantId || undefined,
@@ -494,15 +503,13 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
             operationType: "CREATE",
             payload: {
               ...v,
-              inventoryQuantity: 0,
-              stock: 0,
             },
             idempotencyKey: `VAR-CREATE-${v.id}`,
             tenantId: currentTenantId || undefined,
             branchId: currentBranchId || undefined,
           });
 
-          // 4. Record opening stock movement strictly in StockLedger & Outbox StockAdjustment
+          // 4. Record opening stock movement in StockLedger & Outbox StockAdjustment
           const vOpeningStock = Number(variants.find((item) => item.id === v.id)?.openingStock) || 0;
           if (vOpeningStock > 0) {
             db.saveStockLedgerLocal(
@@ -513,6 +520,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                 sku: v.sku,
                 name: v.name,
                 quantity: vOpeningStock,
+                quantityChange: vOpeningStock,
+                quantityBefore: 0,
+                quantityAfter: vOpeningStock,
                 balanceAfter: vOpeningStock,
                 reason: "OPENING_STOCK",
                 movementType: "OPENING_STOCK",
@@ -547,6 +557,11 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
         }
       } else {
         // --- Non-Variant Product Registration ---
+        const numOpeningStock = Number(openingStock) || 0;
+        productRecord.stock = numOpeningStock;
+        productRecord.totalStock = numOpeningStock;
+        productRecord.availableStock = numOpeningStock;
+
         const defaultVarId = `${prodId}-default`;
         const defaultVariant = {
           id: defaultVarId,
@@ -558,8 +573,8 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           costPrice: costPriceNum,
           buyingPrice: costPriceNum,
           sellingPrice: retailPriceNum,
-          inventoryQuantity: 0,
-          stock: 0,
+          inventoryQuantity: numOpeningStock,
+          stock: numOpeningStock,
           reorderLevel: reorderLevelNum,
           isActive: true,
           tenantId: currentTenantId || undefined,
@@ -567,7 +582,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           updatedAt: now,
         };
 
-        // 1. Persist Product and Default Variant locally with zero stock
+        // 1. Persist Product and Default Variant locally with initial stock
         db.saveProductLocal(
           productRecord as any,
           scopedCtx
@@ -585,7 +600,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           payload: {
             ...productRecord,
             hasVariants: false,
-            variants: [{ ...defaultVariant, inventoryQuantity: 0, stock: 0 }],
+            variants: [defaultVariant],
           },
           idempotencyKey: `PROD-CREATE-${prodId}`,
           tenantId: currentTenantId || undefined,
@@ -599,16 +614,13 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           operationType: "CREATE",
           payload: {
             ...defaultVariant,
-            inventoryQuantity: 0,
-            stock: 0,
           },
           idempotencyKey: `VAR-CREATE-${defaultVarId}`,
           tenantId: currentTenantId || undefined,
           branchId: currentBranchId || undefined,
         });
 
-        // 4. Record opening stock movement strictly in StockLedger & Outbox StockAdjustment
-        const numOpeningStock = Number(openingStock) || 0;
+        // 4. Record opening stock movement in StockLedger & Outbox StockAdjustment
         if (numOpeningStock > 0) {
           db.saveStockLedgerLocal(
             {
@@ -618,6 +630,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
               sku: defaultVariant.sku,
               name: productRecord.name,
               quantity: numOpeningStock,
+              quantityChange: numOpeningStock,
+              quantityBefore: 0,
+              quantityAfter: numOpeningStock,
               balanceAfter: numOpeningStock,
               reason: "OPENING_STOCK",
               movementType: "OPENING_STOCK",
@@ -661,6 +676,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
       );
 
       window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+      window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: prodId, reason: "PRODUCT_CREATED" } }));
       void syncOutbox?.().catch(() => {});
 
       onProductCreated();
