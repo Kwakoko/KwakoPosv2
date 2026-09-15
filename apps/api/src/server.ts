@@ -7,6 +7,13 @@ import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
+import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
+import { globalLegalGovernanceService } from "./services/legalGovernanceService.js";
+import { rollbackAuthorizationRoutes } from "./routes/rollbackAuthorizationRoutes.js";
+import { superAdminDatabaseRoutes } from "./routes/superAdminDatabaseRoutes.js";
+import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoutes.js";
+import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
+import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -47,6 +54,10 @@ function getMimeType(filePath: string): string {
 import {
   CreateProductRequestSchema,
   UpdateProductRequestSchema,
+  CreateCategoryRequestSchema,
+  UpdateCategoryRequestSchema,
+  CreateBrandRequestSchema,
+  UpdateBrandRequestSchema,
   CreateVariantRequestSchema,
   UpdateVariantRequestSchema,
   CreateStockAdjustmentRequestSchema,
@@ -97,6 +108,8 @@ import {
   CreatePayrollInputRequestSchema,
   SyncPushRequestSchema,
   SyncDeltaRequestSchema,
+  SyncBootstrapRequestSchema,
+  SyncStateManifestSchema,
 } from "@kwakopos2/contracts";
 import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager } from "@kwakopos2/auth";
 import {
@@ -116,6 +129,7 @@ import {
   ScopedMonetizationRepository,
   PrismaProductRepository,
   PrismaStockRepository,
+  PrismaCatalogRepository,
   PrismaFinanceRepository,
   PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
@@ -199,6 +213,15 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
   return ctx.tenantId;
 }
 
+function requireSuperAdminContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")) {
+    throw new Error("FORBIDDEN: Super Admin privileges required for platform release controls");
+  }
+  return ctx;
+}
+
 function requireAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
@@ -224,13 +247,69 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const server = Fastify({ logger: true });
   const productionPersistence = opts.productionPersistence ?? isProductionEnv(config);
 
-  // Fastify CORS setup - locked in production
+  // H-007: Hardened CORS configuration
+  // - credentials: true  → allows cookies & Authorization headers cross-origin
+  // - methods            → explicit allowlist; OPTIONS handled automatically for preflight
+  // - allowedHeaders     → all KwakoPos context headers the client sends
+  // - exposedHeaders     → headers the client JS is allowed to read from responses
+  // - maxAge             → 86400 s (24 h) preflight cache to reduce OPTIONS round-trips
   const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["https://kwakokov2--kwakoposv2.us-east4.hosted.app", "https://app.kwakopos.com", "https://admin.kwakopos.com"])
+    ? (process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+        : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
     : "*";
-  server.register(cors, { origin: corsOrigin });
+  server.register(cors, {
+    origin:         corsOrigin,
+    credentials:    true,
+    methods:        ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Correlation-ID',
+      'X-Tenant-ID',
+      'X-Branch-ID',
+      'X-User-ID',
+      'X-Role',
+      'X-Trace-ID',
+    ],
+    exposedHeaders: [
+      'X-Correlation-ID',
+      'X-Trace-ID',
+      'X-Span-ID',
+      'RateLimit-Limit',
+      'RateLimit-Remaining',
+      'RateLimit-Reset',
+    ],
+    maxAge: 86400, // 24 hours – browsers cache preflight responses
+  });
+
+  // H-004 + H-006: Register rate-limiting and security headers middleware
+  // Must be registered BEFORE route handlers to ensure all routes are protected.
+  server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
+
+  // H-025: Graceful SIGTERM shutdown — drain in-flight requests before exit
+  const gracefulShutdown = async (signal: string) => {
+    server.log.info({ signal }, "KwakoPos API: Graceful shutdown initiated");
+    try {
+      await server.close();
+      server.log.info("KwakoPos API: Server closed cleanly");
+      if (productionPersistence) {
+        const { prisma } = await import("@kwakopos2/database");
+        await prisma.$disconnect();
+        server.log.info("KwakoPos API: Database connections closed");
+      }
+    } catch (err) {
+      server.log.error({ err }, "KwakoPos API: Error during graceful shutdown");
+    } finally {
+      process.exit(0);
+    }
+  };
+  // Only register once to avoid duplicate listeners in test environments
+  if (process.listenerCount("SIGTERM") === 0) process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  if (process.listenerCount("SIGINT") === 0) process.once("SIGINT", () => gracefulShutdown("SIGINT"));
 
   const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
+  const catalogRepo = productionPersistence ? new PrismaCatalogRepository() : null;
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
   const syncEngine = productionPersistence
     ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
@@ -240,35 +319,118 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
 
 
-  // Centralized error handler: prefer structured statusCode/code when present.
-  server.setErrorHandler((error: any, _req, reply) => {
-    server.log.error(error);
-    const status = error?.statusCode
-      || (error?.code === "FORBIDDEN" ? 403 : undefined)
-      || (error?.code === "UNAUTHORIZED" ? 401 : undefined)
-      || (typeof error === "string" && error.toLowerCase().includes("not found") ? 404 : undefined);
+  // ── H-005: Hardened centralized error handler ──────────────────────────────
+  // All internal error detail is logged server-side ONLY.  Clients receive a
+  // sanitized message that never reveals stack traces, invariant codes, or any
+  // other implementation detail.  A requestId is attached to every error
+  // response so operators can correlate client reports with server logs.
+  server.setErrorHandler((error: any, req, reply) => {
+    // 1. Log the FULL error (message + stack) internally before any sanitization.
+    server.log.error(
+      { err: error, stack: error?.stack, requestId: req.headers["x-correlation-id"] },
+      "Unhandled error"
+    );
 
-    if (!status) {
-      // Inspect message heuristics as fallback
-      const message = (error && error.message) ? error.message.toString() : String(error);
-      if (message.includes("INVARIANT_007_VIOLATION") || message.includes("access denied") || message.startsWith("FORBIDDEN")) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: message.includes("FORBIDDEN") ? message : "Cross-tenant access denied" } });
-      }
-      if (message.includes("UNAUTHORIZED") || message.includes("token")) {
-        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
-      }
-      if (message.includes("not found")) {
-        return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message } });
-      }
-      if (error.validation || message.includes("INVARIANT") || message.includes("invalid")) {
-        return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message } });
-      }
-      return reply.status(500).send({ success: false, error: { code: "INTERNAL_SERVER_ERROR", message } });
-    }
+    const isProduction = process.env["NODE_ENV"] === "production";
 
-    return reply.status(status).send({
+    // 2. Resolve a tracing token from the inbound correlation header.
+    const requestId =
+      (req.headers["x-correlation-id"] as string | undefined) ?? "unknown";
+
+    // 3. Extract the raw message (never sent to clients in production).
+    const rawMessage: string =
+      error?.message ? String(error.message) : String(error);
+
+    // ── Safe-message resolver ──────────────────────────────────────────────
+    // Returns [httpStatus, clientCode, safeMessage].
+    const resolve = (): [number, string, string] => {
+      const code: string = error?.code ? String(error.code) : "";
+      const msg = rawMessage;
+
+      // RATE_LIMIT — pass through as-is (not sensitive).
+      if (code === "RATE_LIMIT" || code.startsWith("RATE_LIMIT"))
+        return [429, "RATE_LIMIT", "Too many requests."];
+
+      // Auth / session errors → 401.
+      if (
+        code === "UNAUTHORIZED" ||
+        code.includes("UNAUTHORIZED") ||
+        msg.includes("UNAUTHORIZED") ||
+        msg.toLowerCase().includes("token") ||
+        msg.toLowerCase().includes("session")
+      )
+        return [401, "UNAUTHORIZED", "Authentication required."];
+
+      // Tenant / cross-boundary / forbidden → 403.
+      if (
+        code === "FORBIDDEN" ||
+        code.includes("FORBIDDEN") ||
+        code === "TENANT_BOUNDARY_VIOLATION" ||
+        code === "INVARIANT_007_VIOLATION" ||
+        msg.includes("TENANT_BOUNDARY_VIOLATION") ||
+        msg.includes("INVARIANT_007_VIOLATION") ||
+        msg.includes("Cross-tenant") ||
+        msg.toLowerCase().includes("access denied") ||
+        msg.startsWith("FORBIDDEN")
+      )
+        return [403, "FORBIDDEN", "Access denied."];
+
+      // Not-found → 404.
+      if (
+        code === "NOT_FOUND" ||
+        code.includes("NOT_FOUND") ||
+        msg.toLowerCase().includes("not found")
+      )
+        return [404, "NOT_FOUND", "Resource not found."];
+
+      // Duplicate / already-exists → 409.
+      if (
+        code.includes("DUPLICATE") ||
+        code.includes("EXISTS") ||
+        msg.includes("DUPLICATE") ||
+        msg.includes("EXISTS") ||
+        msg.toLowerCase().includes("already")
+      )
+        return [409, "CONFLICT", "Resource already exists."];
+
+      // Financial constraint violations → 409.
+      if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
+        return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
+
+      // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
+      if (
+        code.match(/^INVARIANT_/) ||
+        msg.match(/INVARIANT_/) ||
+        error?.validation ||
+        msg.toLowerCase().includes("invalid")
+      )
+        return [400, "BAD_REQUEST", "A business rule was violated."];
+
+      // Explicit HTTP status already set on the error object.
+      if (error?.statusCode) {
+        const s: number = error.statusCode as number;
+        const safeMsg = isProduction
+          ? s >= 500
+            ? "An internal error occurred."
+            : rawMessage   // 4xx with no specific mapping — safe to echo
+          : rawMessage;
+        return [s, code || "ERROR", safeMsg];
+      }
+
+      // Catch-all: 500 — never leak internal details in production.
+      const safeMsg = isProduction ? "An internal error occurred." : rawMessage;
+      return [500, "INTERNAL_SERVER_ERROR", safeMsg];
+    };
+
+    const [httpStatus, clientCode, safeMessage] = resolve();
+
+    return reply.status(httpStatus).send({
       success: false,
-      error: { code: error?.code || "ERROR", message: error?.message || "Error" },
+      error: {
+        code: clientCode,
+        message: safeMessage,
+        requestId,
+      },
     });
   });
 
@@ -308,7 +470,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url === "/api/system/version" ||
       url === "/auth/login" ||
       url === "/auth/refresh" ||
-      url.startsWith("/telemetry")
+      url === "/auth/logout" ||
+      url.startsWith("/telemetry") ||
+      url.startsWith("/api/legal/documents") ||
+      url === "/api/legal/subprocessors" ||
+      url === "/api/legal/oss-notices" ||
+      url === "/api/legal/cookies"
     ) {
       return;
     }
@@ -351,7 +518,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         const testBranchId = req.headers["x-branch-id"] as string;
         const testUserId = req.headers["x-user-id"] as string;
         if (testTenantId && testBranchId && testUserId) {
-          req.tenantContext = { tenantId: testTenantId, branchId: testBranchId, userId: testUserId, roles: ["ADMIN"], permissions: ["*"] };
+          const isSuperAdmin =
+            testUserId.toLowerCase().includes("super") ||
+            testUserId.toLowerCase().includes("admin") ||
+            req.headers["x-role"] === "SUPER_ADMIN" ||
+            req.headers["x-role"] === "SUPERADMIN";
+          req.tenantContext = {
+            tenantId: testTenantId,
+            branchId: testBranchId,
+            userId: testUserId,
+            roles: isSuperAdmin ? ["ADMIN", "SUPER_ADMIN"] : ["ADMIN"],
+            permissions: ["*", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
+          };
           if (req.traceContext) {
             req.traceContext.tenantId = testTenantId;
             req.traceContext.branchId = testBranchId;
@@ -360,6 +538,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           const authenticatedPath = req.url.split("?")[0];
           if (authenticatedPath.startsWith("/admin/")) {
             requireAdminContext(req);
+          }
+          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+            const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
+            if (!legalStatus.isCompliant) {
+              return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+            }
           }
           return;
         }
@@ -370,6 +554,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const token = authHeader.substring(7);
     try {
       const payload = verifyAccessToken(token);
+      if (payload.sessionId) {
+        const isRevoked = await globalSessionManager.isSessionRevoked(payload.sessionId);
+        if (isRevoked) {
+          return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session revoked or expired" } });
+        }
+      }
       req.tenantContext = extractTenantContext(payload);
       if (req.traceContext) {
         req.traceContext.tenantId = payload.tenantId;
@@ -380,6 +570,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const authenticatedPath = req.url.split("?")[0];
       if (authenticatedPath.startsWith("/admin/")) {
         requireAdminContext(req);
+      }
+      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+        const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
+        if (!legalStatus.isCompliant) {
+          return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+        }
+      }
+      const platformReleasePath =
+        authenticatedPath.startsWith("/api/admin/releases/") ||
+        authenticatedPath.startsWith("/admin/operations/production") ||
+        authenticatedPath.startsWith("/admin/operations/releases") ||
+        authenticatedPath.startsWith("/admin/operations/canary/") ||
+        authenticatedPath.startsWith("/admin/operations/rollback");
+      if (platformReleasePath) {
+        requireSuperAdminContext(req);
       }
     } catch (err: any) {
       const message = err?.message || "Invalid token";
@@ -406,7 +611,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // System endpoints
   server.get("/", async () => {
     return {
-      name: "KwakoPos 2.0 POS & Enterprise API Server",
+      name: "Kwakoko Business Operating System API Server",
       status: "online",
       version: config.APP_VERSION,
       environment: config.NODE_ENV,
@@ -423,7 +628,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         const { prisma } = await import("@kwakopos2/database");
         await Promise.race([
           prisma.$queryRaw`SELECT 1`,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 1500)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("DB health timeout")), 5000)),
         ]);
         database = "connected";
       } catch {
@@ -473,6 +678,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       appVersion: identity.appVersion,
       gitTag: identity.gitTag,
       gitSha: identity.gitSha,
+      buildNumber: identity.buildNumber,
       containerDigest: identity.containerDigest,
       cloudRunRevision: identity.cloudRunRevision,
       environment: identity.environment,
@@ -714,7 +920,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // Login: ONLY allow the "auto-provision" test login when NOT in production.
-  server.post("/auth/login", async (req, reply) => {
+  // H-004: Strict rate limit on authentication endpoint to thwart brute-force attacks
+  server.post("/auth/login", { config: { rateLimit: { max: 15, timeWindow: "15 minutes" } } }, async (req, reply) => {
     const { email, password, deviceId } = (req.body as any) || {};
     if (!email || !password) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing required login parameters: email, password" } });
     let tenantId: string = randomUUID();
@@ -761,30 +968,64 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // Refresh token rotation
-  server.post("/auth/refresh", async (req, reply) => {
+  // H-004: Strict rate limit on refresh token endpoint
+  server.post("/auth/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (req, reply) => {
     const { sessionId, refreshToken, email, tenantId, branchId, userId } = (req.body as any) || {};
-    if (!sessionId || !refreshToken || !tenantId || !branchId || !userId) {
-      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing refresh parameters" } });
+    if (!sessionId) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing sessionId" } });
     }
 
-    const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
-      sub: userId,
-      tenantId,
-      branchId,
-      email: email || "user@kwakopos.com",
+    const session = (globalSessionManager as any).storeProvider
+      ? await (globalSessionManager as any).storeProvider.get(sessionId)
+      : (globalSessionManager as any).inMemorySessions?.get(sessionId);
+
+    if (!session || session.revokedAt || (session.expiresAt && new Date(session.expiresAt) < new Date())) {
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked session" } });
+    }
+
+    const effectiveTenantId = tenantId || session.tenantId || "TNT-TZ-001";
+    const effectiveUserId = userId || session.userId || "user-001";
+    const effectiveBranchId = branchId || "BR-DSM-01";
+    const effectiveEmail = email || "admin@kwakopos.com";
+
+    if (refreshToken) {
+      const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
+        sub: effectiveUserId,
+        tenantId: effectiveTenantId,
+        branchId: effectiveBranchId,
+        email: effectiveEmail,
+        roles: ["ADMIN"],
+        permissions: ["*"],
+      });
+
+      if (rotated) {
+        return reply.send({
+          success: true,
+          data: {
+            accessToken: rotated.accessToken,
+            refreshToken: rotated.refreshToken,
+          },
+        });
+      }
+    }
+
+    // Fallback: If session is valid and not revoked, issue a new access token
+    const newAccessToken = generateAccessToken({
+      sub: effectiveUserId,
+      tenantId: effectiveTenantId,
+      branchId: effectiveBranchId,
+      email: effectiveEmail,
       roles: ["ADMIN"],
       permissions: ["*"],
+      deviceId: session.deviceId,
+      sessionId: session.id,
     });
-
-    if (!rotated) {
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked refresh token" } });
-    }
 
     return reply.send({
       success: true,
       data: {
-        accessToken: rotated.accessToken,
-        refreshToken: rotated.refreshToken,
+        accessToken: newAccessToken,
+        refreshToken: refreshToken || undefined,
       },
     });
   });
@@ -844,6 +1085,76 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreateProductRequestSchema.parse(req.body);
     const product = await productRepo.createProduct(ctx, validated);
     return reply.status(201).send({ success: true, data: product });
+  });
+
+  server.get("/api/v1/catalog/categories", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    return { success: true, data: await catalogRepo.listCategories(req.tenantContext!) };
+  });
+
+  server.post("/api/v1/catalog/categories", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const created = await catalogRepo.createCategory(req.tenantContext!, CreateCategoryRequestSchema.parse(req.body));
+      return reply.status(201).send({ success: true, data: created });
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_CREATE_FAILED", message: err?.message || "Unable to create category" } });
+    }
+  });
+
+  server.put("/api/v1/catalog/categories/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const updated = await catalogRepo.updateCategory(req.tenantContext!, (req.params as any).id, UpdateCategoryRequestSchema.parse(req.body));
+      return { success: true, data: updated };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_UPDATE_FAILED", message: err?.message || "Unable to update category" } });
+    }
+  });
+
+  server.delete("/api/v1/catalog/categories/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const result = await catalogRepo.deleteCategory(req.tenantContext!, (req.params as any).id, (req.body as any)?.replacementId);
+      return { success: true, data: result };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "CATEGORY_DELETE_FAILED", message: err?.message || "Unable to delete category" } });
+    }
+  });
+
+  server.get("/api/v1/catalog/brands", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    return { success: true, data: await catalogRepo.listBrands(req.tenantContext!) };
+  });
+
+  server.post("/api/v1/catalog/brands", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const created = await catalogRepo.createBrand(req.tenantContext!, CreateBrandRequestSchema.parse(req.body));
+      return reply.status(201).send({ success: true, data: created });
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_CREATE_FAILED", message: err?.message || "Unable to create brand" } });
+    }
+  });
+
+  server.put("/api/v1/catalog/brands/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const updated = await catalogRepo.updateBrand(req.tenantContext!, (req.params as any).id, UpdateBrandRequestSchema.parse(req.body));
+      return { success: true, data: updated };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_UPDATE_FAILED", message: err?.message || "Unable to update brand" } });
+    }
+  });
+
+  server.delete("/api/v1/catalog/brands/:id", async (req, reply) => {
+    if (!catalogRepo) return reply.status(503).send({ success: false, error: { code: "CATALOG_PERSISTENCE_UNAVAILABLE", message: "Catalog persistence is unavailable" } });
+    try {
+      const result = await catalogRepo.deleteBrand(req.tenantContext!, (req.params as any).id, (req.body as any)?.replacementId);
+      return { success: true, data: result };
+    } catch (err: any) {
+      return reply.status(err?.code === "P2002" ? 409 : 400).send({ success: false, error: { code: "BRAND_DELETE_FAILED", message: err?.message || "Unable to delete brand" } });
+    }
   });
 
   server.get("/products", async (req) => {
@@ -1004,6 +1315,33 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const result = await syncEngine.processDelta(req.tenantContext!, query as any);
     return { success: true, data: result };
   });
+
+  server.post("/sync/bootstrap", async (req) => {
+    const payload = SyncBootstrapRequestSchema.parse(req.body || {});
+    const result = await (syncEngine as any).processBootstrap(req.tenantContext!, payload as any);
+    return { success: true, data: result };
+  });
+
+  server.post("/sync/reconcile", async (req) => {
+    const manifest = SyncStateManifestSchema.parse(req.body || {});
+    const result = await (syncEngine as any).reconcileState(req.tenantContext!, manifest as any);
+    return { success: true, data: result };
+  });
+
+  server.get("/sync/status", async (req) => {
+    return {
+      success: true,
+      data: {
+        tenantId: req.tenantContext?.tenantId,
+        branchId: req.tenantContext?.branchId,
+        serverVersion: config.APP_VERSION || "2.12.5",
+        schemaVersion: 4,
+        status: "OPERATIONAL",
+        timestamp: new Date().toISOString(),
+      },
+    };
+  });
+
 
   // ==========================================
   // Commercial Core Routes (/api/v1/*)
@@ -2397,10 +2735,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/admin/releases/rollback", async (req, reply) => {
     const { failedVersion, targetStableVersion, reason } = (req.body as any) || {};
+    if (!failedVersion || !targetStableVersion || !reason) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "failedVersion, targetStableVersion and reason are required" } });
+    }
     const result = await globalReleaseService.triggerRollback({
-      failedVersion: failedVersion || "2.3.0",
-      targetStableVersion: targetStableVersion || "2.2.0",
-      reason: reason || "Super Admin manual rollback trigger",
+      failedVersion: String(failedVersion).trim(),
+      targetStableVersion: String(targetStableVersion).trim(),
+      reason: String(reason).trim(),
     });
     return reply.status(200).send({ success: true, data: result });
   });
@@ -2412,7 +2753,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/admin/releases/v2/policy-decision", async (req, reply) => {
-    const version = (req.query as any)?.version || "2.2.0";
+    const version = String((req.query as any)?.version || "").trim();
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
     const decision = await globalReleaseService.evaluateReleasePolicies(version);
     return reply.status(200).send({ success: true, data: decision });
   });
@@ -2428,14 +2770,17 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/admin/releases/v2/compare", async (req, reply) => {
-    const from = (req.query as any)?.from || "2.1.0";
-    const to = (req.query as any)?.to || "2.2.0";
+    const from = String((req.query as any)?.from || "").trim();
+    const to = String((req.query as any)?.to || "").trim();
+    if (!from || !to) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "from and to versions are required" } });
     const comparison = await globalReleaseService.compareReleases(from, to);
     return reply.status(200).send({ success: true, data: comparison });
   });
 
   server.get("/api/admin/releases/v2/evidence-package", async (req, reply) => {
-    const version = (req.query as any)?.version || "2.2.0";
+    const version = String((req.query as any)?.version || "").trim();
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
+    if (!version) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "version is required" } });
     const pkg = await globalReleaseService.getEvidencePackage(version);
     return reply.status(200).send({ success: true, data: pkg });
   });
@@ -3839,6 +4184,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
   });
 
+  // Super Admin SQL Studio & Live Database Explorer Endpoints
+  superAdminDatabaseRoutes(server);
+
+  // Production Cleanliness & Tenant Store Purge Endpoints
+  productionCleanlinessRoutes(server);
+
   // Phase 30 — UI Certification Endpoints
   server.get("/api/v1/ui-certification/overview", async (req, reply) => {
     const { globalUiCertificationService } = await import("./services/uiCertificationService.js");
@@ -4521,12 +4872,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   tenantOnboardingRoutes(server);
+  legalGovernanceRoutes(server);
+  rollbackAuthorizationRoutes(server);
+  tenantExportRoutes(server);
 
   return server;
 }
 
 
-if (process.env.START_SERVER === "true" || process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification") {
+if (process.env.START_SERVER === "true") {
   (async () => {
     const config = loadConfig();
     const server = buildServer();

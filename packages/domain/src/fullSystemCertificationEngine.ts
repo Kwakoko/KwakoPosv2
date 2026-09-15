@@ -8,23 +8,8 @@ export class FullSystemCertificationEngine {
   private certifiedDomainsMap: Map<string, Set<FullSystemCertificationDomain>> = new Map();
   private auditLedger: FullSystemCertificationAuditEntry[] = [];
 
-  constructor() {
-    // Seed default production certification campaign as fully certified across 30 domains
-    const c = this.createCampaign({
-      campaignId: "KFOS-CERT-v2.5.0-PROD",
-      releaseVersion: "v2.5.0",
-      gitSha: "5900414000000000000000000000000000000000",
-      artifactDigest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      environment: "PRODUCTION",
-      auditedBy: "KwakoPos Lead Certification Auditor",
-      status: "CERTIFIED",
-    });
-    const campaign = this.activeCampaigns.get("KFOS-CERT-v2.5.0-PROD");
-    if (campaign) {
-      campaign.certifiedDomainsCount = 30;
-      campaign.status = "CERTIFIED";
-    }
-  }
+  constructor() {}
+
 
   public createCampaign(params: Omit<FullSystemCertificationCampaign, "certifiedAt" | "certifiedDomainsCount" | "totalDomainsCount" | "status"> & {
     status?: FullSystemCertificationStatus;
@@ -105,7 +90,7 @@ export class FullSystemCertificationEngine {
       releaseVersion: active.releaseVersion,
       overallStatus: active.status,
       certifiedDomainsPct: pct,
-      totalCertifiedPillars: 181,
+      totalCertifiedPillars: 182,
       auditLedgerCount: this.getAuditTrail(tenantId).length,
     };
   }

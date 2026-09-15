@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from "fs";
+import fs, { writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { createHash } from "crypto";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
@@ -116,13 +116,38 @@ export class ProductionCertificationEngine {
       evidence: { rollbackTargetRevision: "kwakopos-production-service-00121-xyz", rtoSeconds: 5 },
     });
 
-    // 10. Cryptographic Signing
+    // 11. Repository Forensic Integrity
+    const forensicPath = resolve(process.cwd(), "artifacts/release-evidence/kwakopos-repository-forensic-integrity.json");
+    let forensicEvidence: any = null;
+    if (fs.existsSync(forensicPath)) {
+      try {
+        forensicEvidence = JSON.parse(fs.readFileSync(forensicPath, "utf8"));
+      } catch {
+        forensicEvidence = null;
+      }
+    }
+    results.push({
+      criterionId: "C11_REPOSITORY_FORENSIC_INTEGRITY",
+      criterionName: "Repository File-by-File and Line-Level Forensic Integrity",
+      evaluatedScope: "Tracked source/configuration file inventory, line-level scan, syntax/JSON parse validation, and synthetic-provenance blocker detection",
+      status: forensicEvidence?.verdict === "PASS" ? "PASS" : "FAIL",
+      evidence: forensicEvidence ? {
+        gitSha: forensicEvidence.gitSha,
+        trackedFiles: forensicEvidence.files?.tracked,
+        textFiles: forensicEvidence.files?.text,
+        linesScanned: forensicEvidence.lines?.scanned,
+        parseFailures: forensicEvidence.files?.parseFailures,
+        controlFailures: forensicEvidence.files?.controlFailures,
+        suspiciousFiles: forensicEvidence.files?.suspiciousFiles,
+      } : { reason: "Forensic evidence artifact is missing or unreadable" },
+    });
+
     const rawContent = JSON.stringify(results);
     const signatureHash = createHash("sha256").update(rawContent).digest("hex");
     results.push({
       criterionId: "C10_CRYPTOGRAPHIC_SIGNING",
       criterionName: "Cryptographic Release Evidence Signing",
-      evaluatedScope: "SHA-256 Digest of Full Certification Evidence",
+      evaluatedScope: "SHA-256 Digest of Full Certification Evidence Pre-Certificate",
       status: "PASS",
       evidence: { sha256Digest: signatureHash },
     });

@@ -1,10 +1,11 @@
 /**
- * KwakoPosv2 — Law Firm Module Page
+ * KwakoPosv2 â€” Law Firm Module Page
  * Full sub-navigation: Dashboard, Clients, Cases, Calendar, Tasks,
  * Documents, Billing & Retainers, Reports, Settings
  * CSS: V2 design system only. No static inline styles.
  */
 import React, { useState } from "react";
+import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   Scale, Users, Calendar, AlertCircle, DollarSign, ShieldAlert, Clock,
   ChevronRight, Gavel, FileText, Plus, Search, ArrowRight, BarChart2,
@@ -12,21 +13,22 @@ import {
   Phone, Mail, Briefcase, Bell, Download, Filter, Check, X,
 } from "lucide-react";
 import { useModule } from "../context/KwakoPosContexts.js";
+import { recordLawFirmPayment, saveLawFirmSettings } from "../services/verticalMutationService.js";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
   : v >= 1_000 ? `Tsh ${(v / 1_000).toFixed(0)}K`
   : `Tsh ${Math.round(v).toLocaleString()}`;
 
-// ─── Sub-nav tabs ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-nav tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LAW_TABS = [
   "Legal Dashboard", "Clients", "Cases", "Court Calendar",
   "Legal Tasks", "Documents", "Billing & Retainers", "Legal Reports", "Legal Settings",
 ] as const;
 type LawTab = typeof LAW_TABS[number];
 
-// ─── Shared components ────────────────────────────────────────────────────────
+// â”€â”€â”€ Shared components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const KpiCard: React.FC<{
   label: string; value: string | number; desc?: string;
   icon: React.ReactNode; accent: string; onClick?: () => void;
@@ -60,13 +62,13 @@ const Empty: React.FC<{ icon?: React.ReactNode; message: string; action?: React.
   </div>
 );
 
-// ─── Demo Data ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Demo Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const DEMO_CASES = [
   { id: "LC-2026-001", title: "Mwangi v. Tanzania Revenue Authority",  client: "John Mwangi",    status: "IN_PROGRESS", type: "Tax Dispute",   court: "High Court Dar", nextHearing: "2026-09-15" },
-  { id: "LC-2026-002", title: "Safaricom Ltd — Contract Review",       client: "Safaricom Ltd",  status: "OPEN",        type: "Commercial",    court: "Commercial Court", nextHearing: "—" },
+  { id: "LC-2026-002", title: "Safaricom Ltd â€” Contract Review",       client: "Safaricom Ltd",  status: "OPEN",        type: "Commercial",    court: "Commercial Court", nextHearing: "â€”" },
   { id: "LC-2026-003", title: "R v. Hassan Mohamed",                    client: "Hassan Mohamed", status: "IN_PROGRESS", type: "Criminal",      court: "Resident Magistrate", nextHearing: "2026-09-08" },
-  { id: "LC-2026-004", title: "Fatuma Estate — Succession Matter",      client: "Fatuma Salum",   status: "INTAKE",      type: "Succession",    court: "High Court PBD", nextHearing: "2026-09-22" },
-  { id: "LC-2026-005", title: "THA v. Dar Port Authority",             client: "THA",            status: "CLOSED",      type: "Admin Law",     court: "High Court Dar", nextHearing: "—" },
+  { id: "LC-2026-004", title: "Fatuma Estate â€” Succession Matter",      client: "Fatuma Salum",   status: "INTAKE",      type: "Succession",    court: "High Court PBD", nextHearing: "2026-09-22" },
+  { id: "LC-2026-005", title: "THA v. Dar Port Authority",             client: "THA",            status: "CLOSED",      type: "Admin Law",     court: "High Court Dar", nextHearing: "â€”" },
 ];
 
 const DEMO_CLIENTS = [
@@ -80,29 +82,29 @@ const DEMO_CLIENTS = [
 const DEMO_HEARINGS = [
   { id: "H-001", caseId: "LC-2026-001", title: "Tax Tribunal Mention",         date: "2026-09-08", time: "09:00", court: "High Court Dar",      type: "Mention",  status: "Scheduled" },
   { id: "H-002", caseId: "LC-2026-003", title: "Criminal Bail Hearing",        date: "2026-09-10", time: "10:30", court: "Res. Magistrate Dar", type: "Hearing",  status: "Scheduled" },
-  { id: "H-003", caseId: "LC-2026-001", title: "Substantive Hearing — Day 1",  date: "2026-09-15", time: "08:30", court: "High Court Dar",      type: "Trial",    status: "Scheduled" },
+  { id: "H-003", caseId: "LC-2026-001", title: "Substantive Hearing â€” Day 1",  date: "2026-09-15", time: "08:30", court: "High Court Dar",      type: "Trial",    status: "Scheduled" },
   { id: "H-004", caseId: "LC-2026-004", title: "Succession Application",       date: "2026-09-22", time: "14:00", court: "High Court PBD",      type: "Petition", status: "Scheduled" },
 ];
 
 const DEMO_TASKS = [
-  { id: "T-001", title: "File Written Submissions — Mwangi Tax Case", caseId: "LC-2026-001", dueDate: "2026-09-05", priority: "HIGH",   status: "OVERDUE",   assignee: "Adv. Kamau" },
-  { id: "T-002", title: "Draft Contract Opinion — Safaricom",         caseId: "LC-2026-002", dueDate: "2026-09-12", priority: "MEDIUM", status: "OPEN",      assignee: "Adv. Kimani" },
+  { id: "T-001", title: "File Written Submissions â€” Mwangi Tax Case", caseId: "LC-2026-001", dueDate: "2026-09-05", priority: "HIGH",   status: "OVERDUE",   assignee: "Adv. Kamau" },
+  { id: "T-002", title: "Draft Contract Opinion â€” Safaricom",         caseId: "LC-2026-002", dueDate: "2026-09-12", priority: "MEDIUM", status: "OPEN",      assignee: "Adv. Kimani" },
   { id: "T-003", title: "Serve pleadings on opposing counsel",        caseId: "LC-2026-003", dueDate: "2026-09-09", priority: "HIGH",   status: "OPEN",      assignee: "Clerk Joan" },
-  { id: "T-004", title: "Confirm court attendance — Fatuma matter",   caseId: "LC-2026-004", dueDate: "2026-09-20", priority: "LOW",    status: "COMPLETED", assignee: "Adv. Kimani" },
+  { id: "T-004", title: "Confirm court attendance â€” Fatuma matter",   caseId: "LC-2026-004", dueDate: "2026-09-20", priority: "LOW",    status: "COMPLETED", assignee: "Adv. Kimani" },
 ];
 
 const DEMO_DOCS = [
-  { id: "DOC-001", name: "Mwangi — Notice of Appeal.pdf",    caseId: "LC-2026-001", type: "Pleading",  size: "1.2 MB", uploaded: "2026-08-20" },
+  { id: "DOC-001", name: "Mwangi â€” Notice of Appeal.pdf",    caseId: "LC-2026-001", type: "Pleading",  size: "1.2 MB", uploaded: "2026-08-20" },
   { id: "DOC-002", name: "Safaricom Contract v3 Draft.docx", caseId: "LC-2026-002", type: "Contract",  size: "680 KB", uploaded: "2026-08-22" },
-  { id: "DOC-003", name: "Hassan — Bail Application.pdf",   caseId: "LC-2026-003", type: "Motion",    size: "840 KB", uploaded: "2026-08-28" },
+  { id: "DOC-003", name: "Hassan â€” Bail Application.pdf",   caseId: "LC-2026-003", type: "Motion",    size: "840 KB", uploaded: "2026-08-28" },
   { id: "DOC-004", name: "THA Correspondence Chain.pdf",    caseId: "LC-2026-005", type: "Correspondence", size: "2.1 MB", uploaded: "2026-07-14" },
 ];
 
 const DEMO_BILLING = [
-  { id: "INV-2026-081", client: "John Mwangi",    description: "Substantive Hearing Attendance × 2", amount: 2800000, hours: 6,   status: "UNPAID",    date: "2026-08-25" },
-  { id: "INV-2026-082", client: "Safaricom Ltd",  description: "Contract Advisory — 12 hrs",         amount: 7200000, hours: 12,  status: "PAID",      date: "2026-08-20" },
+  { id: "INV-2026-081", client: "John Mwangi",    description: "Substantive Hearing Attendance Ã— 2", amount: 2800000, hours: 6,   status: "UNPAID",    date: "2026-08-25" },
+  { id: "INV-2026-082", client: "Safaricom Ltd",  description: "Contract Advisory â€” 12 hrs",         amount: 7200000, hours: 12,  status: "PAID",      date: "2026-08-20" },
   { id: "INV-2026-083", client: "Hassan Mohamed", description: "Criminal Defence Retainer Draw",      amount: 1500000, hours: 4,   status: "UNPAID",    date: "2026-08-30" },
-  { id: "INV-2026-084", client: "THA",            description: "Admin Law Matter — Research",         amount: 4800000, hours: 10,  status: "PARTIAL",   date: "2026-08-18" },
+  { id: "INV-2026-084", client: "THA",            description: "Admin Law Matter â€” Research",         amount: 4800000, hours: 10,  status: "PARTIAL",   date: "2026-08-18" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -112,7 +114,7 @@ const STATUS_BADGE: Record<string, string> = {
   Scheduled: "v2-badge-accent",
 };
 
-// ─── Sub-page: Legal Dashboard ────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Legal Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) => {
   const activeCases   = DEMO_CASES.filter((c) => ["INTAKE","OPEN","IN_PROGRESS"].includes(c.status)).length;
   const overdueTasks  = DEMO_TASKS.filter((t) => t.status === "OVERDUE").length;
@@ -164,11 +166,11 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
                     <span className="v2-text-sm v2-font-black v2-truncate">{c.title}</span>
                   </div>
                   <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".15rem" }}>
-                    Client: <strong>{c.client}</strong> · {c.type} · {c.court}
+                    Client: <strong>{c.client}</strong> Â· {c.type} Â· {c.court}
                   </div>
                 </div>
                 <div className="v2-flex v2-items-center v2-gap-2">
-                  {c.nextHearing !== "—" && <span className="v2-text-xs v2-text-muted">{c.nextHearing}</span>}
+                  {c.nextHearing !== "â€”" && <span className="v2-text-xs v2-text-muted">{c.nextHearing}</span>}
                   <span className={`badge ${STATUS_BADGE[c.status] || "v2-badge-muted"}`}>{c.status}</span>
                 </div>
               </div>
@@ -190,7 +192,7 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
                 <div key={h.id} className="v2-card" style={{ background: "var(--surface-2)", padding: ".65rem .85rem" }}>
                   <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
                     <span className={`badge ${STATUS_BADGE[h.type] || "v2-badge-muted"}`} style={{ fontSize: ".6rem" }}>{h.type}</span>
-                    <span className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-1"><Clock size={10} /> {h.date} · {h.time}</span>
+                    <span className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-1"><Clock size={10} /> {h.date} Â· {h.time}</span>
                   </div>
                   <div className="v2-text-xs v2-font-black">{h.title}</div>
                   <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".1rem" }}>{h.court}</div>
@@ -204,7 +206,7 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
   );
 };
 
-// ─── Sub-page: Clients ────────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Clients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalClients: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_CLIENTS.filter((c) => !search || `${c.name} ${c.type} ${c.email}`.toLowerCase().includes(search.toLowerCase()));
@@ -212,15 +214,15 @@ const LegalClients: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Clients & Corporate Register</h2>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> New Client</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.215.new-client", "New Client", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.215.new-client"><Plus size={13} /> New Client</button>
       </div>
       <div className="v2-card">
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients…" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clientsâ€¦" />
           </div>
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Export</button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.223.export", "Export", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.223.export"><Download size={13} /> Export</button>
         </div>
         <table className="v2-table">
           <thead><tr><th>Client ID</th><th>Name</th><th>Type</th><th>Phone</th><th>Email</th><th>Retainer Bal.</th><th>Matters</th><th>Actions</th></tr></thead>
@@ -236,8 +238,8 @@ const LegalClients: React.FC = () => {
                 <td><span className="badge v2-badge-muted">{c.matters}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.239.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.239.button"><Eye size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.240.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.240.button"><Edit2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -249,7 +251,7 @@ const LegalClients: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Cases & Matters ────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Cases & Matters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalCases: React.FC = () => {
   const [filter, setFilter] = useState("All");
   const statuses = ["All", "INTAKE", "OPEN", "IN_PROGRESS", "CLOSED"];
@@ -259,14 +261,14 @@ const LegalCases: React.FC = () => {
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Legal Cases & Matters</h2>
         <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><ShieldAlert size={13} /> Conflict Check</button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Open Matter</button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.262.conflict-check", "Conflict Check", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.262.conflict-check"><ShieldAlert size={13} /> Conflict Check</button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.263.open-matter", "Open Matter", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.263.open-matter"><Plus size={13} /> Open Matter</button>
         </div>
       </div>
       <div className="v2-card">
         <div style={{ display: "flex", gap: ".3rem", padding: ".75rem 1.25rem", borderBottom: "1px solid var(--surface-border)" }}>
           {statuses.map((s) => (
-            <button key={s} className={`sector-pill${filter === s ? " active" : ""}`} onClick={() => setFilter(s)} type="button">{s}</button>
+            <button key={s} aria-label={s} className={`sector-pill${filter === s ? " active" : ""}`} onClick={() => setFilter(s)} type="button">{s}</button>
           ))}
         </div>
         <table className="v2-table">
@@ -283,8 +285,8 @@ const LegalCases: React.FC = () => {
                 <td><span className={`badge ${STATUS_BADGE[c.status] || "v2-badge-muted"}`}>{c.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.286.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.286.button"><Eye size={13} /></button>
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.287.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.287.button"><Edit2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -296,12 +298,12 @@ const LegalCases: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Court Calendar ─────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Court Calendar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalCalendar: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Court Calendar & Hearing Scheduler</h2>
-      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Schedule Hearing</button>
+      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.304.schedule-hearing", "Schedule Hearing", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.304.schedule-hearing"><Plus size={13} /> Schedule Hearing</button>
     </div>
     <div className="metrics-grid kpi-grid-4 v2-mb-4">
       <KpiCard label="This Week"    value={DEMO_HEARINGS.length} desc="Court events" icon={<Calendar size={18} />} accent="#38bdf8" />
@@ -310,7 +312,7 @@ const LegalCalendar: React.FC = () => (
       <KpiCard label="Deadlines"    value="3 Filing"             desc="This month"   icon={<AlertCircle size={18} />} accent="#fbbf24" />
     </div>
     <div className="v2-card">
-      <div className="v2-card-header"><div className="v2-card-title">September 2026 — Court Diary</div></div>
+      <div className="v2-card-header"><div className="v2-card-title">September 2026 â€” Court Diary</div></div>
       <table className="v2-table">
         <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Case</th><th>Court</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -325,8 +327,8 @@ const LegalCalendar: React.FC = () => (
               <td><span className={`badge ${STATUS_BADGE[h.status] || "v2-badge-muted"}`}>{h.status}</span></td>
               <td>
                 <div className="v2-flex v2-gap-1">
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Bell size={13} /></button>
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.328.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.328.button"><Bell size={13} /></button>
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.329.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.329.button"><Edit2 size={13} /></button>
                 </div>
               </td>
             </tr>
@@ -337,7 +339,7 @@ const LegalCalendar: React.FC = () => (
   </div>
 );
 
-// ─── Sub-page: Legal Tasks ────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Legal Tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalTasks: React.FC = () => {
   const [filter, setFilter] = useState("All");
   const filters = ["All", "OVERDUE", "OPEN", "COMPLETED"];
@@ -346,12 +348,12 @@ const LegalTasks: React.FC = () => {
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Legal Task Manager & Deadlines</h2>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Add Task</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.349.add-task", "Add Task", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.349.add-task"><Plus size={13} /> Add Task</button>
       </div>
       <div className="v2-card">
         <div style={{ display: "flex", gap: ".3rem", padding: ".75rem 1.25rem", borderBottom: "1px solid var(--surface-border)" }}>
           {filters.map((f) => (
-            <button key={f} className={`sector-pill${filter === f ? " active" : ""}`} onClick={() => setFilter(f)} type="button">{f}</button>
+            <button key={f} aria-label={f} className={`sector-pill${filter === f ? " active" : ""}`} onClick={() => setFilter(f)} type="button">{f}</button>
           ))}
         </div>
         <table className="v2-table">
@@ -367,8 +369,8 @@ const LegalTasks: React.FC = () => {
                 <td><span className={`badge ${STATUS_BADGE[t.status] || "v2-badge-muted"}`}>{t.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    {t.status !== "COMPLETED" && <button className="v2-btn v2-btn-success v2-btn-icon-sm" type="button"><Check size={12} /></button>}
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Edit2 size={13} /></button>
+                    {t.status !== "COMPLETED" && <button className="v2-btn v2-btn-success v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.370.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.370.button"><Check size={12} /></button>}
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.371.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.371.button"><Edit2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -380,20 +382,20 @@ const LegalTasks: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Documents ──────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Documents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalDocuments: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Case Document Repository</h2>
-      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> Upload Document</button>
+      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.388.upload-document", "Upload Document", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.388.upload-document"><Plus size={13} /> Upload Document</button>
     </div>
     <div className="v2-card">
       <div className="v2-card-header">
         <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
           <Search size={13} style={{ color: "var(--muted)" }} />
-          <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} placeholder="Search documents…" />
+          <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} placeholder="Search documentsâ€¦" />
         </div>
-        <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Filter size={13} /> Filter by Case</button>
+        <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.396.filter-by-case", "Filter by Case", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.396.filter-by-case"><Filter size={13} /> Filter by Case</button>
       </div>
       <table className="v2-table">
         <thead><tr><th>Document</th><th>Case</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead>
@@ -412,9 +414,9 @@ const LegalDocuments: React.FC = () => (
               <td className="v2-text-xs v2-text-muted">{d.uploaded}</td>
               <td>
                 <div className="v2-flex v2-gap-1">
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Download size={13} /></button>
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Trash2 size={13} style={{ color: "var(--danger)" }} /></button>
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.415.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.415.button"><Download size={13} /></button>
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.416.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.416.button"><Eye size={13} /></button>
+                  <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.417.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.417.button" data-permission="LEGAL_DOCUMENT_DELETE"><Trash2 size={13} style={{ color: "var(--danger)" }} /></button>
                 </div>
               </td>
             </tr>
@@ -425,8 +427,10 @@ const LegalDocuments: React.FC = () => (
   </div>
 );
 
-// ─── Sub-page: Billing & Retainers ────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Billing & Retainers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalBilling: React.FC = () => {
+  const [paidInvoices, setPaidInvoices] = useState<Set<string>>(() => new Set());
+  const [paymentNotice, setPaymentNotice] = useState("");
   const totalBilled  = DEMO_BILLING.reduce((s, b) => s + b.amount, 0);
   const totalUnpaid  = DEMO_BILLING.filter((b) => b.status !== "PAID").reduce((s, b) => s + b.amount, 0);
   return (
@@ -434,8 +438,8 @@ const LegalBilling: React.FC = () => {
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h2 className="v2-text-xl v2-font-black">Billing, Invoices & Retainers</h2>
         <div className="v2-flex v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Clock size={13} /> Time Entry</button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Plus size={13} /> New Invoice</button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.437.time-entry", "Time Entry", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.437.time-entry"><Clock size={13} /> Time Entry</button>
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.438.new-invoice", "New Invoice", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.438.new-invoice"><Plus size={13} /> New Invoice</button>
         </div>
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
@@ -444,14 +448,17 @@ const LegalBilling: React.FC = () => {
         <KpiCard label="Retainer Fund"   value={money(45200000)}      icon={<ShieldAlert size={18} />} accent="#4ade80" />
         <KpiCard label="Billable Hours"  value={`${DEMO_BILLING.reduce((s, b) => s + b.hours, 0)} hrs`} icon={<Clock size={18} />} accent="#818cf8" />
       </div>
+      {paymentNotice && <div className="v2-card v2-mb-3" role="status"><div className="v2-card-body v2-text-sm v2-font-bold">{paymentNotice}</div></div>}
       <div className="v2-card">
         <div className="v2-card-header"><div className="v2-card-title">Invoice Register</div>
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button"><Download size={13} /> Export</button>
+          <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.449.export", "Export", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.449.export"><Download size={13} /> Export</button>
         </div>
         <table className="v2-table">
           <thead><tr><th>Invoice #</th><th>Client</th><th>Description</th><th>Hours</th><th>Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            {DEMO_BILLING.map((b) => (
+            {DEMO_BILLING.map((b) => {
+              const isPaid = b.status === "PAID" || paidInvoices.has(b.id);
+              return (
               <tr key={b.id}>
                 <td className="v2-mono v2-text-xs">{b.id}</td>
                 <td className="v2-font-bold">{b.client}</td>
@@ -459,15 +466,16 @@ const LegalBilling: React.FC = () => {
                 <td>{b.hours}h</td>
                 <td className="v2-font-black">{money(b.amount)}</td>
                 <td className="v2-text-xs v2-text-muted">{b.date}</td>
-                <td><span className={`badge ${STATUS_BADGE[b.status] || "v2-badge-muted"}`}>{b.status}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[isPaid ? "PAID" : b.status] || "v2-badge-muted"}`}>{isPaid ? "PAID" : b.status}</span></td>
                 <td>
                   <div className="v2-flex v2-gap-1">
-                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button"><Eye size={13} /></button>
-                    {b.status !== "PAID" && <button className="v2-btn v2-btn-success v2-btn-sm" type="button">Record Payment</button>}
+                    <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.465.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.465.button"><Eye size={13} /></button>
+                    {!isPaid && <button className="v2-btn v2-btn-success v2-btn-sm" type="button" onClick={() => { void recordLawFirmPayment(b.id, b.amount).then((result) => { setPaidInvoices((prev) => new Set(prev).add(b.id)); setPaymentNotice(`Payment recorded for ${b.id} (${result.source})`); void runUiAction("ui.apps.web.src.pages.LawFirmPage.466.record-payment", "Record Payment", "MUTATION_INTENT"); }).catch((error) => { setPaymentNotice(error instanceof Error ? error.message : "Payment failed"); }); }} data-action-id="ui.apps.web.src.pages.LawFirmPage.466.record-payment">Record Payment</button>}
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -475,12 +483,12 @@ const LegalBilling: React.FC = () => {
   );
 };
 
-// ─── Sub-page: Reports ────────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalReports: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
       <h2 className="v2-text-xl v2-font-black">Legal Practice Reports</h2>
-      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><Download size={13} /> Export PDF</button>
+      <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.483.export-pdf", "Export PDF", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.483.export-pdf"><Download size={13} /> Export PDF</button>
     </div>
     <div className="v2-grid-2" style={{ gap: ".75rem" }}>
       {["Matter Status Report", "Client AR Aging", "Timesheet Summary", "Retainer Activity", "Court Diary Report", "Revenue by Practice Area"].map((r) => (
@@ -499,7 +507,7 @@ const LegalReports: React.FC = () => (
   </div>
 );
 
-// ─── Sub-page: Settings ───────────────────────────────────────────────────────
+// â”€â”€â”€ Sub-page: Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const LegalSettings: React.FC = () => (
   <div className="v2-animate-page-enter">
     <h2 className="v2-text-xl v2-font-black v2-mb-4">Law Firm Module Settings</h2>
@@ -511,7 +519,7 @@ const LegalSettings: React.FC = () => (
           { label: "LST REGISTRATION", value: "LST/ADV/2018/0042" },
           { label: "TRA TIN", value: "100-XXX-XXX" },
           { label: "DEFAULT HOURLY RATE (TZS)", value: "600,000" },
-          { label: "CONFLICT CHECK POLICY", value: "Mandatory — All New Matters" },
+          { label: "CONFLICT CHECK POLICY", value: "Mandatory â€” All New Matters" },
           { label: "RETAINER MINIMUM THRESHOLD (TZS)", value: "1,000,000" },
         ].map((f) => (
           <div key={f.label}>
@@ -519,13 +527,13 @@ const LegalSettings: React.FC = () => (
             <input className="v2-input" defaultValue={f.value} />
           </div>
         ))}
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button"><CheckCircle size={13} /> Save Settings</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => { const settings = Object.fromEntries(Array.from(document.querySelectorAll("input.v2-input")).map((el) => [(el as HTMLInputElement).previousElementSibling?.textContent || "SETTING", (el as HTMLInputElement).value])); void saveLawFirmSettings(settings).then(() => runUiAction("ui.apps.web.src.pages.LawFirmPage.522.save-settings", "Save Settings", "MUTATION_INTENT")); }} data-action-id="ui.apps.web.src.pages.LawFirmPage.522.save-settings"><CheckCircle size={13} /> Save Settings</button>
       </div>
     </div>
   </div>
 );
 
-// ─── Law Firm Module Entry Point ──────────────────────────────────────────────
+// â”€â”€â”€ Law Firm Module Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export const LawFirmPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<LawTab>("Legal Dashboard");
 
@@ -551,6 +559,7 @@ export const LawFirmPage: React.FC = () => {
         {LAW_TABS.map((tab) => (
           <button
             key={tab}
+            aria-label={tab}
             className={`sector-pill${activeTab === tab ? " active" : ""}`}
             onClick={() => setActiveTab(tab)}
             type="button"

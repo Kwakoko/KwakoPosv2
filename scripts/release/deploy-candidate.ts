@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 import { getRealGitSha } from "./releaseIdentity.js";
 import { assertValidGitSha, assertValidContainerDigest, assertValidCloudRunRevision } from "@kwakopos2/domain";
-import { loadConfig } from "@kwakopos2/config";
 
 export interface CandidateDeploymentEvidence {
   deploymentMode: "EXISTING_SERVICE" | "BOOTSTRAP";
@@ -22,52 +21,80 @@ function run(command: string, encoding?: "utf8") {
   return execSync(command, encoding ? { encoding } : { stdio: "inherit" });
 }
 
-function quoteForPosixShell(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-
-function requireProductionSecret(name: string): void {
-  if (process.env.NODE_ENV === "production-certification" && !process.env[name]) {
-    throw new Error(`RELEASE_BLOCKED: required production secret ${name} is missing`);
+function quoteCliValue(value: string): string {
+  if (!value || /[\r\n]/.test(value)) {
+    throw new Error("RELEASE_BLOCKED: invalid CLI value contains control characters");
   }
+  if (!/^[A-Za-z0-9._:/@=+,-]+$/.test(value)) {
+    throw new Error(`RELEASE_BLOCKED: unsafe CLI value: ${value}`);
+  }
+  return value;
 }
 
-function validateContainerProvenance(imageRef: string, expectedSha: string): string {
+async function validateContainerProvenance(imageRef: string, expectedSha: string): Promise<string> {
   try {
-    run(`docker pull ${quoteForPosixShell(imageRef)}`);
-    const raw = String(run(`docker inspect ${quoteForPosixShell(imageRef)} --format='{{json .Config.Labels}}'`, "utf8")).trim();
-    const labels = JSON.parse(raw || "{}");
-    const sourceSha = String(labels["org.opencontainers.image.revision"] || "").trim();
+    const at = imageRef.lastIndexOf("@");
+    const digestRef = imageRef.slice(at + 1);
+    const imagePath = imageRef.slice(0, at);
+    const firstSlash = imagePath.indexOf("/");
+    const lastSlash = imagePath.lastIndexOf("/");
+    if (at < 0 || firstSlash <= 0 || lastSlash <= firstSlash || !/^sha256:[0-9a-f]{64}$/i.test(digestRef)) {
+      throw new Error(`invalid immutable image reference: ${imageRef}`);
+    }
+    const registry = imagePath.slice(0, firstSlash);
+    const repository = imagePath.slice(firstSlash + 1, lastSlash);
+    const imageName = imagePath.slice(lastSlash + 1);
+    const digest = digestRef.slice("sha256:".length);
+    const token = String(run("gcloud auth print-access-token", "utf8")).trim();
+    if (!token) throw new Error("unable to obtain Artifact Registry access token");
+    const baseUrl = `https://${registry}/v2/${repository}/${imageName}`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json",
+    };
+    const manifestRes = await fetch(`${baseUrl}/manifests/sha256:${digest}`, { headers });
+    if (!manifestRes.ok) throw new Error(`registry manifest lookup failed: HTTP ${manifestRes.status}`);
+    const manifest: any = await manifestRes.json();
+    const configDigest = String(manifest?.config?.digest || "").trim();
+    if (!/^sha256:[0-9a-f]{64}$/i.test(configDigest)) throw new Error(`registry manifest has invalid config digest: ${configDigest || "missing"}`);
+    const configRes = await fetch(`${baseUrl}/blobs/${configDigest}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!configRes.ok) throw new Error(`registry config lookup failed: HTTP ${configRes.status}`);
+    const config: any = await configRes.json();
+    const sourceSha = String(config?.config?.Labels?.["org.opencontainers.image.revision"] || "").trim();
     assertValidGitSha(sourceSha);
     if (sourceSha !== expectedSha) throw new Error(`container source provenance mismatch: expected=${expectedSha} actual=${sourceSha}`);
     return sourceSha;
   } catch (err: any) {
-    throw new Error(`RELEASE_BLOCKED: unable to independently verify container source provenance: ${err?.message || err}`);
+    throw new Error(`RELEASE_BLOCKED: unable to independently verify registry container source provenance: ${err?.message || err}`);
   }
 }
 
-export function deployCandidateRevision(): CandidateDeploymentEvidence {
+export async function deployCandidateRevision(): Promise<CandidateDeploymentEvidence> {
   console.log("----------------------------------------------------------------");
   console.log(" STEP 2 — Real Cloud Run Zero-Traffic Candidate Deployment     ");
   console.log("----------------------------------------------------------------");
 
   const isProdCert = process.env.NODE_ENV === "production-certification";
-  const config = loadConfig();
+  const releaseManifestPath = path.resolve(process.cwd(), "release-manifest.json");
+  const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
+  const releaseVersion = String(releaseManifest.version || releaseManifest.appVersion || "").trim();
+  if (!releaseVersion) throw new Error("RELEASE_BLOCKED: authoritative release version is missing");
   const gitSha = getRealGitSha();
   assertValidGitSha(gitSha);
 
-  const region = process.env.GCP_REGION || "us-central1";
-  const project = process.env.GCP_PROJECT || "kwakoposv2";
+  const region = process.env.GCP_REGION || String(run("gcloud config get-value compute/region", "utf8")).trim();
+  const project = process.env.GCP_PROJECT || String(run("gcloud config get-value project", "utf8")).trim();
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
+  if (!project || project === "(unset)" || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/i.test(project)) {
+    throw new Error(`RELEASE_BLOCKED: invalid GCP project id: ${project || "(unset)"}`);
+  }
+  if (!region || region === "(unset)") {
+    throw new Error("RELEASE_BLOCKED: GCP region is not configured. Set GCP_REGION or gcloud compute/region.");
+  }
   const imageRepository = `${region}-docker.pkg.dev/${project}/kwakopos/kwakopos2`;
 
   if (isProdCert && process.env.EXECUTE_GCLOUD !== "true") {
     throw new Error("RELEASE_BLOCKED: production-certification requires EXECUTE_GCLOUD=true");
-  }
-
-  if (isProdCert) {
-    requireProductionSecret("DATABASE_URL");
-    requireProductionSecret("JWT_SECRET");
   }
 
   let imageDigest = "";
@@ -83,7 +110,7 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     const tag = `${imageRepository}:${gitSha}`;
     let existingDigest = "";
     try {
-      existingDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteForPosixShell(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
+      existingDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteCliValue(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
     } catch {
       existingDigest = "";
     }
@@ -92,22 +119,22 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
       imageDigest = existingDigest;
     } else {
       try {
-        run(`docker build --build-arg RELEASE_GIT_SHA=${quoteForPosixShell(gitSha)} --build-arg RELEASE_VERSION=${quoteForPosixShell(config.APP_VERSION)} -t ${quoteForPosixShell(tag)} .`);
-        run(`docker push ${quoteForPosixShell(tag)}`);
+        run(`docker build --build-arg RELEASE_GIT_SHA=${quoteCliValue(gitSha)} --build-arg RELEASE_VERSION=${quoteCliValue(releaseVersion)} -t ${quoteCliValue(tag)} .`);
+        run(`docker push ${quoteCliValue(tag)}`);
       } catch {
-        run(`gcloud builds submit --config=cloudbuild.yaml --substitutions=_RELEASE_GIT_SHA=${gitSha},_RELEASE_VERSION=${config.APP_VERSION},_IMAGE=${tag} . --project=${quoteForPosixShell(project)}`);
+        run(`gcloud builds submit --config=cloudbuild.yaml --substitutions=_RELEASE_GIT_SHA=${gitSha},_RELEASE_VERSION=${releaseVersion},_IMAGE=${tag} . --project=${quoteCliValue(project)}`);
       }
-      imageDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteForPosixShell(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
+      imageDigest = String(run(`gcloud artifacts docker images describe ${tag} --project=${quoteCliValue(project)} --format="value(image_summary.digest)"`, "utf8")).trim();
     }
     assertValidContainerDigest(imageDigest);
 
     const fullImageRef = `${imageRepository}@${imageDigest}`;
-    const containerSourceSha = validateContainerProvenance(fullImageRef, gitSha);
+    const containerSourceSha = await validateContainerProvenance(fullImageRef, gitSha);
     const tagArg = `rc-${gitSha.substring(0, 7)}`;
 
     let serviceExists = false;
     try {
-      const serviceDescribe = String(run(`gcloud run services describe ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8"));
+      const serviceDescribe = String(run(`gcloud run services describe ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8"));
       serviceExists = Boolean(JSON.parse(serviceDescribe)?.metadata?.name);
     } catch {
       serviceExists = false;
@@ -115,19 +142,19 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     deploymentMode = serviceExists ? "EXISTING_SERVICE" : "BOOTSTRAP";
 
     // Secrets are injected from Secret Manager; secret values are never placed in shell arguments.
-    const secretRefs = "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest";
-    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteForPosixShell(gitSha)},CONTAINER_DIGEST=${quoteForPosixShell(imageDigest)} --update-secrets=${secretRefs}`;
+    const secretRefs = "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,SUPER_ADMIN_MFA_ENCRYPTION_KEY=SUPER_ADMIN_MFA_ENCRYPTION_KEY:latest";
+    const envFlags = `--update-env-vars=NODE_ENV=production,GIT_SHA=${quoteCliValue(gitSha)},CONTAINER_DIGEST=${quoteCliValue(imageDigest)} --remove-env-vars=DATABASE_URL,JWT_SECRET --update-secrets=${secretRefs}`;
 
     let deployStdout = "";
     if (deploymentMode === "EXISTING_SERVICE") {
-      deployStdout = String(run(`gcloud run deploy ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --image=${quoteForPosixShell(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --no-traffic --allow-unauthenticated ${envFlags} --tag=${quoteForPosixShell(tagArg)} --format="json"`, "utf8"));
+      deployStdout = String(run(`gcloud run deploy ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --image=${quoteCliValue(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --no-traffic --allow-unauthenticated ${envFlags} --tag=${quoteCliValue(tagArg)} --format="json"`, "utf8"));
     } else {
-      deployStdout = String(run(`gcloud run deploy ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --image=${quoteForPosixShell(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --allow-unauthenticated ${envFlags} --tag=${quoteForPosixShell(tagArg)} --format="json"`, "utf8"));
+      deployStdout = String(run(`gcloud run deploy ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --image=${quoteCliValue(fullImageRef)} --region=${region} --memory=1Gi --cpu=1 --timeout=300s --allow-unauthenticated ${envFlags} --tag=${quoteCliValue(tagArg)} --format="json"`, "utf8"));
     }
 
     const deployJson = JSON.parse(deployStdout);
     candidateRevision = deployJson?.status?.latestCreatedRevisionName || "";
-    const serviceJson = JSON.parse(String(run(`gcloud run services describe ${quoteForPosixShell(serviceName)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8")));
+    const serviceJson = JSON.parse(String(run(`gcloud run services describe ${quoteCliValue(serviceName)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8")));
     if (!candidateRevision) candidateRevision = serviceJson?.status?.latestCreatedRevisionName || "";
     const taggedTraffic = Array.isArray(serviceJson?.status?.traffic) ? serviceJson.status.traffic.find((entry: any) => entry.tag === tagArg || entry.revisionName === candidateRevision) : undefined;
     const baseServiceUrl = serviceJson?.status?.url || "";
@@ -138,13 +165,13 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
     if (!/^https:\/\//i.test(candidateUrl) || /localhost|127\.0\.0\.1/i.test(candidateUrl)) throw new Error(`RELEASE_BLOCKED: invalid candidate URL returned: ${candidateUrl}`);
     assertValidCloudRunRevision(candidateRevision);
 
-    const revisionJson = JSON.parse(String(run(`gcloud run revisions describe ${quoteForPosixShell(candidateRevision)} --project=${quoteForPosixShell(project)} --region=${region} --format="json"`, "utf8")));
+    const revisionJson = JSON.parse(String(run(`gcloud run revisions describe ${quoteCliValue(candidateRevision)} --project=${quoteCliValue(project)} --region=${region} --format="json"`, "utf8")));
     const isReady = Array.isArray(revisionJson?.status?.conditions) ? revisionJson.status.conditions.some((c: any) => c.type === "Ready" && c.status === "True") : false;
     if (!isReady) throw new Error(`RELEASE_BLOCKED: Cloud Run revision ${candidateRevision} is not Ready`);
     const deployedImage = revisionJson?.spec?.containers?.[0]?.image || "";
     if (deployedImage !== fullImageRef) throw new Error(`RELEASE_BLOCKED: Cloud Run revision image mismatch. Expected ${fullImageRef}; got ${deployedImage}`);
 
-    const evidence: CandidateDeploymentEvidence = { deploymentMode, candidateRevision, candidateUrl, imageRef: fullImageRef, imageDigest, containerDigest: imageDigest, gitSha, containerSourceSha, version: config.APP_VERSION, timestamp: new Date().toISOString() };
+    const evidence: CandidateDeploymentEvidence = { deploymentMode, candidateRevision, candidateUrl, imageRef: fullImageRef, imageDigest, containerDigest: imageDigest, gitSha, containerSourceSha, version: releaseVersion, timestamp: new Date().toISOString() };
     const artifactDir = path.resolve(process.cwd(), "artifacts", "release-evidence");
     fs.mkdirSync(artifactDir, { recursive: true });
     fs.writeFileSync(path.join(artifactDir, "kwakopos-candidate-deployment.json"), JSON.stringify(evidence, null, 2), "utf8");
@@ -156,4 +183,9 @@ export function deployCandidateRevision(): CandidateDeploymentEvidence {
   }
 }
 
-if (process.argv[1] && process.argv[1].endsWith("deploy-candidate.ts")) deployCandidateRevision();
+if (process.argv[1] && process.argv[1].endsWith("deploy-candidate.ts")) {
+  deployCandidateRevision().catch((err) => {
+    console.error(`RELEASE_BLOCKED: ${err?.message || err}`);
+    process.exit(1);
+  });
+}

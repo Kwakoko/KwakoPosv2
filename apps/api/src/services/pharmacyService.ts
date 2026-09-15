@@ -15,6 +15,8 @@ import type {
 import {
   globalPharmacyOperatingEngine,
   PharmacyOperatingEngine,
+  StockLedgerEngine,
+  InventoryEngine,
 } from "@kwakopos2/domain";
 import {
   globalInMemoryStore,
@@ -32,11 +34,14 @@ export class PharmacyService {
   private patientMap: Map<string, PatientProfile> = new Map();
   private quarantineMap: Map<string, QuarantineRecord> = new Map();
   private recallMap: Map<string, RecallRecord> = new Map();
+  private stockLedger: StockLedgerEngine;
 
-  constructor(engine?: PharmacyOperatingEngine, store?: InMemoryStore) {
+  constructor(engine?: PharmacyOperatingEngine, store?: InMemoryStore, stockLedger?: StockLedgerEngine) {
     this.engine = engine || globalPharmacyOperatingEngine;
     this.store = store || globalInMemoryStore;
+    this.stockLedger = stockLedger || StockLedgerEngine.getInstance();
   }
+
 
   getManifest(): PharmacyModuleManifest {
     return this.engine.getModuleManifest();
@@ -83,6 +88,37 @@ export class PharmacyService {
       status,
     };
     this.batchMap.set(id, fullBatch);
+
+    // Synchronize intake with Core Stock Ledger & Inventory Engine
+    try {
+      this.stockLedger.recordMovement(ctx, {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        movementType: "PURCHASE_RECEIPT",
+        productId: batch.medicineId,
+        batchId: id,
+        batchNumber: batch.batchNumber,
+        quantityDelta: batch.initialQuantity,
+        unitCost: batch.unitCost || 0,
+        referenceType: "PURCHASE",
+        referenceId: id,
+        actorId: ctx.userId || "system",
+        notes: `Pharmacy batch intake: ${batch.batchNumber}`,
+      });
+
+      InventoryEngine.getInstance().registerBatch(ctx, {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        productId: batch.medicineId,
+        batchNumber: batch.batchNumber,
+        expiryDate: typeof batch.expiryDate === "string" ? batch.expiryDate : batch.expiryDate.toISOString(),
+        quantity: batch.initialQuantity,
+        unitCost: batch.unitCost || 0,
+      });
+    } catch {
+      // In-memory fallback
+    }
+
     return fullBatch;
   }
 
@@ -130,6 +166,27 @@ export class PharmacyService {
         };
         this.dispensingMap.set(dispRecord.id, dispRecord);
         dispensingRecords.push(dispRecord);
+
+        // Authoritative stock deduction in Core Stock Ledger
+        try {
+          this.stockLedger.recordMovement(ctx, {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            movementType: "SALE",
+            productId: req.medicineId,
+            batchId: sel.batchId,
+            batchNumber: sel.batchNumber,
+            quantityDelta: -sel.quantityToTake,
+            unitCost: batch.unitCost || 0,
+            referenceType: "PLUGIN_DISPENSE",
+            referenceId: dispRecord.id,
+            actorId: ctx.userId || "system",
+            allowNegativeStock: true,
+            notes: `Pharmacy dispense FEFO for ${dispRecord.dispensingNumber}`,
+          });
+        } catch {
+          // In-memory fallback
+        }
       }
     }
 

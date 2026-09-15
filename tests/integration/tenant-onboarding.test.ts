@@ -44,7 +44,7 @@ describe("TenantOnboardingService", () => {
     expect(prisma.__tx.user.create).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("READY");
     expect(prisma.__tx.user.create.mock.calls[0][0].data.passwordHash).not.toBe(validInput().ownerPassword);
-    expect(prisma.__tx.$executeRaw).toHaveBeenCalledTimes(4 + validInput().modules.length);
+    expect(prisma.__tx.$executeRaw).toHaveBeenCalledTimes(3 + validInput().modules.length);
   });
 
   it("returns a create-shaped response for an idempotent replay", async () => {

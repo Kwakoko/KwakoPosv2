@@ -33,14 +33,38 @@ import {
   assertPriceHistoryImmutability,
 } from "@kwakopos2/domain";
 import { randomUUID } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // Search parent directories for monorepo root .env
+    const candidates = [
+      path.resolve(process.cwd(), ".env"),
+      path.resolve(process.cwd(), "../../.env"),
+      path.resolve(process.cwd(), "../.env"),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        try {
+          (process as any).loadEnvFile(candidate);
+          break;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+}
 
 export const prisma = new PrismaClient();
 
-import { InMemoryStore } from "./inMemoryStore.js";
-export { InMemoryStore };
 
-
-export const globalInMemoryStore = new InMemoryStore();
+import { InMemoryStore, globalInMemoryStore } from "./inMemoryStore.js";
+export { InMemoryStore, globalInMemoryStore };
+export { setRlsTenantContext, clearRlsTenantContext } from "./rlsContext.js";
 
 export class ScopedProductRepository {
   private store: InMemoryStore;
@@ -73,12 +97,22 @@ export class ScopedProductRepository {
       if (vStock <= vReorder) lowStockCount++;
     }
 
+    const stockChanged =
+      product.totalStock !== totalStock ||
+      product.reservedStock !== reservedStock ||
+      product.availableStock !== availableStock ||
+      product.lowStockVariantsCount !== lowStockCount ||
+      product.hasVariants !== (variants.length > 0);
+
     product.totalStock = totalStock;
     product.reservedStock = reservedStock;
     product.availableStock = availableStock;
     product.lowStockVariantsCount = lowStockCount;
     product.hasVariants = variants.length > 0;
-    product.updatedAt = new Date().toISOString();
+    if (stockChanged) {
+      const existingTime = product.updatedAt ? new Date(product.updatedAt).getTime() : 0;
+      product.updatedAt = new Date(Math.max(Date.now(), existingTime + 1)).toISOString();
+    }
 
     this.store.products.set(productId, product);
   }
@@ -385,14 +419,14 @@ export class ScopedProductRepository {
 
   getProducts(ctx: TenantContext): Product[] {
     const products = Array.from(this.store.products.values()).filter(
-      (p) => p.tenantId === ctx.tenantId && p.branchId === ctx.branchId
+      (p) => p.tenantId === ctx.tenantId && (!ctx.branchId || !p.branchId || p.branchId === ctx.branchId)
     );
 
     return products.map((p) => {
       this.recalculateProductStock(ctx, p.id);
       const fresh = this.store.products.get(p.id)!;
       const variants = Array.from(this.store.variants.values())
-        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && v.branchId === ctx.branchId)
+        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId))
         .map((v) => this.attachEffectivePrices(fresh, v));
       return { ...fresh, variants };
     });
@@ -422,7 +456,7 @@ export class ScopedProductRepository {
       images: req.images !== undefined ? req.images : existing.images,
       hasVariants: req.hasVariants !== undefined ? req.hasVariants : existing.hasVariants,
       isActive: req.isActive ?? existing.isActive,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(Math.max(Date.now(), (existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0) + 1)).toISOString(),
     };
 
     this.store.products.set(id, updated);
@@ -549,21 +583,11 @@ export class ScopedProductRepository {
     if (!existing) return false;
     assertTenantIsolation(ctx, existing.tenantId, existing.branchId);
 
-    // Safeguard check for transaction history
-    const hasLedgerHistory = Array.from(this.store.stockLedgers.values()).some(
-      (l) => l.variantId === variantId && l.tenantId === ctx.tenantId
-    );
-
-    if (hasLedgerHistory) {
-      // Soft-delete / Archive variant if transaction history exists
-      existing.isActive = false;
-      existing.updatedAt = new Date().toISOString();
-      this.store.variants.set(variantId, existing);
-      this.recalculateProductStock(ctx, existing.productId);
-      return true;
-    }
-
-    this.store.variants.delete(variantId);
+    // Soft-delete / Archive variant so deletion is a durable tombstone for sync propagation
+    existing.isActive = false;
+    const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+    existing.updatedAt = new Date(Math.max(Date.now(), existingTime + 1)).toISOString();
+    this.store.variants.set(variantId, existing);
     this.recalculateProductStock(ctx, existing.productId);
     return true;
   }
@@ -689,8 +713,12 @@ export class ScopedStockRepository {
       return { adjustment: existingAdjustment, ledger: existingLedger };
     }
 
-    const variant = this.store.variants.get(req.variantId);
+    const variant = this.store.variants.get(req.variantId) ||
+      Array.from(this.store.variants.values()).find(
+        (v) => v.tenantId === ctx.tenantId && (v.productId === req.variantId || v.productId === (req as any).productId || v.id === `${req.variantId}-default`)
+      );
     if (!variant) throw new Error(`Variant ${req.variantId} not found`);
+    const resolvedVariantId = variant.id;
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
     const now = new Date().toISOString();
@@ -698,15 +726,15 @@ export class ScopedStockRepository {
     let changeQty = req.quantityChange;
 
     if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
-    else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, req.variantId);
+    else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, resolvedVariantId);
 
-    const movementType = changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS";
+    const movementType = req.movementType || (changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS");
 
     const adjustment: StockAdjustment = {
       id: adjustmentId,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
-      variantId: req.variantId,
+      variantId: resolvedVariantId,
       adjustmentType: req.adjustmentType,
       quantityChange: changeQty,
       reason: req.reason,
@@ -820,7 +848,6 @@ export class ScopedStockRepository {
   }
 }
 
-export { PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
 import { ScopedCommercialRepository, registerStockRepositoryClass } from "./commercialRepositories.js";
 registerStockRepositoryClass(ScopedStockRepository);
 import { ScopedFinanceRepository } from "./financeRepositories.js";
@@ -1077,8 +1104,8 @@ export class ReleaseRepository {
     const dep: DeploymentHistoryRecord = {
       ...data,
       id,
-      revision: data.revision || "kwakopos-prod-001",
-      artifactDigest: data.artifactDigest || "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      revision: data.revision,
+      artifactDigest: data.artifactDigest,
       deploymentStrategy: data.deploymentStrategy || "CANARY",
       canaryPercentage: data.canaryPercentage ?? 100,
       healthResult: data.healthResult || "100% HEALTHY",
@@ -1352,6 +1379,8 @@ export * from "./workforceRepositories.js";
 export * from "./atomicCommercialFinance.js";
 export * from "./financeHardening.js";
 export * from "./receiptRepositories.js";
+export * from "./legalRepositories.js";
+export * from "./rollbackRepositories.js";
 
 
 
@@ -1362,3 +1391,5 @@ export * from "./receiptRepositories.js";
 
 
 
+
+export { PrismaCatalogRepository, PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";

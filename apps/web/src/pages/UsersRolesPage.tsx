@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
+import { useToast } from "../context/ToastContext.js";
 
 type SubTab = "directory" | "employees" | "branches" | "roles_builder" | "matrix" | "sessions" | "audit" | "super_admin";
 
@@ -111,6 +112,7 @@ export const UsersRolesPage: React.FC = () => {
   const { currentBranchName, availableBranches } = useBranch();
   const { permissions: rbacPermissions, hasPermission, isSuperAdmin } = useRbac();
   const { isOnline, pendingOutboxCount, db } = useSync();
+  const toast = useToast();
 
   const [activeTab, setActiveTab] = useState<SubTab>("directory");
   const [isLoading, setIsLoading] = useState(true);
@@ -371,13 +373,14 @@ export const UsersRolesPage: React.FC = () => {
 
   const handleDeleteUser = async (userRec: UserRecord) => {
     if (userRec.id === currentUser?.id) {
-      alert("You cannot delete your own active session account.");
+      toast.warning("Action Denied", "You cannot delete your own active session account.");
       return;
     }
     if (confirm(`Permanently delete user account for ${userRec.firstName} ${userRec.lastName}?`)) {
       await apiFetch(`/api/v1/users/${userRec.id}`, { method: "DELETE" }).catch(() => {});
       db.enqueueOutbox({ entityType: "User", operationType: "DELETE", payload: { id: userRec.id } });
       setUsersList((prev) => prev.filter((u) => u.id !== userRec.id));
+      toast.success("User Deleted", `Account for ${userRec.firstName} ${userRec.lastName} removed.`);
     }
   };
 
@@ -734,7 +737,7 @@ export const UsersRolesPage: React.FC = () => {
           <div className="v2-card" style={{ width: 500, padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
               <h2 className="v2-text-lg v2-font-black">Add Staff Employee Account</h2>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsAddUserOpen(false)} type="button"><X size={15} /></button>
+              <button aria-label="Close add user dialog" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsAddUserOpen(false)} type="button"><X size={15} /></button>
             </div>
             <form onSubmit={handleAddUser} className="v2-space-y-3">
               <div className="v2-grid v2-grid-2 v2-gap-2">

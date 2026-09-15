@@ -65,34 +65,38 @@ export class TenantOnboardingService {
     const normalized = { ...data, businessName: data.businessName.trim(), ownerName: data.ownerName.trim(), ownerEmail: data.ownerEmail.trim().toLowerCase(), branchName: data.branchName.trim(), modules, industry };
     const slug = normalizeSlug(data.slug || data.businessName);
     const branchCode = normalizeBranchCode(data.branchCode, slug);
-    const requestFingerprint = fingerprintRequest(normalized);
+    const requestFingerprint = fingerprintRequest(data);
+
+    const passwordHash = await hashPassword(data.ownerPassword);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${data.idempotencyKey}, 0))`;
-        const existing = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE idempotency_key = ${data.idempotencyKey} LIMIT 1`;
-        if (existing[0]) {
-          if (existing[0].request_fingerprint !== requestFingerprint) throw new TenantOnboardingError("CONFLICT", "Idempotency key was already used with different parameters", 409);
-          return { onboardingId: existing[0].id, tenantId: existing[0].tenant_id, branchId: existing[0].branch_id, ownerUserId: existing[0].owner_user_id, status: existing[0].status, nextStep: "LOGIN" as const };
-        }
-        if (await tx.tenant.findUnique({ where: { slug } })) throw new TenantOnboardingError("CONFLICT", "Tenant slug is already in use", 409);
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE idempotency_key = ${data.idempotencyKey} LIMIT 1`;
+          if (existing[0]) {
+            if (existing[0].request_fingerprint !== requestFingerprint) throw new TenantOnboardingError("CONFLICT", "Idempotency key was already used with different parameters", 409);
+            return { onboardingId: existing[0].id, tenantId: existing[0].tenant_id, branchId: existing[0].branch_id, ownerUserId: existing[0].owner_user_id, status: existing[0].status, nextStep: "LOGIN" as const };
+          }
+          if (await tx.tenant.findUnique({ where: { slug } })) throw new TenantOnboardingError("CONFLICT", "Tenant slug is already in use", 409);
 
-        const tenantId = randomUUID(), branchId = randomUUID(), roleId = randomUUID(), ownerId = randomUUID(), onboardingId = randomUUID();
-        const passwordHash = await hashPassword(data.ownerPassword);
-        const tenant = await tx.tenant.create({ data: { id: tenantId, name: normalized.businessName, slug, status: "ACTIVE" } });
-        const branch = await tx.branch.create({ data: { id: branchId, tenantId, name: normalized.branchName, code: branchCode, isMain: true } });
-        const role = await tx.role.create({ data: { id: roleId, tenantId, name: "OWNER", permissions: [...OWNER_PERMISSIONS] } });
-        const user = await tx.user.create({ data: { id: ownerId, tenantId, branchId, roleId: role.id, email: normalized.ownerEmail, passwordHash, name: normalized.ownerName } });
-        await tx.$executeRaw`INSERT INTO tenant_onboardings (id, tenant_id, business_name, slug, branch_name, branch_code, status, current_step, industry, modules, country, currency, timezone, locale, owner_user_id, branch_id, idempotency_key, request_fingerprint, created_at, updated_at) VALUES (${onboardingId}::uuid, ${tenantId}::uuid, ${normalized.businessName}, ${slug}, ${normalized.branchName}, ${branchCode}, 'READY', 'COMPLETE', ${industry}, ${Prisma.sql`ARRAY[${Prisma.join(modules)}]`}::text[], ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, ${ownerId}::uuid, ${branchId}::uuid, ${data.idempotencyKey}, ${requestFingerprint}, NOW(), NOW())`;
-        await tx.$executeRaw`INSERT INTO tenant_configurations (tenant_id, country, currency, timezone, locale, numbering_policy, branch_code_policy, tax_configuration) VALUES (${tenantId}::uuid, ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, 'SEQUENTIAL', 'TENANT_PREFIXED', '{}'::jsonb)`;
-        for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
-        await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${onboardingId}::uuid, ${tenantId}::uuid, ${actor.userId}::uuid, 'CREATE', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
-        return { onboardingId, tenantId: tenant.id, branchId: branch.id, ownerUserId: user.id, status: "READY" as const, nextStep: "LOGIN" as const };
-      });
+          const tenantId = randomUUID(), branchId = randomUUID(), roleId = randomUUID(), ownerId = randomUUID(), onboardingId = randomUUID();
+          const tenant = await tx.tenant.create({ data: { id: tenantId, name: normalized.businessName, slug, status: "ACTIVE" } });
+          const branch = await tx.branch.create({ data: { id: branchId, tenantId, name: normalized.branchName, code: branchCode, isMain: true } });
+          const role = await tx.role.create({ data: { id: roleId, tenantId, name: "OWNER", permissions: [...OWNER_PERMISSIONS] } });
+          const user = await tx.user.create({ data: { id: ownerId, tenantId, branchId, roleId: role.id, email: normalized.ownerEmail, passwordHash, name: normalized.ownerName } });
+          await tx.$executeRaw`INSERT INTO tenant_onboardings (id, tenant_id, business_name, slug, branch_name, branch_code, status, current_step, industry, modules, country, currency, timezone, locale, owner_user_id, branch_id, idempotency_key, request_fingerprint, created_at, updated_at) VALUES (${onboardingId}::uuid, ${tenantId}::uuid, ${normalized.businessName}, ${slug}, ${normalized.branchName}, ${branchCode}, 'READY', 'COMPLETE', ${industry}, ${modules}::text[], ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, ${ownerId}::uuid, ${branchId}::uuid, ${data.idempotencyKey}, ${requestFingerprint}, NOW(), NOW())`;
+          await tx.$executeRaw`INSERT INTO tenant_configurations (tenant_id, country, currency, timezone, locale, numbering_policy, branch_code_policy, tax_configuration) VALUES (${tenantId}::uuid, ${data.country}, ${data.currency}, ${data.timezone}, ${data.locale}, 'SEQUENTIAL', 'TENANT_PREFIXED', '{}'::jsonb)`;
+          for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
+          await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${onboardingId}::uuid, ${tenantId}::uuid, ${actor.userId}::uuid, 'CREATE', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
+          return { onboardingId, tenantId: tenant.id, branchId: branch.id, ownerUserId: user.id, status: "READY" as const, nextStep: "LOGIN" as const };
+        },
+        { maxWait: 10000, timeout: 25000 }
+      );
     } catch (error: any) {
       if (error instanceof TenantOnboardingError) throw error;
       if (error?.code === "P2002" || error?.code === "23505") throw new TenantOnboardingError("CONFLICT", "Tenant or onboarding idempotency key already exists", 409);
-      throw new TenantOnboardingError("PROVISIONING_FAILED", "Tenant provisioning failed and was rolled back", 500);
+      const detail = error?.meta?.message || error?.message || String(error);
+      throw new TenantOnboardingError("PROVISIONING_FAILED", `Tenant provisioning failed and was rolled back: ${detail}`, 500);
     }
   }
 
@@ -118,7 +122,7 @@ export class TenantOnboardingService {
         if (branchId && (data.branchName || data.branchCode)) await tx.branch.update({ where: { id: branchId }, data: { ...(data.branchName ? { name: data.branchName.trim() } : {}), ...(data.branchCode ? { code: data.branchCode } : {}) } });
         if (data.country || data.currency || data.timezone || data.locale) await tx.$executeRaw`UPDATE tenant_configurations SET country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
         if (modules) {
-          await tx.$executeRaw`UPDATE tenant_onboardings SET modules=${Prisma.sql`ARRAY[${Prisma.join(modules)}]`}::text[] WHERE tenant_id=${tenantId}::uuid`;
+          await tx.$executeRaw`UPDATE tenant_onboardings SET modules=${modules}::text[] WHERE tenant_id=${tenantId}::uuid`;
           await tx.$executeRaw`DELETE FROM tenant_module_entitlements WHERE tenant_id=${tenantId}::uuid`;
           for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
         }

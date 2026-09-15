@@ -1,7 +1,7 @@
-import { KWAKOPOS_UI_PARITY_MATRIX } from "../../apps/web/src/uiParityMatrix.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
+import { KWAKOPOS_UI_PARITY_MATRIX } from "../../apps/web/src/uiParityMatrix.js";
 
 export interface PillarVerificationResult {
   pillarId: string;

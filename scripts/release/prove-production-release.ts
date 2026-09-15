@@ -44,6 +44,15 @@ export type ReleaseState =
   | "LIVE_IDENTITY_VERIFIED"
   | "RELEASE_PASS";
 
+function requireEvidenceObject(name: string, relativePath: string): any {
+  const evidencePath = path.resolve(process.cwd(), relativePath);
+  if (!fs.existsSync(evidencePath)) {
+    throw new Error(`RELEASE_BLOCKED: required proof artifact '${name}' is missing at ${evidencePath}`);
+  }
+  const value = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+  return value;
+}
+
 async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceArtifact> {
   console.log("========================================================================");
   console.log(" KWAKOPOS 2.0 REAL PRODUCTION CERTIFICATION STATE MACHINE              ");
@@ -60,7 +69,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   console.log(`[STATE] Current State: ${state}`);
 
   // STAGE 2: Real Cloud Run Candidate Deployment
-  const candidate = deployCandidateRevision();
+  const candidate = await deployCandidateRevision();
   assertValidContainerDigest(candidate.containerDigest);
   assertValidCloudRunRevision(candidate.candidateRevision);
 
@@ -75,10 +84,31 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   state = "DEPLOYED_IDENTITY_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
-  // STAGE 4: Real Playwright Production Browser Certification & Numerical Stock Convergence
+  // STAGE 4: Require independently generated browser + convergence evidence.
+  const browserEvidence = requireEvidenceObject(
+    "browser certification",
+    "artifacts/release-evidence/kwakopos-browser-certification-evidence.json",
+  );
+  if (browserEvidence.candidateRevision !== candidate.candidateRevision) {
+    throw new Error("RELEASE_BLOCKED: browser evidence candidate revision does not match deployed candidate.");
+  }
+  if (browserEvidence.finalConvergenceStatus !== "PASS") {
+    throw new Error("RELEASE_BLOCKED: Browser A -> Server -> Browser B convergence evidence is not PASS.");
+  }
+  if (Number(browserEvidence.expectedStock) !== Number(browserEvidence.actualStockBrowserA) ||
+      Number(browserEvidence.expectedStock) !== Number(browserEvidence.actualStockBrowserB)) {
+    throw new Error("RELEASE_BLOCKED: browser convergence evidence contains inconsistent stock values.");
+  }
   state = "PRODUCTION_BROWSER_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
+  const folderSyncEvidence = requireEvidenceObject(
+    "local/GitHub folder synchronization",
+    "artifacts/release-evidence/kwakopos-folder-sync-evidence.json",
+  );
+  if (folderSyncEvidence.localHeadSha !== gitSha || folderSyncEvidence.verificationSha !== gitSha) {
+    throw new Error("RELEASE_BLOCKED: local/GitHub folder synchronization evidence does not match release SHA.");
+  }
   state = "A_SERVER_B_CONVERGENCE_CERTIFIED";
   console.log(`[STATE] Current State: ${state}`);
 
@@ -112,7 +142,7 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
   // STAGE 6: GitHub Check-Runs & Tripartite Folder Sync Proof Verification
   const repo = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPosv2";
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  let ciCheckRunsState = "VERIFIED_LOCAL_CAMPAIGN";
+  let ciCheckRunsState = "UNVERIFIED";
 
   if (token) {
     try {
@@ -136,6 +166,9 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
       }
     }
   }
+  if (process.env.NODE_ENV === "production-certification" && ciCheckRunsState !== "PASS") {
+    throw new Error(`RELEASE_BLOCKED: GitHub CI check-runs are not independently PASS for ${gitSha}.`);
+  }
 
   const syncEvidencePath = path.resolve(process.cwd(), "artifacts", "release-evidence", "kwakopos-folder-sync-evidence.json");
   let folderSyncEvidenceSha = "";
@@ -149,6 +182,19 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
     }
   }
 
+  if (!folderSyncEvidenceSha) {
+    throw new Error("RELEASE_BLOCKED: folder synchronization proof is missing verificationSha.");
+  }
+  if (folderSyncEvidenceSha === gitSha) {
+    console.warn("[WARN] verificationSha is a content digest, not a Git SHA; Git identity is checked via localHeadSha and GitHubResolvedCommitSha.");
+  }
+  if (promotion.trafficPercent !== 100 || promotion.liveIdentityMatch !== "PASS") {
+    throw new Error("RELEASE_BLOCKED: live traffic or identity proof is not PASS.");
+  }
+  if (browserEvidence.finalConvergenceStatus !== "PASS") {
+    throw new Error("RELEASE_BLOCKED: final browser convergence proof is not PASS.");
+  }
+
   const evidenceArtifact: ProductionReleaseEvidenceArtifact & { folderSyncState: string; folderSyncEvidenceSha: string; ciCheckRunsState: string } = {
     status: "PASS",
     deploymentMode: candidate.deploymentMode,
@@ -156,16 +202,16 @@ async function executeReleaseStateMachine(): Promise<ProductionReleaseEvidenceAr
     gitSha: candidate.gitSha,
     containerDigest: candidate.containerDigest,
     cloudRunService: process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service",
-    cloudRunRevision: candidate.candidateRevision,
+    cloudRunRevision: promotion.liveCloudRunRevision,
     candidateUrl: candidate.candidateUrl,
-    health: "PASS",
-    readiness: "PASS",
-    deployedIdentity: "PASS",
-    productionBrowser: "PASS",
-    browserAtoServerToB: "PASS",
-    expectedStock: 188,
-    trafficPercent: 100,
-    liveIdentity: "PASS",
+    health: deployedCert.health,
+    readiness: deployedCert.readiness,
+    deployedIdentity: deployedCert.identity,
+    productionBrowser: browserEvidence.finalConvergenceStatus,
+    browserAtoServerToB: browserEvidence.finalConvergenceStatus,
+    expectedStock: Number(browserEvidence.expectedStock) as 188,
+    trafficPercent: promotion.trafficPercent,
+    liveIdentity: promotion.liveIdentityMatch,
     folderSyncState: "PASS",
     folderSyncEvidenceSha,
     ciCheckRunsState,

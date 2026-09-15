@@ -1,5 +1,6 @@
 export default {
   testDir: "./tests/browser",
+  testMatch: /.*\.spec\.ts/,
   timeout: 120000,
   fullyParallel: false,
   workers: 1,

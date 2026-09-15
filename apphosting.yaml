@@ -23,3 +23,7 @@ env:
     secret: JWT_SECRET
     availability:
       - RUNTIME
+  - variable: SUPER_ADMIN_MFA_ENCRYPTION_KEY
+    secret: SUPER_ADMIN_MFA_ENCRYPTION_KEY
+    availability:
+      - RUNTIME

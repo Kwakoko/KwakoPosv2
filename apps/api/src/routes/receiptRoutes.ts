@@ -3,12 +3,16 @@ import { globalReceiptService } from "../services/receiptService.js";
 import { CreateReceiptRequestSchema, TenantContext } from "@kwakopos2/contracts";
 
 export function extractTenantContext(req: FastifyRequest): TenantContext {
+  const ctx = (req as any).tenantContext as TenantContext | undefined;
+  if (!ctx?.tenantId || !ctx?.branchId || !ctx?.userId) {
+    throw new Error("UNAUTHORIZED: Authenticated tenant context is required");
+  }
   return {
-    tenantId: (req.headers["x-tenant-id"] as string) || "TENANT-001",
-    branchId: (req.headers["x-branch-id"] as string) || "BRANCH-001",
-    userId: (req.headers["x-user-id"] as string) || "USER-CASHIER-001",
-    roles: ["ADMIN"],
-    permissions: ["*"],
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
+    userId: ctx.userId,
+    roles: Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r)) : [],
+    permissions: Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p)) : [],
   };
 }
 

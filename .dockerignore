@@ -1,0 +1,12 @@
+node_modules
+dist
+artifacts
+.git
+*.log
+.env
+.env.local
+coverage
+test-results
+apps/web/dist
+release-manifest.json
+

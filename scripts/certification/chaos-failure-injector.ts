@@ -131,7 +131,7 @@ export async function runChaosFailureInjectionSuite(): Promise<{
     status: "PENDING",
   });
 
-  const mig = db3.migrateToVersion(4);
+  const mig = await db3.migrateToVersion(4);
   const recovered3 = mig.newVersion === 4 && mig.preservedOutboxCount === 1;
 
   results.push({

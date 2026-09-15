@@ -17,7 +17,7 @@ export function renderCrmCommandCenter(props: CrmUiCardProps): string {
   const formattedPipelineValue = new Intl.NumberFormat("en-TZ", { style: "currency", currency: "TZS", maximumFractionDigits: 0 }).format(props.weightedPipelineValue);
 
   return `
-<div class="kcrml-command-center" style="background: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+<div class="kcrml-command-center" style="background: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; padding: 24px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
 
   <!-- 1. Lifecycle Progress Banner -->
   <div class="kcrml-banner" style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 24px;">

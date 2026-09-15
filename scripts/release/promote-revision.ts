@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import http from "http";
 import https from "https";
-import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion } from "@kwakopos2/domain";
+import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion, assessProductionRelease } from "@kwakopos2/domain";
 import { CandidateDeploymentEvidence } from "./deploy-candidate.js";
 
 export interface PromotionEvidence {
@@ -39,8 +39,12 @@ async function fetchHttpJson(url: string): Promise<{ statusCode: number; data: a
 }
 
 export async function promoteCandidateRevision(candidateInput?: CandidateDeploymentEvidence): Promise<PromotionEvidence> {
+  const targetTrafficPercent = process.env.PROMOTION_PERCENT
+    ? Math.max(1, Math.min(100, Number(process.env.PROMOTION_PERCENT)))
+    : 100;
+
   console.log("----------------------------------------------------------------");
-  console.log(" STEP 5 — Promote Certified Candidate Revision to 100% Traffic ");
+  console.log(` STEP 5 â€” Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
   console.log("----------------------------------------------------------------");
 
   const isProdCert = process.env.NODE_ENV === "production-certification";
@@ -60,8 +64,17 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     candidate = JSON.parse(fs.readFileSync(candidateFile, "utf8"));
   }
 
-  const project = process.env.GCP_PROJECT || "kwakoposv2";
-  const region = process.env.GCP_REGION || "us-central1";
+  const project = process.env.GCP_PROJECT || String(execSync("gcloud config get-value project", { encoding: "utf8" })).trim();
+  const region = process.env.GCP_REGION || String(execSync("gcloud config get-value compute/region", { encoding: "utf8" })).trim();
+  if (targetTrafficPercent > 0) {
+    const gateFile = path.resolve(process.cwd(), "artifacts", "release-evidence", "kwakopos-production-release-gate.json");
+    if (!fs.existsSync(gateFile)) throw new Error("RELEASE_BLOCKED: Step 25 production release gate evidence is missing");
+    const gateEvidence = JSON.parse(fs.readFileSync(gateFile, "utf8"));
+    const stage = targetTrafficPercent === 1 ? "PERCENT_1" : targetTrafficPercent === 5 ? "PERCENT_5" : targetTrafficPercent === 25 ? "PERCENT_25" : targetTrafficPercent === 50 ? "PERCENT_50" : "PERCENT_100";
+    const assessment = assessProductionRelease(gateEvidence, stage as any);
+    if (assessment.decision !== "PASS") throw new Error(`RELEASE_BLOCKED: Step 25 gate decision ${assessment.decision}: ${assessment.failedGates.join(", ")}`);
+  }  if (!project || project === "(unset)") throw new Error("RELEASE_BLOCKED: GCP project is not configured");
+  if (!region || region === "(unset)") throw new Error("RELEASE_BLOCKED: GCP region is not configured");
   const serviceName = process.env.CLOUD_RUN_SERVICE || "kwakopos-production-service";
   const digest = candidate.containerDigest || candidate.imageDigest;
 
@@ -72,8 +85,12 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
 
   try {
     execSync("gcloud --version", { stdio: "ignore" });
+    const trafficArg = targetTrafficPercent === 100
+      ? `${candidate.candidateRevision}=100`
+      : `${candidate.candidateRevision}=${targetTrafficPercent}`;
+
     execSync(
-      `gcloud run services update-traffic ${serviceName} --project=${project} --region=${region} --to-revisions=${candidate.candidateRevision}=100`,
+      `gcloud run services update-traffic ${serviceName} --project=${project} --region=${region} --to-revisions=${trafficArg}`,
       { stdio: "inherit" },
     );
 
@@ -88,8 +105,8 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     const certifiedTraffic = trafficList.find((t: any) => t.revisionName === candidate.candidateRevision);
     const totalTraffic = trafficList.reduce((sum: number, t: any) => sum + Number(t.percent || 0), 0);
 
-    if (!certifiedTraffic || certifiedTraffic.percent !== 100) {
-      throw new Error(`Traffic allocation mismatch: certified revision has ${certifiedTraffic?.percent || 0}% instead of 100%.`);
+    if (!certifiedTraffic || certifiedTraffic.percent !== targetTrafficPercent) {
+      throw new Error(`Traffic allocation mismatch: certified revision has ${certifiedTraffic?.percent || 0}% instead of ${targetTrafficPercent}%.`);
     }
     if (totalTraffic !== 100) {
       throw new Error(`Traffic allocation invalid: total reported traffic is ${totalTraffic}%, expected 100%.`);
@@ -121,13 +138,13 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     };
 
     assertReleaseIdentityMatch(liveIdentity, expectedCertified);
-    assertVerifiedTrafficPromotion(true, 100);
+    assertVerifiedTrafficPromotion(true, targetTrafficPercent);
 
     const evidence: PromotionEvidence = {
       status: "PASS",
       promotedRevision: candidate.candidateRevision,
       productionUrl,
-      trafficPercent: 100,
+      trafficPercent: targetTrafficPercent,
       liveGitSha: liveIdentity.gitSha,
       liveContainerDigest: liveIdentity.containerDigest,
       liveCloudRunRevision: liveIdentity.cloudRunRevision,
@@ -166,3 +183,4 @@ if (process.argv[1] && process.argv[1].endsWith("promote-revision.ts")) {
     process.exit(1);
   });
 }
+import { assessProductionRelease } from "@kwakopos2/domain";

@@ -42,11 +42,23 @@ export function certifyVersionSync(targetVersion?: string): VersionSyncCertifica
   console.log(" KWAKOPOS 2.0 MONOREPO VERSION SYNCHRONIZATION AUDITOR & CERTIFIER     ");
   console.log("========================================================================");
 
+  const releaseManifestPath = path.resolve(process.cwd(), "release-manifest.json");
+  let manifestVersion: string | null = null;
+  if (fs.existsSync(releaseManifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
+      manifestVersion = manifest?.appVersion || manifest?.version || null;
+    } catch { /* ignore */ }
+  }
   const rootPkgPath = path.resolve(process.cwd(), "package.json");
   const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
-  const rootVersion = targetVersion || rootPkg.version || "2.5.0";
+  const rootVersion = targetVersion || manifestVersion || rootPkg.version;
+  if (!rootVersion) throw new Error("No authoritative release version found.");
+  if (manifestVersion && rootPkg.version !== manifestVersion && !targetVersion) {
+    throw new Error(`Release manifest version ${manifestVersion} does not match root package version ${rootPkg.version}.`);
+  }
 
-  console.log(`[INFO] Ground Truth Version Target: v${rootVersion}`);
+  console.log(`[INFO] Ground Truth Version Target: v${rootVersion} (Authoritative source: ${manifestVersion ? "release-manifest.json" : "package.json"})`);
 
   const packageFiles = findWorkspacePackages();
   const checks: PackageVersionCheck[] = [];

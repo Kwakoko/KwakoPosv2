@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { FullSystemCertificationEngine } from "@kwakopos2/domain";
 
-describe("Phase 45 — Full KwakoPos Operating System Certification OS (KFOS-CERT v1.0.0)", () => {
+describe("Phase 45 — Full Kwakoko Business Operating System Certification OS (KFOS-CERT v1.0.0)", () => {
   let engine: FullSystemCertificationEngine;
 
   beforeEach(() => {
@@ -29,6 +29,6 @@ describe("Phase 45 — Full KwakoPos Operating System Certification OS (KFOS-CER
 
     const hs = engine.getHealthSummary("SYSTEM");
     expect(hs.authorityOperational).toBe(true);
-    expect(hs.totalCertifiedPillars).toBe(181);
+    expect(hs.totalCertifiedPillars).toBe(182);
   });
 });

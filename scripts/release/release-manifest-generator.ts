@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";
+import { execSync } from "child_process";
 
 export interface ReleaseManifest {
   product: string;
@@ -26,8 +27,10 @@ export function generateReleaseManifest(options?: {
 }): ReleaseManifest {
   const pkgPath = path.resolve(process.cwd(), "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-  const version = options?.version || pkg.version || "2.2.0";
-  const gitSha = options?.gitSha || process.env.GITHUB_SHA || "88c0662e2a8132f5fd6097f43d557c0c1086d067";
+  const version = options?.version || pkg.version;
+  if (!version) throw new Error("RELEASE_BLOCKED: package version is missing");
+  const gitSha = options?.gitSha || process.env.GITHUB_SHA || execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
   const buildId = options?.buildId || `build-${Date.now()}`;
 
   const manifestContent = JSON.stringify({ product: "KwakoPos", version, gitSha, buildId });
@@ -39,7 +42,7 @@ export function generateReleaseManifest(options?: {
     gitSha,
     buildId,
     artifactDigest,
-    schemaVersion: "2.2.0",
+    schemaVersion: version,
     sbomReference: `artifacts/releases/${version}/sbom.spdx.json`,
     provenanceReference: `artifacts/releases/${version}/provenance.json`,
     releaseRisk: options?.releaseRisk || "LOW",

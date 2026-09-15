@@ -6,6 +6,7 @@ import {
   generateTotpSecret,
   verifyTotpCode,
   issueSetupToken,
+  verifySetupToken,
   issueStepUpToken,
   verifyStepUpToken,
   generateWebAuthnChallenge,
@@ -50,9 +51,8 @@ describe("KwakoPos v2 — Super Admin Bootstrap & Authentication Security Suite"
     const token = issueSetupToken(userId);
     expect(token).toBeDefined();
 
-    const decoded = verifyAccessToken(token) as any;
-    expect(decoded.sub).toBe(userId);
-    expect(decoded.scope).toBe("super_admin_setup");
+    const verifiedUserId = verifySetupToken(token);
+    expect(verifiedUserId).toBe(userId);
   });
 
   it("4. Step-up authentication tokens must require matching target action and expire quickly", () => {

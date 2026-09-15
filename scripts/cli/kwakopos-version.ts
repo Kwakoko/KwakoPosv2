@@ -44,7 +44,7 @@ async function main() {
       if (isJson) console.log(JSON.stringify({ localFolder: localRepo.folderName, localVersion: drift.folderVersion, remoteVersion: remoteRelease.version, remoteTag: remoteRelease.tag, status: drift.status, reason: drift.reason, isDirty: localRepo.isDirty }, null, 2));
       else {
         console.log("========================================================================");
-        console.log(" KWAKOPOS LOCAL SEMANTIC VERSION FOLDER SYNCHRONIZATION STATUS           ");
+        console.log(" KWAKOKO BOS LOCAL VERSION FOLDER SYNCHRONIZATION STATUS                ");
         console.log("========================================================================");
         console.log(`Local Folder:      ${localRepo.folderName}`);
         console.log(`Local Version:     v${drift.folderVersion}`);

@@ -1,0 +1,48 @@
+name: Kwakoko Production Reliability & Observability Governance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-reliability-governance:
+    name: Production Reliability / Observability Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Step 14 Reliability Governance Verifier
+        run: npx tsx scripts/release/verify-production-reliability.ts
+      - name: Step 14 Contract Tests
+        run: npx vitest run tests/unit/production-reliability-governance.test.ts
+      - name: Brand Integrity Gate
+        run: npm run brand:verify
+      - name: Design System Gate
+        run: npm run design:verify
+      - name: Experience Integrity Gate
+        run: npm run experience:verify
+      - name: Workflow Integrity Gate
+        run: npm run workflow:verify
+      - name: AI Agent Governance Gate
+        run: npm run ai-governance:verify
+      - name: Security Trust Gate
+        run: npm run security-trust:verify
+      - name: Privacy Data Gate
+        run: npm run privacy-data:verify
+      - name: Data Lifecycle DR Gate
+        run: npm run lifecycle-dr:verify
+      - name: Observability Package Build
+        run: npm --workspace=@kwakopos2/observability run build
+      - name: Config Build
+        run: npm --workspace=@kwakopos2/config run build

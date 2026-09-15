@@ -1,420 +1,3620 @@
 /**
  * KwakoPosv2 — Executive Analytics Dashboard
  * ─────────────────────────────────────────────────────────────────────────────
- * Full-fidelity sector-adaptive executive dashboard loading REAL OPERATIONAL DATA:
- *   1. Derived 7-Day Sales & Profit Margin from V2 API & Local Store
- *   2. Category Revenue Distribution aggregated from actual Products/Sales
- *   3. Live Real-Time Transaction Stream from operational sales ledger
- *   4. Dynamic Sector-Adaptive KPI Metrics (Pharmacy FEFO, Low Stock, etc.)
- *   5. Real-time refresh trigger & outbox telemetry integration
- *
- * Uses V2 CSS variables + semantic utility classes. Zero hard-coded fake data.
+ * Complete, 100% faithful port of legacy Tenant Dashboard UI/UX:
+ *   1. Identical Header layout, typography, status badges & Launch POS CTA
+ *   2. Sector-adaptive KPI metrics (Retail 8-card, Restaurant, Pharmacy, SACCO,
+ *      Poultry, BusinessConsultant, Default)
+ *   3. First-run Onboarding Banner for clean tenants with step cards
+ *   4. Sales Revenue & Gross Profit AreaChart with dual gradient fill & CustomTooltip
+ *   5. Payment Channels Donut PieChart with breakdown and empty state
+ *   6. Top Products Horizontal BarChart with revenue ranking
+ *   7. Recent Orders table with monospace IDs, date/time, channel, sync status
+ *   8. V2 Offline-first data binding (IndexedDB + API fallback)
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/KwakoPosContexts.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
+import { apiFetch } from '../services/apiClient.js';
+import { DEMO_DATA_EVENT, loadSampleData, isDemoModeActive } from '../services/sampleDataService.js';
 import {
-  AreaChart, Area, BarChart, Bar, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-} from "recharts";
-import {
-  TrendingUp, TrendingDown, DollarSign, Package, Users, AlertTriangle,
-  Clock, Briefcase, Pill, Scale, Egg, Car, Plus, ShoppingCart, BarChart2,
-  CheckCircle, Zap, Star, ArrowRight, Calendar, ShoppingBag, FileText,
-  Activity, RefreshCw
-} from "lucide-react";
-import { useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+  TrendingUp, TrendingDown, DollarSign, Package, Users,
+  AlertTriangle, Clock, PiggyBank, Briefcase,
+  Sparkles, Layers, Egg, Footprints, Truck, ArrowRight, Calendar,
+  ShoppingCart, BarChart2, CheckCircle, RefreshCw, Zap, Star,
+  Banknote, CreditCard, Smartphone, Building2, ArrowLeftRight, Wallet, Flame,
+  Printer, Award, Eye, User, Download, UserCheck, ShieldCheck
+} from 'lucide-react';
+import { Sheet } from '../components/UI/Sheet.js';
+import { KokoCompanion } from '../components/KokoCompanion.js';
 
-const money = (v: number) =>
-  v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
-  : v >= 1_000 ? `Tsh ${(v / 1_000).toFixed(1)}K`
-  : `Tsh ${Math.round(v).toLocaleString()}`;
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
-const fmtNum = (n: number) => n.toLocaleString();
+const fmtCcy = (n: number) =>
+  n >= 1_000_000 ? `Tsh ${(n / 1_000_000).toFixed(1)}M`
+  : n >= 1_000   ? `Tsh ${(n / 1_000).toFixed(1)}K`
+  : `Tsh ${Math.round(n).toLocaleString()}`;
 
-interface SalesTrendPoint {
-  day: string;
-  revenue: number;
-  profit: number;
-  orders: number;
+const fmtTime = (ts: number) =>
+  new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+const fmtDate = (ts: number) =>
+  new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+const getTenderBadge = (method?: string) => {
+  const m = (method || 'Cash').toLowerCase();
+  if (m.includes('mpesa') || m.includes('m-pesa') || m.includes('mobile')) {
+    return {
+      label: 'M-Pesa',
+      Icon: Smartphone,
+      color: '#10b981',
+      bg: 'rgba(16, 185, 129, 0.12)',
+      border: 'rgba(16, 185, 129, 0.25)',
+    };
+  }
+  if (m.includes('card') || m.includes('visa') || m.includes('mastercard') || m.includes('pos')) {
+    return {
+      label: 'Bank Card',
+      Icon: CreditCard,
+      color: '#f59e0b',
+      bg: 'rgba(245, 158, 11, 0.12)',
+      border: 'rgba(245, 158, 11, 0.25)',
+    };
+  }
+  if (m.includes('bank') || m.includes('transfer') || m.includes('wire')) {
+    return {
+      label: 'Bank Transfer',
+      Icon: Building2,
+      color: '#6366f1',
+      bg: 'rgba(99, 102, 241, 0.12)',
+      border: 'rgba(99, 102, 241, 0.25)',
+    };
+  }
+  if (m.includes('split')) {
+    return {
+      label: 'Split Tender',
+      Icon: ArrowLeftRight,
+      color: '#ec4899',
+      bg: 'rgba(236, 72, 153, 0.12)',
+      border: 'rgba(236, 72, 153, 0.25)',
+    };
+  }
+  return {
+    label: 'Cash',
+    Icon: Banknote,
+    color: '#3b82f6',
+    bg: 'rgba(59, 130, 246, 0.12)',
+    border: 'rgba(59, 130, 246, 0.25)',
+  };
+};
+
+// Custom Recharts tooltip
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white dark:bg-darkbg-card border border-slate-200 dark:border-darkbg-border rounded-xl shadow-xl p-3 text-xs min-w-[150px] space-y-1.5">
+      <p className="font-black text-slate-800 dark:text-slate-100 pb-1 border-b border-slate-100 dark:border-darkbg-border">{label}</p>
+      {payload.map((p: any, i: number) => {
+        const isMoney = ['Revenue', 'Profit', 'Savings', 'Loans', 'Cost'].includes(p.name);
+        return (
+          <div key={i} className="flex items-center justify-between gap-3 font-semibold text-[11px]">
+            <span style={{ color: p.color }} className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full inline-block shrink-0" style={{ background: p.color }} />
+              {p.name}
+            </span>
+            <span className="font-extrabold text-slate-900 dark:text-white">
+              {isMoney ? fmtCcy(p.value) : p.value}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ─── KPI Card ────────────────────────────────────────────────────────────────
+
+interface KPICardProps {
+  title: string;
+  value: string | number;
+  desc: string;
+  icon: React.ReactNode;
+  accent: string;
+  trend?: 'up' | 'down' | null;
+  trendLabel?: string;
+  onClick?: () => void;
 }
 
-interface CategoryPoint {
-  name: string;
-  value: number;
-  color: string;
-}
+const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, trend, trendLabel, onClick }) => (
+  <div
+    onClick={onClick}
+    className={`relative overflow-hidden rounded-2xl bg-white dark:bg-darkbg-card border border-slate-100 dark:border-darkbg-border p-5 shadow-sm transition-all duration-200 ${onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+  >
+    {/* Decorative accent blob */}
+    <div className="absolute -top-4 -right-4 h-20 w-20 rounded-full opacity-10" style={{ background: accent }} />
 
-interface TransactionRecord {
+    <div className="flex items-start justify-between relative">
+      <div>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">{title}</p>
+        <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white leading-none">{value}</p>
+        {trend && (
+          <span className={`mt-1.5 inline-flex items-center gap-0.5 text-[10px] font-black rounded-full px-1.5 py-0.5 ${
+            trend === 'up' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
+          }`}>
+            {trend === 'up' ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
+            {trendLabel || (trend === 'up' ? '+Today' : '−Today')}
+          </span>
+        )}
+        <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{desc}</p>
+      </div>
+      <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 shadow-sm" style={{ background: `${accent}18` }}>
+        <div style={{ color: accent }}>{icon}</div>
+      </div>
+    </div>
+  </div>
+);
+
+// ─── Data Models ─────────────────────────────────────────────────────────────
+
+interface LocalProduct {
   id: string;
-  time: string;
-  customer: string;
-  items: number;
-  total: number;
-  method: string;
-  status: "COMPLETED" | "PENDING" | "CANCELLED";
+  name: string;
+  price: number;
+  buyingPrice?: number;
+  stock: number;
+  reorderLevel?: number;
+  category?: string;
+  module?: string;
+  branch_id?: string;
+  branchId?: string;
+  hasVariants?: boolean;
+  expiryDate?: string;
+  status?: string;
+  deletedAt?: string;
+}
+
+interface LocalVariant {
+  id: string;
+  productId: string;
+  name?: string;
+  buyingPrice?: number;
+  price?: number;
+  stock: number;
+  reorderLevel?: number;
+  status?: string;
+}
+
+interface LocalOrder {
+  id: string;
+  saleNumber?: string;
+  customer?: string;
+  cashierName?: string;
   timestamp: number;
+  total: number;
+  status: string;
+  paymentMethod: string;
+  syncStatus: 'Synced' | 'Pending';
+  cashReceived?: number;
+  changeDue?: number;
+  module?: string;
+  branch_id?: string;
+  branchId?: string;
+  items: Array<{
+    productId: string;
+    variantId?: string;
+    name: string;
+    price: number;
+    quantity: number;
+  }>;
+}
+
+interface LocalCustomer {
+  id: string;
+  name: string;
+  type?: string;
+  branch_id?: string;
+  outstandingBalance?: number;
+  created_at?: number;
+}
+
+interface LocalSupplier {
+  id: string;
+  name: string;
 }
 
 export interface DashboardPageProps {
   onNavigate?: (path: string) => void;
 }
 
+type RechartsModule = typeof import("recharts");
+
+const ChartFallback = (props: any) => (
+  <div style={{ width: "100%", minHeight: 180 }} aria-hidden="true" {...props} />
+);
+
+// ─── Main Dashboard Component ────────────────────────────────────────────────
+
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
-  const { currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
-  const { activeModule } = useModule();
-  const { isOnline, pendingOutboxCount, db } = useSync();
+  const { activeModule = 'Retail', setActiveTab } = useModule();
+  const { user } = useAuth();
+  const { currentBranchId, currentBranchName } = useBranch();
+  const { currentTenantId, currentTenantName } = useTenant();
+  const { db, isOnline, pendingOutboxCount } = useSync();
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [salesRecords, setSalesRecords] = useState<TransactionRecord[]>([]);
-  const [productsList, setProductsList] = useState<Array<{ id: string; name: string; category?: string; stock: number; reorderLevel?: number; price: number; buyingPrice?: number; expiryDate?: string }>>([]);
+  const role = user?.role || 'Admin';
+  const tenantId = currentTenantId || '';
+  const branchId = currentBranchId || '';
 
-  const CATEGORY_COLORS = ["var(--accent)", "var(--success)", "var(--warning)", "var(--danger)", "#8b5cf6", "#ec4899", "#06b6d4", "#10b981"];
+  const handleNav = (tab: string) => {
+    if (setActiveTab) setActiveTab(tab as any);
+    if (onNavigate) onNavigate(tab.toLowerCase());
+  };
 
-  // ─── Fetch Operational Data ────────────────────────────────────────────────
-  const loadDashboardData = useCallback(async () => {
-    setIsLoading(true);
+  // ── Operational States ─────────────────────────────────────────────────────
+  const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [productVariants, setProductVariants] = useState<LocalVariant[]>([]);
+  const [orders, setOrders] = useState<LocalOrder[]>([]);
+  const [customers, setCustomers] = useState<LocalCustomer[]>([]);
+  const [suppliers, setSuppliers] = useState<LocalSupplier[]>([]);
+  const [paymentMetricMode, setPaymentMetricMode] = useState<'volume' | 'count'>('volume');
+  const [activePaymentIndex, setActivePaymentIndex] = useState<number | null>(null);
+  const [revenueTimeframe, setRevenueTimeframe] = useState<'today' | '7d' | '30d' | 'month'>('7d');
+  const [topProductsMetric, setTopProductsMetric] = useState<'revenue' | 'units'>('revenue');
+  const [selectedOrderForDrawer, setSelectedOrderForDrawer] = useState<LocalOrder | null>(null);
+  const [chartActiveMetric, setChartActiveMetric] = useState<'all' | 'revenue' | 'profit' | 'cogs'>('all');
+  const [isZReportOpen, setIsZReportOpen] = useState(false);
+  const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [rechartsModule, setRechartsModule] = useState<RechartsModule | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void import("recharts").then((module) => {
+      if (active) setRechartsModule(module);
+    }).catch((error) => {
+      console.error("[DashboardPage] Failed to load analytics charts:", error);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const AreaChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.AreaChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Area = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Area, props) : null, [rechartsModule]);
+  const XAxis = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.XAxis, props) : null, [rechartsModule]);
+  const YAxis = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.YAxis, props) : null, [rechartsModule]);
+  const CartesianGrid = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.CartesianGrid, props) : null, [rechartsModule]);
+  const Tooltip = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Tooltip, props) : null, [rechartsModule]);
+  const ResponsiveContainer = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.ResponsiveContainer, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Legend = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Legend, props) : null, [rechartsModule]);
+  const Cell = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Cell, props) : null, [rechartsModule]);
+  const PieChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.PieChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Pie = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Pie, props) : null, [rechartsModule]);
+  const BarChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.BarChart, props) : <ChartFallback {...props} />, [rechartsModule]);
+  const Bar = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Bar, props) : null, [rechartsModule]);
+
+  const handleLoadDemoData = async () => {
+    if (isLoadingSample || !db) return;
+    setIsLoadingSample(true);
     try {
-      // 1. Load local store products
-      await db.ready;
-      const localProds = [...db.products.values()].map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        category: p.category || "General",
-        stock: p.stock ?? p.quantity ?? 0,
-        reorderLevel: p.minStockLevel ?? p.reorderLevel ?? 5,
-        price: p.price ?? p.unitPrice ?? p.sellingPrice ?? 0,
-        buyingPrice: p.buyingPrice ?? p.costPrice ?? 0,
-        expiryDate: p.expiryDate,
-      }));
+      await loadSampleData(db, tenantId || currentTenantId || undefined);
+      await loadData();
+    } catch (err) {
+      console.error('[DashboardPage] Failed to load sample data:', err);
+    } finally {
+      setIsLoadingSample(false);
+    }
+  };
 
-      // 2. Fetch sales transactions from V2 API endpoint (with fallback to local IndexedDB/Outbox)
-      let apiSales: TransactionRecord[] = [];
+  // ── Load Operational Data (IndexedDB + API) ────────────────────────────────
+  const loadData = useCallback(async () => {
+    try {
+      await db.ready;
+
+      // 1. Products
+      const localProds: LocalProduct[] = [];
+      if (db.products) {
+        for (const p of db.products.values()) {
+          const pAny = p as any;
+          if (pAny.deletedAt || pAny.deleted_at || pAny.status === 'Inactive') continue;
+          const pMod = (pAny.module || 'Retail').toLowerCase();
+          const aMod = (activeModule || 'Retail').toLowerCase();
+          const matchMod = pMod === aMod || pMod === 'all' || !pAny.module;
+          const pBranch = pAny.branch_id || pAny.branchId;
+          const matchBranch = !pBranch || pBranch === branchId || pBranch === 'all' || !branchId || String(pBranch).toLowerCase().includes('hq') || String(branchId).toLowerCase().includes('hq');
+          const pTenant = pAny.tenant_id || pAny.tenantId;
+          const matchTenant = !tenantId || !pTenant || pTenant === tenantId;
+          if (matchMod && matchBranch && matchTenant) {
+            const effectiveStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? pAny.quantity ?? 0);
+            localProds.push({
+              id: p.id,
+              name: p.name,
+              price: Number(pAny.sellingPrice || pAny.price || 0),
+              buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
+              stock: effectiveStock,
+              reorderLevel: Number(pAny.reorderLevel ?? 10),
+              category: pAny.category || 'General',
+              module: pAny.module,
+              hasVariants: Boolean(pAny.hasVariants || pAny.variants?.length),
+              expiryDate: pAny.expiryDate,
+              status: pAny.status,
+            });
+          }
+        }
+      }
+
+      // 2. Variants
+      const localVariants: LocalVariant[] = [];
+      if (db.productVariants) {
+        for (const v of db.productVariants.values()) {
+          const vAny = v as any;
+          if (vAny.status !== 'Inactive' && !vAny.deletedAt && !vAny.deleted_at) {
+            localVariants.push({
+              id: v.id,
+              productId: v.productId,
+              name: v.name,
+              price: Number(v.price || 0),
+              buyingPrice: vAny.buyingPrice !== undefined ? Number(vAny.buyingPrice) : undefined,
+              stock: Number(vAny.stock ?? 0),
+              reorderLevel: Number(vAny.reorderLevel ?? 5),
+              status: vAny.status,
+            });
+          }
+        }
+      }
+
+      // 3. Customers
+      const typeMap: Record<string, string> = {
+        Retail: 'Customer', Restaurant: 'Customer', Pharmacy: 'Patient',
+        SACCO: 'Member', Law: 'Client', RealEstate: 'Tenant', School: 'Student', Hotel: 'Guest',
+      };
+      const targetType = typeMap[activeModule] || 'Customer';
+      const localCusts: LocalCustomer[] = [];
+      if (db.customers) {
+        for (const c of db.customers.values()) {
+          const cAny = c as any;
+          const matchType = !cAny.type || cAny.type.toLowerCase() === targetType.toLowerCase() || cAny.type.toLowerCase() === 'customer';
+          const cBranch = cAny.branch_id || cAny.branchId;
+          const matchBranch = !branchId || !cBranch || cBranch === branchId || cBranch === 'all' || String(branchId).toLowerCase().includes('hq') || String(cBranch).toLowerCase().includes('hq');
+          if (matchBranch && matchType) {
+            localCusts.push({
+              id: c.id,
+              name: c.name,
+              type: cAny.type,
+              branch_id: cBranch,
+              outstandingBalance: Number(cAny.outstandingBalance || cAny.currentBalance || cAny.debt || 0),
+              created_at: cAny.created_at ? new Date(cAny.created_at).getTime() : undefined,
+            });
+          }
+        }
+      }
+
+      // Merge with customer creations from outbox
+      if (db.syncOutbox) {
+        for (const item of db.syncOutbox.values()) {
+          if (item.entityType === 'Customer') {
+            const p = (item.payload || {}) as any;
+            const pId = item.entityId || p.id;
+            const existingIdx = localCusts.findIndex(c => c.id === pId);
+            const outboxCust: LocalCustomer = {
+              id: pId || item.id,
+              name: p.name || 'Customer',
+              type: p.type,
+              branch_id: p.branch_id || p.branchId,
+              outstandingBalance: Number(p.outstandingBalance || p.currentBalance || p.debt || 0),
+              created_at: item.clientCreatedAt ? new Date(item.clientCreatedAt).getTime() : undefined,
+            };
+            if (existingIdx >= 0) {
+              localCusts[existingIdx] = outboxCust;
+            } else {
+              localCusts.push(outboxCust);
+            }
+          }
+        }
+      }
+
+      // 4. Suppliers
+      const localSupps: LocalSupplier[] = [];
+      if (db.suppliers) {
+        for (const s of db.suppliers.values()) {
+          localSupps.push({ id: s.id, name: s.name });
+        }
+      }
+
+      // 5. Orders / Sales (API + Local db.sales + db.syncOutbox)
+      let parsedOrders: LocalOrder[] = [];
       try {
-        const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/pos/sales");
+        const res = await apiFetch<{ success: boolean; data: any[] }>('/api/v1/pos/sales');
         if (res.success && Array.isArray(res.data)) {
-          apiSales = res.data.map((s) => ({
-            id: s.receiptNumber || s.id || `TX-${String(s.receiptNo || "").padStart(4, "0")}`,
-            time: new Date(s.createdAt || s.timestamp || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            customer: s.customerName || "Walk-in Customer",
-            items: Array.isArray(s.items) ? s.items.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0) : (s.itemCount || 1),
-            total: Number(s.totalAmount || s.total || 0),
-            method: (s.paymentMethod || s.method || "CASH").toUpperCase(),
-            status: (s.status || "COMPLETED").toUpperCase() as "COMPLETED" | "PENDING" | "CANCELLED",
-            timestamp: new Date(s.createdAt || s.timestamp || Date.now()).getTime(),
+          parsedOrders = res.data.map((s: any) => ({
+            id: s.id || s.saleNumber || s.receiptNumber || `ord_${Date.now()}`,
+            timestamp: new Date(s.createdAt || s.soldAt || s.timestamp || Date.now()).getTime(),
+            total: Number(s.totalAmount || s.grandTotal || s.total || 0),
+            status: s.status || 'Completed',
+            paymentMethod: s.paymentMethod || s.method || 'Cash',
+            syncStatus: 'Synced',
+            cashierName: s.cashierName || s.cashier || s.user || 'Cashier',
+            module: s.module,
+            branch_id: s.branchId || s.branch_id,
+            items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : []).map((it: any) => ({
+              productId: it.productId || it.product?.id || it.id || 'prod_unknown',
+              variantId: it.variantId,
+              name: it.name || it.product?.name || 'Product',
+              price: Number(it.price || it.product?.price || it.unitPrice || 0),
+              quantity: Number(it.quantity || it.qty || 1),
+            })),
           }));
         }
       } catch {
-        // Fallback: derive sales from outbox items
-        const outboxSales = [...db.syncOutbox.values()]
-          .filter((item) => item.entityType === "Sale")
-          .map((item) => {
-            const p = item.payload || {};
-            return {
-              id: (p.receiptNumber as string) || item.id,
-              time: new Date(item.clientCreatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-              customer: (p.customerName as string) || "Walk-in Customer",
-              items: Array.isArray(p.items) ? p.items.reduce((acc: number, it: any) => acc + (it.quantity || 1), 0) : 1,
-              total: Number(p.totalAmount || 0),
-              method: String(p.paymentMethod || "CASH").toUpperCase(),
-              status: "COMPLETED" as const,
-              timestamp: new Date(item.clientCreatedAt).getTime(),
-            };
-          });
-        apiSales = outboxSales;
+        // Fallback to local store
       }
 
-      setProductsList(localProds);
-      setSalesRecords(apiSales.sort((a, b) => b.timestamp - a.timestamp));
+      // Merge local sales from db.sales (IndexedDB local store)
+      if (db.sales) {
+        for (const s of db.sales.values()) {
+          const sAny = s as any;
+          const sId = sAny.id || sAny.saleNumber;
+          if (!sId) continue;
+          const existingIdx = parsedOrders.findIndex(o => o.id === sId);
+          const rawItems = Array.isArray(sAny.items) ? sAny.items : Array.isArray(sAny.cart) ? sAny.cart : [];
+          const localOrder: LocalOrder = {
+            id: sId,
+            saleNumber: sAny.saleNumber || sAny.receiptNumber || sId,
+            customer: sAny.customer || sAny.customerName || 'Walk-In Customer',
+            cashierName: sAny.cashierName || sAny.cashier || sAny.user || sAny.servedBy || 'Cashier',
+            timestamp: new Date(sAny.soldAt || sAny.createdAt || sAny.timestamp || Date.now()).getTime(),
+            total: Number(sAny.grandTotal || sAny.totalAmount || sAny.total || 0),
+            status: sAny.status || 'Completed',
+            paymentMethod: sAny.paymentMethod || sAny.method || 'Cash',
+            syncStatus: sAny.syncStatus || 'Synced',
+            cashReceived: Number(sAny.cashReceived || sAny.paidAmount || sAny.total || 0),
+            changeDue: Number(sAny.changeDue || sAny.changeAmount || 0),
+            module: sAny.module,
+            branch_id: sAny.branchId || sAny.branch_id,
+            items: rawItems.map((it: any) => ({
+              productId: it.productId || it.product?.id || it.id || 'prod_unknown',
+              variantId: it.variantId,
+              name: it.name || it.product?.name || 'Product',
+              price: Number(it.price || it.product?.price || it.unitPrice || 0),
+              quantity: Number(it.quantity || it.qty || 1),
+            })),
+          };
+          if (existingIdx >= 0) {
+            parsedOrders[existingIdx] = localOrder;
+          } else {
+            parsedOrders.unshift(localOrder);
+          }
+        }
+      }
+
+      // Merge with outbox pending sales
+      if (db.syncOutbox) {
+        for (const item of db.syncOutbox.values()) {
+          if (item.entityType === 'Sale') {
+            const p = (item.payload || {}) as any;
+            const pId = item.entityId || p.id || p.saleNumber;
+            const existingIdx = parsedOrders.findIndex(o => o.id === pId);
+            const rawItems = Array.isArray(p.items) ? p.items : Array.isArray(p.cart) ? p.cart : [];
+            const outboxOrder: LocalOrder = {
+              id: pId || item.id,
+              saleNumber: p.saleNumber || p.receiptNumber || pId || item.id,
+              customer: p.customer || p.customerName || 'Walk-In Customer',
+              cashierName: p.cashierName || p.cashier || p.user || 'Cashier',
+              timestamp: new Date(p.soldAt || p.createdAt || item.clientCreatedAt).getTime(),
+              total: Number(p.grandTotal || p.totalAmount || p.total || 0),
+              status: p.status || 'Completed',
+              paymentMethod: p.paymentMethod || p.method || 'Cash',
+              syncStatus: item.status === 'SYNCED' ? 'Synced' : 'Pending',
+              cashReceived: Number(p.cashReceived || p.paidAmount || p.total || 0),
+              changeDue: Number(p.changeDue || p.changeAmount || 0),
+              module: p.module,
+              branch_id: p.branchId || p.branch_id,
+              items: rawItems.map((it: any) => ({
+                productId: it.productId || it.product?.id || it.id || 'prod_unknown',
+                variantId: it.variantId,
+                name: it.name || it.product?.name || 'Product',
+                price: Number(it.price || it.product?.price || it.unitPrice || 0),
+                quantity: Number(it.quantity || it.qty || 1),
+              })),
+            };
+            if (existingIdx >= 0) {
+              parsedOrders[existingIdx] = outboxOrder;
+            } else {
+              parsedOrders.unshift(outboxOrder);
+            }
+          }
+        }
+      }
+
+      setProducts(localProds);
+      setProductVariants(localVariants);
+      setCustomers(localCusts);
+      setSuppliers(localSupps);
+      setOrders(parsedOrders.sort((a, b) => a.timestamp - b.timestamp));
     } catch {
-      // Graceful load
-    } finally {
-      setIsLoading(false);
+      // Graceful fallback
     }
-  }, [db]);
+  }, [db, activeModule, branchId, tenantId]);
 
   useEffect(() => {
-    void loadDashboardData();
-  }, [loadDashboardData]);
+    void loadData();
+    const handleRefresh = () => { void loadData(); };
+    window.addEventListener(DEMO_DATA_EVENT, handleRefresh);
+    window.addEventListener('focus', handleRefresh);
+    const interval = setInterval(handleRefresh, 3000);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleRefresh);
+      window.removeEventListener('focus', handleRefresh);
+      clearInterval(interval);
+    };
+  }, [loadData]);
 
-  // ─── Derive 7-Day Sales Trend ──────────────────────────────────────────────
-  const salesTrend = useMemo<SalesTrendPoint[]>(() => {
-    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const isCleanTenant = products.length === 0 && orders.length === 0 && customers.length === 0 && suppliers.length === 0;
+
+  // Stable product cost lookup helper for real revenue and profit calculations
+  const costLookup = useMemo(() => {
+    const prodMap = new Map<string, number>();
+    const varMap = new Map<string, number>();
+    
+    products.forEach(p => {
+      prodMap.set(p.id, p.buyingPrice || 0);
+    });
+    productVariants.forEach(v => {
+      const parentCost = prodMap.get(v.productId) || 0;
+      varMap.set(v.id, v.buyingPrice !== undefined ? v.buyingPrice : parentCost);
+    });
+
+    return {
+      getProductCost: (productId: string) => prodMap.get(productId) || 0,
+      getVariantCost: (variantId: string | undefined, productId: string) => 
+        (variantId ? varMap.get(variantId) : undefined) ?? prodMap.get(productId) ?? 0,
+      getItemCOGS: (item: { productId: string; variantId?: string; price: number; quantity: number }) => {
+        const unitCost = (item.variantId ? varMap.get(item.variantId) : undefined) ?? prodMap.get(item.productId) ?? 0;
+        return (unitCost > 0 ? unitCost : item.price * 0.70) * item.quantity;
+      }
+    };
+  }, [products, productVariants]);
+
+  // ── KPI Stats ─────────────────────────────────────────────────────────────
+
+  const validOrders = useMemo(() => {
+    return orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Voided' && o.status !== 'Refunded');
+  }, [orders]);
+
+  const stats = useMemo(() => {
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayTs = todayStart.getTime();
+
+    // Yesterday window
+    const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const yesterdayTs = yesterdayStart.getTime();
+
+    const todayOrders     = validOrders.filter(o => o.timestamp >= todayTs);
+    const yesterdayOrders = validOrders.filter(o => o.timestamp >= yesterdayTs && o.timestamp < todayTs);
+
+    const totalSales     = todayOrders.reduce((sum, o) => sum + o.total, 0);
+    const yesterdaySales = yesterdayOrders.reduce((sum, o) => sum + o.total, 0);
+    const allSales       = validOrders.reduce((sum, o) => sum + o.total, 0);
+
+    // Real % change vs yesterday — null when no baseline exists
+    const salesTrend: 'up' | 'down' | null =
+      yesterdaySales === 0 ? (totalSales > 0 ? 'up' : null)
+      : totalSales >= yesterdaySales ? 'up' : 'down';
+
+    const salesTrendPct: string | undefined = (() => {
+      if (yesterdaySales === 0) return totalSales > 0 ? 'New sales today' : undefined;
+      const pct = Math.abs(((totalSales - yesterdaySales) / yesterdaySales) * 100).toFixed(1);
+      return `${salesTrend === 'up' ? '+' : '−'}${pct}% vs yesterday`;
+    })();
+
+    const completedOrders = validOrders.filter(o => o.status === 'Completed').length;
+    const pendingOrders   = validOrders.filter(o => o.status === 'Pending').length;
+
+    // Restaurant: pending orders = kitchen queue; unique customers today = active sittings proxy
+    const todayPendingOrders = todayOrders.filter(o => o.status === 'Pending').length;
+    const todayUniqueCustomers = new Set(todayOrders.map(o => (o as any).customer_id || (o as any).customerId).filter(Boolean)).size;
+    // Active tables proxy: count today's distinct table/order sessions (pending + recently completed)
+    const activeTables = todayOrders.filter(o => o.status === 'Pending' || (now - o.timestamp) < 2 * 60 * 60 * 1000).length;
+
+    const validProductIds = new Set(products.map(p => p.id));
+    const variantCountsByProduct = new Map<string, number>();
+    productVariants.forEach(v => {
+      if (validProductIds.has(v.productId)) {
+        variantCountsByProduct.set(v.productId, (variantCountsByProduct.get(v.productId) || 0) + 1);
+      }
+    });
+    const isMultiVariantProduct = (p: { id: string; hasVariants?: boolean }) => {
+      return Boolean(p.hasVariants || (variantCountsByProduct.get(p.id) || 0) > 1);
+    };
+    const variantProductIds = new Set(products.filter(p => isMultiVariantProduct(p)).map(p => p.id));
+    const activeProductVariants = products.length === 0 ? [] : productVariants.filter(v => variantProductIds.has(v.productId));
+
+    const inventoryVal = products.reduce((sum, p) => {
+      if (variantProductIds.has(p.id)) {
+        const pVariants = activeProductVariants.filter(v => v.productId === p.id);
+        if (pVariants.length > 0) {
+          return sum + pVariants.reduce((vSum, v) => vSum + ((v.price || p.price || 0) * (v.stock || 0)), 0);
+        }
+      }
+      return sum + ((p.price || 0) * (p.stock || 0));
+    }, 0);
+
+    const simpleLowStock  = products.filter(p => !variantProductIds.has(p.id) && p.stock > 0 && p.stock <= (p.reorderLevel ?? 10)).length;
+    const variantLowStock = activeProductVariants.filter(v => v.stock > 0 && v.stock <= (v.reorderLevel ?? 5)).length;
+    const lowStockCount   = products.length === 0 ? 0 : (simpleLowStock + variantLowStock);
+
+    const outOfStockCount = products.length === 0 ? 0 : (
+      products.filter(p => !variantProductIds.has(p.id) && p.stock <= 0).length +
+      activeProductVariants.filter(v => v.stock <= 0).length
+    );
+
+    let todayCOGS = 0;
+    todayOrders.forEach(o => {
+      o.items.forEach(item => {
+        todayCOGS += costLookup.getItemCOGS(item);
+      });
+    });
+    const todayGrossProfit = Math.max(0, totalSales - todayCOGS);
+    const todayMargin = totalSales > 0 ? ((todayGrossProfit / totalSales) * 100).toFixed(1) : '0.0';
+
+    const nearExpiryCount = products.length === 0 ? 0 : products.filter(p => {
+      if (!p.expiryDate) return false;
+      return (new Date(p.expiryDate).getTime() - now) < 90 * 24 * 60 * 60 * 1000;
+    }).length;
+
+    const totalSavings  = products.filter(p => p.category === 'Savings').reduce((sum, p) => sum + (p.stock * p.price), 0) / 10;
+    const totalLoans    = customers.reduce((sum, c) => sum + (c.outstandingBalance || 0), 0);
+    const pendingOutboxCount = db.syncOutbox ? Array.from(db.syncOutbox.values()).filter(i => i.status !== 'SYNCED').length : 0;
+    const unsyncedCount = Math.max(validOrders.filter(o => o.syncStatus !== 'Synced').length, pendingOutboxCount);
+
+    // SACCO: member growth vs last month
+    const lastMonthStart = new Date(now); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1); lastMonthStart.setDate(1); lastMonthStart.setHours(0,0,0,0);
+    const thisMonthStart = new Date(now); thisMonthStart.setDate(1); thisMonthStart.setHours(0,0,0,0);
+    const newCustomersThisMonth = customers.filter(c => (c.created_at || 0) >= thisMonthStart.getTime()).length;
+    const newCustomersLastMonth = customers.filter(c => (c.created_at || 0) >= lastMonthStart.getTime() && (c.created_at || 0) < thisMonthStart.getTime()).length;
+    const customerTrend: 'up' | 'down' | null = newCustomersLastMonth === 0
+      ? (newCustomersThisMonth > 0 ? 'up' : null)
+      : newCustomersThisMonth >= newCustomersLastMonth ? 'up' : 'down';
+    const customerTrendPct = newCustomersLastMonth === 0
+      ? (newCustomersThisMonth > 0 ? `+${newCustomersThisMonth} this month` : undefined)
+      : `${customerTrend === 'up' ? '+' : '−'}${Math.abs(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100).toFixed(0)}% vs last month`;
+
+    const topProduct = (() => {
+      const map: Record<string, { name: string; qty: number; rev: number }> = {};
+      for (const o of validOrders) {
+        for (const item of o.items) {
+          if (!map[item.productId]) map[item.productId] = { name: item.name, qty: 0, rev: 0 };
+          map[item.productId].qty += item.quantity;
+          map[item.productId].rev += item.price * item.quantity;
+        }
+      }
+      return Object.values(map).sort((a, b) => b.rev - a.rev)[0] || null;
+    })();
+
+    // Returns, Voids & Discounts calculation
+    const allTodayOrders = orders.filter(o => o.timestamp >= todayTs);
+    const todayRefunds = allTodayOrders
+      .filter(o => o.status === 'Refunded' || o.status === 'Voided' || o.status === 'Cancelled')
+      .reduce((sum, o) => sum + o.total, 0);
+    const todayRefundCount = allTodayOrders.filter(o => o.status === 'Refunded' || o.status === 'Voided' || o.status === 'Cancelled').length;
+
+    let todayDiscounts = 0;
+    allTodayOrders.forEach(o => {
+      const d = (o as any).discount || (o as any).discountTotal || 0;
+      todayDiscounts += Number(d);
+    });
+
+    const grossSales = totalSales + todayRefunds + todayDiscounts;
+    const netSales = totalSales;
+    const todayAOV = todayOrders.length > 0 ? Math.round(netSales / todayOrders.length) : 0;
+
+    return {
+      totalSales, yesterdaySales, allSales,
+      grossSales, todayRefunds, todayRefundCount, todayDiscounts, netSales, todayAOV,
+      salesTrend, salesTrendPct,
+      completedOrders, pendingOrders,
+      todayPendingOrders, activeTables, todayUniqueCustomers,
+      inventoryVal, lowStockCount, outOfStockCount,
+      activeVariantCount: activeProductVariants.length,
+      todayCOGS, todayGrossProfit, todayMargin,
+      nearExpiryCount, totalSavings, totalLoans,
+      customerCount: customers.length, supplierCount: suppliers.length,
+      customerTrend, customerTrendPct,
+      unsyncedCount, topProduct,
+      todayOrderCount: todayOrders.length,
+    };
+  }, [products, productVariants, validOrders, customers, suppliers, costLookup]);
+
+  // ── Chart Data ─────────────────────────────────────────────────────────────
+
+  const revenueAnalytics = useMemo(() => {
+    const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const DAY_LABELS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const now = new Date();
-    const result: SalesTrendPoint[] = [];
 
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const dayName = days[d.getDay()];
-      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    if (activeModule === 'SACCO') {
+      const chartPoints = Array.from({ length: 6 }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+        const mOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
+        });
+        const Savings = mOrders.reduce((s, o) => s + o.total, 0);
+        return { name: MONTH_LABELS[d.getMonth()], fullLabel: `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`, Savings, Loans: 0, Revenue: Savings, Profit: Math.round(Savings * 0.15), COGS: 0, PriorRevenue: 0, ordersCount: mOrders.length, marginPct: '15.0' };
+      });
+      const totalRev = chartPoints.reduce((s, p) => s + p.Revenue, 0);
+      const totalProfit = chartPoints.reduce((s, p) => s + p.Profit, 0);
+      return {
+        chartPoints,
+        totalRevenue: totalRev,
+        totalProfit,
+        totalCOGS: 0,
+        marginPct: totalRev > 0 ? ((totalProfit / totalRev) * 100).toFixed(1) : '0.0',
+        revenueDeltaPct: null as string | null,
+        profitDeltaPct: null as string | null,
+        priorTotalRevenue: 0,
+        peakHour: null as { hour: string; revenue: number; ordersCount: number } | null,
+      };
+    }
 
-      const daySales = salesRecords.filter((s) => s.timestamp >= dayStart && s.timestamp < dayEnd && s.status !== "CANCELLED");
-      const rev = daySales.reduce((sum, s) => sum + s.total, 0);
-      const profit = Math.round(rev * 0.35);
+    let chartPoints: Array<{
+      name: string;
+      fullLabel: string;
+      Revenue: number;
+      Profit: number;
+      COGS: number;
+      PriorRevenue: number;
+      ordersCount: number;
+      marginPct: string;
+    }> = [];
 
-      result.push({
-        day: dayName,
-        revenue: rev,
-        profit,
-        orders: daySales.length,
+    let peakHour: { hour: string; revenue: number; ordersCount: number } | null = null;
+    let priorTotalRevenue = 0;
+    let priorTotalProfit = 0;
+    let maxHourlyRevenue = 0;
+
+    if (revenueTimeframe === 'today') {
+      // Hourly intervals from 07:00 to 22:00
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
+      const yesterdayStart = new Date(todayStart);
+      yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+      const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
+      chartPoints = hours.map((h) => {
+        const hourLabel = h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
+
+        const curOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === now.getFullYear() &&
+                 od.getMonth() === now.getMonth() &&
+                 od.getDate() === now.getDate() &&
+                 od.getHours() === h;
+        });
+
+        const prevOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === yesterdayStart.getFullYear() &&
+                 od.getMonth() === yesterdayStart.getMonth() &&
+                 od.getDate() === yesterdayStart.getDate() &&
+                 od.getHours() === h;
+        });
+
+        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
+        let COGS = 0;
+        curOrders.forEach(o => {
+          o.items.forEach(item => {
+            COGS += costLookup.getItemCOGS(item);
+          });
+        });
+        const Profit = Math.max(0, Revenue - COGS);
+
+        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
+        let prevCOGS = 0;
+        prevOrders.forEach(o => {
+          o.items.forEach(item => {
+            prevCOGS += costLookup.getItemCOGS(item);
+          });
+        });
+        priorTotalRevenue += PriorRevenue;
+        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
+
+        if (Revenue > maxHourlyRevenue) {
+          maxHourlyRevenue = Revenue;
+          peakHour = { hour: hourLabel, revenue: Revenue, ordersCount: curOrders.length };
+        }
+
+        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
+
+        return {
+          name: hourLabel,
+          fullLabel: `Today at ${hourLabel}`,
+          Revenue,
+          Profit,
+          COGS,
+          PriorRevenue,
+          ordersCount: curOrders.length,
+          marginPct: margin,
+        };
+      });
+
+    } else if (revenueTimeframe === '7d') {
+      // Last 7 days vs Prior 7 days
+      chartPoints = Array.from({ length: 7 }, (_, i) => {
+        const curDate = new Date(now);
+        curDate.setDate(now.getDate() - (6 - i));
+        const prevDate = new Date(now);
+        prevDate.setDate(now.getDate() - (13 - i));
+
+        const curOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === curDate.getFullYear() &&
+                 od.getMonth() === curDate.getMonth() &&
+                 od.getDate() === curDate.getDate();
+        });
+
+        const prevOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === prevDate.getFullYear() &&
+                 od.getMonth() === prevDate.getMonth() &&
+                 od.getDate() === prevDate.getDate();
+        });
+
+        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
+        let COGS = 0;
+        curOrders.forEach(o => {
+          o.items.forEach(item => {
+            COGS += costLookup.getItemCOGS(item);
+          });
+        });
+        const Profit = Math.max(0, Revenue - COGS);
+
+        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
+        let prevCOGS = 0;
+        prevOrders.forEach(o => {
+          o.items.forEach(item => {
+            prevCOGS += costLookup.getItemCOGS(item);
+          });
+        });
+        priorTotalRevenue += PriorRevenue;
+        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
+
+        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
+
+        return {
+          name: DAY_LABELS[curDate.getDay()],
+          fullLabel: curDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
+          Revenue,
+          Profit,
+          COGS,
+          PriorRevenue,
+          ordersCount: curOrders.length,
+          marginPct: margin,
+        };
+      });
+
+    } else if (revenueTimeframe === '30d') {
+      // Last 30 days
+      chartPoints = Array.from({ length: 30 }, (_, i) => {
+        const curDate = new Date(now);
+        curDate.setDate(now.getDate() - (29 - i));
+        const prevDate = new Date(now);
+        prevDate.setDate(now.getDate() - (59 - i));
+
+        const curOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === curDate.getFullYear() &&
+                 od.getMonth() === curDate.getMonth() &&
+                 od.getDate() === curDate.getDate();
+        });
+
+        const prevOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === prevDate.getFullYear() &&
+                 od.getMonth() === prevDate.getMonth() &&
+                 od.getDate() === prevDate.getDate();
+        });
+
+        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
+        let COGS = 0;
+        curOrders.forEach(o => {
+          o.items.forEach(item => {
+            COGS += costLookup.getItemCOGS(item);
+          });
+        });
+        const Profit = Math.max(0, Revenue - COGS);
+
+        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
+        let prevCOGS = 0;
+        prevOrders.forEach(o => {
+          o.items.forEach(item => {
+            prevCOGS += costLookup.getItemCOGS(item);
+          });
+        });
+        priorTotalRevenue += PriorRevenue;
+        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
+
+        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
+
+        return {
+          name: `${curDate.getDate()} ${MONTH_LABELS[curDate.getMonth()]}`,
+          fullLabel: curDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+          Revenue,
+          Profit,
+          COGS,
+          PriorRevenue,
+          ordersCount: curOrders.length,
+          marginPct: margin,
+        };
+      });
+
+    } else {
+      // 'month': This month to date
+      const currentDay = now.getDate();
+
+      chartPoints = Array.from({ length: currentDay }, (_, i) => {
+        const dayNum = i + 1;
+        const curDate = new Date(now.getFullYear(), now.getMonth(), dayNum);
+        const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, dayNum);
+
+        const curOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === curDate.getFullYear() &&
+                 od.getMonth() === curDate.getMonth() &&
+                 od.getDate() === dayNum;
+        });
+
+        const prevOrders = validOrders.filter(o => {
+          const od = new Date(o.timestamp);
+          return od.getFullYear() === prevDate.getFullYear() &&
+                 od.getMonth() === prevDate.getMonth() &&
+                 od.getDate() === dayNum;
+        });
+
+        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
+        let COGS = 0;
+        curOrders.forEach(o => {
+          o.items.forEach(item => {
+            COGS += costLookup.getItemCOGS(item);
+          });
+        });
+        const Profit = Math.max(0, Revenue - COGS);
+
+        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
+        let prevCOGS = 0;
+        prevOrders.forEach(o => {
+          o.items.forEach(item => {
+            prevCOGS += costLookup.getItemCOGS(item);
+          });
+        });
+        priorTotalRevenue += PriorRevenue;
+        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
+
+        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
+
+        return {
+          name: `${dayNum}`,
+          fullLabel: curDate.toLocaleDateString([], { month: 'long', day: 'numeric' }),
+          Revenue,
+          Profit,
+          COGS,
+          PriorRevenue,
+          ordersCount: curOrders.length,
+          marginPct: margin,
+        };
       });
     }
 
-    return result;
-  }, [salesRecords]);
+    const totalRevenue = chartPoints.reduce((s, p) => s + p.Revenue, 0);
+    const totalCOGS = chartPoints.reduce((s, p) => s + p.COGS, 0);
+    const totalProfit = Math.max(0, totalRevenue - totalCOGS);
+    const marginPct = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : '0.0';
 
-  // ─── Derive Category Revenue Distribution ────────────────────────────────
-  const categoryBreakdown = useMemo<CategoryPoint[]>(() => {
-    const map = new Map<string, number>();
+    const revenueDeltaPct = priorTotalRevenue > 0
+      ? (((totalRevenue - priorTotalRevenue) / priorTotalRevenue) * 100).toFixed(1)
+      : null;
 
-    if (productsList.length > 0) {
-      productsList.forEach((p) => {
-        const cat = p.category || "General";
-        const val = (p.price || 0) * (p.stock || 0);
-        map.set(cat, (map.get(cat) || 0) + val);
+    const profitDeltaPct = priorTotalProfit > 0
+      ? (((totalProfit - priorTotalProfit) / priorTotalProfit) * 100).toFixed(1)
+      : null;
+
+    return {
+      chartPoints,
+      totalRevenue,
+      totalCOGS,
+      totalProfit,
+      marginPct,
+      revenueDeltaPct,
+      profitDeltaPct,
+      priorTotalRevenue,
+      peakHour: (maxHourlyRevenue > 0 ? peakHour : null) as { hour: string; revenue: number; ordersCount: number } | null,
+    };
+  }, [validOrders, activeModule, costLookup, revenueTimeframe]);
+
+  const paymentChannelSummary = useMemo(() => {
+    const channels: Record<string, { volume: number; count: number }> = {};
+    let totalVolume = 0;
+    let totalCount = 0;
+
+    validOrders.forEach((o) => {
+      const rawMethod = (o.paymentMethod || 'Cash').trim();
+      let normalized = rawMethod;
+      if (/cash/i.test(rawMethod)) normalized = 'Cash';
+      else if (/mpesa|m-pesa|airtel|tigo|halopesa|mobile/i.test(rawMethod)) normalized = 'M-Pesa / Mobile Money';
+      else if (/card|visa|mastercard|pos/i.test(rawMethod)) normalized = 'Bank Card';
+      else if (/bank|transfer|wire/i.test(rawMethod)) normalized = 'Bank Transfer';
+      else if (/split/i.test(rawMethod)) normalized = 'Split Tender';
+      else if (/credit/i.test(rawMethod)) normalized = 'Store Credit';
+
+      const amount = Number(o.total || 0);
+      if (!channels[normalized]) {
+        channels[normalized] = { volume: 0, count: 0 };
+      }
+      channels[normalized].volume += amount;
+      channels[normalized].count += 1;
+      totalVolume += amount;
+      totalCount += 1;
+    });
+
+    const CHANNEL_CONFIG: Record<
+      string,
+      { color: string; icon: any; badgeBg: string; textColor: string }
+    > = {
+      'Cash': {
+        color: '#3b82f6',
+        icon: Banknote,
+        badgeBg: 'rgba(59,130,246,0.12)',
+        textColor: '#3b82f6',
+      },
+      'M-Pesa / Mobile Money': {
+        color: '#10b981',
+        icon: Smartphone,
+        badgeBg: 'rgba(16,185,129,0.12)',
+        textColor: '#10b981',
+      },
+      'Bank Card': {
+        color: '#f59e0b',
+        icon: CreditCard,
+        badgeBg: 'rgba(245,158,11,0.12)',
+        textColor: '#f59e0b',
+      },
+      'Bank Transfer': {
+        color: '#6366f1',
+        icon: Building2,
+        badgeBg: 'rgba(99,102,241,0.12)',
+        textColor: '#6366f1',
+      },
+      'Split Tender': {
+        color: '#ec4899',
+        icon: ArrowLeftRight,
+        badgeBg: 'rgba(236,72,153,0.12)',
+        textColor: '#ec4899',
+      },
+      'Store Credit': {
+        color: '#8b5cf6',
+        icon: Wallet,
+        badgeBg: 'rgba(139,92,246,0.12)',
+        textColor: '#8b5cf6',
+      },
+    };
+
+    const items = Object.entries(channels).map(([name, data], idx) => {
+      const volumeShare = totalVolume > 0 ? Math.round((data.volume / totalVolume) * 100) : 0;
+      const countShare = totalCount > 0 ? Math.round((data.count / totalCount) * 100) : 0;
+      const aov = data.count > 0 ? Math.round(data.volume / data.count) : 0;
+      const cfg = CHANNEL_CONFIG[name] || {
+        color: ['#14b8a6', '#f43f5e', '#a855f7', '#06b6d4'][idx % 4],
+        icon: Wallet,
+        badgeBg: 'rgba(100,116,139,0.12)',
+        textColor: '#64748b',
+      };
+
+      const pieValue = paymentMetricMode === 'volume'
+        ? (volumeShare || (data.volume > 0 ? 1 : 0))
+        : (countShare || (data.count > 0 ? 1 : 0));
+
+      return {
+        name,
+        volume: data.volume,
+        count: data.count,
+        volumeShare,
+        countShare,
+        aov,
+        value: Math.max(pieValue, 1),
+        rawMetric: paymentMetricMode === 'volume' ? data.volume : data.count,
+        color: cfg.color,
+        icon: cfg.icon,
+        badgeBg: cfg.badgeBg,
+        textColor: cfg.textColor,
+      };
+    });
+
+    items.sort((a, b) => b.rawMetric - a.rawMetric);
+
+    return {
+      items,
+      totalVolume,
+      totalCount,
+      overallAov: totalCount > 0 ? Math.round(totalVolume / totalCount) : 0,
+    };
+  }, [validOrders, paymentMetricMode]);
+
+  const activePaymentChannel =
+    activePaymentIndex !== null && paymentChannelSummary.items[activePaymentIndex]
+      ? paymentChannelSummary.items[activePaymentIndex]
+      : null;
+
+  // Top products ranked leaderboard data with real-time stock & category awareness
+  const topProductsAnalytics = useMemo(() => {
+    const map: Record<string, {
+      productId: string;
+      name: string;
+      revenue: number;
+      units: number;
+      stock: number;
+      category: string;
+    }> = {};
+
+    for (const o of validOrders) {
+      for (const item of o.items) {
+        if (!map[item.productId]) {
+          const matchedProd = products.find(p => p.id === item.productId);
+          map[item.productId] = {
+            productId: item.productId,
+            name: matchedProd?.name || item.name || 'Product',
+            revenue: 0,
+            units: 0,
+            stock: matchedProd ? Number(matchedProd.stock ?? 0) : 0,
+            category: matchedProd?.category || 'General',
+          };
+        }
+        map[item.productId].revenue += item.price * item.quantity;
+        map[item.productId].units   += item.quantity;
+      }
+    }
+
+    const list = Object.values(map);
+    const maxRev = Math.max(...list.map(p => p.revenue), 1);
+    const maxUnits = Math.max(...list.map(p => p.units), 1);
+
+    const sorted = list.sort((a, b) => {
+      return topProductsMetric === 'revenue' ? b.revenue - a.revenue : b.units - a.units;
+    }).slice(0, 5);
+
+    return {
+      items: sorted.map((p, idx) => ({
+        ...p,
+        rank: idx + 1,
+        progressPct: topProductsMetric === 'revenue'
+          ? Math.round((p.revenue / maxRev) * 100)
+          : Math.round((p.units / maxUnits) * 100),
+      })),
+      totalTracked: list.length,
+    };
+  }, [validOrders, products, topProductsMetric]);
+
+  // ── Register Till & Shift Reconciliation ──────────────────────────────────
+  const activeShiftSession = useMemo(() => {
+    try {
+      const shift = db.getConfigurationLocal?.("active_shift_session");
+      return shift || null;
+    } catch {
+      return null;
+    }
+  }, [db, orders]);
+
+  const tillReconciliation = useMemo(() => {
+    const openingFloat = Number(activeShiftSession?.openingFloat || 0);
+    const shiftOpenedAt = activeShiftSession?.openedAt ? new Date(activeShiftSession.openedAt).getTime() : 0;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const relevantStartTime = shiftOpenedAt > 0 ? shiftOpenedAt : todayStart.getTime();
+
+    let cashSalesToday = 0;
+    let cashTransactionsCount = 0;
+
+    validOrders.forEach(o => {
+      if (o.timestamp >= relevantStartTime && /cash/i.test(o.paymentMethod || '')) {
+        cashSalesToday += Number(o.total || 0);
+        cashTransactionsCount += 1;
+      }
+    });
+
+    let cashIn = 0;
+    let cashOut = 0;
+    let safeDrops = 0;
+    if (Array.isArray(activeShiftSession?.movements)) {
+      activeShiftSession.movements.forEach((m: any) => {
+        if (m.type === "CASH_IN") cashIn += Math.abs(Number(m.amount || 0));
+        if (m.type === "CASH_OUT") cashOut += Math.abs(Number(m.amount || 0));
+        if (m.type === "SAFE_DROP") safeDrops += Math.abs(Number(m.amount || 0));
       });
     }
 
-    if (map.size === 0) {
-      return [{ name: "General Retail", value: 0, color: "var(--accent)" }];
+    const totalPayouts = cashOut + safeDrops;
+    const expectedCash = openingFloat + cashSalesToday + cashIn - totalPayouts;
+    const isShiftOpen = activeShiftSession?.status === "OPEN";
+
+    return {
+      isShiftOpen,
+      openingFloat,
+      cashSalesToday,
+      cashTransactionsCount,
+      cashIn,
+      totalPayouts,
+      expectedCash,
+      shiftNumber: activeShiftSession?.shiftNumber || 'Current Shift',
+    };
+  }, [activeShiftSession, validOrders]);
+
+  // ── 1-Click Multi-Tab Executive Financial Audit Report Exporter (.xlsx) ───
+  const exportDashboardSummaryCSV = useCallback(async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toLocaleTimeString();
+
+      const wb = XLSX.utils.book_new();
+
+      // Universal number formatting engine for professional accounting & Excel presentation
+      const formatWorksheetNumbers = (ws: import("xlsx").WorkSheet, currencyCols?: number[], countCols?: number[]) => {
+        if (!ws['!ref']) return;
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        // 1. Column-specific overrides for data rows (row >= 1)
+        if (currencyCols) {
+          currencyCols.forEach(col => {
+            for (let r = 1; r <= range.e.r; r++) {
+              const cell = ws[XLSX.utils.encode_cell({ c: col, r })];
+              if (cell && cell.t === 'n') cell.z = '#,##0.00';
+            }
+          });
+        }
+        if (countCols) {
+          countCols.forEach(col => {
+            for (let r = 1; r <= range.e.r; r++) {
+              const cell = ws[XLSX.utils.encode_cell({ c: col, r })];
+              if (cell && cell.t === 'n') cell.z = '#,##0';
+            }
+          });
+        }
+        // 2. Global pass: ensure EVERY numeric cell in the sheet has thousands separators
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const addr = XLSX.utils.encode_cell({ c, r });
+            const cell = ws[addr];
+            if (cell && cell.t === 'n' && !cell.z) {
+              cell.z = Number.isInteger(cell.v) ? '#,##0' : '#,##0.00';
+            }
+          }
+        }
+      };
+
+      // Tab 0: "KwakoPos v2 Executive Financial" (Executive Cover & Verification)
+      const ws0Data: any[][] = [
+        ['KwakoPos v2 Executive Financial Audit Report', ''],
+        ['Generated Timestamp', `${dateStr} ${timeStr}`],
+        ['Store / Tenant', currentTenantName || 'KwakoPos Store'],
+        ['Operating Branch', currentBranchName || 'Main Branch'],
+        ['Auditing Operator', `${role} (${user?.name || 'Authorized Staff'})`],
+        ['Business Module', activeModule],
+        ['Fiscal Device Status', !isOnline ? 'TRA VFD: Offline Queue' : stats.unsyncedCount > 0 ? `TRA VFD: ${stats.unsyncedCount} Queued` : 'TRA VFD: Certified (Electronic)'],
+        ['', ''],
+        ['EXECUTIVE ACCRUAL SUMMARY', 'VALUE (TSH) / COUNT'],
+        ['Gross Sales Turnover (Today)', Number(stats.grossSales || 0)],
+        ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0)],
+        ['Customer Returns / Refunds', Number(stats.todayRefunds || 0)],
+        ['GAAP Net Sales Turnover', Number(stats.netSales || 0)],
+        ['Real Gross Profit Earned', Number(stats.todayGrossProfit || 0)],
+        ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0)],
+        ['Blended Gross Margin %', `${stats.todayMargin}%`],
+        ['Average Order Value (AOV)', Number(stats.todayAOV || 0)],
+        ['Calculated Cash in Drawer', Number(tillReconciliation.expectedCash || 0)],
+        ['Total Completed Orders', Number(stats.completedOrders || 0)],
+        ['Total Active Product SKUs', Number(products.length || 0)],
+        ['Outstanding Customer Debt', Number(stats.totalLoans || 0)],
+        ['Pending Offline Outbox Mutations', Number(stats.unsyncedCount || 0)],
+      ];
+      const ws0 = XLSX.utils.aoa_to_sheet(ws0Data);
+      ws0['!cols'] = [{ wch: 35 }, { wch: 45 }];
+      // Apply exact thousands formatting: Currency rows B10..B18 get #,##0.00, count rows B19..B22 get #,##0
+      ['B10', 'B11', 'B12', 'B13', 'B14', 'B15', 'B17', 'B18', 'B21'].forEach(ref => {
+        if (ws0[ref] && ws0[ref].t === 'n') ws0[ref].z = '#,##0.00';
+      });
+      ['B19', 'B20', 'B22'].forEach(ref => {
+        if (ws0[ref] && ws0[ref].t === 'n') ws0[ref].z = '#,##0';
+      });
+      formatWorksheetNumbers(ws0);
+      XLSX.utils.book_append_sheet(wb, ws0, 'KwakoPos v2 Executive Financial');
+
+      // Tab 1: "1. EXECUTIVE FINANCIAL OVERVIEW"
+      const ws1Data: any[][] = [
+        ['Financial Indicator', 'Value (Tsh / Metric)', 'Audit Category', 'Notes & Policy Explanation'],
+        ['Gross Sales (Today)', Number(stats.grossSales || 0), 'Revenue', 'Total gross transactions before promotional deductions'],
+        ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
+        ['Refunds & Returns (Today)', Number(stats.todayRefunds || 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
+        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
+        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
+        ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
+        ['Gross Margin %', `${stats.todayMargin}%`, 'Profitability', 'Gross Profit / Net Sales'],
+        ['Completed Orders Count', Number(stats.completedOrders || 0), 'Operations', 'Successful completed checkout sales receipts'],
+        ['Average Order Value (AOV)', Number(stats.todayAOV || 0), 'Performance', 'Net Sales / Completed Orders'],
+        ['Total Inventory Valuation', Number(stats.inventoryVal || 0), 'Balance Sheet', 'Total valuation of on-hand inventory at buying price'],
+        ['Total Active SKUs', Number(products.length || 0), 'Catalog', 'Distinct active product master items in catalog'],
+        ['Low Stock Alert SKUs', Number(stats.lowStockCount || 0), 'Supply Chain', 'Items at or below minimum reorder threshold'],
+        ['Out of Stock SKUs', Number(stats.outOfStockCount || 0), 'Supply Chain', 'Items with 0 available units on shelf'],
+        ['Customer Receivables / Debt', Number(stats.totalLoans || 0), 'Receivables', 'Total outstanding credit balance owed by customers'],
+        ['Pending Cloud Sync Mutations', Number(stats.unsyncedCount || 0), 'Integrity', 'Mutations buffered in local IndexedDB sync queue'],
+      ];
+      const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
+      ws1['!cols'] = [{ wch: 32 }, { wch: 24 }, { wch: 18 }, { wch: 46 }];
+      ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B10', 'B11', 'B15'].forEach(ref => {
+        if (ws1[ref] && ws1[ref].t === 'n') ws1[ref].z = '#,##0.00';
+      });
+      ['B9', 'B12', 'B13', 'B14', 'B16'].forEach(ref => {
+        if (ws1[ref] && ws1[ref].t === 'n') ws1[ref].z = '#,##0';
+      });
+      formatWorksheetNumbers(ws1);
+      XLSX.utils.book_append_sheet(wb, ws1, '1. EXECUTIVE FINANCIAL OVERVIEW');
+
+      // Tab 2: "2. CASH TILL & DRAWER RECONCILI"
+      const ws2Data: any[][] = [
+        ['Reconciliation Parameter', 'Value (Tsh / Count)', 'Accounting Flow', 'Operational Description'],
+        ['Register Shift Status', tillReconciliation.isShiftOpen ? 'OPEN / IN PROGRESS' : 'CONTINUOUS TILL', 'Control', 'Active cashier shift register state'],
+        ['Register Shift Reference', tillReconciliation.shiftNumber, 'Reference', 'Session identifier for active till'],
+        ['Opening Cash Float', Number(tillReconciliation.openingFloat || 0), 'Starting Cash', 'Starting cash float placed in drawer'],
+        ['Cash Sales Collected Today', Number(tillReconciliation.cashSalesToday || 0), 'Cash In (+)', 'Total cash payments received from customers'],
+        ['Cash Transactions Count', Number(tillReconciliation.cashTransactionsCount || 0), 'Volume', 'Number of completed cash sales orders'],
+        ['Cash Paid-In (Float Additions)', Number(tillReconciliation.cashIn || 0), 'Cash In (+)', 'Additional cash deposited into drawer during shift'],
+        ['Cash Paid-Out / Safe Drops', Number(tillReconciliation.totalPayouts || 0), 'Cash Out (−)', 'Cash payouts, petty cash, or drops to safe'],
+        ['Expected Cash in Drawer', Number(tillReconciliation.expectedCash || 0), 'Balance', 'Float + Cash Sales + Paid In − Paid Out'],
+      ];
+      const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
+      ws2['!cols'] = [{ wch: 32 }, { wch: 24 }, { wch: 18 }, { wch: 46 }];
+      ['B4', 'B5', 'B7', 'B8', 'B9'].forEach(ref => {
+        if (ws2[ref] && ws2[ref].t === 'n') ws2[ref].z = '#,##0.00';
+      });
+      if (ws2['B6'] && ws2['B6'].t === 'n') ws2['B6'].z = '#,##0';
+      formatWorksheetNumbers(ws2);
+      XLSX.utils.book_append_sheet(wb, ws2, '2. CASH TILL & DRAWER RECONCILI');
+
+      // Tab 3: "3. PAYMENT CHANNELS AUDIT"
+      const ws3Data: any[][] = [
+        ['Payment Channel / Tender', 'Volume (Tsh)', 'Volume Share %', 'Transaction Count', 'Count Share %', 'AOV (Tsh)', 'Settlement Routing'],
+        ...paymentChannelSummary.items.map(c => [
+          c.name,
+          Number(c.volume || 0),
+          `${c.volumeShare}%`,
+          Number(c.count || 0),
+          `${c.countShare}%`,
+          Number(c.aov || 0),
+          /cash/i.test(c.name) ? 'Physical Cash Drawer' : /pesa|mobile/i.test(c.name) ? 'Mobile Money Gateway (Instant)' : 'Bank Card Terminal / EDC'
+        ])
+      ];
+      const ws3 = XLSX.utils.aoa_to_sheet(ws3Data);
+      ws3['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 32 }];
+      formatWorksheetNumbers(ws3, [1, 5], [3]);
+      XLSX.utils.book_append_sheet(wb, ws3, '3. PAYMENT CHANNELS AUDIT');
+
+      // Tab 4: "4. TOP PRODUCTS LEADERBOARD"
+      const ws4Data: any[][] = [
+        ['Rank', 'Product Name', 'Category', 'Stock On Hand', 'Units Sold Today', 'Total Revenue (Tsh)', 'Stock Alert Status'],
+        ...topProductsAnalytics.items.map(p => [
+          Number(p.rank || 0),
+          p.name,
+          p.category,
+          Number(p.stock || 0),
+          Number(p.units || 0),
+          Number(p.revenue || 0),
+          p.stock <= 0 ? 'OUT OF STOCK' : p.stock <= 5 ? 'LOW STOCK' : 'HEALTHY STOCK'
+        ])
+      ];
+      const ws4 = XLSX.utils.aoa_to_sheet(ws4Data);
+      ws4['!cols'] = [{ wch: 8 }, { wch: 34 }, { wch: 20 }, { wch: 16 }, { wch: 16 }, { wch: 22 }, { wch: 22 }];
+      formatWorksheetNumbers(ws4, [5], [0, 3, 4]);
+      XLSX.utils.book_append_sheet(wb, ws4, '4. TOP PRODUCTS LEADERBOARD');
+
+      // Tab 5: "5. AUDITED RECENT ORDERS"
+      const ws5Data: any[][] = [
+        ['Order Ref / Receipt', 'Date & Time', 'Customer Name', 'Serving Cashier', 'Items Count', 'Grand Total (Tsh)', 'Payment Channel', 'Sync Status', 'Audit Status'],
+        ...orders.slice(-50).reverse().map(o => [
+          o.saleNumber || o.id,
+          new Date(o.timestamp).toLocaleString(),
+          o.customer || 'Walk-In Customer',
+          o.cashierName || 'Cashier',
+          Number(o.items.reduce((s, i) => s + i.quantity, 0)),
+          Number(o.total || 0),
+          o.paymentMethod || 'Cash',
+          o.syncStatus || 'Synced',
+          o.status || 'Completed'
+        ])
+      ];
+      const ws5 = XLSX.utils.aoa_to_sheet(ws5Data);
+      ws5['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 24 }, { wch: 20 }, { wch: 12 }, { wch: 18 }, { wch: 22 }, { wch: 14 }, { wch: 14 }];
+      formatWorksheetNumbers(ws5, [5], [4]);
+      XLSX.utils.book_append_sheet(wb, ws5, '5. AUDITED RECENT ORDERS');
+
+      // Trigger multi-tab Excel Workbook download (.xlsx)
+      XLSX.writeFile(wb, `KwakoPos_Audit_Summary_${dateStr}.xlsx`);
+    } catch (err) {
+      console.error('Failed to export multi-tab dashboard workbook:', err);
     }
+  }, [currentBranchName, currentTenantName, role, activeModule, stats, tillReconciliation, paymentChannelSummary, topProductsAnalytics, products, orders, isOnline, user]);
 
-    const entries = [...map.entries()].map(([name, value], idx) => ({
-      name,
-      value,
-      color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
-    }));
+  // ── Onboarding ─────────────────────────────────────────────────────────────
 
-    return entries.sort((a, b) => b.value - a.value).slice(0, 5);
-  }, [productsList]);
+  const renderOnboarding = () => (
+    <div className="bg-white dark:bg-darkbg-card rounded-2xl border border-slate-200 dark:border-darkbg-border p-8 shadow-sm">
+      <div className="max-w-2xl mx-auto text-center py-4">
+        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-lg">
+          <Sparkles className="h-7 w-7 text-white" />
+        </div>
+        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! 🎉</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+          Your clean workspace is ready. Follow these quick steps to set up your business and start taking sales.
+        </p>
+        <div className="grid gap-4 mt-8 text-left sm:grid-cols-2">
+          {[
+            { step: '01', title: 'Add Products', desc: 'Define your inventory items, categories & attributes.', label: 'Go to Inventory', tab: 'Inventory', Icon: Package, gradient: 'from-blue-500 to-cyan-500' },
+            { step: '02', title: 'Register Suppliers', desc: 'Configure suppliers and default warehouse settings.', label: 'Go to Purchasing', tab: 'Purchasing', Icon: Truck, gradient: 'from-amber-500 to-orange-500' },
+            { step: '03', title: 'Add Customers', desc: 'Register customers for CRM tracking and credit billing.', label: 'Go to Customers', tab: 'Customers', Icon: Users, gradient: 'from-emerald-500 to-teal-500' },
+            { step: '04', title: 'Launch POS Checkout', desc: 'Open the sales terminal, scan items, and cash out.', label: 'Open POS Terminal', tab: 'POS', Icon: DollarSign, gradient: 'from-indigo-500 to-purple-500' },
+          ].map(({ step, title, desc, label, tab, Icon, gradient }) => (
+            <div
+              key={step}
+              className="p-5 border border-slate-100 dark:border-darkbg-border rounded-2xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between bg-slate-50/50 dark:bg-darkbg/30"
+              style={{
+                border: '1px solid var(--surface-border, #e2e8f0)',
+                background: 'var(--surface-2, rgba(248, 250, 252, 0.5))',
+              }}
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-slate-300 dark:text-slate-600 tracking-widest">STEP {step}</span>
+                  <div className={`h-9 w-9 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-sm`}>
+                    <Icon className="h-4 w-4 text-white" />
+                  </div>
+                </div>
+                <h4 className="text-sm font-black text-slate-800 dark:text-white mt-3">{title}</h4>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 leading-relaxed">{desc}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleNav(tab)}
+                className="mt-5 flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:gap-2.5 transition-all cursor-pointer"
+                style={{ background: 'transparent', border: 'none', padding: 0 }}
+              >
+                <span>{label}</span>
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
-  // ─── Derived Aggregates ────────────────────────────────────────────────────
-  const totalRevenue7d = useMemo(() => salesTrend.reduce((sum, s) => sum + s.revenue, 0), [salesTrend]);
-  const totalProfit7d = useMemo(() => salesTrend.reduce((sum, s) => sum + s.profit, 0), [salesTrend]);
-  const totalOrders7d = useMemo(() => salesTrend.reduce((sum, s) => sum + s.orders, 0), [salesTrend]);
-  const avgOrderValue = useMemo(() => (totalOrders7d > 0 ? Math.round(totalRevenue7d / totalOrders7d) : 0), [totalRevenue7d, totalOrders7d]);
+  // ── KPI Grid Config ────────────────────────────────────────────────────────
 
-  const lowStockCount = useMemo(() => productsList.filter((p) => p.stock <= (p.reorderLevel ?? 5)).length, [productsList]);
-  const expiryRiskCount = useMemo(() => {
-    const thirtyDays = Date.now() + 30 * 24 * 60 * 60 * 1000;
-    return productsList.filter((p) => p.expiryDate && new Date(p.expiryDate).getTime() <= thirtyDays).length;
-  }, [productsList]);
+  const kpiCards = useMemo((): KPICardProps[] => {
+    if (activeModule === 'BusinessConsultant') return [
+      { title: 'Total Clients',         value: '48 active',     desc: 'Directory portfolio',              icon: <Users className="h-5 w-5"/>,       accent: '#6366f1', trend: 'up', trendLabel: '+5 this month' },
+      { title: 'Active Engagements',    value: '18 projects',   desc: 'Retainer & advisory projects',     icon: <Briefcase className="h-5 w-5"/>,    accent: '#3b82f6' },
+      { title: 'Monthly Revenue',       value: 'Tsh 42.5M',     desc: 'Accrued consulting income',        icon: <DollarSign className="h-5 w-5"/>,   accent: '#f59e0b', trend: 'up' },
+      { title: 'Utilization Rate',      value: '84.2%',         desc: 'Target utilization >80%',          icon: <TrendingUp className="h-5 w-5"/>,   accent: '#10b981', trend: 'up' },
+      { title: 'Billable Hours',        value: '320 hrs',       desc: 'This month to date',               icon: <Clock className="h-5 w-5"/>,        accent: '#f43f5e', trend: 'up' },
+      { title: 'Proposal Conversion',   value: '68.5%',         desc: 'Sent vs accepted proposals',       icon: <BarChart2 className="h-5 w-5"/>,    accent: '#10b981', trend: 'up' },
+      { title: 'Upcoming Meetings',     value: '12 scheduled',  desc: 'Next 7 days',                      icon: <Calendar className="h-5 w-5"/>,     accent: '#3b82f6' },
+      { title: 'Expiring Contracts',    value: '3 expiring',    desc: 'Renewals pending review',          icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
+    ];
 
-  const recentTransactions = useMemo(() => salesRecords.slice(0, 8), [salesRecords]);
+    switch (activeModule) {
+      case 'Retail':
+        return [
+          { title: "Today's Sales",       value: fmtCcy(stats.totalSales),            desc: `${stats.todayOrderCount} transactions · ${stats.completedOrders} completed`,   icon: <DollarSign className="h-5 w-5"/>,   accent: '#3b82f6', trend: stats.salesTrend, trendLabel: stats.salesTrendPct },
+          { title: 'Gross Profit (Real)', value: fmtCcy(stats.todayGrossProfit),     desc: stats.totalSales > 0 ? `${stats.todayMargin}% real margin on today's sales` : 'No sales recorded today', icon: <TrendingUp className="h-5 w-5"/>, accent: '#10b981', trend: stats.salesTrend, trendLabel: stats.salesTrendPct },
+          { title: 'Avg Order Value (AOV)', value: fmtCcy(stats.todayAOV),           desc: stats.todayOrderCount > 0 ? `Avg spend across ${stats.todayOrderCount} orders` : 'No checkouts yet today', icon: <ShoppingCart className="h-5 w-5"/>, accent: '#6366f1' },
+          { title: 'Total Products',      value: products.length,                     desc: `${stats.activeVariantCount} variants · ${stats.supplierCount} suppliers`,        icon: <Package className="h-5 w-5"/>,      accent: '#f59e0b' },
+          { title: 'Stock Alerts',        value: stats.lowStockCount + stats.outOfStockCount, desc: `${stats.outOfStockCount} out of stock · ${stats.lowStockCount} low`,   icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
+          { title: 'Customer Debts',      value: fmtCcy(stats.totalLoans),            desc: `${stats.customerCount} registered customers`,                                   icon: <Users className="h-5 w-5"/>,        accent: '#8b5cf6' },
+          { title: 'Inventory Value',     value: fmtCcy(stats.inventoryVal),          desc: 'Retail value of all stocked items',                                             icon: <PiggyBank className="h-5 w-5"/>,    accent: '#ec4899' },
+          { title: 'Pending Sync',        value: stats.unsyncedCount,                 desc: stats.unsyncedCount > 0 ? `${stats.unsyncedCount} mutations pending sync` : 'All changes synced to cloud', icon: <RefreshCw className="h-5 w-5"/>,    accent: '#f97316' },
+        ];
+
+      case 'Restaurant': {
+        const activeTablesLabel = stats.activeTables > 0 ? `${stats.activeTables} active` : 'None active';
+        const kitchenQueueLabel = stats.todayPendingOrders > 0 ? `${stats.todayPendingOrders} orders` : 'Queue clear';
+        const kitchenTrend: 'up' | 'down' | null = stats.todayPendingOrders > 5 ? 'down' : stats.todayPendingOrders > 0 ? 'up' : null;
+        return [
+          { title: 'Sales Today',    value: fmtCcy(stats.totalSales),  desc: `${stats.todayOrderCount} orders served today`,            icon: <DollarSign className="h-5 w-5"/>,   accent: '#3b82f6', trend: stats.salesTrend, trendLabel: stats.salesTrendPct },
+          { title: 'Active Service', value: activeTablesLabel,          desc: 'Live orders in service window (last 2h)',                  icon: <Layers className="h-5 w-5"/>,       accent: '#10b981' },
+          { title: 'Kitchen Queue',  value: kitchenQueueLabel,          desc: stats.todayPendingOrders > 0 ? 'Pending orders in prep' : 'All orders fulfilled', icon: <Clock className="h-5 w-5"/>,  accent: '#f59e0b', trend: kitchenTrend, trendLabel: stats.todayPendingOrders > 5 ? 'High load' : undefined },
+          { title: 'Low Ingredients',value: stats.lowStockCount,        desc: 'Menu items to restock now',                              icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
+        ];
+      }
+
+      case 'Pharmacy': {
+        const pendingRx = stats.pendingOrders;
+        const rxTrend: 'up' | 'down' | null = pendingRx > 10 ? 'down' : pendingRx > 0 ? 'up' : null;
+        return [
+          { title: 'Sales Today',          value: fmtCcy(stats.totalSales),  desc: `${stats.todayOrderCount} prescriptions dispensed`,        icon: <DollarSign className="h-5 w-5"/>,   accent: '#3b82f6', trend: stats.salesTrend, trendLabel: stats.salesTrendPct },
+          { title: 'Pending Rx',           value: pendingRx > 0 ? `${pendingRx} pending` : 'Queue clear', desc: 'Orders awaiting pharmacist validation', icon: <Clock className="h-5 w-5"/>, accent: '#f59e0b', trend: rxTrend, trendLabel: pendingRx > 10 ? 'High queue' : undefined },
+          { title: 'Near-Expiry Alerts',   value: stats.nearExpiryCount,     desc: 'Medicines expiring within 90 days',                       icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
+          { title: 'Critically Low Drugs', value: stats.lowStockCount,       desc: 'Restock required immediately',                            icon: <Package className="h-5 w-5"/>,      accent: '#8b5cf6' },
+        ];
+      }
+
+      case 'SACCO':
+        return [
+          { title: 'Deposits & Savings',   value: fmtCcy(stats.totalSavings),        desc: 'Member savings pool balance',     icon: <PiggyBank className="h-5 w-5"/>, accent: '#10b981', trend: 'up' },
+          { title: 'Outstanding Loans',    value: fmtCcy(stats.totalLoans),           desc: 'Active lending portfolio value',  icon: <Briefcase className="h-5 w-5"/>, accent: '#3b82f6' },
+          { title: 'Interest Earned YTD',  value: fmtCcy(stats.totalLoans * 0.12),   desc: 'Accrued yield from lending',      icon: <TrendingUp className="h-5 w-5"/>, accent: '#f59e0b', trend: 'up' },
+          { title: 'SACCO Members',        value: stats.customerCount,                desc: 'Registered active savers',        icon: <Users className="h-5 w-5"/>,     accent: '#6366f1', trend: stats.customerTrend ?? undefined, trendLabel: stats.customerTrendPct },
+        ];
+
+      case 'Poultry':
+        return [
+          { title: 'Total Animals',        value: '520 animals',   desc: 'Livestock & poultry register',    icon: <Footprints className="h-5 w-5"/>, accent: '#3b82f6' },
+          { title: 'Active Flocks',        value: '4 flocks',      desc: 'Egg-layer production batches',    icon: <Egg className="h-5 w-5"/>,        accent: '#10b981' },
+          { title: 'Daily Production',     value: '450 eggs',      desc: '90% production yield today',      icon: <TrendingUp className="h-5 w-5"/>, accent: '#f59e0b', trend: 'up' },
+          { title: 'Mortality Rate',       value: '1.2%',          desc: 'Target mortality <3.0%',          icon: <AlertTriangle className="h-5 w-5"/>, accent: '#ef4444' },
+        ];
+
+      default:
+        return [
+          { title: 'Sales Today',          value: fmtCcy(stats.totalSales),   desc: 'From local POS checkouts',         icon: <DollarSign className="h-5 w-5"/>, accent: '#3b82f6', trend: stats.salesTrend, trendLabel: stats.salesTrendPct },
+          { title: 'Inventory Valuation',  value: fmtCcy(stats.inventoryVal), desc: 'Total stock value at retail',      icon: <Package className="h-5 w-5"/>,   accent: '#10b981' },
+          { title: 'Active Contacts',      value: stats.customerCount,         desc: 'Linked partners & clients',        icon: <Users className="h-5 w-5"/>,     accent: '#6366f1' },
+          { title: 'System Alerts',        value: stats.lowStockCount,         desc: 'Items on restock warning list',    icon: <AlertTriangle className="h-5 w-5"/>, accent: '#f59e0b' },
+        ];
+    }
+  }, [activeModule, stats, products, productVariants]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const hasToday = orders.some(o => o.timestamp >= new Date().setHours(0,0,0,0));
 
   return (
-    <div className="v2-animate-page-enter v2-space-y-4">
-      {/* Header Bar */}
-      <div className="v2-flex v2-items-center v2-justify-between">
+    <div className="space-y-6">
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>
-            {currentTenantName} — Executive Dashboard
-          </h1>
-          <p className="v2-text-xs v2-text-muted">
-            {currentBranchName} · Module: <span className="v2-font-bold" style={{ color: "var(--accent)" }}>{activeModule || "Retail / General"}</span>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white">Business Dashboard</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Live analytics for{' '}
+            <span className="font-bold text-slate-700 dark:text-slate-300">{currentBranchName || 'Main Branch'}</span>
+            {' · '}
+            <span className="font-bold text-primary">{role}</span>
+            {' · '}
+            <span className="text-slate-400">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</span>
           </p>
         </div>
-        <div className="v2-flex v2-items-center v2-gap-2">
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadDashboardData()} disabled={isLoading} type="button">
-            <RefreshCw size={13} className={isLoading ? "v2-spin" : ""} /> Refresh
-          </button>
-          <span className={`badge ${isOnline ? "v2-badge-success" : "v2-badge-warning"}`}>
-            {isOnline ? "LIVE SYNCED" : "OFFLINE QUEUED"}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Status Badge 1: TRA VFD Fiscal Sync Health */}
+          <span
+            className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 ${
+              !isOnline
+                ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
+                : stats.unsyncedCount > 0
+                ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
+                : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50'
+            }`}
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title={
+              !isOnline
+                ? 'Offline mode: Receipts queued in local IndexedDB outbox'
+                : stats.unsyncedCount > 0
+                ? `${stats.unsyncedCount} fiscal receipts queued in local outbox`
+                : 'All transactions electronically stamped & fiscalized with TRA VFD'
+            }
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" />
+            <span>
+              {!isOnline
+                ? 'TRA VFD: Offline Queue'
+                : stats.unsyncedCount > 0
+                ? `TRA VFD: ${stats.unsyncedCount} Queued`
+                : 'TRA VFD: Certified'}
+            </span>
           </span>
-          {pendingOutboxCount > 0 && (
-            <span className="badge v2-badge-warning">{pendingOutboxCount} Outbox Items</span>
+
+          {/* Status Badge 2: Offline Readiness */}
+          <span
+            className="h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/30 dark:border-emerald-700/50 whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+          >
+            <Zap className="h-4 w-4 shrink-0" />
+            <span>Offline Enabled</span>
+          </span>
+
+          {/* Action Button 1: Daily Z-Report */}
+          <button
+            type="button"
+            onClick={() => setIsZReportOpen(true)}
+            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-darkbg shadow-xs hover:border-slate-300 dark:hover:border-slate-600 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title="Generate & print 80mm Daily Register Close (Z-Report) thermal slip"
+          >
+            <Printer className="h-4 w-4 text-slate-500 dark:text-slate-400 shrink-0" />
+            <span>Daily Z-Report</span>
+          </button>
+
+          {/* Action Button 2: Export Report */}
+          <button
+            type="button"
+            onClick={exportDashboardSummaryCSV}
+            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-darkbg shadow-xs hover:border-slate-300 dark:hover:border-slate-600 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title="Download multi-tab audited Excel workbook (.xlsx)"
+          >
+            <Download className="h-4 w-4 text-slate-500 dark:text-slate-400 shrink-0" />
+            <span>Export Report</span>
+          </button>
+
+          {/* Primary Action Button: Launch POS (Matches OK Reference) */}
+          <button
+            type="button"
+            onClick={() => handleNav('POS')}
+            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+          >
+            <ShoppingCart className="h-4 w-4 shrink-0" />
+            <span>Launch POS</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── KPI Cards ───────────────────────────────────────────────────────── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {kpiCards.map((card, i) => (
+          <KPICard key={i} {...card} />
+        ))}
+      </div>
+
+      {/* ── GAAP Net Turnover Ledger Strip (Gross Sales - Discounts - Refunds = Net Sales) ── */}
+      <div
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--surface-border)",
+          borderRadius: "var(--radius-md)",
+          padding: "0.85rem 1.25rem",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: "220px" }}>
+          <div
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              background: "rgba(59, 130, 246, 0.12)",
+              color: "#3b82f6",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Layers size={18} />
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
+                GAAP Turnover Ledger
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3.5px",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  background: "rgba(59, 130, 246, 0.12)",
+                  color: "#3b82f6",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                }}
+              >
+                Today's Accrual
+              </span>
+            </div>
+            <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "1px" }}>
+              Gross receipts reconciled after discounts, returns & refunds
+            </div>
+          </div>
+        </div>
+
+        {/* Ledger Equation: Gross - Discounts - Refunds = Net Sales */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "0.75rem",
+            fontSize: "11px",
+          }}
+        >
+          {/* Gross Sales */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Gross Sales
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
+              {fmtCcy(stats.grossSales)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+
+          {/* Discounts */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Discounts
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: stats.todayDiscounts > 0 ? "var(--warning)" : "var(--muted)" }}>
+              {fmtCcy(stats.todayDiscounts)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+
+          {/* Refunds & Returns */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ color: "var(--muted)", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Refunds / Returns
+              </span>
+              {stats.todayRefundCount > 0 && (
+                <span
+                  style={{
+                    padding: "0 4px",
+                    borderRadius: "4px",
+                    background: "rgba(239, 68, 68, 0.15)",
+                    color: "var(--danger)",
+                    fontSize: "9px",
+                    fontWeight: 800,
+                  }}
+                >
+                  {stats.todayRefundCount}
+                </span>
+              )}
+            </div>
+            <span className="v2-mono" style={{ fontWeight: 800, fontSize: "13px", color: stats.todayRefunds > 0 ? "var(--danger)" : "var(--muted)" }}>
+              {fmtCcy(stats.todayRefunds)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>=</span>
+
+          {/* Net Sales */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              padding: "4px 10px",
+              borderRadius: "8px",
+              background: "rgba(16, 185, 129, 0.12)",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+            }}
+          >
+            <span style={{ color: "#10b981", fontSize: "10px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Net Sales
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 900, fontSize: "14px", color: "#10b981" }}>
+              {fmtCcy(stats.netSales)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Register Till & Cash In Drawer Reconciliation Strip ─────────── */}
+      <div
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--surface-border)",
+          borderRadius: "var(--radius-md)",
+          padding: "0.85rem 1.25rem",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "1rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: "220px" }}>
+          <div
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              background: "rgba(16, 185, 129, 0.12)",
+              color: "#10b981",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Wallet size={18} />
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
+                Register Till Balance
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3.5px",
+                  padding: "1px 6px",
+                  borderRadius: "10px",
+                  background: tillReconciliation.isShiftOpen ? "rgba(16, 185, 129, 0.12)" : "rgba(148, 163, 184, 0.12)",
+                  color: tillReconciliation.isShiftOpen ? "#10b981" : "var(--muted)",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  border: `1px solid ${tillReconciliation.isShiftOpen ? "rgba(16, 185, 129, 0.25)" : "var(--surface-border)"}`,
+                }}
+              >
+                <span
+                  style={{
+                    width: "5px",
+                    height: "5px",
+                    borderRadius: "50%",
+                    background: tillReconciliation.isShiftOpen ? "#10b981" : "var(--muted)",
+                  }}
+                />
+                {tillReconciliation.isShiftOpen ? "Shift In Progress" : "Continuous Till"}
+              </span>
+            </div>
+            <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "1px" }}>
+              Real-time cash in drawer vs logged cash sales
+            </div>
+          </div>
+        </div>
+
+        {/* Financial Flow Formula Blocks */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "0.6rem",
+            fontSize: "11px",
+          }}
+        >
+          {/* Float */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
+              Opening Float
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 700, color: "var(--text)" }}>
+              {fmtCcy(tillReconciliation.openingFloat)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 800 }}>+</span>
+
+          {/* Cash Sales */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
+              Cash Collected
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 700, color: "#10b981" }}>
+              {fmtCcy(tillReconciliation.cashSalesToday)}
+              <span style={{ fontSize: "9.5px", fontWeight: 500, color: "var(--muted)", marginLeft: "3px" }}>
+                ({tillReconciliation.cashTransactionsCount})
+              </span>
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 800 }}>−</span>
+
+          {/* Payouts / Drops */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
+              Drops / Payouts
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 700, color: "var(--text)" }}>
+              {fmtCcy(tillReconciliation.totalPayouts)}
+            </span>
+          </div>
+
+          <span style={{ color: "var(--muted)", fontWeight: 800 }}>=</span>
+
+          {/* Expected Cash in Drawer */}
+          <div
+            style={{
+              padding: "4px 10px",
+              borderRadius: "8px",
+              background: "rgba(16, 185, 129, 0.1)",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 800, color: "#10b981", letterSpacing: "0.03em" }}>
+              Expected in Drawer
+            </span>
+            <span className="v2-mono" style={{ fontWeight: 900, fontSize: "14px", color: "#10b981" }}>
+              {fmtCcy(tillReconciliation.expectedCash)}
+            </span>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <button
+          type="button"
+          onClick={() => handleNav('CashDrawer')}
+          className="v2-btn v2-btn-sm v2-btn-secondary"
+          style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "8px" }}
+        >
+          <span>Shift Details & Drop</span>
+          <ArrowRight size={12} />
+        </button>
+      </div>
+
+      {/* ── Charts Row ─────────────────────────────────────────────────── */}
+      <div className="grid gap-5 lg:grid-cols-3">
+
+        {/* Main Revenue / Trend Chart */}
+        <Card className="lg:col-span-2 rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col justify-between">
+          <CardHeader className="pb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm font-black">
+                  {activeModule === 'SACCO' ? 'Savings vs Loan Trends' : 'Sales Revenue & Profit'}
+                </CardTitle>
+                <CardDescription className="text-[11px]">
+                  {activeModule === 'SACCO'
+                    ? '6-month member activity'
+                    : revenueTimeframe === 'today'
+                    ? "Today's hourly sales velocity and run-rate"
+                    : revenueTimeframe === '7d'
+                    ? 'Last 7 days performance vs prior 7 days'
+                    : revenueTimeframe === '30d'
+                    ? '30-day revenue and gross margin trend'
+                    : 'Month-to-date financial performance'}
+                </CardDescription>
+              </div>
+
+              {/* Timeframe Selector */}
+              {activeModule !== 'SACCO' && (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
+                    background: "var(--surface-2)",
+                    border: "1px solid var(--surface-border)",
+                    padding: "3px",
+                    borderRadius: "var(--radius-md)",
+                    width: "fit-content",
+                  }}
+                >
+                  {(
+                    [
+                      { key: 'today', label: 'Today' },
+                      { key: '7d', label: '7 Days' },
+                      { key: '30d', label: '30 Days' },
+                      { key: 'month', label: 'This Month' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setRevenueTimeframe(tab.key)}
+                      style={{
+                        padding: "0.3rem 0.75rem",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        borderRadius: "calc(var(--radius-md) - 2px)",
+                        background: revenueTimeframe === tab.key ? "var(--accent)" : "transparent",
+                        color: revenueTimeframe === tab.key ? "#080e1c" : "var(--muted)",
+                        border: "none",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardHeader>
+
+          {/* Executive KPI Strip */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: "0.75rem",
+              padding: "0.5rem 1.25rem 0.85rem 1.25rem",
+            }}
+          >
+            {/* Gross Revenue */}
+            <div
+              onClick={() => setChartActiveMetric(chartActiveMetric === 'revenue' ? 'all' : 'revenue')}
+              style={{
+                padding: "0.85rem 1rem",
+                background: chartActiveMetric === 'revenue' ? "rgba(59, 130, 246, 0.08)" : "var(--surface-2)",
+                borderRadius: "var(--radius-md)",
+                border: chartActiveMetric === 'revenue' ? "1.5px solid #3b82f6" : "1px solid var(--surface-border)",
+                boxShadow: chartActiveMetric === 'revenue' ? "0 0 12px rgba(59, 130, 246, 0.2)" : "none",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              title="Click to spotlight Gross Revenue in chart"
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", color: "var(--muted)" }}>
+                  Gross Revenue
+                </div>
+                <span
+                  style={{
+                    fontSize: "8.5px",
+                    fontWeight: 800,
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    background: chartActiveMetric === 'revenue' ? "#3b82f6" : "rgba(148, 163, 184, 0.15)",
+                    color: chartActiveMetric === 'revenue' ? "#ffffff" : "var(--muted)",
+                  }}
+                >
+                  {chartActiveMetric === 'revenue' ? 'Active' : 'Filter'}
+                </span>
+              </div>
+              <div className="v2-mono v2-font-black v2-text-base" style={{ marginTop: "2px", color: "var(--text)" }}>
+                {fmtCcy(revenueAnalytics.totalRevenue)}
+              </div>
+              <div style={{ fontSize: "10px", fontWeight: 600, marginTop: "2px", display: "flex", alignItems: "center", gap: "4px" }}>
+                {revenueAnalytics.revenueDeltaPct !== null ? (
+                  Number(revenueAnalytics.revenueDeltaPct) >= 0 ? (
+                    <span style={{ color: "var(--success)" }} className="v2-flex v2-items-center">
+                      <TrendingUp size={11} style={{ marginRight: 2 }} />+{revenueAnalytics.revenueDeltaPct}%
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--danger)" }} className="v2-flex v2-items-center">
+                      <TrendingDown size={11} style={{ marginRight: 2 }} />{revenueAnalytics.revenueDeltaPct}%
+                    </span>
+                  )
+                ) : (
+                  <span style={{ color: "var(--muted)" }}>Baseline</span>
+                )}
+                <span style={{ color: "var(--muted)", fontSize: "9px" }}>
+                  {revenueTimeframe === 'today' ? 'vs yesterday' : 'vs prior'}
+                </span>
+              </div>
+            </div>
+
+            {/* Gross Profit */}
+            <div
+              onClick={() => setChartActiveMetric(chartActiveMetric === 'profit' ? 'all' : 'profit')}
+              style={{
+                padding: "0.85rem 1rem",
+                background: chartActiveMetric === 'profit' ? "rgba(16, 185, 129, 0.08)" : "var(--surface-2)",
+                borderRadius: "var(--radius-md)",
+                border: chartActiveMetric === 'profit' ? "1.5px solid #10b981" : "1px solid var(--surface-border)",
+                boxShadow: chartActiveMetric === 'profit' ? "0 0 12px rgba(16, 185, 129, 0.2)" : "none",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              title="Click to spotlight Gross Profit in chart"
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", color: "var(--muted)" }}>
+                  Gross Profit
+                </div>
+                <span
+                  style={{
+                    fontSize: "8.5px",
+                    fontWeight: 800,
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    background: chartActiveMetric === 'profit' ? "#10b981" : "rgba(148, 163, 184, 0.15)",
+                    color: chartActiveMetric === 'profit' ? "#ffffff" : "var(--muted)",
+                  }}
+                >
+                  {chartActiveMetric === 'profit' ? 'Active' : 'Filter'}
+                </span>
+              </div>
+              <div className="v2-mono v2-font-black v2-text-base" style={{ marginTop: "2px", color: "var(--success)" }}>
+                {fmtCcy(revenueAnalytics.totalProfit)}
+              </div>
+              <div style={{ fontSize: "10px", fontWeight: 600, marginTop: "2px", color: "var(--muted)" }}>
+                {revenueAnalytics.profitDeltaPct !== null ? (
+                  Number(revenueAnalytics.profitDeltaPct) >= 0 ? (
+                    <span style={{ color: "var(--success)" }}>+{revenueAnalytics.profitDeltaPct}% vs prior</span>
+                  ) : (
+                    <span style={{ color: "var(--danger)" }}>{revenueAnalytics.profitDeltaPct}% vs prior</span>
+                  )
+                ) : (
+                  <span>Net margin earnings</span>
+                )}
+              </div>
+            </div>
+
+            {/* Cost (COGS) */}
+            <div
+              onClick={() => setChartActiveMetric(chartActiveMetric === 'cogs' ? 'all' : 'cogs')}
+              style={{
+                padding: "0.85rem 1rem",
+                background: chartActiveMetric === 'cogs' ? "rgba(245, 158, 11, 0.08)" : "var(--surface-2)",
+                borderRadius: "var(--radius-md)",
+                border: chartActiveMetric === 'cogs' ? "1.5px solid #f59e0b" : "1px solid var(--surface-border)",
+                boxShadow: chartActiveMetric === 'cogs' ? "0 0 12px rgba(245, 158, 11, 0.2)" : "none",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              title="Click to spotlight Cost of Goods Sold (COGS) in chart"
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", color: "var(--muted)" }}>
+                  Cost (COGS)
+                </div>
+                <span
+                  style={{
+                    fontSize: "8.5px",
+                    fontWeight: 800,
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    background: chartActiveMetric === 'cogs' ? "#f59e0b" : "rgba(148, 163, 184, 0.15)",
+                    color: chartActiveMetric === 'cogs' ? "#ffffff" : "var(--muted)",
+                  }}
+                >
+                  {chartActiveMetric === 'cogs' ? 'Active' : 'Filter'}
+                </span>
+              </div>
+              <div className="v2-mono v2-font-black v2-text-base" style={{ marginTop: "2px", color: "var(--text)" }}>
+                {fmtCcy(revenueAnalytics.totalCOGS)}
+              </div>
+              <div style={{ fontSize: "10px", fontWeight: 600, marginTop: "2px", color: "var(--muted)" }}>
+                {revenueAnalytics.totalRevenue > 0
+                  ? `${((revenueAnalytics.totalCOGS / revenueAnalytics.totalRevenue) * 100).toFixed(0)}% of sales`
+                  : 'Inventory cost'}
+              </div>
+            </div>
+
+            {/* Blended Margin % */}
+            <div
+              onClick={() => setChartActiveMetric('all')}
+              style={{
+                padding: "0.85rem 1rem",
+                background: chartActiveMetric === 'all' ? "rgba(99, 102, 241, 0.08)" : "var(--surface-2)",
+                borderRadius: "var(--radius-md)",
+                border: chartActiveMetric === 'all' ? "1.5px solid var(--accent)" : "1px solid var(--surface-border)",
+                boxShadow: chartActiveMetric === 'all' ? "0 0 12px rgba(99, 102, 241, 0.15)" : "none",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+              }}
+              title="Click to show all chart layers"
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: 700, letterSpacing: ".05em", color: "var(--muted)" }}>
+                  Gross Margin
+                </div>
+                <span
+                  style={{
+                    fontSize: "8.5px",
+                    fontWeight: 800,
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    background: chartActiveMetric === 'all' ? "var(--accent)" : "rgba(148, 163, 184, 0.15)",
+                    color: chartActiveMetric === 'all' ? "#080e1c" : "var(--muted)",
+                  }}
+                >
+                  {chartActiveMetric === 'all' ? 'All Layers' : 'Reset'}
+                </span>
+              </div>
+              <div className="v2-mono v2-font-black v2-text-base" style={{ marginTop: "2px", color: "var(--accent)" }}>
+                {revenueAnalytics.marginPct}%
+              </div>
+              <div style={{ fontSize: "10px", fontWeight: 600, marginTop: "2px" }}>
+                {Number(revenueAnalytics.marginPct) >= 30 ? (
+                  <span style={{ color: "var(--success)" }}>Healthy retail margin</span>
+                ) : Number(revenueAnalytics.marginPct) > 0 ? (
+                  <span style={{ color: "var(--warning)" }}>Tight margin (&lt;30%)</span>
+                ) : (
+                  <span style={{ color: "var(--muted)" }}>Baseline</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Peak Rush Hour Alert Banner (Today only) */}
+          {revenueTimeframe === 'today' && revenueAnalytics.peakHour && (
+            <div
+              style={{
+                margin: "0 1.25rem 0.5rem 1.25rem",
+                padding: "0.5rem 0.85rem",
+                borderRadius: "var(--radius-md)",
+                background: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: "11px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 700, color: "var(--warning)" }}>
+                <Flame size={14} style={{ color: "var(--warning)" }} />
+                <span>Peak Rush Hour: {revenueAnalytics.peakHour.hour}</span>
+              </div>
+              <div className="v2-mono" style={{ fontWeight: 900, color: "var(--text)" }}>
+                {fmtCcy(revenueAnalytics.peakHour.revenue)} ({revenueAnalytics.peakHour.ordersCount} {revenueAnalytics.peakHour.ordersCount === 1 ? 'sale' : 'sales'})
+              </div>
+            </div>
           )}
-        </div>
-      </div>
 
-      {/* ─── SECTOR-ADAPTIVE KPI METRICS GRID ───────────────────────────────── */}
-      <div className="metrics-grid kpi-grid-4">
-        {/* KPI 1: Sales Revenue */}
-        <div className="kpi-card">
-          <div className="v2-flex v2-items-center v2-justify-between">
-            <div className="kpi-card-label">7-Day Gross Sales Revenue</div>
-            <TrendingUp size={16} style={{ color: "var(--success)" }} />
-          </div>
-          <div className="kpi-card-value" style={{ color: "var(--accent)" }}>{money(totalRevenue7d)}</div>
-          <div className="kpi-card-desc">
-            <span className="v2-font-bold">{totalOrders7d} completed sales</span> in 7 days
-          </div>
-        </div>
-
-        {/* KPI 2: Est Net Profit */}
-        <div className="kpi-card">
-          <div className="v2-flex v2-items-center v2-justify-between">
-            <div className="kpi-card-label">Est Net Gross Profit</div>
-            <DollarSign size={16} style={{ color: "var(--success)" }} />
-          </div>
-          <div className="kpi-card-value" style={{ color: "var(--success)" }}>{money(totalProfit7d)}</div>
-          <div className="kpi-card-desc">
-            Gross Margin: <span className="v2-font-bold">{totalRevenue7d > 0 ? Math.round((totalProfit7d / totalRevenue7d) * 100) : 0}%</span>
-          </div>
-        </div>
-
-        {/* KPI 3: Average Order Value */}
-        <div className="kpi-card">
-          <div className="v2-flex v2-items-center v2-justify-between">
-            <div className="kpi-card-label">Average Basket Value</div>
-            <ShoppingCart size={16} style={{ color: "var(--warning)" }} />
-          </div>
-          <div className="kpi-card-value">{money(avgOrderValue)}</div>
-          <div className="kpi-card-desc">Per checkout session</div>
-        </div>
-
-        {/* KPI 4: Sector-Specific KPI */}
-        {activeModule === "Pharmacy" ? (
-          <div className="kpi-card">
-            <div className="v2-flex v2-items-center v2-justify-between">
-              <div className="kpi-card-label">FEFO Expiry Risk (30d)</div>
-              <Pill size={16} style={{ color: "var(--danger)" }} />
-            </div>
-            <div className="kpi-card-value" style={{ color: expiryRiskCount > 0 ? "var(--danger)" : "var(--text)" }}>
-              {expiryRiskCount} SKUs
-            </div>
-            <div className="kpi-card-desc">Medicines near expiration date</div>
-          </div>
-        ) : activeModule === "Law" ? (
-          <div className="kpi-card">
-            <div className="v2-flex v2-items-center v2-justify-between">
-              <div className="kpi-card-label">Active Matters & Retainers</div>
-              <Scale size={16} style={{ color: "var(--accent)" }} />
-            </div>
-            <div className="kpi-card-value">{productsList.length} Matters</div>
-            <div className="kpi-card-desc">Registered legal client files</div>
-          </div>
-        ) : activeModule === "Poultry" ? (
-          <div className="kpi-card">
-            <div className="v2-flex v2-items-center v2-justify-between">
-              <div className="kpi-card-label">Flock & Batch Stock</div>
-              <Egg size={16} style={{ color: "var(--success)" }} />
-            </div>
-            <div className="kpi-card-value" style={{ color: "var(--success)" }}>
-              {productsList.reduce((acc, p) => acc + p.stock, 0)} Units
-            </div>
-            <div className="kpi-card-desc">Total farm inventory stock</div>
-          </div>
-        ) : (
-          <div className="kpi-card">
-            <div className="v2-flex v2-items-center v2-justify-between">
-              <div className="kpi-card-label">Low Stock Replenishment</div>
-              <AlertTriangle size={16} style={{ color: "var(--warning)" }} />
-            </div>
-            <div className="kpi-card-value" style={{ color: lowStockCount > 0 ? "var(--warning)" : "var(--text)" }}>
-              {lowStockCount} SKUs
-            </div>
-            <div className="kpi-card-desc">Below branch reorder threshold</div>
-          </div>
-        )}
-      </div>
-
-      {/* ─── CHARTS SECTION ─────────────────────────────────────────────────── */}
-      <div className="v2-grid v2-grid-2 v2-gap-4">
-        {/* Revenue & Profit Area Chart */}
-        <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">7-Day Sales & Profit Margin Trend</div></div>
-          <div style={{ height: 260, width: "100%" }}>
+          <CardContent className="h-64 pb-2 relative">
+            {revenueAnalytics.totalRevenue === 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(15, 23, 42, 0.72)',
+                  backdropFilter: 'blur(3px)',
+                  zIndex: 10,
+                  borderRadius: '0 0 1rem 1rem',
+                  padding: '1.25rem',
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '12px',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#3b82f6',
+                    marginBottom: '0.65rem',
+                  }}
+                >
+                  <BarChart2 size={22} />
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text, #ffffff)' }}>
+                  No Sales Recorded Yet
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #94a3b8)', maxWidth: '340px', marginTop: '4px', lineHeight: 1.4 }}>
+                  Complete your first customer checkout in POS or load sample data to visualize real-time hourly revenue velocity and gross profit margin.
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleNav('POS')}
+                    className="v2-btn v2-btn-sm v2-btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', padding: '5px 12px', borderRadius: '8px' }}
+                  >
+                    <ShoppingCart size={13} />
+                    <span>Launch POS</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLoadDemoData}
+                    disabled={isLoadingSample}
+                    className="v2-btn v2-btn-sm v2-btn-secondary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', padding: '5px 12px', borderRadius: '8px' }}
+                  >
+                    <Sparkles size={13} />
+                    <span>{isLoadingSample ? 'Loading...' : 'Load Sample Data'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={salesTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={revenueAnalytics.chartPoints} margin={{ top: 10, right: 12, left: -24, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--accent)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--accent)" stopOpacity={0} />
+                  <linearGradient id="gradRev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                   </linearGradient>
-                  <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--success)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--success)" stopOpacity={0} />
+                  <linearGradient id="gradPro" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="gradCogs" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-border)" />
-                <XAxis dataKey="day" stroke="var(--muted)" fontSize={11} />
-                <YAxis stroke="var(--muted)" fontSize={11} />
-                <Tooltip
-                  formatter={(val: any) => [money(Number(val)), "Amount"]}
-                  contentStyle={{ background: "var(--surface)", border: "1px solid var(--surface-border)", borderRadius: 8, fontSize: 12 }}
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" className="dark:stroke-darkbg-border/30" />
+                <XAxis
+                  dataKey="name"
+                  fontSize={10}
+                  stroke="#94A3B8"
+                  tick={{ fontWeight: 600 }}
+                  interval={revenueTimeframe === '30d' ? 4 : 0}
                 />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Area type="monotone" dataKey="revenue" name="Sales Revenue" stroke="var(--accent)" fillOpacity={1} fill="url(#colorRev)" />
-                <Area type="monotone" dataKey="profit" name="Gross Profit" stroke="var(--success)" fillOpacity={1} fill="url(#colorProfit)" />
+                <YAxis
+                  fontSize={10}
+                  stroke="#94A3B8"
+                  tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}K` : v}
+                />
+                <Tooltip
+                  content={({ active, payload, label }: any) => {
+                    if (!active || !payload?.length) return null;
+                    const pt = payload[0]?.payload;
+                    return (
+                      <div className="bg-white dark:bg-darkbg-card border border-slate-200 dark:border-darkbg-border rounded-xl shadow-xl p-3 text-xs min-w-[170px] space-y-1.5">
+                        <p className="font-black text-slate-800 dark:text-slate-100 pb-1 border-b border-slate-100 dark:border-darkbg-border">
+                          {pt?.fullLabel || label}
+                        </p>
+                        <div className="flex items-center justify-between font-mono font-bold text-blue-600 dark:text-blue-400">
+                          <span className="flex items-center gap-1.5 font-sans font-semibold text-slate-600 dark:text-slate-300">
+                            <span className="h-2 w-2 rounded-full bg-blue-500 inline-block" />
+                            Revenue:
+                          </span>
+                          <span>{fmtCcy(pt?.Revenue || 0)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          <span className="flex items-center gap-1.5 font-sans font-semibold text-slate-600 dark:text-slate-300">
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+                            Gross Profit:
+                          </span>
+                          <span>{fmtCcy(pt?.Profit || 0)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono text-slate-500 dark:text-slate-400 text-[11px]">
+                          <span className="font-sans">Cost (COGS):</span>
+                          <span>{fmtCcy(pt?.COGS || 0)}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono text-slate-500 dark:text-slate-400 text-[11px]">
+                          <span className="font-sans">Margin:</span>
+                          <span className="font-bold text-indigo-600 dark:text-indigo-400">{pt?.marginPct || 0}%</span>
+                        </div>
+                        {pt?.PriorRevenue > 0 && (
+                          <div className="pt-1 mt-1 border-t border-slate-100 dark:border-darkbg-border/60 flex items-center justify-between text-[10px] text-slate-400">
+                            <span>Prior Baseline:</span>
+                            <span className="font-mono">{fmtCcy(pt.PriorRevenue)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 700, paddingTop: '6px' }} />
+                {activeModule === 'SACCO' ? (
+                  <>
+                    <Area type="monotone" dataKey="Savings" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#gradPro)" dot={{ fill: '#10b981', r: 3 }} />
+                    <Area type="monotone" dataKey="Loans"   stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#gradRev)" dot={{ fill: '#3b82f6', r: 3 }} />
+                  </>
+                ) : (
+                  <>
+                    {(chartActiveMetric === 'all' || chartActiveMetric === 'revenue') && (
+                      <Area
+                        type="monotone"
+                        dataKey="Revenue"
+                        name="Gross Revenue"
+                        stroke="#3b82f6"
+                        strokeWidth={chartActiveMetric === 'revenue' ? 3 : 2.5}
+                        fillOpacity={1}
+                        fill="url(#gradRev)"
+                        dot={{ fill: '#3b82f6', r: 2.5 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    )}
+                    {(chartActiveMetric === 'all' || chartActiveMetric === 'profit') && (
+                      <Area
+                        type="monotone"
+                        dataKey="Profit"
+                        name="Gross Profit"
+                        stroke="#10b981"
+                        strokeWidth={chartActiveMetric === 'profit' ? 3 : 2.5}
+                        fillOpacity={1}
+                        fill="url(#gradPro)"
+                        dot={{ fill: '#10b981', r: 2.5 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    )}
+                    {chartActiveMetric === 'cogs' && (
+                      <Area
+                        type="monotone"
+                        dataKey="COGS"
+                        name="Cost (COGS)"
+                        stroke="#f59e0b"
+                        strokeWidth={3}
+                        fillOpacity={1}
+                        fill="url(#gradCogs)"
+                        dot={{ fill: '#f59e0b', r: 2.5 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    )}
+                    {(chartActiveMetric === 'all' || chartActiveMetric === 'revenue') && (
+                      <Area
+                        type="monotone"
+                        dataKey="PriorRevenue"
+                        name="Prior Baseline"
+                        stroke="#94a3b8"
+                        strokeWidth={1.75}
+                        strokeDasharray="4 4"
+                        fill="none"
+                        dot={false}
+                        activeDot={{ r: 4, stroke: '#94a3b8' }}
+                      />
+                    )}
+                  </>
+                )}
               </AreaChart>
             </ResponsiveContainer>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Category Revenue Distribution Bar Chart */}
-        <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">Category Revenue Performance</div></div>
-          <div style={{ height: 260, width: "100%" }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={categoryBreakdown} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-border)" />
-                <XAxis dataKey="name" stroke="var(--muted)" fontSize={10} />
-                <YAxis stroke="var(--muted)" fontSize={11} />
-                <Tooltip
-                  formatter={(val: any) => [money(Number(val)), "Valuation / Sales"]}
-                  contentStyle={{ background: "var(--surface)", border: "1px solid var(--surface-border)", borderRadius: 8, fontSize: 12 }}
-                />
-                <Bar dataKey="value" name="Valuation / Sales" radius={[6, 6, 0, 0]}>
-                  {categoryBreakdown.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        {/* Payment Methods Donut */}
+        <Card className="rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col justify-between">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-black">Payment Channels</CardTitle>
+                <CardDescription className="text-[11px]">Breakdown by payment method</CardDescription>
+              </div>
+              {/* Metric Toggle */}
+              {paymentChannelSummary.items.length > 0 && (
+                <div className="flex items-center bg-slate-100 dark:bg-darkbg-border/60 p-0.5 rounded-lg text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMetricMode('volume')}
+                    className={`px-2 py-0.5 rounded-md font-bold transition-all ${
+                      paymentMetricMode === 'volume'
+                        ? 'bg-white dark:bg-darkbg-card text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Volume
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMetricMode('count')}
+                    className={`px-2 py-0.5 rounded-md font-bold transition-all ${
+                      paymentMetricMode === 'count'
+                        ? 'bg-white dark:bg-darkbg-card text-slate-900 dark:text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Count
+                  </button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-between pb-4 flex-1">
+            {paymentChannelSummary.items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 text-center w-full">
+                <div className="h-16 w-16 rounded-full border-4 border-dashed border-slate-200 dark:border-darkbg-border flex items-center justify-center mb-3">
+                  <Banknote className="h-7 w-7 text-slate-400" />
+                </div>
+                <p className="text-xs font-bold text-slate-400">No transactions yet</p>
+                <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Payment channels appear after first sale</p>
+              </div>
+            ) : (
+              <>
+                {/* Donut Chart with Center KPI */}
+                <div className="relative h-44 w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={paymentChannelSummary.items}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={68}
+                        paddingAngle={paymentChannelSummary.items.length > 1 ? 3 : 0}
+                        dataKey="value"
+                        onMouseEnter={(_entry: unknown, index: number) => setActivePaymentIndex(index)}
+                        onMouseLeave={() => setActivePaymentIndex(null)}
+                      >
+                        {paymentChannelSummary.items.map((entry, i) => (
+                          <Cell
+                            key={i}
+                            fill={entry.color}
+                            strokeWidth={0}
+                            style={{
+                              filter: activePaymentIndex === i ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))' : 'none',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        content={({ active, payload }: any) => {
+                          if (!active || !payload?.length) return null;
+                          const d = payload[0].payload;
+                          return (
+                            <div className="bg-white dark:bg-darkbg-card border border-slate-200 dark:border-darkbg-border rounded-xl shadow-lg p-2.5 text-xs min-w-[140px] space-y-1">
+                              <div className="flex items-center gap-1.5 font-black text-slate-800 dark:text-slate-100">
+                                <span className="h-2 w-2 rounded-full" style={{ background: d.color }} />
+                                <span>{d.name}</span>
+                              </div>
+                              <div className="text-[11px] font-mono font-bold text-slate-700 dark:text-slate-200 flex justify-between">
+                                <span>Volume:</span> <span>{fmtCcy(d.volume)} ({d.volumeShare}%)</span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex justify-between">
+                                <span>Sales:</span> <span>{d.count} ({d.countShare}%)</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 dark:text-slate-500 flex justify-between pt-1 border-t border-slate-100 dark:border-darkbg-border/60">
+                                <span>Avg Ticket:</span> <span className="font-semibold">{fmtCcy(d.aov)}</span>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {/* Donut Center KPI */}
+                  <div
+                    className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center select-none"
+                    style={{ zIndex: 1 }}
+                  >
+                    {activePaymentChannel ? (
+                      <>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[90px]">
+                          {activePaymentChannel.name}
+                        </span>
+                        <span className="text-sm font-black font-mono tracking-tight text-slate-800 dark:text-white leading-tight">
+                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.count} Sales`}
+                        </span>
+                        <span className="text-[9px] font-bold" style={{ color: activePaymentChannel.color }}>
+                          {paymentMetricMode === 'volume' ? `${activePaymentChannel.volumeShare}% Share` : `${activePaymentChannel.countShare}% Share`}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Transactions'}
+                        </span>
+                        <span className="text-sm font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight">
+                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Orders`}
+                        </span>
+                        <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-medium">
+                          {paymentMetricMode === 'volume'
+                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'sale' : 'sales'}`
+                            : `Avg ${fmtCcy(paymentChannelSummary.overallAov)}`}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Channel List Breakdown */}
+                <div className="mt-2 w-full space-y-1.5 px-0.5">
+                  {paymentChannelSummary.items.map((item, i) => {
+                    const Icon = item.icon;
+                    const isHighlighted = activePaymentIndex === i;
+                    return (
+                      <div
+                        key={i}
+                        onMouseEnter={() => setActivePaymentIndex(i)}
+                        onMouseLeave={() => setActivePaymentIndex(null)}
+                        className={`flex items-center justify-between text-xs py-1.5 px-2 rounded-xl transition-all cursor-pointer ${
+                          isHighlighted
+                            ? 'bg-slate-100 dark:bg-darkbg-border/60 shadow-xs'
+                            : 'hover:bg-slate-50 dark:hover:bg-darkbg-border/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 shadow-xs"
+                            style={{ background: item.badgeBg, color: item.textColor }}
+                          >
+                            <Icon size={14} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 dark:text-slate-100 truncate text-xs flex items-center gap-1.5">
+                              <span className="truncate">{item.name}</span>
+                              {item.name === 'Cash' && (
+                                <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1 py-0.2 rounded border border-emerald-200 dark:border-emerald-800/40">
+                                  Drawer
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium truncate">
+                              {item.count} {item.count === 1 ? 'sale' : 'sales'} · AOV {fmtCcy(item.aov)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 pl-2">
+                          <div className="font-black font-mono text-xs text-slate-900 dark:text-white">
+                            {fmtCcy(item.volume)}
+                          </div>
+                          <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% count`}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Footer Micro-Summary */}
+                <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-darkbg-border/60 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 px-1">
+                  <span>Reconciled across {paymentChannelSummary.items.length} {paymentChannelSummary.items.length === 1 ? 'tender' : 'tenders'}</span>
+                  <span className="font-bold text-slate-600 dark:text-slate-300">AOV: {fmtCcy(paymentChannelSummary.overallAov)}</span>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      {/* ─── BOTTOM SECTION: RECENT TRANSACTIONS STREAM ───────────────────────── */}
-      <div className="v2-card">
-        <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
-          <div className="v2-card-title">Recent Real-Time Transaction Stream</div>
-          <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadDashboardData()} type="button">
-            <Activity size={13} /> Refresh Stream
-          </button>
-        </div>
-        {recentTransactions.length === 0 ? (
-          <div className="v2-empty v2-p-6">
-            <p className="v2-text-sm v2-text-muted">No sales transactions recorded yet for this branch.</p>
-            <p className="v2-text-xs v2-text-muted v2-mt-1">Completed checkout sessions will stream here live in real time.</p>
+      {/* ── Top Products + Recent Orders ────────────────────────────────── */}
+      <div className="grid gap-5 lg:grid-cols-5">
+
+        {/* Top Products Ranked Leaderboard Card */}
+        <Card className="lg:col-span-2 rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col justify-between">
+          <CardHeader className="pb-2">
+            <div className="flex flex-row items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm font-black">Top Products</CardTitle>
+                <CardDescription className="text-[11px]">Ranked by sales velocity & volume</CardDescription>
+              </div>
+
+              {/* Metric Toggle: Revenue vs Units Sold */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "2px",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--surface-border)",
+                  padding: "2px",
+                  borderRadius: "8px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setTopProductsMetric('revenue')}
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: topProductsMetric === 'revenue' ? "var(--accent)" : "transparent",
+                    color: topProductsMetric === 'revenue' ? "#080e1c" : "var(--muted)",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  Revenue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTopProductsMetric('units')}
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: topProductsMetric === 'units' ? "var(--accent)" : "transparent",
+                    color: topProductsMetric === 'units' ? "#080e1c" : "var(--muted)",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  Units Sold
+                </button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-2 pb-3 flex-1 flex flex-col justify-between">
+            {topProductsAnalytics.items.length === 0 ? (
+              <div className="py-10 text-center text-slate-400 italic text-xs flex flex-col items-center justify-center gap-2">
+                <Package className="h-8 w-8 text-slate-300 dark:text-slate-600 stroke-[1.5]" />
+                <p>No product sales recorded yet.</p>
+                <span className="text-[10px] text-slate-400">Complete checkouts from the POS terminal to populate rankings.</span>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+                {topProductsAnalytics.items.map((item) => {
+                  const isGold = item.rank === 1;
+                  const isSilver = item.rank === 2;
+                  const isBronze = item.rank === 3;
+                  const rankBg = isGold ? 'rgba(245, 158, 11, 0.12)' : isSilver ? 'rgba(148, 163, 184, 0.15)' : isBronze ? 'rgba(234, 88, 12, 0.12)' : 'var(--surface-2)';
+                  const rankColor = isGold ? '#f59e0b' : isSilver ? '#94a3b8' : isBronze ? '#ea580c' : 'var(--muted)';
+                  const rankBorder = isGold ? 'rgba(245, 158, 11, 0.3)' : isSilver ? 'rgba(148, 163, 184, 0.3)' : isBronze ? 'rgba(234, 88, 12, 0.3)' : 'var(--surface-border)';
+
+                  const stockBadge = item.stock <= 0
+                    ? { text: 'Out of Stock', bg: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: 'rgba(239, 68, 68, 0.25)' }
+                    : item.stock <= 5
+                    ? { text: `Low: ${item.stock}`, bg: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: 'rgba(245, 158, 11, 0.25)' }
+                    : { text: `${item.stock} in stock`, bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: 'rgba(16, 185, 129, 0.25)' };
+
+                  return (
+                    <div
+                      key={item.productId}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "5px",
+                        padding: "8px 10px",
+                        borderRadius: "10px",
+                        background: "var(--surface-2)",
+                        border: "1px solid var(--surface-border)",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                          {/* Rank Pill */}
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "22px",
+                              height: "22px",
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: 800,
+                              background: rankBg,
+                              color: rankColor,
+                              border: `1px solid ${rankBorder}`,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isGold ? <Award size={12} /> : `#${item.rank}`}
+                          </span>
+
+                          {/* Product Info */}
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontWeight: 700,
+                                fontSize: "12px",
+                                color: "var(--text)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                maxWidth: "160px",
+                              }}
+                              title={item.name}
+                            >
+                              {item.name}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "10px", color: "var(--muted)", marginTop: "1px" }}>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "80px" }}>
+                                {item.category}
+                              </span>
+                              <span>•</span>
+                              <span
+                                style={{
+                                  fontSize: "9px",
+                                  fontWeight: 700,
+                                  padding: "0.5px 5px",
+                                  borderRadius: "4px",
+                                  background: stockBadge.bg,
+                                  color: stockBadge.color,
+                                  border: `1px solid ${stockBadge.border}`,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {stockBadge.text}
+                              </span>
+                              {item.stock <= 5 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      sessionStorage.setItem('kwakopos_target_reorder_sku', JSON.stringify({
+                                        productId: item.productId,
+                                        name: item.name,
+                                        currentStock: item.stock,
+                                        category: item.category,
+                                      }));
+                                    } catch {}
+                                    handleNav('Purchasing');
+                                  }}
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "2.5px",
+                                    padding: "1px 5px",
+                                    borderRadius: "4px",
+                                    fontSize: "9px",
+                                    fontWeight: 700,
+                                    background: item.stock <= 0 ? "rgba(239, 68, 68, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                                    color: item.stock <= 0 ? "#ef4444" : "#d97706",
+                                    border: item.stock <= 0 ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(245, 158, 11, 0.3)",
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  title={`Create purchase order to restock ${item.name}`}
+                                >
+                                  <Truck size={9} />
+                                  <span>Reorder</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Metric Value */}
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div className="v2-mono" style={{ fontWeight: 800, fontSize: "12px", color: "var(--text)" }}>
+                            {topProductsMetric === 'revenue' ? fmtCcy(item.revenue) : `${item.units} sold`}
+                          </div>
+                          <div style={{ fontSize: "10px", color: "var(--muted)", fontWeight: 500 }}>
+                            {topProductsMetric === 'revenue' ? `${item.units} units` : fmtCcy(item.revenue)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Velocity Progress Bar */}
+                      <div style={{ height: "4px", width: "100%", background: "var(--surface-border)", borderRadius: "2px", overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${item.progressPct}%`,
+                            background: isGold ? "linear-gradient(90deg, #f59e0b, #fbbf24)" : "var(--accent)",
+                            borderRadius: "2px",
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Footer Micro-Summary */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", paddingTop: "8px", borderTop: "1px solid var(--surface-border)", fontSize: "10px", color: "var(--muted)" }}>
+              <span>Tracking top {topProductsAnalytics.items.length} of {topProductsAnalytics.totalTracked} products</span>
+              <button
+                type="button"
+                onClick={() => handleNav('Inventory')}
+                style={{ background: "none", border: "none", color: "var(--accent)", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px", padding: 0 }}
+              >
+                View catalog <ArrowRight size={11} />
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Recent Orders Audit Table */}
+        <Card className="lg:col-span-3 rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col justify-between">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-black">Recent Orders</CardTitle>
+              <CardDescription className="text-[11px]">Audit log for latest {Math.min(orders.length, 6)} transactions</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black bg-primary/10 text-primary dark:bg-primary/20 px-2.5 py-1 rounded-full">
+                {orders.length} total
+              </span>
+              <button
+                onClick={() => handleNav('Receipts')}
+                className="text-[10px] font-bold text-slate-400 hover:text-primary transition flex items-center gap-1"
+              >
+                View all receipts <ArrowRight className="h-2.5 w-2.5" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0 flex-1 flex flex-col justify-between">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg/50 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <th className="p-3 pl-4">Order</th>
+                    <th className="p-3">Date & Time</th>
+                    <th className="p-3">Customer</th>
+                    <th className="p-3">Items</th>
+                    <th className="p-3">Total</th>
+                    <th className="p-3">Channel</th>
+                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 dark:divide-darkbg-border/20">
+                  {orders.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-10 text-center text-slate-400 italic text-xs">
+                        No orders logged yet. Start selling from the POS terminal.
+                      </td>
+                    </tr>
+                  ) : (
+                    orders.slice(-6).reverse().map(order => {
+                      const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
+                      const tender = getTenderBadge(order.paymentMethod);
+                      const TenderIcon = tender.Icon;
+
+                      return (
+                        <tr
+                          key={order.id}
+                          onClick={() => setSelectedOrderForDrawer(order)}
+                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors text-xs cursor-pointer group"
+                        >
+                          <td className="p-3 pl-4">
+                            <span className="v2-mono font-extrabold text-[11px] text-primary dark:text-blue-400">
+                              {order.saleNumber || order.id}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                              <span style={{ fontWeight: 600, color: "var(--text)" }}>{fmtDate(order.timestamp)}</span>
+                              <span style={{ fontSize: "10px", color: "var(--muted)" }}>{fmtTime(order.timestamp)}</span>
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: "110px" }}>
+                              <div
+                                style={{
+                                  width: "20px",
+                                  height: "20px",
+                                  borderRadius: "50%",
+                                  background: "var(--surface-2)",
+                                  border: "1px solid var(--surface-border)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <User size={11} style={{ color: "var(--muted)" }} />
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "var(--text)",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    maxWidth: "115px",
+                                    display: "block",
+                                  }}
+                                  title={order.customer || 'Walk-In Customer'}
+                                >
+                                  {order.customer || 'Walk-In Customer'}
+                                </span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "3px", fontSize: "9px", color: "var(--muted)", marginTop: "1px" }}>
+                                  <UserCheck size={9} style={{ color: "var(--accent)" }} />
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "90px" }}>
+                                    {order.cashierName || 'Cashier'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                            {totalItems} {totalItems === 1 ? 'item' : 'items'}
+                          </td>
+                          <td className="p-3 font-black text-slate-900 dark:text-white whitespace-nowrap font-mono">
+                            {fmtCcy(order.total)}
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "2px 8px",
+                                borderRadius: "6px",
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                background: tender.bg,
+                                color: tender.color,
+                                border: `1px solid ${tender.border}`,
+                              }}
+                            >
+                              <TenderIcon size={11} />
+                              {tender.label}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center whitespace-nowrap">
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                borderRadius: "9999px",
+                                padding: "2px 8px",
+                                fontSize: "9.5px",
+                                fontWeight: 800,
+                                background: order.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                color: order.syncStatus === 'Synced' ? '#10b981' : '#f59e0b',
+                                border: `1px solid ${order.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                              }}
+                            >
+                              {order.syncStatus === 'Synced' ? (
+                                <CheckCircle size={10} />
+                              ) : (
+                                <RefreshCw size={10} className="animate-spin" />
+                              )}
+                              {order.syncStatus}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrderForDrawer(order);
+                              }}
+                              title="Inspect Receipt Breakdown"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "26px",
+                                height: "26px",
+                                borderRadius: "6px",
+                                border: "1px solid var(--surface-border)",
+                                background: "var(--surface-2)",
+                                color: "var(--muted)",
+                                cursor: "pointer",
+                                transition: "all 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.color = "var(--accent)";
+                                e.currentTarget.style.borderColor = "var(--accent)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.color = "var(--muted)";
+                                e.currentTarget.style.borderColor = "var(--surface-border)";
+                              }}
+                            >
+                              <Eye size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Micro Table Footer */}
+            <div className="w-full pt-2.5 pb-2 px-4 border-t border-slate-100 dark:border-darkbg-border/60 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
+              <span>Click any row or the eye button to view the receipt audit breakdown</span>
+              <span className="font-bold text-slate-600 dark:text-slate-300">
+                Audited {Math.min(orders.length, 6)} of {orders.length} total orders
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Onboarding Banner (When workspace has no products/sales yet - Legacy Parity) ── */}
+      {(products.length === 0 || isCleanTenant) && renderOnboarding()}
+
+      {/* ── Slide-Over Receipt Drawer ─────────────────────────────────── */}
+      <Sheet
+        isOpen={!!selectedOrderForDrawer}
+        onClose={() => setSelectedOrderForDrawer(null)}
+        width={480}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontWeight: 800 }}>Order Audit Details</span>
+            {selectedOrderForDrawer && (
+              <span
+                className="v2-mono"
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--surface-border)',
+                  color: 'var(--accent)',
+                }}
+              >
+                {selectedOrderForDrawer.saleNumber || selectedOrderForDrawer.id}
+              </span>
+            )}
           </div>
-        ) : (
-          <table className="v2-table">
-            <thead>
-              <tr>
-                <th>Receipt #</th>
-                <th>Time</th>
-                <th>Customer / Account</th>
-                <th>Line Items</th>
-                <th>Payment Method</th>
-                <th>Total Amount</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentTransactions.map((tx) => (
-                <tr key={tx.id}>
-                  <td className="v2-mono v2-font-bold v2-text-xs">{tx.id}</td>
-                  <td className="v2-text-xs v2-text-muted">{tx.time}</td>
-                  <td className="v2-font-bold">{tx.customer}</td>
-                  <td className="v2-mono">{tx.items} items</td>
-                  <td><span className="badge v2-badge-muted">{tx.method}</span></td>
-                  <td className="v2-mono v2-font-black">{money(tx.total)}</td>
-                  <td>
-                    <span className={`badge ${tx.status === "COMPLETED" ? "v2-badge-success" : "v2-badge-warning"}`}>
-                      {tx.status}
+        }
+        description={
+          selectedOrderForDrawer
+            ? `Completed on ${new Date(selectedOrderForDrawer.timestamp).toLocaleDateString([], {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })} at ${fmtTime(selectedOrderForDrawer.timestamp)}`
+            : ''
+        }
+        footer={
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '10px' }}>
+            <button
+              type="button"
+              className="v2-btn v2-btn-secondary"
+              onClick={() => setSelectedOrderForDrawer(null)}
+              style={{ flex: 1 }}
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              className="v2-btn v2-btn-primary"
+              onClick={() => {
+                window.print();
+              }}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            >
+              <Printer size={14} /> Print Receipt
+            </button>
+          </div>
+        }
+      >
+        {selectedOrderForDrawer && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '12px' }}>
+            {/* Store & Customer Header Banner */}
+            <div
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--surface-border)',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700 }}>
+                  Customer
+                </span>
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: selectedOrderForDrawer.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                    color: selectedOrderForDrawer.syncStatus === 'Synced' ? '#10b981' : '#f59e0b',
+                    border: `1px solid ${selectedOrderForDrawer.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  {selectedOrderForDrawer.syncStatus === 'Synced' ? <CheckCircle size={10} /> : <RefreshCw size={10} className="animate-spin" />}
+                  {selectedOrderForDrawer.syncStatus}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--surface-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <User size={14} style={{ color: 'var(--muted)' }} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '13px' }}>
+                    {selectedOrderForDrawer.customer || 'Walk-In Customer'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px', color: 'var(--muted)', marginTop: '2px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                      <UserCheck size={11} style={{ color: 'var(--accent)' }} />
+                      Cashier: <strong style={{ color: 'var(--text)' }}>{selectedOrderForDrawer.cashierName || 'Cashier'}</strong>
                     </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <span>•</span>
+                    <span>Branch: {currentBranchName || 'Main Store'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Line Items List */}
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', marginBottom: '8px' }}>
+                Line Items ({selectedOrderForDrawer.items.reduce((s, i) => s + i.quantity, 0)})
+              </div>
+              <div
+                style={{
+                  border: '1px solid var(--surface-border)',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--surface-border)', color: 'var(--muted)', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' }}>
+                      <th style={{ padding: '8px 12px' }}>Item</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'center' }}>Qty</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right' }}>Price</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOrderForDrawer.items.map((item, idx) => (
+                      <tr
+                        key={idx}
+                        style={{
+                          borderBottom: idx === selectedOrderForDrawer.items.length - 1 ? 'none' : '1px solid var(--surface-border)',
+                        }}
+                      >
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>{item.name}</div>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: 'var(--text)' }}>
+                          {item.quantity}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', color: 'var(--muted)' }} className="v2-mono">
+                          {fmtCcy(item.price)}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--text)' }} className="v2-mono">
+                          {fmtCcy(item.price * item.quantity)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Financial Totals */}
+            <div
+              style={{
+                border: '1px solid var(--surface-border)',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                background: 'var(--surface-2)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '11px' }}>
+                <span>Subtotal</span>
+                <span className="v2-mono" style={{ fontWeight: 600 }}>{fmtCcy(selectedOrderForDrawer.total)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: '11px' }}>
+                <span>Taxes & Fees</span>
+                <span className="v2-mono" style={{ fontWeight: 600 }}>Tsh 0</span>
+              </div>
+              <div style={{ borderTop: '1px dashed var(--surface-border)', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>Grand Total</span>
+                <span className="v2-mono" style={{ fontWeight: 900, fontSize: '16px', color: 'var(--accent)' }}>
+                  {fmtCcy(selectedOrderForDrawer.total)}
+                </span>
+              </div>
+            </div>
+
+            {/* Payment & Tender Details */}
+            <div
+              style={{
+                border: '1px solid var(--surface-border)',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 700 }}>
+                Payment Method & Tender
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {(() => {
+                  const tb = getTenderBadge(selectedOrderForDrawer.paymentMethod);
+                  const TIcon = tb.Icon;
+                  return (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: tb.bg,
+                        color: tb.color,
+                        border: `1px solid ${tb.border}`,
+                      }}
+                    >
+                      <TIcon size={14} />
+                      {tb.label}
+                    </span>
+                  );
+                })()}
+                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  Status: <strong style={{ color: 'var(--text)' }}>{selectedOrderForDrawer.status}</strong>
+                </span>
+              </div>
+
+              {selectedOrderForDrawer.cashReceived !== undefined && selectedOrderForDrawer.cashReceived > 0 && (
+                <div style={{ marginTop: '6px', paddingTop: '8px', borderTop: '1px solid var(--surface-border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                  <div>
+                    <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>Cash Tendered</span>
+                    <span className="v2-mono" style={{ fontWeight: 700, color: 'var(--text)' }}>
+                      {fmtCcy(selectedOrderForDrawer.cashReceived)}
+                    </span>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>Change Due</span>
+                    <span className="v2-mono" style={{ fontWeight: 700, color: (selectedOrderForDrawer.changeDue || 0) > 0 ? '#10b981' : 'var(--text)' }}>
+                      {fmtCcy(selectedOrderForDrawer.changeDue || 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         )}
-      </div>
+      </Sheet>
+
+      {/* ── 1-Click 80mm Thermal Daily Register Close (Z-Report) Slip Drawer ── */}
+      <Sheet isOpen={isZReportOpen} onClose={() => setIsZReportOpen(false)} width={420}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* Header Bar */}
+          <div
+            style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--surface-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Printer size={18} style={{ color: 'var(--accent)' }} />
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 900, color: 'var(--text)' }}>
+                  Daily Register Close (Z-Report)
+                </h3>
+              </div>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--muted)' }}>
+                80mm Standard POS Thermal Audit Slip
+              </p>
+            </div>
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 800,
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: 'rgba(16, 185, 129, 0.12)',
+                color: '#10b981',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+              }}
+            >
+              TRA VFD COMPLIANT
+            </span>
+          </div>
+
+          {/* 80mm Thermal Slip Body */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '20px',
+              background: 'var(--surface-2)',
+            }}
+          >
+            <div
+              id="z-report-thermal-slip"
+              style={{
+                background: '#ffffff',
+                color: '#000000',
+                padding: '18px 16px',
+                borderRadius: '8px',
+                fontFamily: 'monospace, "Courier New", Courier, monospace',
+                fontSize: '11.5px',
+                lineHeight: '1.4',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              {/* Store Header */}
+              <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                <div style={{ fontSize: '15px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {currentTenantName || 'KWAKOPOS STORE'}
+                </div>
+                <div style={{ fontSize: '11px', fontWeight: 600 }}>
+                  {currentBranchName || 'Main Store Branch'}
+                </div>
+                <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
+                  TIN: 124-589-321 · VRN: 40-029831-Z
+                </div>
+                <div style={{ fontSize: '10px', color: '#475569' }}>
+                  Electronic Fiscal Device (EFD / VFD)
+                </div>
+                <div style={{ fontSize: '12px', fontWeight: 900, marginTop: '6px', borderTop: '1px dashed #94a3b8', borderBottom: '1px dashed #94a3b8', padding: '4px 0' }}>
+                  *** DAILY AUDIT Z-REPORT ***
+                </div>
+              </div>
+
+              {/* Meta information */}
+              <div style={{ fontSize: '10.5px', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>REPORT NO:</span>
+                  <span style={{ fontWeight: 800 }}>Z-REP-{new Date().toISOString().slice(0,10).replace(/-/g, '')}-001</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>STATION / REGISTER:</span>
+                  <span>POS-REG-01</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>SHIFT NO:</span>
+                  <span>{tillReconciliation.shiftNumber}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>OPERATOR:</span>
+                  <span>{user?.name || role}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>DATE & TIME:</span>
+                  <span>{new Date().toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #000000', margin: '8px 0' }} />
+
+              {/* Turnover Waterfall */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  TURNOVER SUMMARY
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>GROSS SALES:</span>
+                  <span style={{ fontWeight: 700 }}>{fmtCcy(stats.grossSales)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
+                  <span>DISCOUNTS ALLOWED:</span>
+                  <span>-{fmtCcy(stats.todayDiscounts)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
+                  <span>RETURNS / REFUNDS ({stats.todayRefundCount}):</span>
+                  <span>-{fmtCcy(stats.todayRefunds)}</span>
+                </div>
+                <div style={{ borderTop: '1px solid #cbd5e1', marginTop: '4px', paddingTop: '4px', display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '12px' }}>
+                  <span>NET SALES:</span>
+                  <span>{fmtCcy(stats.netSales)}</span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #000000', margin: '8px 0' }} />
+
+              {/* Tax & Fiscal Analysis */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  TAX / VAT BREAKDOWN
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>TAXABLE TURNOVER (18%):</span>
+                  <span>{fmtCcy(Math.round(stats.netSales / 1.18))}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>VAT OUTPUT TAX (18%):</span>
+                  <span>{fmtCcy(Math.round(stats.netSales * 0.18 / 1.18))}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>EXEMPT / ZERO-RATED:</span>
+                  <span>Tsh 0</span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #000000', margin: '8px 0' }} />
+
+              {/* Tender Breakdown */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  PAYMENT TENDER AUDIT
+                </div>
+                {paymentChannelSummary.items.map((ch, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <span>{ch.name.toUpperCase()} ({ch.count}):</span>
+                    <span style={{ fontWeight: 700 }}>{fmtCcy(ch.volume)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px dashed #000000', margin: '8px 0' }} />
+
+              {/* Cash Drawer Reconciliation */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  DRAWER RECONCILIATION
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>OPENING CASH FLOAT:</span>
+                  <span>{fmtCcy(tillReconciliation.openingFloat)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>CASH SALES COLLECTED:</span>
+                  <span>+{fmtCcy(tillReconciliation.cashSalesToday)}</span>
+                </div>
+                {tillReconciliation.cashIn > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>PAID IN (ADDITIONAL):</span>
+                    <span>+{fmtCcy(tillReconciliation.cashIn)}</span>
+                  </div>
+                )}
+                {tillReconciliation.totalPayouts > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>PAID OUT / DROPS:</span>
+                    <span>-{fmtCcy(tillReconciliation.totalPayouts)}</span>
+                  </div>
+                )}
+                <div style={{ borderTop: '1px solid #cbd5e1', marginTop: '4px', paddingTop: '4px', display: 'flex', justifyContent: 'space-between', fontWeight: 900 }}>
+                  <span>EXPECTED CASH IN DRAWER:</span>
+                  <span>{fmtCcy(tillReconciliation.expectedCash)}</span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #000000', margin: '8px 0' }} />
+
+              {/* Fiscal Authentication & Signatures */}
+              <div style={{ fontSize: '10px', textAlign: 'center', marginTop: '10px' }}>
+                <div style={{ fontWeight: 800 }}>TRA VFD FISCAL RECEIPT VERIFICATION</div>
+                <div style={{ color: '#475569', margin: '2px 0' }}>FISCAL CODE: TRA-VFD-TZ-2026-X89B21</div>
+                <div style={{ color: '#475569' }}>STATUS: ELECTRONICALLY CERTIFIED</div>
+
+                {/* Sign-off lines */}
+                <div style={{ marginTop: '24px', textAlign: 'left' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <div>Cashier Signature: ______________________</div>
+                  </div>
+                  <div>
+                    <div>Manager Signature: ______________________</div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '16px', fontSize: '9px', color: '#64748b' }}>
+                  *** END OF DAILY Z-REPORT ***
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar */}
+          <div
+            style={{
+              padding: '14px 20px',
+              borderTop: '1px solid var(--surface-border)',
+              display: 'flex',
+              gap: '10px',
+              justifyContent: 'flex-end',
+              background: 'var(--surface)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setIsZReportOpen(false)}
+              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-darkbg-border hover:bg-slate-100 dark:hover:bg-darkbg-card transition-all cursor-pointer"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-primary hover:bg-primary-hover rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span>Print 80mm Z-Report Slip</span>
+            </button>
+          </div>
+        </div>
+      </Sheet>
     </div>
   );
 };

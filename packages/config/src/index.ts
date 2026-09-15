@@ -3,6 +3,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { loadAuthoritativeRelease } from "./authoritativeRelease.js";
 
 function normalizeDatabaseUrlValue(raw: string): string {
   let value = raw.trim();
@@ -41,7 +42,14 @@ function resolvePackageVersion(): string {
   } catch {
     // Runtime may not include repository metadata; APP_VERSION can provide the value explicitly.
   }
-  return "2.0.0";
+  return "2.12.5";
+}
+if (typeof (process as any).loadEnvFile === "function") {
+  try {
+    (process as any).loadEnvFile();
+  } catch {
+    // .env not present or already supplied via runtime environment
+  }
 }
 
 const developmentJwtSecret = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
@@ -55,12 +63,25 @@ export const ConfigSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default("7d"),
   GIT_SHA: z.string().optional(),
+  BUILD_NUMBER: z.coerce.number().default(584),
   CONTAINER_DIGEST: z.string().optional(),
   CLOUD_RUN_REVISION: z.string().optional(),
   APP_VERSION: z.string().default(resolvePackageVersion()),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+
+export function resolveRealBuildNumber(): number {
+  const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
+  if (envBuild && /^\d+$/.test(envBuild)) return parseInt(envBuild, 10);
+  try {
+    const count = execSync("git rev-list --count HEAD", { encoding: "utf8" }).trim();
+    if (/^\d+$/.test(count)) return parseInt(count, 10);
+  } catch {
+    // Git may be unavailable inside the runtime container.
+  }
+  return 584;
+}
 
 export function resolveRealGitSha(): string {
   const envSha = process.env.GIT_SHA || process.env.COMMIT_SHA || process.env.CONTAINER_SOURCE_SHA || process.env.GITHUB_SHA || process.env.GIT_COMMIT;
@@ -86,8 +107,10 @@ export function resolveRealGitSha(): string {
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
   const gitSha = resolveRealGitSha();
+  const buildNumber = resolveRealBuildNumber();
   const env = {
     GIT_SHA: gitSha,
+    BUILD_NUMBER: buildNumber,
     ...process.env,
     ...overrideEnv,
   };
@@ -105,6 +128,7 @@ export interface ReleaseIdentity {
   appVersion: string;
   gitTag: string;
   gitSha: string;
+  buildNumber: number;
   containerDigest: string | null;
   cloudRunRevision: string | null;
   environment: string;
@@ -122,19 +146,20 @@ export interface CompatibilityMetadata {
 }
 
 export const CURRENT_COMPATIBILITY: CompatibilityMetadata = {
-  databaseSchemaVersion: 2,
+  databaseSchemaVersion: 4,
   syncProtocolVersion: 2,
-  pwaSchemaVersion: 3,
+  pwaSchemaVersion: 4,
   minSupportedClientVersion: "2.0.0",
-  recommendedClientVersion: "2.0.0",
+  recommendedClientVersion: "2.12.5",
 };
 
-export function getReleaseIdentity(config: Config): ReleaseIdentity {
-  const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST;
-  const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION;
-  const appVersion = config.APP_VERSION || "2.0.0";
-  const gitSha = config.GIT_SHA || resolveRealGitSha();
-  const gitTag = `v${appVersion}`;
+export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<string, any> {
+  const auth = loadAuthoritativeRelease();
+  const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST || auth.containerDigest;
+  const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION || auth.cloudRunRevision;
+  const appVersion = config.APP_VERSION || auth.appVersion || "2.12.5";
+  const gitSha = config.GIT_SHA && /^[0-9a-f]{40}$/i.test(config.GIT_SHA) ? config.GIT_SHA : auth.gitSha || resolveRealGitSha();
+  const gitTag = config.APP_VERSION ? `v${config.APP_VERSION}` : (auth.gitTag || `v${appVersion}`);
 
   if (process.env.NODE_ENV === "production-certification") {
     if (!containerDigest || !/^sha256:[0-9a-f]{64}$/i.test(containerDigest)) throw new Error("RELEASE_IDENTITY_FAILURE: Real immutable CONTAINER_DIGEST is required for production certification.");
@@ -142,17 +167,60 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity {
   }
 
   return {
+    ...auth,
     version: appVersion,
     appVersion,
     gitTag,
     gitSha,
+    releaseId: auth.releaseId,
+    buildId: auth.buildId || gitSha.slice(0, 8),
+    buildNumber: Number(config.BUILD_NUMBER || auth.buildNumber || resolveRealBuildNumber()),
+    pwaVersion: auth.pwaVersion,
+    pwaSchemaVersion: auth.pwaSchemaVersion,
+    syncProtocolVersion: auth.syncProtocolVersion,
+    databaseSchemaVersion: auth.databaseSchemaVersion,
+    minimumSupportedClientVersion: auth.minimumSupportedClientVersion,
+    maximumSupportedClientVersion: auth.maximumSupportedClientVersion,
     containerDigest: containerDigest || null,
     cloudRunRevision: cloudRunRevision || null,
-    environment: config.NODE_ENV,
-    releaseChannel: config.NODE_ENV === "production" ? "production" : "development",
-    releaseTimestamp: new Date().toISOString(),
-    compatibility: CURRENT_COMPATIBILITY,
+    environment: config.NODE_ENV || auth.environment,
+    releaseChannel: config.NODE_ENV === "production" ? "production" : auth.releaseChannel,
+    releaseTimestamp: auth.releaseTimestamp || new Date().toISOString(),
+    compatibility: auth.compatibility,
   };
 }
 
 export * from "./semverEngine.js";
+export * from "./authoritativeRelease.js";
+export * from "./brandHierarchy.js";
+export * from "./kokoAmbassador.js";
+export * from "./brandPositioning.js";
+
+export * from './visualIdentity.js';
+export * from "./brandVoice.js";
+export * from "./experienceGovernance.js";
+export * from "./designSystem.js";
+
+export * from "./performanceScaleGovernance.js";
+export * from './integrationApiEcosystemGovernance.js';
+export * from './productionReliabilityGovernance.js';
+export * from './performanceScaleGovernance.js';
+export * from './commercialProductReadinessGovernance.js';
+export * from './enterpriseCustomerReadinessGovernance.js';
+export * from "./marketplacePartnerGovernance.js";
+export * from "./biAnalyticsGovernance.js";
+
+export * from "./aiOperatingLayerGovernance.js";
+export * from "./autonomousOperationsGovernance.js";
+export * from "./platformGovernanceControlPlane.js";
+export * from "./platformGovernanceControlPlane.js";
+export * from "./releaseCertificationGovernance.js";
+export * from "./productionReleaseAuthority.js";
+export * from "./securityTrustGovernance.js";
+export * from "./privacyDataGovernance.js";
+export * from "./dataLifecycleDrGovernance.js";
+export * from "./workflowGovernance.js";
+export * from "./aiAgentGovernance.js";
+export * from "./liveProductionEvidenceGovernance.js";
+
+export * from "./visualAssetLibrary.js";

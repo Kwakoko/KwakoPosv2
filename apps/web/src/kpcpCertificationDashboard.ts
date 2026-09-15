@@ -1,6 +1,6 @@
 export function renderKpcpCertificationDashboard(): string {
   return `
-  <div class="kpcp-dashboard-container" style="font-family: Inter, system-ui, sans-serif; background: #0b132b; color: #f8fafc; padding: 2rem; border-radius: 12px; max-width: 1400px; margin: 0 auto;">
+  <div class="kpcp-dashboard-container" style="font-family: 'Inter', sans-serif; background: #0b132b; color: #f8fafc; padding: 2rem; border-radius: 12px; max-width: 1400px; margin: 0 auto;">
     
     <!-- Top Header Banner -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1c2541; padding-bottom: 1.5rem; margin-bottom: 2rem;">

@@ -88,13 +88,13 @@ export class WorldStandardPrismaSyncEngine {
   }
 
   private async journal(ctx: TenantContext, op: SyncPushRequest["operations"][number], record: unknown, source = "push", db: any = prisma): Promise<string> {
-    const existing = await db.$queryRawUnsafe<JournalRow[]>(
+    const existing = await db.$queryRawUnsafe(
       `SELECT revision, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source, created_at
        FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND operation_id = $3 LIMIT 1`,
       ctx.tenantId, ctx.branchId, op.operationId,
     );
-    if (existing[0]) return String(existing[0].revision);
-    const rows = await db.$queryRawUnsafe<Array<{ revision: bigint }>>(
+    if ((existing as JournalRow[])[0]) return String((existing as JournalRow[])[0].revision);
+    const rows = await db.$queryRawUnsafe(
       `INSERT INTO sync_change_journal
         (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
@@ -102,7 +102,7 @@ export class WorldStandardPrismaSyncEngine {
       ctx.tenantId, ctx.branchId, op.operationId, op.entityType, op.entityId, op.operationType,
       JSON.stringify(record ?? op.payload), source,
     );
-    return String(rows[0].revision);
+    return String((rows as Array<{ revision: bigint }>)[0].revision);
   }
 
   private async reconcileJournal(ctx: TenantContext): Promise<void> {

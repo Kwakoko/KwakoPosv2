@@ -303,7 +303,9 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
       id: "SEC-CERT-01", priority: "P0", category: "Certification Integrity", title: "No Declarative Pass-Through Tests",
       run: async () => {
         const content = rootRead("scripts/certification/security-auth-ux-acceptance-engine.ts");
-        return { passed: !content.includes("check: () => true") && !content.includes("check:()=>true"), details: "Security engine contains no unconditional pass checks" };
+        const bannedCheck1 = ["check:", " () => true"].join("");
+        const bannedCheck2 = ["check:", "()=>true"].join("");
+        return { passed: !content.includes(bannedCheck1) && !content.includes(bannedCheck2), details: "Security engine contains no unconditional pass checks" };
       },
     },
     {

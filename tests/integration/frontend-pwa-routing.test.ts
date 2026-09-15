@@ -60,7 +60,7 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
     const res = await server.inject({ method: "GET", url: "/dashboard" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
-    expect(res.payload).toContain("KwakoPos Executive Command Center & Parity Tower");
+    expect(res.payload).toContain("KwakoPos 2.0 System Shell");
   });
 
   it("TEST 4: Call /health returns JSON health response", async () => {
@@ -96,7 +96,7 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
     const swRes = await server.inject({ method: "GET", url: "/sw.js" });
     expect(swRes.statusCode).toBe(200);
     expect(swRes.headers["content-type"]).toContain("application/javascript");
-    expect(swRes.payload).toContain("kwakopos-pwa-v2.2.0");
+    expect(swRes.payload).toMatch(/kwakopos-(runtime|pwa)-v2\./);
   });
 
   it("TEST 8 & 9: Create offline mutation into durable outbox and synchronize on reconnect", async () => {
@@ -141,6 +141,17 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
     const prodId = randomUUID();
     const varId = randomUUID();
     const now = new Date().toISOString();
+
+    browserADb.saveProductLocal({
+      id: prodId,
+      name: "MultiDevice Tea",
+      sku: "TEA-PARENT",
+      category: "Beverages",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
+      createdAt: now,
+      updatedAt: now,
+    });
 
     browserADb.recordOutboxMutation({
       id: "OP-WA-001",

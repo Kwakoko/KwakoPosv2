@@ -1,6 +1,6 @@
 export function renderRestaurantDashboard(): string {
   return `
-    <div style="font-family: system-ui, -apple-system, sans-serif; background: #0c0a09; color: #f5f5f4; padding: 2rem; min-height: 100vh;">
+    <div style="font-family: 'Inter', sans-serif; background: #0c0a09; color: #f5f5f4; padding: 2rem; min-height: 100vh;">
       <header style="border-bottom: 1px solid #292524; padding-bottom: 1rem; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
         <div>
           <span style="background: #f97316; color: #ffffff; padding: 0.25rem 0.75rem; border-radius: 9999px; font-weight: 600; font-size: 0.875rem;">RESTAURANT OPERATING SYSTEM MODULE</span>

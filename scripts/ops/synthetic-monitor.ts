@@ -305,7 +305,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     idempotencyKey: "PWA-1",
     status: "PENDING",
   });
-  const migration = pwaDb.migrateToVersion(3);
+  const migration = await pwaDb.migrateToVersion(3);
   const passF = migration.newVersion === 3 && migration.preservedOutboxCount === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",

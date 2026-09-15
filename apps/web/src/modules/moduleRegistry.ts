@@ -1,16 +1,14 @@
 /**
- * KwakoPosv2 Module Registry
+ * Kwakoko Business Operating System — Industry Module Registry
  * ─────────────────────────────────────────────────────────────────────────────
- * Single source of truth for all industry module manifests.
+ * Single source of truth for all industry-specific business modules operating
+ * beneath the Kwakoko Business Operating System platform.
  *
- * Resolution pipeline:
- *   Module Registry → Tenant Entitlement → Subscription → Feature Flag → RBAC
- *   → Module Availability → Navigation → Route → Workspace
- *
- * RULES:
- *  - Dexie is NEVER the authority for entitlement/auth decisions.
- *  - Unknown modules default to NOT authorized (fail-closed).
- *  - Modules register here; they do not hard-code themselves into the shell.
+ * Brand Hierarchy:
+ *   Level 1: Kwakoko (Authoritative Parent Technology Brand)
+ *   Level 2: Kwakoko Business Operating System (Flagship Platform)
+ *   Level 3: Industry-Specific Business Modules (operate beneath platform)
+ *   Level 4: KwakoPos (POS Capability and cashier checkout subsystem)
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -81,6 +79,8 @@ export interface ModuleManifest {
   requiresSubscription?: boolean;
   /** Version tag shown in the module selector UI */
   version?: string;
+  /** Parent platform identity under the brand hierarchy */
+  parentPlatform?: string;
 }
 
 // ─── Sector Metadata ────────────────────────────────────────────────────────
@@ -109,20 +109,23 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
     sidebar: [
       "Dashboard",
       { name: "POS", subItems: ["New Sale", "Sales History", "Returns"] },
-      { name: "Inventory", subItems: ["Inventory Overview", "Products", "Categories & Brands", "Stock Adjustment", "Stock Transfer", "Stock Alerts", "Stock Sync Engine", "Product Bundles & Kits", "Stock Count", "Ledger Drilldown", "Inventory Reports"] },
-      { name: "Receipts", subItems: ["Receipt History", "Receipt Templates", "Receipt Analytics", "Receipt Verification", "Receipt Archive"] },
+      { name: "Cash Drawer", subItems: ["Shift & Active Register", "Cash Movement Ledger", "Denomination Calculator", "Reconciliation & Variances", "Safe & Bank Deposits", "No Sale & Event Logs", "15 Financial Reports", "Security & RBAC Rules", "AI Cash Advisor"] },
+      { name: "Inventory", subItems: ["Inventory Overview", "Products", "Categories & Brands", "Stock Adjustment", "Stock Transfer", "Stock Alerts", "Stock Sync Engine", "Product Bundles & Kits", "Stock Count", "Ledger Drilldown", "Wastage & Spillage", "Inventory Reports"] },
+      { name: "Receipts", subItems: ["Receipt History", "Receipt Viewer", "Receipt Templates", "Receipt Analytics", "Receipt Verification", "Receipt Archive"] },
       "Customers",
       { name: "Purchasing", subItems: ["Suppliers", "Purchase Orders", "Goods Received", "Supplier Ledgers", "Warehouses"] },
       "Expenses",
       { name: "Reports", subItems: ["Sales", "Profit", "Inventory Valuation", "Tax", "Customers Report", "Expenses Report", "Payment Methods", "Stock Movement", "Purchasing Report", "Discounts", "Returns & Refunds", "Branch Comparison", "Cashier Performance", "Receivables Aging"] },
-      { name: "Settings", subItems: ["General Settings", "Users & Roles"] },
+      "Employees",
+      { name: "AI Insights Engine", subItems: ["Business Health Score", "Sales Intelligence", "Inventory Intelligence", "Profit & Pricing", "Customer CLV", "Cash Flow & Burn", "Fraud & Security", "Branch Comparison", "Demand Forecast"] },
+      { name: "Settings", subItems: ["Business Profile & Identity", "POS Configurations", "Inventory Rules", "Tax & Billing", "Security Policies", "Terminals & Sessions", "Trash Can & Recovery", "Subscriptions & Billing", "Developer Options", "Help & Manuals", "Change Log"] },
     ],
     bottomNav: [
-      { label: "Home", tab: "Dashboard", icon: "Home" },
-      { label: "POS", tab: "POS", icon: "ShoppingCart" },
-      { label: "Stock", tab: "Inventory", icon: "Package" },
-      { label: "CRM", tab: "Customers", icon: "Users" },
-      { label: "Reports", tab: "Reports", icon: "BarChart2" },
+      { label: "Home", tab: "Dashboard", icon: "LayoutDashboard" },
+      { label: "POS", tab: "POS", icon: "ScanBarcode" },
+      { label: "Stock", tab: "Inventory", icon: "Boxes" },
+      { label: "CRM", tab: "Customers", icon: "ContactRound" },
+      { label: "Reports", tab: "Reports", icon: "BarChart3" },
     ],
     widgets: ["SalesToday", "ProfitToday", "InventoryValue", "LowStock"],
     description: "Retail inventory count, sales, receipts, and client reward points.",

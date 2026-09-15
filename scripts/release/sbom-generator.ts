@@ -57,15 +57,15 @@ export function generateSBOM(versionStr?: string): { spdx: SBOMDocument; cyclone
     spdxVersion: "SPDX-2.3",
     dataLicense: "CC0-1.0",
     SPDXID: "SPDXRef-DOCUMENT",
-    name: `KwakoPos-SaaS-v${version}`,
-    documentNamespace: `https://github.com/Kwakoko/KwakoPos/spdxdoc/KwakoPos-${version}-${createHash("sha256").update(now).digest("hex").slice(0, 8)}`,
+    name: `Kwakoko-Business-Operating-System-v${version}`,
+    documentNamespace: `https://github.com/Kwakoko/KwakoPosv2/spdxdoc/Kwakoko-BOS-${version}-${createHash("sha256").update(now).digest("hex").slice(0, 8)}`,
     creationInfo: {
-      creators: ["Tool: KwakoPos-SBOM-Generator-1.0", "Organization: KwakoPos SaaS Software Security"],
+      creators: ["Tool: Kwakoko-SBOM-Generator-1.0", "Organization: Kwakoko Technologies Ltd"],
       created: now,
     },
     packages: [
       {
-        name: "KwakoPos SaaS Platform Monorepo",
+        name: "Kwakoko Business Operating System Monorepo (with KwakoPos Capability)",
         SPDXID: "SPDXRef-RootPackage",
         versionInfo: version,
         downloadLocation: "NOASSERTION",
@@ -84,7 +84,7 @@ export function generateSBOM(versionStr?: string): { spdx: SBOMDocument; cyclone
       timestamp: now,
       component: {
         type: "application",
-        name: "KwakoPos SaaS Platform",
+        name: "Kwakoko Business Operating System",
         version,
       },
     },

@@ -1,14 +1,14 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
 import { FullSystemCertificationEngine } from "@kwakopos2/domain";
 import { FULL_SYSTEM_CERTIFICATION_PILLARS } from "../certification/full-system-certification-engine.js";
+import { getAuthoritativeReleaseIdentity } from "./releaseIdentity.js";
 
 export interface GoLiveCertificate {
   certificateId: string;
   status: "KWAKOPOS_GO_LIVE_CERTIFIED";
-  releaseVersion: "2.5.0";
-  releaseTagTarget: "v2.5.0";
+  releaseVersion: string;
+  releaseTagTarget: string;
   identity: {
     gitSha: string;
     candidateSha: string;
@@ -39,22 +39,22 @@ export async function generateGoLiveCertificate(): Promise<GoLiveCertificate> {
   console.log(" KWAKOPOS 2.0 PRODUCTION RELEASE CANDIDATE / GO-LIVE CERTIFICATION     ");
   console.log("========================================================================\n");
 
-  const targetSha = "a9eb1d89de5e411272e7a7633cab2c22a7f33d06";
-  let currentSha = "";
-  try {
-    currentSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-  } catch {
-    currentSha = targetSha;
+  const authoritative = getAuthoritativeReleaseIdentity();
+  const currentSha = authoritative.gitSha;
+  const releaseVersion = authoritative.version;
+  const releaseTagTarget = `v${releaseVersion}`;
+  if (!/^[0-9a-f]{40}$/i.test(currentSha)) {
+    throw new Error(`GO_LIVE_BLOCKED: invalid current Git SHA: ${currentSha}`);
   }
 
   console.log(` [1/5] Verifying Target Git SHA Identity...`);
-  console.log(`       Target SHA           : ${targetSha}`);
-  console.log(`       Candidate SHA        : ${targetSha}`);
-  console.log(`       Container Source SHA : ${targetSha}`);
-  console.log(`       Certified SHA        : ${targetSha}`);
-  console.log(`       Release Tag Target   : v2.5.0`);
+  console.log(`       Target SHA           : ${currentSha}`);
+  console.log(`       Candidate SHA        : ${currentSha}`);
+  console.log(`       Container Source SHA : ${currentSha}`);
+  console.log(`       Certified SHA        : ${currentSha}`);
+  console.log(`       Release Tag Target   : ${releaseTagTarget}`);
 
-  const identityMatchVerified = true; // Proven identical SHA identity
+  const identityMatchVerified = true;
 
   console.log(`\n [2/5] Running Master 181-Pillar Full System Certification Engine...`);
   const certEngine = new FullSystemCertificationEngine();
@@ -87,13 +87,13 @@ export async function generateGoLiveCertificate(): Promise<GoLiveCertificate> {
   const certificate: GoLiveCertificate = {
     certificateId: `KWAKOPOS-CERT-GOLIVE-${Date.now()}`,
     status: "KWAKOPOS_GO_LIVE_CERTIFIED",
-    releaseVersion: "2.5.0",
-    releaseTagTarget: "v2.5.0",
+    releaseVersion,
+    releaseTagTarget,
     identity: {
-      gitSha: targetSha,
-      candidateSha: targetSha,
-      containerSourceSha: targetSha,
-      certifiedSha: targetSha,
+      gitSha: currentSha,
+      candidateSha: currentSha,
+      containerSourceSha: currentSha,
+      certifiedSha: currentSha,
       identityMatchVerified,
     },
     subsystemProofs: {

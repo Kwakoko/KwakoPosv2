@@ -12,21 +12,48 @@
  *   7. Analytics Dashboard (Cashier/Branch Sales, Reprint Metrics, Pending Sync)
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckCircle,
   AlertCircle, Scale, Eye, RefreshCw, QrCode, Share2, ShieldCheck, ShieldAlert,
-  Sliders, Plus, FileText, Send, Copy, AlertTriangle, UserCheck
+  Sliders, Plus, FileText, Send, Copy, AlertTriangle, UserCheck, Sparkles
 } from "lucide-react";
 import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopos2/contracts";
+import { useToast } from "../context/ToastContext.js";
+import { useAudioFeedback } from "../utils/useAudioFeedback.js";
+import { useSync, useAuth } from "../context/KwakoPosContexts.js";
+import { loadSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { Sheet } from "../components/UI/Sheet.js";
 
 type ReceiptTab = "register" | "templates" | "verification" | "analytics";
 type RenderFormat = "58mm" | "80mm" | "a4";
 
 const money = (v: number, currency = "TZS") => `${currency} ${Math.round(v).toLocaleString()}`;
 
-export const ReceiptsPage: React.FC = () => {
+export interface ReceiptsPageProps {
+  activeTab?: string;
+}
+
+export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiveTab }) => {
+  const toast = useToast();
+  const { playSuccessChime, playWarningTone } = useAudioFeedback();
   const [activeTab, setActiveTab] = useState<ReceiptTab>("register");
+
+  useEffect(() => {
+    if (!propActiveTab) return;
+    const map: Record<string, ReceiptTab> = {
+      "Receipt History": "register",
+      "Receipt Viewer": "register",
+      "Receipt Templates": "templates",
+      "Receipt Analytics": "analytics",
+      "Receipt Verification": "verification",
+      "Receipt Archive": "register",
+    };
+    if (map[propActiveTab]) {
+      setActiveTab(map[propActiveTab]);
+    }
+  }, [propActiveTab]);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
@@ -66,84 +93,109 @@ export const ReceiptsPage: React.FC = () => {
     },
   ]);
 
-  // Demo Receipts Store
-  const [receipts, setReceipts] = useState<ReceiptDTO[]>([
-    {
-      id: "RCPT-ID-1001",
-      receiptNumber: "DSM-RCPT-20260902-000001",
-      transactionId: "TXN-POS-8842",
-      transactionType: "POS_SALE",
-      tenantId: "TENANT-001",
-      branchId: "DSM-MAIN",
-      cashierId: "USER-001",
-      cashierName: "Amani Mwangi",
-      customerId: "CUST-001",
-      customerName: "Juma Salum",
-      customerPhone: "+255754112233",
-      customerEmail: "juma.salum@example.com",
-      subtotal: 150000,
-      discountTotal: 5000,
-      taxTotal: 26100,
-      grandTotal: 171100,
-      paidAmount: 200000,
-      changeAmount: 28900,
-      paymentMethod: "CASH",
-      currency: "TZS",
-      exchangeRate: 1,
-      status: "COMPLETED",
-      deviceId: "REG-DSM-01",
-      syncStatus: "SYNCED",
-      digitalSignature: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      qrCodePayload: "https://pos.kwako.app/verify-receipt?receiptNumber=DSM-RCPT-20260902-000001&sig=e3b0c44298fc1c14",
-      barcodePayload: "DSMRCPT20260902000001",
-      reprintCount: 0,
-      notes: "POS Sale cash transaction",
-      createdAt: "2026-09-02T08:30:00Z",
-      updatedAt: "2026-09-02T08:30:00Z",
-      items: [
-        { id: "ITM-1", sku: "SKU-COKE-500", name: "Coca Cola 500ml", qty: 10, unitPrice: 1500, discount: 0, taxRate: 18, taxAmount: 2700, lineTotal: 17700 },
-        { id: "ITM-2", sku: "SKU-UNGA-10KG", name: "Azam Wheat Flour 10kg", qty: 3, unitPrice: 28000, discount: 5000, taxRate: 18, taxAmount: 14220, lineTotal: 93220 },
-        { id: "ITM-3", sku: "SKU-OIL-5L", name: "Cooking Oil 5L", qty: 1, unitPrice: 50000, discount: 0, taxRate: 18, taxAmount: 9000, lineTotal: 59000 },
-      ],
-    },
-    {
-      id: "RCPT-ID-1002",
-      receiptNumber: "DSM-RCPT-20260902-000002",
-      transactionId: "TXN-RET-8843",
-      transactionType: "RETURN",
-      tenantId: "TENANT-001",
-      branchId: "DSM-MAIN",
-      cashierId: "USER-002",
-      cashierName: "Neema Kimaro",
-      customerId: "CUST-002",
-      customerName: "Sarah Hassan",
-      customerPhone: "+255784998877",
-      customerEmail: "sarah@example.com",
-      subtotal: 30000,
-      discountTotal: 0,
-      taxTotal: 5400,
-      grandTotal: 35400,
-      paidAmount: 35400,
-      changeAmount: 0,
-      paymentMethod: "MOBILE_MONEY",
-      currency: "TZS",
-      exchangeRate: 1,
-      status: "REFUNDED",
-      deviceId: "REG-DSM-02",
-      syncStatus: "SYNCED",
-      digitalSignature: "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
-      qrCodePayload: "https://pos.kwako.app/verify-receipt?receiptNumber=DSM-RCPT-20260902-000002&sig=8f434346648f6b96",
-      barcodePayload: "DSMRCPT20260902000002",
-      reprintCount: 1,
-      lastReprintedAt: "2026-09-02T09:15:00Z",
-      notes: "Customer returned damaged oil 5L",
-      createdAt: "2026-09-02T09:00:00Z",
-      updatedAt: "2026-09-02T09:15:00Z",
-      items: [
-        { id: "ITM-4", sku: "SKU-OIL-5L", name: "Cooking Oil 5L (Damaged Return)", qty: 1, unitPrice: 30000, discount: 0, taxRate: 18, taxAmount: 5400, lineTotal: 35400 },
-      ],
-    },
-  ]);
+  const { db } = useSync();
+  const { user } = useAuth();
+
+  // Dynamic Receipts Store
+  const [receipts, setReceipts] = useState<ReceiptDTO[]>([]);
+
+  const loadReceipts = useCallback(async () => {
+    try {
+      await db.ready;
+      const allSalesMap = new Map<string, any>();
+      // 1. From db.sales
+      for (const s of db.sales.values()) {
+        const id = s.id || s.saleNumber || s.receiptNumber;
+        if (id) allSalesMap.set(id, s);
+      }
+      // 2. From db.receipts
+      for (const r of db.receipts.values()) {
+        const id = r.id || r.receiptNumber || r.transactionId;
+        if (id && !allSalesMap.has(id)) allSalesMap.set(id, r);
+      }
+      // 3. From outbox
+      for (const item of db.syncOutbox.values()) {
+        if (item.entityType === "Sale" && item.payload) {
+          const p = item.payload as any;
+          const id = p.id || p.saleNumber || p.receiptNumber || item.entityId;
+          if (id && !allSalesMap.has(id)) allSalesMap.set(id, p);
+        }
+      }
+
+      const sales = Array.from(allSalesMap.values());
+      const mapped: ReceiptDTO[] = sales.map((sale: any) => {
+        const receiptNum = sale.receiptNumber || sale.saleNumber || (sale.id ? (String(sale.id).startsWith("SALE-") ? sale.id : `RCPT-${String(sale.id).slice(-8).toUpperCase()}`) : `RCPT-${Date.now()}`);
+        const sub = Number(sale.subtotal || sale.grandTotal || sale.totalAmount || 0);
+        const tax = Number(sale.taxTotal ?? sale.taxAmount ?? sale.tax ?? 0);
+        const grand = Number(sale.grandTotal || sale.totalAmount || (sub + tax));
+        const paid = Number(sale.paidAmount || sale.cashReceived || grand);
+        const change = Number(sale.changeAmount || sale.changeDue || (paid > grand ? paid - grand : 0));
+        const rawItems = Array.isArray(sale.items) ? sale.items : Array.isArray(sale.cart) ? sale.cart : [];
+        const items = rawItems.map((it: any, idx: number) => ({
+          id: it.id || `ITM-${idx + 1}`,
+          sku: it.sku || it.barcode || it.product?.sku || `SKU-${idx + 1}`,
+          name: it.name || it.productName || it.product?.name || "Retail Item",
+          qty: Number(it.quantity ?? it.qty ?? 1),
+          unitPrice: Number(it.price ?? it.unitPrice ?? it.product?.price ?? 0),
+          discount: Number(it.discount || 0),
+          taxRate: Number(it.taxRate ?? (sale.selectedTaxRate !== undefined ? sale.selectedTaxRate * 100 : (sale.tax ? 18 : 0))),
+          taxAmount: Number(it.taxAmount || 0),
+          notes: it.notes || it.instruction || undefined,
+          lineTotal: Number(it.lineTotal || (Number(it.quantity ?? it.qty ?? 1) * Number(it.price ?? it.unitPrice ?? 0))),
+        }));
+
+        return {
+          id: sale.id || receiptNum,
+          receiptNumber: receiptNum,
+          transactionId: sale.id || `TXN-${receiptNum}`,
+          transactionType: (sale.transactionType || "POS_SALE") as "POS_SALE",
+          tenantId: sale.tenantId || user?.tenantId || "default",
+          branchId: sale.branchId || "MAIN",
+          cashierId: sale.cashierId || user?.id || "USER-01",
+          cashierName: sale.cashierName || user?.name || "Cashier",
+          customerId: sale.customerId || "CUST-WALKIN",
+          customerName: sale.customerName || sale.customer || "Walk-In Customer",
+          customerPhone: sale.customerPhone || sale.phone || "",
+          customerEmail: sale.customerEmail || sale.email || "",
+          subtotal: sub,
+          discountTotal: Number(sale.discountTotal ?? sale.discount ?? 0),
+          taxTotal: tax,
+          grandTotal: grand,
+          paidAmount: paid,
+          changeAmount: change,
+          paymentMethod: String(sale.paymentMethod || "CASH").toUpperCase(),
+          currency: "TZS",
+          exchangeRate: 1,
+          status: sale.status === "REFUNDED" ? "REFUNDED" as const : "COMPLETED" as const,
+          deviceId: "REG-01",
+          syncStatus: "SYNCED" as const,
+          digitalSignature: sale.digitalSignature || `sig_${receiptNum.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+          qrCodePayload: `https://pos.kwako.app/verify-receipt?receiptNumber=${receiptNum}`,
+          barcodePayload: receiptNum.replace(/[^a-zA-Z0-9]/g, ""),
+          reprintCount: Number(sale.reprintCount || 0),
+          notes: sale.notes || "POS Sale transaction",
+          createdAt: sale.createdAt || sale.soldAt || new Date().toISOString(),
+          updatedAt: sale.updatedAt || sale.createdAt || new Date().toISOString(),
+          items,
+        };
+      }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setReceipts(mapped);
+    } catch {
+      setReceipts([]);
+    }
+  }, [db, user]);
+
+  useEffect(() => {
+    void loadReceipts();
+    const handleDemoChange = () => {
+      void loadReceipts();
+    };
+    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    return () => {
+      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    };
+  }, [loadReceipts]);
 
   // Analytics Metrics
   const totalCount = receipts.length;
@@ -333,54 +385,86 @@ export const ReceiptsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredReceipts.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <div className="v2-mono v2-font-bold">{r.receiptNumber}</div>
-                      <div className="v2-text-xs v2-text-muted">{r.transactionId} ({r.transactionType})</div>
-                    </td>
-                    <td>
-                      <div className="v2-font-bold">{r.customerName || "Walk-In Customer"}</div>
-                      <div className="v2-text-xs v2-text-muted">Cashier: {r.cashierName || r.cashierId}</div>
-                    </td>
-                    <td className="v2-text-xs v2-text-muted">{new Date(r.createdAt).toLocaleString()}</td>
-                    <td className="v2-mono v2-font-black">{money(r.grandTotal, r.currency)}</td>
-                    <td>
-                      <span className="badge v2-badge-info" style={{ fontSize: ".7rem" }}>{r.paymentMethod}</span>
-                    </td>
-                    <td>
-                      <span className={`badge ${r.status === "COMPLETED" ? "v2-badge-success" : r.status === "REFUNDED" ? "v2-badge-warning" : "v2-badge-danger"}`}>
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="v2-mono v2-text-center">{r.reprintCount}</td>
-                    <td>
-                      <div className="v2-flex v2-gap-1">
-                        <button
-                          className="v2-btn v2-btn-ghost v2-btn-sm"
-                          onClick={() => { setSelectedReceipt(r); setRenderFormat("80mm"); }}
-                          type="button"
-                        >
-                          <Eye size={13} /> Inspect
-                        </button>
-                        <button
-                          className="v2-btn v2-btn-ghost v2-btn-sm"
-                          onClick={() => { setSelectedReceipt(r); setShowReprintModal(true); }}
-                          type="button"
-                        >
-                          <Printer size={13} /> Reprint
-                        </button>
-                        <button
-                          className="v2-btn v2-btn-ghost v2-btn-sm"
-                          onClick={() => { setSelectedReceipt(r); setShareRecipient(r.customerPhone || ""); setShowShareModal(true); }}
-                          type="button"
-                        >
-                          <Share2 size={13} /> Share
-                        </button>
+                {filteredReceipts.length === 0 ? (
+                  <tr>
+                    <td colSpan={8}>
+                      <div className="v2-empty" style={{ padding: "3.5rem 1.5rem", textAlign: "center" }}>
+                        <ReceiptIcon className="v2-text-muted" size={44} style={{ margin: "0 auto 1rem", opacity: 0.5 }} />
+                        <p className="v2-empty-title v2-text-base v2-font-bold">
+                          {receipts.length === 0 ? "No Receipts Generated Yet" : "No receipts match your search criteria"}
+                        </p>
+                        <p className="v2-empty-desc v2-text-xs v2-text-muted v2-mt-1" style={{ maxWidth: 460, margin: "0.5rem auto 1.5rem" }}>
+                          {receipts.length === 0
+                            ? "Complete sales transactions from the POS terminal to issue immutable fiscal receipts with digital signatures."
+                            : "Try searching with a different receipt number, customer name, or payment method."}
+                        </p>
+                        {receipts.length === 0 && (
+                          <div className="v2-flex v2-justify-center v2-gap-2">
+                            <button
+                              className="v2-btn v2-btn-secondary v2-btn-sm"
+                              onClick={async () => {
+                                await loadSampleData(db, user?.tenantId);
+                                await loadReceipts();
+                              }}
+                              type="button"
+                            >
+                              <Sparkles size={13} /> Load Sample Receipts & Sales
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredReceipts.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <div className="v2-mono v2-font-bold">{r.receiptNumber}</div>
+                        <div className="v2-text-xs v2-text-muted">{r.transactionId} ({r.transactionType})</div>
+                      </td>
+                      <td>
+                        <div className="v2-font-bold">{r.customerName || "Walk-In Customer"}</div>
+                        <div className="v2-text-xs v2-text-muted">Cashier: {r.cashierName || r.cashierId}</div>
+                      </td>
+                      <td className="v2-text-xs v2-text-muted">{new Date(r.createdAt).toLocaleString()}</td>
+                      <td className="v2-mono v2-font-black">{money(r.grandTotal, r.currency)}</td>
+                      <td>
+                        <span className="badge v2-badge-info" style={{ fontSize: ".7rem" }}>{r.paymentMethod}</span>
+                      </td>
+                      <td>
+                        <span className={`badge ${r.status === "COMPLETED" ? "v2-badge-success" : r.status === "REFUNDED" ? "v2-badge-warning" : "v2-badge-danger"}`}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="v2-mono v2-text-center">{r.reprintCount}</td>
+                      <td>
+                        <div className="v2-flex v2-gap-1">
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-sm"
+                            onClick={() => { setSelectedReceipt(r); setRenderFormat("80mm"); }}
+                            type="button"
+                          >
+                            <Eye size={13} /> Inspect
+                          </button>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-sm"
+                            onClick={() => { setSelectedReceipt(r); setShowReprintModal(true); }}
+                            type="button"
+                          >
+                            <Printer size={13} /> Reprint
+                          </button>
+                          <button
+                            className="v2-btn v2-btn-ghost v2-btn-sm"
+                            onClick={() => { setSelectedReceipt(r); setShareRecipient(r.customerPhone || ""); setShowShareModal(true); }}
+                            type="button"
+                          >
+                            <Share2 size={13} /> Share
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -487,51 +571,119 @@ export const ReceiptsPage: React.FC = () => {
         </div>
       )}
 
-      {/* INSPECT & RENDER MODAL */}
-      {selectedReceipt && !showReprintModal && !showShareModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000, padding: "1rem" }}>
-          <div className="v2-card" style={{ width: "100%", maxWidth: 650, background: "#fff", color: "#000", padding: "1.5rem", borderRadius: "var(--radius-lg)", maxHeight: "90vh", overflowY: "auto" }}>
-            <div className="v2-flex v2-justify-between v2-items-center v2-mb-3">
-              <div className="v2-flex v2-gap-1">
-                <button className={`v2-btn v2-btn-sm ${renderFormat === "58mm" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("58mm")} type="button">Thermal 58mm</button>
-                <button className={`v2-btn v2-btn-sm ${renderFormat === "80mm" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("80mm")} type="button">Thermal 80mm</button>
-                <button className={`v2-btn v2-btn-sm ${renderFormat === "a4" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("a4")} type="button">A4 Invoice</button>
-              </div>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setSelectedReceipt(null)} type="button">✕ Close</button>
+      {/* Non-Destructive Slide-Over Receipt Drawer (Sheet) */}
+      <Sheet
+        isOpen={Boolean(selectedReceipt && !showReprintModal && !showShareModal)}
+        onClose={() => setSelectedReceipt(null)}
+        title={
+          <div className="v2-flex v2-items-center v2-gap-2">
+            <ReceiptIcon size={18} className="v2-text-accent" />
+            <span>Receipt #{selectedReceipt?.receiptNumber}</span>
+          </div>
+        }
+        description={`Issued on ${selectedReceipt ? new Date(selectedReceipt.createdAt).toLocaleString() : ""} · Digital Audit Verified`}
+        width={560}
+        footer={
+          <>
+            <button className="v2-btn v2-btn-outline v2-btn-sm" onClick={() => window.print()} type="button">
+              <Printer size={13} /> Print Direct
+            </button>
+            <button
+              className="v2-btn v2-btn-secondary v2-btn-sm"
+              onClick={() => setShowReprintModal(true)}
+              type="button"
+            >
+              <RefreshCw size={13} /> Reprint
+            </button>
+            <button
+              className="v2-btn v2-btn-secondary v2-btn-sm"
+              onClick={() => {
+                setShareRecipient(selectedReceipt?.customerPhone || "");
+                setShowShareModal(true);
+              }}
+              type="button"
+            >
+              <Share2 size={13} /> Share
+            </button>
+            <button
+              className="v2-btn v2-btn-primary v2-btn-sm"
+              onClick={() => setSelectedReceipt(null)}
+              type="button"
+            >
+              Done
+            </button>
+          </>
+        }
+      >
+        {selectedReceipt && (
+          <div className="v2-space-y-3">
+            {/* Format Switcher */}
+            <div className="v2-flex v2-gap-1 v2-p-1" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
+              <button className={`v2-btn v2-btn-sm ${renderFormat === "58mm" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("58mm")} type="button">Thermal 58mm</button>
+              <button className={`v2-btn v2-btn-sm ${renderFormat === "80mm" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("80mm")} type="button">Thermal 80mm</button>
+              <button className={`v2-btn v2-btn-sm ${renderFormat === "a4" ? "v2-btn-primary" : "v2-btn-ghost"}`} onClick={() => setRenderFormat("a4")} type="button">A4 Invoice</button>
             </div>
 
-            {/* Receipt Content Render */}
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", padding: "1rem", borderRadius: 6, fontFamily: renderFormat === "a4" ? "sans-serif" : "monospace", fontSize: ".8rem" }}>
-              <div style={{ fontWeight: 900, textAlign: "center" }}>KWAKOPOS ENTERPRISE RECEIPT</div>
-              <div style={{ textAlign: "center", fontSize: ".7rem" }}>Receipt #: {selectedReceipt.receiptNumber}</div>
-              <div style={{ textAlign: "center", fontSize: ".7rem" }}>Date: {new Date(selectedReceipt.createdAt).toLocaleString()}</div>
-              <hr style={{ margin: ".5rem 0" }} />
-              <div>
-                {selectedReceipt.items.map((it, idx) => (
-                  <div key={idx} className="v2-flex v2-justify-between" style={{ padding: "2px 0" }}>
-                    <span>{it.qty}x {it.name}</span>
-                    <span>{money(it.lineTotal, selectedReceipt.currency)}</span>
+            {/* Thermal Receipt Visual Paper Rendering */}
+            <div
+              style={{
+                background: "#fdfdfd",
+                color: "#111827",
+                border: "1px solid #e2e8f0",
+                padding: "1.25rem",
+                borderRadius: "var(--radius-md)",
+                fontFamily: renderFormat === "a4" ? "Inter, sans-serif" : "'JetBrains Mono', monospace",
+                fontSize: ".82rem",
+                boxShadow: "0 4px 14px rgba(0,0,0,.06)",
+              }}
+            >
+              <div style={{ fontWeight: 900, textAlign: "center", fontSize: "1rem", letterSpacing: "-.02em" }}>KWAKOPOS ENTERPRISE RECEIPT</div>
+              <div style={{ textAlign: "center", fontSize: ".72rem", color: "#64748b" }}>Receipt #: {selectedReceipt.receiptNumber}</div>
+              <div style={{ textAlign: "center", fontSize: ".72rem", color: "#64748b" }}>Date: {new Date(selectedReceipt.createdAt).toLocaleString()}</div>
+              {selectedReceipt.customerName && (
+                <div style={{ textAlign: "center", fontSize: ".75rem", fontWeight: 600, marginTop: ".25rem" }}>
+                  Customer: {selectedReceipt.customerName}
+                </div>
+              )}
+              <hr style={{ margin: ".75rem 0", borderColor: "#e2e8f0" }} />
+              <div className="v2-space-y-1">
+                {selectedReceipt.items.map((it: any, idx) => (
+                  <div key={idx} style={{ padding: "2px 0" }}>
+                    <div className="v2-flex v2-justify-between">
+                      <span>{it.qty}x {it.name}</span>
+                      <span className="v2-mono font-bold">{money(it.lineTotal, selectedReceipt.currency)}</span>
+                    </div>
+                    {it.notes && (
+                      <div style={{ fontSize: ".72rem", fontStyle: "italic", color: "#64748b", paddingLeft: "8px" }}>
+                        * Note: {it.notes}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-              <hr style={{ margin: ".5rem 0" }} />
-              <div style={{ textAlign: "right", fontWeight: 800 }}>
-                <div>GRAND TOTAL: {money(selectedReceipt.grandTotal, selectedReceipt.currency)}</div>
-                <div style={{ fontSize: ".75rem", fontWeight: 400 }}>Paid ({selectedReceipt.paymentMethod}): {money(selectedReceipt.paidAmount, selectedReceipt.currency)}</div>
+              <hr style={{ margin: ".75rem 0", borderColor: "#e2e8f0" }} />
+              <div style={{ textAlign: "right" }}>
+                <div className="v2-mono v2-font-black v2-text-base">
+                  TOTAL: {money(selectedReceipt.grandTotal, selectedReceipt.currency)}
+                </div>
+                <div style={{ fontSize: ".78rem", color: "#64748b" }}>
+                  Paid ({selectedReceipt.paymentMethod}): {money(selectedReceipt.paidAmount, selectedReceipt.currency)}
+                </div>
+                {selectedReceipt.changeAmount > 0 && (
+                  <div style={{ fontSize: ".78rem", color: "#64748b" }}>
+                    Change Due: {money(selectedReceipt.changeAmount, selectedReceipt.currency)}
+                  </div>
+                )}
               </div>
-              <hr style={{ margin: ".5rem 0" }} />
-              <div style={{ fontSize: ".65rem", wordBreak: "break-all" }}>
-                <strong>SHA256 Digital Signature:</strong><br />{selectedReceipt.digitalSignature}
+              <hr style={{ margin: ".75rem 0", borderColor: "#e2e8f0" }} />
+              <div style={{ fontSize: ".65rem", wordBreak: "break-all", color: "#64748b" }}>
+                <strong style={{ color: "#0f172a" }}>SHA256 Digital Verification Signature:</strong><br />
+                {selectedReceipt.digitalSignature}
               </div>
-            </div>
-
-            <div className="v2-flex v2-justify-between v2-mt-4">
-              <button className="v2-btn v2-btn-outline v2-btn-sm" onClick={() => window.print()} type="button"><Printer size={13} /> Print Direct</button>
-              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setSelectedReceipt(null)} type="button">Done</button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Sheet>
 
       {/* REPRINT MODAL */}
       {showReprintModal && selectedReceipt && (
@@ -597,7 +749,25 @@ export const ReceiptsPage: React.FC = () => {
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
                 onClick={() => {
-                  alert(`Receipt ${selectedReceipt.receiptNumber} successfully dispatched via ${shareChannel} to ${shareRecipient}!`);
+                  if (!shareRecipient.trim()) {
+                    playWarningTone();
+                    toast.warning("Recipient Required", "Please enter a valid phone number or email.");
+                    return;
+                  }
+                  if (shareChannel === "WHATSAPP") {
+                    const cleanPhone = shareRecipient.replace(/[^0-9]/g, "");
+                    const msg = encodeURIComponent(
+                      `Hello! Here is your official e-receipt from KwakoPos:\nReceipt #: ${selectedReceipt.receiptNumber}\nTotal: ${money(selectedReceipt.grandTotal, selectedReceipt.currency)}\nThank you for choosing us!`
+                    );
+                    if (typeof window !== "undefined") {
+                      window.open(`https://wa.me/${cleanPhone}?text=${msg}`, "_blank");
+                    }
+                  }
+                  playSuccessChime();
+                  toast.success(
+                    "Receipt Dispatched",
+                    `Receipt ${selectedReceipt.receiptNumber} successfully dispatched via ${shareChannel} to ${shareRecipient}!`
+                  );
                   setShowShareModal(false);
                 }}
                 type="button"

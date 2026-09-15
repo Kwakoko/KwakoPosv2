@@ -1,4 +1,5 @@
 import { getReleaseIdentity, loadConfig } from "../../packages/config/src/index.js";
+import { execSync } from "node:child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -34,31 +35,41 @@ export function generateReleaseManifest(options?: {
 }): ReleaseManifest {
   const config = loadConfig();
   const identity = getReleaseIdentity(config);
-
   const targetVersion = options?.version || identity.appVersion;
-  const targetTag = `v${targetVersion}`;
+  if (!targetVersion) throw new Error("RELEASE_BLOCKED: application version is missing");
   const gitSha = options?.gitSha || identity.gitSha;
+  if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
+  const targetTag = `v${targetVersion}`;
+  const certification = options?.certification || "FAIL";
   const containerDigest = options?.containerDigest ?? identity.containerDigest ?? null;
   const cloudRunRevision = options?.cloudRunRevision ?? identity.cloudRunRevision ?? null;
-  const environment = options?.environment || identity.environment || "production";
-  const releaseChannel = options?.releaseChannel || identity.releaseChannel || (environment === "production" ? "production" : "development");
+  const environment = options?.environment || identity.environment || "release-candidate";
+  const releaseChannel = options?.releaseChannel || identity.releaseChannel || "stable";
+  if (certification === "PASS") {
+    if (!/^sha256:[0-9a-f]{64}$/i.test(containerDigest || "")) {
+      throw new Error("RELEASE_BLOCKED: PASS certification requires a real immutable CONTAINER_DIGEST.");
+    }
+    if (!cloudRunRevision || /MOCK|SIMULATED/i.test(cloudRunRevision)) {
+      throw new Error("RELEASE_BLOCKED: PASS certification requires a real CLOUD_RUN_REVISION.");
+    }
+  }
 
   const manifest: ReleaseManifest = {
     version: targetVersion,
     tag: targetTag,
-    gitSha: gitSha,
+    gitSha,
     containerDigest,
     cloudRunRevision,
     environment,
     releaseChannel,
     releasedAt: new Date().toISOString(),
-    certification: options?.certification || "PASS",
-    compatibility: identity.compatibility || {
-      databaseSchemaVersion: 1,
-      syncProtocolVersion: 1,
-      pwaSchemaVersion: 1,
-      minSupportedClientVersion: "1.0.0",
-      recommendedClientVersion: "1.0.0",
+    certification,
+    compatibility: {
+      databaseSchemaVersion: 4,
+      syncProtocolVersion: 2,
+      pwaSchemaVersion: 4,
+      minSupportedClientVersion: "2.0.0",
+      recommendedClientVersion: targetVersion,
     },
     evidencePath: options?.evidencePath,
   };

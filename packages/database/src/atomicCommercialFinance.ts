@@ -44,7 +44,66 @@ export class PrismaAtomicCommercialFinanceService {
       for (const p of req.payments || []) { const r = PaymentEngine.processPayment({ tenantId: ctx.tenantId, branchId: ctx.branchId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider, providerReference: p.providerReference, customerId: req.customerId }); if (!r.success) throw new Error("PAYMENT_REJECTED"); payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: TransactionNumbering.formatNumber("PAY", "MAIN", (await tx.payment.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + payments.length + 1), saleId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: totals.subtotal, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: totals.grossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
-      const ledgers = await Promise.all(lines.map((l: any, i: number) => tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: l.productId, variantId: l.variantId, movementType: "SALE", quantity: -Math.abs(l.quantity), referenceType: "SALE", referenceId: sale.id, occurredAt: now, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}` } })));
+
+      // Update inventory and stock ledgers atomically
+      const ledgers: any[] = [];
+      const impactedProductIds = new Set<string>();
+
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        const qtySold = Math.abs(l.quantity);
+        const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
+        const qtyBefore = Number(variantBefore?.inventoryQuantity ?? 0);
+        const qtyAfter = Math.max(0, qtyBefore - qtySold);
+
+        const ledger = await tx.stockLedger.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: l.productId,
+            variantId: l.variantId,
+            movementType: "SALE",
+            quantityChange: -qtySold,
+            quantity: -qtySold,
+            quantityBefore: qtyBefore,
+            quantityAfter: qtyAfter,
+            unitCost: l.unitCost || 0,
+            totalCost: qtySold * (l.unitCost || 0),
+            referenceType: "SALE",
+            referenceId: sale.id,
+            occurredAt: now,
+            deviceId: req.deviceId,
+            operationId: req.operationId,
+            idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}`,
+          },
+        });
+        ledgers.push(ledger);
+
+        await tx.productVariant.update({
+          where: { id: l.variantId },
+          data: { inventoryQuantity: qtyAfter },
+        });
+
+        impactedProductIds.add(l.productId);
+      }
+
+      for (const prodId of impactedProductIds) {
+        const siblingVars = await tx.productVariant.findMany({
+          where: { productId: prodId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+        });
+        const totalStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity), 0);
+        const reservedStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.reservedQuantity || 0), 0);
+        await tx.product.update({
+          where: { id: prodId },
+          data: {
+            totalStock,
+            reservedStock,
+            availableStock: Math.max(0, totalStock - reservedStock),
+            lowStockVariantsCount: siblingVars.filter((v: any) => v.isActive && Number(v.inventoryQuantity) <= Number(v.reorderLevel || 0)).length,
+          },
+        });
+      }
+
       const lookup = await this.accounts(tx, ctx);
       const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
       const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
@@ -60,8 +119,66 @@ export class PrismaAtomicCommercialFinanceService {
       const receiptId = req.id || crypto.randomUUID(); const now = new Date(); const number = TransactionNumbering.formatNumber("REC", "MAIN", (await tx.purchaseReceipt.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1); const total = req.items.reduce((s: number, i: any) => s + i.quantityReceived * i.unitCost, 0);
       const receipt = await tx.purchaseReceipt.create({ data: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId, receiptNumber: number, purchaseOrderId: req.purchaseOrderId ?? null, supplierId: req.supplierId, receivedAt: now, createdById: ctx.userId, notes: req.notes ?? null, items: { create: req.items.map((i: any) => ({ id: crypto.randomUUID(), variantId: i.variantId, quantityReceived: i.quantityReceived, unitCost: i.unitCost, totalCost: i.quantityReceived * i.unitCost, batchNumber: i.batchNumber ?? null, expiryDate: i.expiryDate ? new Date(i.expiryDate) : null })) } }, include: { items: true } });
       await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { increment: total } } });
-      const ledgers = await Promise.all(req.items.map((i: any, idx: number) => { const item = receipt.items[idx]; return tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: item.variantId, variantId: item.variantId, movementType: "PURCHASE", quantity: i.quantityReceived, referenceType: "PURCHASE_RECEIPT", referenceId: receipt.id, occurredAt: now, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: `${req.idempotencyKey}-${i.variantId}-${idx}` } }); }));
-      const variants = await tx.productVariant.findMany({ where: { id: { in: req.items.map((i: any) => i.variantId) } } }); for (const l of ledgers) { const v = variants.find((x: any) => x.id === l.variantId); await tx.stockLedger.update({ where: { id: l.id }, data: { productId: v?.productId || l.productId } }); }
+
+      const ledgers: any[] = [];
+      const impactedProdIds = new Set<string>();
+
+      for (let idx = 0; idx < req.items.length; idx++) {
+        const i = req.items[idx];
+        const item = receipt.items[idx];
+        const qtyReceived = Math.abs(i.quantityReceived);
+        const v = await tx.productVariant.findUnique({ where: { id: i.variantId } });
+        const qtyBefore = Number(v?.inventoryQuantity ?? 0);
+        const qtyAfter = qtyBefore + qtyReceived;
+        const prodId = v?.productId || item.variantId;
+
+        const ledger = await tx.stockLedger.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: prodId,
+            variantId: i.variantId,
+            movementType: "PURCHASE",
+            quantityChange: qtyReceived,
+            quantity: qtyReceived,
+            quantityBefore: qtyBefore,
+            quantityAfter: qtyAfter,
+            unitCost: i.unitCost || 0,
+            totalCost: qtyReceived * (i.unitCost || 0),
+            referenceType: "PURCHASE_RECEIPT",
+            referenceId: receipt.id,
+            occurredAt: now,
+            deviceId: req.deviceId,
+            operationId: req.operationId,
+            idempotencyKey: `${req.idempotencyKey}-${i.variantId}-${idx}`,
+          },
+        });
+        ledgers.push(ledger);
+
+        await tx.productVariant.update({
+          where: { id: i.variantId },
+          data: { inventoryQuantity: qtyAfter },
+        });
+
+        impactedProdIds.add(prodId);
+      }
+
+      for (const prodId of impactedProdIds) {
+        const siblingVars = await tx.productVariant.findMany({
+          where: { productId: prodId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+        });
+        const totalStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity), 0);
+        const reservedStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.reservedQuantity || 0), 0);
+        await tx.product.update({
+          where: { id: prodId },
+          data: {
+            totalStock,
+            reservedStock,
+            availableStock: Math.max(0, totalStock - reservedStock),
+            lowStockVariantsCount: siblingVars.filter((v: any) => v.isActive && Number(v.inventoryQuantity) <= Number(v.reorderLevel || 0)).length,
+          },
+        });
+      }
       const lookup = await this.accounts(tx, ctx); const built = FinancialBridge.mapGoodsReceiptToJournal(ctx, { ...(receipt as any), items: receipt.items.map((x: any) => ({ ...x, totalCost: Number(x.totalCost) })) }, lookup as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1); await this.writeJournal(tx, ctx, built);
       return { receipt, ledgers };
     });

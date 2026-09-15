@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 /**
  * KwakoPos Release Engineering Platform v2 — Canonical Cross-Client Transaction Test Runner
  * Executes Section 20 critical transaction verification:
@@ -37,44 +41,33 @@ export interface CrossClientTestResult {
 }
 
 export function runCanonicalCrossClientTest(): CrossClientTestResult {
-  const timestamp = new Date().toISOString();
-  const testId = `cct_${Date.now()}`;
+  throw new Error(
+    "REAL_RUNTIME_REQUIRED: synthetic cross-client results are prohibited. Use `npm run production:browser` with NODE_ENV=production-certification and a real CANDIDATE_URL; the authoritative Playwright spec writes the evidence artifact."
+  );
+}
 
-  const productId = "prod_cross_client_001";
-  const variantId = "var_cross_client_001";
-  const initialStock = 100;
-  const saleQuantity = 15;
-  const finalStock = 85;
+if (process.argv[1]?.endsWith("canonical-cross-client-test.ts")) {
+  if (process.env.NODE_ENV !== "production-certification") {
+    throw new Error("REAL_RUNTIME_REQUIRED: production:browser must run with NODE_ENV=production-certification.");
+  }
+  if (!process.env.CANDIDATE_URL || /localhost|127\.0\.0\.1/i.test(process.env.CANDIDATE_URL)) {
+    throw new Error("REAL_RUNTIME_REQUIRED: CANDIDATE_URL must be a real HTTPS candidate endpoint.");
+  }
 
-  return {
-    testId,
-    timestamp,
-    status: "PASS",
-    browserA: {
-      productId,
-      variantId,
-      initialStock,
-      saleQuantity,
-      finalStock,
-    },
-    serverSync: {
-      ledgerEventsRecorded: 1,
-      outboxSynced: true,
-      serverCalculatedBalance: finalStock,
-    },
-    browserB: {
-      syncedProductVerified: true,
-      syncedVariantVerified: true,
-      syncedStockVerified: true,
-      syncedLedgerVerified: true,
-      calculatedBalance: finalStock,
-    },
-    resilienceChecks: {
-      refreshPersistence: true,
-      logoutLoginPersistence: true,
-      serviceWorkerUpdatePersistence: true,
-      reconnectRetryPersistence: true,
-    },
-    message: "Canonical Cross-Client Transaction Test PASSED: State convergence & algebraic stock ledger integrity verified (100 -> 85 across Browser A, Server & Browser B)",
-  };
+  const runner = process.platform === "win32" ? "npx.cmd" : "npx";
+  execFileSync(runner, ["playwright", "test", "tests/browser/production-browser.spec.mjs", "--config=playwright.production.config.mjs"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  const evidencePath = resolve(process.cwd(), "artifacts/release-evidence/kwakopos-browser-certification-evidence.json");
+  if (!existsSync(evidencePath)) {
+    throw new Error(`REAL_RUNTIME_REQUIRED: authoritative Playwright evidence was not produced at ${evidencePath}.`);
+  }
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+  if (evidence.finalConvergenceStatus !== "PASS") {
+    throw new Error("REAL_RUNTIME_REQUIRED: authoritative Playwright convergence evidence is not PASS.");
+  }
+  console.log(`REAL_CROSS_CLIENT_CERTIFICATION=PASS\\nEVIDENCE=${evidencePath}`);
 }
