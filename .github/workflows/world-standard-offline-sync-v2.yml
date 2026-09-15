@@ -42,8 +42,8 @@ jobs:
       - run: npm run build
       - run: npm run test:sync
       - run: npx playwright install --with-deps chromium
-      - run: npm run certify:offline-sync
       - run: npm run certify:offline-e2e
+      - run: npm run certify:offline-sync
       - name: Upload offline sync evidence
         if: always()
         uses: actions/upload-artifact@v4
