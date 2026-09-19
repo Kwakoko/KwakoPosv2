@@ -124,7 +124,7 @@ export interface TenantScopedContext {
   userId?: string;
 }
 
-export class QueryableStore<T extends Record<string, any>> extends Map<string, T> {
+export class QueryableStore<T = any> extends Map<string, T> {
   constructor(
     private readonly storeName: NativeStore,
     private readonly onPersist?: (store: NativeStore, key: string, value: any) => void
@@ -135,7 +135,7 @@ export class QueryableStore<T extends Record<string, any>> extends Map<string, T
   where(field: string) {
     return {
       equals: (val: any) => {
-        let predicate = (item: T) => (item as any)[field] === val;
+        let predicate = (item: T) => item && typeof item === "object" && (item as any)[field] === val;
         return {
           and: (additionalPred: (item: T) => boolean) => {
             const prev = predicate;
@@ -155,8 +155,8 @@ export class QueryableStore<T extends Record<string, any>> extends Map<string, T
   }
 
   async add(item: T): Promise<string> {
-    const id = (item as any).id || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
-    const record = { ...item, id };
+    const id = (item && typeof item === "object" && (item as any).id) || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    const record = typeof item === "object" && item !== null ? { ...item, id } : item;
     this.set(id, record as any);
     this.onPersist?.(this.storeName, id, record);
     return id;
@@ -164,7 +164,7 @@ export class QueryableStore<T extends Record<string, any>> extends Map<string, T
 
   async update(id: string, patch: Partial<T>): Promise<void> {
     const existing = this.get(id);
-    const updated = { ...(existing || {}), ...patch, id } as T;
+    const updated = (typeof existing === "object" && existing !== null && typeof patch === "object" && patch !== null ? { ...existing, ...patch, id } : patch) as unknown as T;
     this.set(id, updated);
     this.onPersist?.(this.storeName, id, updated);
   }
@@ -257,6 +257,11 @@ export class LocalIndexedDbStore {
             const newVersion = event.newVersion || ver || this.schemaVersion;
 
             globalMigrationEngine.applySchemaUpgrade(db, transaction, oldVersion, newVersion);
+            const metadata = transaction?.objectStore("syncMetadata");
+            if (metadata) {
+              metadata.put(String(db.version), "nativeMigrationVersion");
+              metadata.put(new Date().toISOString(), "nativeMigrationAppliedAt:" + db.version);
+            }
           };
 
           request.onsuccess = () => {

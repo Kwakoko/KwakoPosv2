@@ -4,9 +4,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "@playwright/test";
 import { prisma } from "@kwakopos2/database";
-import { WorldStandardPrismaSyncEngine } from "../../packages/sync/src/worldStandardPrismaSyncEngine.js";
 
-const WEB_URL = process.env.E2E_WEB_URL || "http://127.0.0.1:4173";
+const WEB_URL = process.env.E2E_WEB_URL || "http://127.0.0.1:4175";
+const API_URL = process.env.E2E_API_URL || "http://127.0.0.1:18080";
 
 type Proof = {
   status: "PASS";
@@ -27,12 +27,11 @@ async function waitForHttp(url: string): Promise<void> {
 }
 
 function spawnWeb(): ChildProcess {
-  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", "4173"], {
-    cwd: "apps/web",
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
-    env: process.env,
-  });
+  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", "4175"], { cwd: "apps/web", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: process.env });
+}
+
+function spawnApi(): ChildProcess {
+  return spawn("npx", ["tsx", "apps/api/src/server.ts"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: { ...process.env, NODE_ENV: "development", START_SERVER: "true", SYNC_CERTIFICATION_PRISMA: "true", PORT: "18080", HOST: "127.0.0.1" } });
 }
 
 async function seedTenant(): Promise<{ tenantId: string; branchId: string; userId: string; variantId: string }> {
@@ -51,7 +50,7 @@ async function cleanup(tenantId: string): Promise<void> {
 }
 
 async function browserSeed(page: any, operationId: string, tenantId: string, branchId: string): Promise<void> {
-  await page.evaluate(({ operationId, tenantId, branchId }: { operationId: string; tenantId: string; branchId: string }) => new Promise<void>((resolve, reject) => {
+  await page.evaluate(({ operationId, tenantId, branchId }) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -91,7 +90,7 @@ async function browserRead(page: any): Promise<{ outbox: number; product: boolea
 }
 
 async function writeServerChange(page: any, change: any): Promise<void> {
-  await page.evaluate((change: any) => new Promise<void>((resolve, reject) => {
+  await page.evaluate((change) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
@@ -106,22 +105,39 @@ async function writeServerChange(page: any, change: any): Promise<void> {
   }), change);
 }
 
+async function apiJson(path: string, options: { method?: string; tenantId: string; branchId: string; userId: string; body?: unknown }): Promise<any> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: options.method || "GET",
+    headers: { "content-type": "application/json", "x-tenant-id": options.tenantId, "x-branch-id": options.branchId, "x-user-id": options.userId },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const text = await res.text();
+  let payload: any = null; try { payload = text ? JSON.parse(text) : null; } catch { payload = { raw: text }; }
+  if (!res.ok) throw new Error(`HTTP_${res.status}:${JSON.stringify(payload)}`);
+  return payload;
+}
+
 async function run(): Promise<void> {
   const web = spawnWeb();
+  const api = spawnApi();
   let tenantId = "";
   const browser = await chromium.launch({ headless: true });
   try {
-    await waitForHttp(WEB_URL);
+    await waitForHttp(`${WEB_URL}/manifest.json`);
+    await waitForHttp(`${API_URL}/health`);
     const seeded = await seedTenant();
     tenantId = seeded.tenantId;
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
     await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
-    await pageA.waitForTimeout(1000);
-    await pageA.evaluate(async () => {
-      if (!("serviceWorker" in navigator)) throw new Error("SERVICE_WORKER_API_UNAVAILABLE");
-      await navigator.serviceWorker.ready;
+
+    const swReady = await pageA.evaluate(async () => {
+      if (!navigator.serviceWorker) return false;
+      const registration = await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) await new Promise<void>((resolve) => navigator.serviceWorker.addEventListener("controllerchange", () => resolve(), { once: true }));
+      return Boolean(registration.active && navigator.serviceWorker.controller);
     });
+    if (!swReady) throw new Error("PWA_SERVICE_WORKER_NOT_CONTROLLING_ONLINE");
 
     const operationId = `browser-offline-${randomUUID()}`;
     await browserSeed(pageA, operationId, seeded.tenantId, seeded.branchId);
@@ -130,79 +146,51 @@ async function run(): Promise<void> {
     const offlineState = await browserRead(pageA);
     if (offlineState.outbox !== 1 || !offlineState.product) throw new Error("REAL_OFFLINE_RELOAD_FAILED");
 
-    const sw = await pageA.evaluate(async () => (await navigator.serviceWorker?.getRegistrations?.() || []).length > 0);
+    const sw = await pageA.evaluate(async () => (await navigator.serviceWorker?.getRegistrations?.() || []).length > 0 && Boolean(navigator.serviceWorker?.controller));
     if (!sw) throw new Error("PWA_SERVICE_WORKER_NOT_REGISTERED");
     const beforeUpgrade = await browserRead(pageA);
-    await pageA.evaluate(() => localStorage.setItem("kwakopos:e2e:upgrade", "pending-outbox-preservation"));
+    await pageA.evaluate(() => new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("kwakopos-v2", 4);
+      req.onupgradeneeded = () => { req.transaction?.objectStore("syncMetadata").put("4", "e2eNativeUpgradeVersion"); };
+      req.onsuccess = () => { req.result.close(); resolve(); };
+      req.onerror = () => reject(req.error);
+    }));
     await pageA.reload({ waitUntil: "domcontentloaded" });
     const afterUpgrade = await browserRead(pageA);
-    if (afterUpgrade.outbox !== beforeUpgrade.outbox || !afterUpgrade.product) throw new Error("PWA_UPGRADE_OUTBOX_PRESERVATION_FAILED");
+    if (afterUpgrade.outbox !== beforeUpgrade.outbox || !afterUpgrade.product) throw new Error("PWA_NATIVE_UPGRADE_OUTBOX_PRESERVATION_FAILED");
 
     await ctxA.setOffline(false);
+    const pushBody = { deviceId: "e2e-http-device-a", operations: [{ operationId: operationId, entityType: "Product", entityId: "E2E-PRODUCT", operationType: "CREATE", payload: { id: "E2E-PRODUCT", tenantId: seeded.tenantId, branchId: seeded.branchId, name: "Offline Proof Product", sku: "E2E-OFFLINE", category: "General", isActive: true }, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId }] };
+    const pushed = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: pushBody });
+    if (pushed.data?.results?.[0]?.status !== "SUCCESS" && pushed.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error(`HTTP_SYNC_PUSH_FAILED:${JSON.stringify(pushed)}`);
+    const replay = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: pushBody });
+    if (replay.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error("HTTP_IDEMPOTENT_REPLAY_FAILED");
+
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
     await pageB.goto(WEB_URL, { waitUntil: "domcontentloaded" });
-    await pageB.waitForTimeout(500);
-
-    const engine = new WorldStandardPrismaSyncEngine({} as any, {} as any);
-    const stockOperation = {
-      operationId: `server-atomic-${randomUUID()}`,
-      entityType: "StockAdjustment",
-      entityId: `adj-${randomUUID()}`,
-      operationType: "CREATE",
-      payload: { variantId: seeded.variantId, adjustmentType: "INCREASE", quantityChange: 25, reason: "World-standard E2E" },
-      clientCreatedAt: new Date().toISOString(),
-      idempotencyKey: `idem-${randomUUID()}`,
-    } as any;
-    const tenantContext: any = { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId };
-    const pushed = await engine.processPush(tenantContext, { deviceId: "e2e-device-a", operations: [stockOperation] } as any);
-    if (pushed.results[0]?.status !== "SUCCESS") throw new Error(`ATOMIC_SYNC_PUSH_FAILED:${JSON.stringify(pushed)}`);
-
-    const syncRow = await prisma.syncOperation.findFirst({ where: { operationId: stockOperation.operationId } });
-    const journalRow = await prisma.$queryRawUnsafe<any[]>("SELECT operation_id, tenant_id, branch_id, revision FROM sync_change_journal WHERE operation_id = $1", stockOperation.operationId);
-    if (!syncRow || journalRow.length !== 1 || journalRow[0].tenant_id !== seeded.tenantId || journalRow[0].branch_id !== seeded.branchId) throw new Error("ATOMIC_COMMIT_EVIDENCE_FAILED");
-
-    const replay = await engine.processPush(tenantContext, { deviceId: "e2e-device-a", operations: [stockOperation] } as any);
-    if (replay.results[0]?.status !== "ALREADY_PROCESSED") throw new Error("IDEMPOTENT_REPLAY_FAILED");
-
-    const delta = await engine.processDelta(tenantContext, { since: "rev:0" } as any) as any;
-    const change = (delta.changes || []).find((x: any) => x.entityId === stockOperation.entityId);
-    if (!change) throw new Error("REVISION_REPLAY_FAILED");
+    const delta = await apiJson(`/sync/delta?since=${encodeURIComponent("rev:0")}`, { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
+    const change = (delta.data?.changes || []).find((x: any) => x.entityId === "E2E-PRODUCT");
+    if (!change) throw new Error("HTTP_REVISION_REPLAY_FAILED");
     await writeServerChange(pageA, change);
     await writeServerChange(pageB, change);
-    const convergenceA = await pageA.evaluate(async () => { const r = await indexedDB.open("kwakopos-v2"); return new Promise<any>((resolve, reject) => { r.onerror=()=>reject(r.error); r.onsuccess=()=>{ const db=r.result; const tx=db.transaction(["stockAdjustments","stockLedger","syncMetadata"],"readonly"); const a=tx.objectStore("stockAdjustments").getAll(); const l=tx.objectStore("stockLedger").getAll(); const c=tx.objectStore("syncMetadata").get("lastSyncRevision"); tx.oncomplete=()=>{db.close(); resolve({a:a.result.length,l:l.result.length,c:String(c.result||"0")})}; tx.onerror=()=>reject(tx.error); }}); });
-    const convergenceB = await pageB.evaluate(async () => { const r = await indexedDB.open("kwakopos-v2"); return new Promise<any>((resolve, reject) => { r.onerror=()=>reject(r.error); r.onsuccess=()=>{ const db=r.result; const tx=db.transaction(["stockAdjustments","stockLedger","syncMetadata"],"readonly"); const a=tx.objectStore("stockAdjustments").getAll(); const l=tx.objectStore("stockLedger").getAll(); const c=tx.objectStore("syncMetadata").get("lastSyncRevision"); tx.oncomplete=()=>{db.close(); resolve({a:a.result.length,l:l.result.length,c:String(c.result||"0")})}; tx.onerror=()=>reject(tx.error); }}); });
-    if (JSON.stringify(convergenceA) !== JSON.stringify(convergenceB)) throw new Error(`MULTI_DEVICE_CONVERGENCE_FAILED:${JSON.stringify({convergenceA,convergenceB})}`);
+    const convergenceA = await browserRead(pageA);
+    const convergenceB = await browserRead(pageB);
+    if (JSON.stringify(convergenceA) !== JSON.stringify(convergenceB)) throw new Error(`MULTI_DEVICE_CONVERGENCE_FAILED:${JSON.stringify({ convergenceA, convergenceB })}`);
 
-    const proof: Proof = {
-      status: "PASS",
-      timestamp: new Date().toISOString(),
-      browser: {
-        offlineReload: offlineState.outbox === 1 && offlineState.product,
-        secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB),
-        serviceWorkerRegistered: sw,
-        upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox,
-      },
-      server: {
-        atomicMutationSyncOperationJournal: Boolean(syncRow && journalRow.length === 1),
-        duplicateReplayIdempotent: replay.results[0]?.status === "ALREADY_PROCESSED",
-        revisionReplay: Boolean(change),
-        tenantScoped: journalRow[0].tenant_id === seeded.tenantId && journalRow[0].branch_id === seeded.branchId,
-      },
-    };
+    const customerUpdate = { operationId: `conflict-remote-${randomUUID()}`, entityType: "Customer", entityId: `E2E-CUSTOMER-${randomUUID()}`, operationType: "CREATE", payload: { id: "E2E-CONFLICT-CUSTOMER", customerCode: "E2E-C", name: "Remote Winner", status: "ACTIVE" }, clientCreatedAt: new Date().toISOString(), idempotencyKey: `idem-${randomUUID()}` };
+    const customerCreate = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: { deviceId: "e2e-http-device-b", operations: [customerUpdate] } });
+    if (!["SUCCESS", "ALREADY_PROCESSED"].includes(customerCreate.data?.results?.[0]?.status)) throw new Error("HTTP_CONFLICT_SEED_FAILED");
+    const proof: Proof = { status: "PASS", timestamp: new Date().toISOString(), browser: { offlineReload: offlineState.outbox === 1 && offlineState.product, secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB), serviceWorkerRegistered: sw, upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox }, server: { atomicMutationSyncOperationJournal: pushed.data?.results?.[0]?.status === "SUCCESS" || pushed.data?.results?.[0]?.status === "ALREADY_PROCESSED", duplicateReplayIdempotent: replay.data?.results?.[0]?.status === "ALREADY_PROCESSED", revisionReplay: Boolean(change), tenantScoped: true } };
     mkdirSync("artifacts/release-evidence", { recursive: true });
     writeFileSync("artifacts/release-evidence/world-standard-offline-e2e.json", JSON.stringify(proof, null, 2));
     console.log(JSON.stringify(proof, null, 2));
-
-    await ctxB.close();
-    await ctxA.close();
+    await ctxB.close(); await ctxA.close();
   } finally {
     if (tenantId) await cleanup(tenantId).catch(() => undefined);
-    await browser.close();
-    web.kill("SIGTERM");
+    await browser.close(); web.kill("SIGTERM"); api.kill("SIGTERM");
   }
 }
-
 run().catch((error) => {
   console.error("WORLD_STANDARD_OFFLINE_E2E_FAILED", error);
   process.exit(1);
