@@ -13,10 +13,11 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Wifi, WifiOff, RefreshCw, ShieldCheck, Clock, Activity, HardDrive,
-  CheckCircle2, X, AlertTriangle, Database, Lock, Layers
+  CheckCircle2, X, AlertTriangle, Database, Lock, Layers, ShieldAlert
 } from "lucide-react";
 import { useAuth, useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { syncTelemetryService, type SyncTelemetryMetrics } from "../services/syncTelemetryService.js";
+import { SyncConflictResolutionModal } from "./SyncConflictResolutionModal.js";
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return "0 MB";
@@ -35,8 +36,20 @@ export const SyncTelemetryHUD: React.FC = () => {
 
   const [metrics, setMetrics] = useState<SyncTelemetryMetrics>(syncTelemetryService.getMetrics());
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const conflictCount = useMemo(() => {
+    if (!db?.syncMetadata) return 0;
+    let count = 0;
+    for (const key of db.syncMetadata.keys()) {
+      if (key.startsWith("sync_conflict_")) {
+        count++;
+      }
+    }
+    return count;
+  }, [db, showDiagnostics, showConflictModal]);
 
   // Register DB store with telemetry service
   useEffect(() => {
@@ -440,6 +453,15 @@ export const SyncTelemetryHUD: React.FC = () => {
                 <button
                   type="button"
                   className="v2-btn v2-btn-outline v2-btn-sm"
+                  onClick={() => setShowConflictModal(true)}
+                  style={{ color: conflictCount > 0 ? "#f87171" : undefined, borderColor: conflictCount > 0 ? "#ef4444" : undefined }}
+                >
+                  <ShieldAlert size={13} style={{ marginRight: "0.35rem", color: conflictCount > 0 ? "#ef4444" : "#f59e0b" }} />
+                  <span>{conflictCount > 0 ? `${conflictCount} Conflicts` : "Conflict Center"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="v2-btn v2-btn-outline v2-btn-sm"
                   disabled={effectiveIsSyncing}
                   onClick={handleForceProbe}
                 >
@@ -458,6 +480,13 @@ export const SyncTelemetryHUD: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Sync Conflict & Oversell Resolution Modal */}
+      <SyncConflictResolutionModal
+        isOpen={showConflictModal}
+        onClose={() => setShowConflictModal(false)}
+        localDb={db}
+      />
     </>
   );
 };

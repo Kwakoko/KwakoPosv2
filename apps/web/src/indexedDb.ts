@@ -124,26 +124,76 @@ export interface TenantScopedContext {
   userId?: string;
 }
 
+export class QueryableStore<T extends Record<string, any>> extends Map<string, T> {
+  constructor(
+    private readonly storeName: NativeStore,
+    private readonly onPersist?: (store: NativeStore, key: string, value: any) => void
+  ) {
+    super();
+  }
+
+  where(field: string) {
+    return {
+      equals: (val: any) => {
+        let predicate = (item: T) => (item as any)[field] === val;
+        return {
+          and: (additionalPred: (item: T) => boolean) => {
+            const prev = predicate;
+            predicate = (item: T) => prev(item) && Boolean(additionalPred(item));
+            return {
+              toArray: async (): Promise<T[]> => Array.from(this.values()).filter(predicate),
+            };
+          },
+          toArray: async (): Promise<T[]> => Array.from(this.values()).filter(predicate),
+        };
+      },
+    };
+  }
+
+  async toArray(): Promise<T[]> {
+    return Array.from(this.values());
+  }
+
+  async add(item: T): Promise<string> {
+    const id = (item as any).id || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    const record = { ...item, id };
+    this.set(id, record as any);
+    this.onPersist?.(this.storeName, id, record);
+    return id;
+  }
+
+  async update(id: string, patch: Partial<T>): Promise<void> {
+    const existing = this.get(id);
+    const updated = { ...(existing || {}), ...patch, id } as T;
+    this.set(id, updated);
+    this.onPersist?.(this.storeName, id, updated);
+  }
+}
+
 export class LocalIndexedDbStore {
   schemaVersion: number;
-  products = new Map<string, Product>();
-  productVariants = new Map<string, ProductVariant>();
-  stockLedger = new Map<string, StockLedger>();
-  stockAdjustments = new Map<string, StockAdjustment>();
-  stockBalance = new Map<string, ProductBranchStock>();
-  productPriceHistory = new Map<string, ProductPriceHistory>();
-  sales = new Map<string, any>();
-  payments = new Map<string, any>();
-  receipts = new Map<string, any>();
-  customers = new Map<string, any>();
-  suppliers = new Map<string, any>();
-  syncOutbox = new Map<string, OutboxItem>();
-  syncMetadata = new Map<string, string>();
-  configuration = new Map<string, any>();
-  auditState = new Map<string, any>();
-  migrationJournal = new Map<string, MigrationJournalEntry>();
-  recoverySnapshots = new Map<string, RecoverySnapshot>();
-  updateState = new Map<string, any>();
+  products: QueryableStore<Product>;
+  productVariants: QueryableStore<ProductVariant>;
+  stockLedger: QueryableStore<StockLedger>;
+  stockAdjustments: QueryableStore<StockAdjustment>;
+  stockBalance: QueryableStore<ProductBranchStock>;
+  productPriceHistory: QueryableStore<ProductPriceHistory>;
+  sales: QueryableStore<any>;
+  payments: QueryableStore<any>;
+  receipts: QueryableStore<any>;
+  customers: QueryableStore<any>;
+  suppliers: QueryableStore<any>;
+  syncOutbox: QueryableStore<OutboxItem>;
+  syncMetadata: QueryableStore<string>;
+  configuration: QueryableStore<any>;
+  auditState: QueryableStore<any>;
+  migrationJournal: QueryableStore<MigrationJournalEntry>;
+  recoverySnapshots: QueryableStore<RecoverySnapshot>;
+  updateState: QueryableStore<any>;
+
+  get outbox(): QueryableStore<OutboxItem> {
+    return this.syncOutbox;
+  }
 
   readonly ready: Promise<void>;
   private nativeDb: IDBDatabase | null = null;
@@ -157,6 +207,27 @@ export class LocalIndexedDbStore {
       Number.isInteger(requestedSchemaVersion) && requestedSchemaVersion > 0
         ? requestedSchemaVersion
         : AUTHORITATIVE_SCHEMA_VERSION;
+
+    const p = (store: NativeStore, key: string, value: any) => this.persist(store, key, value);
+    this.products = new QueryableStore<Product>("products", p);
+    this.productVariants = new QueryableStore<ProductVariant>("productVariants", p);
+    this.stockLedger = new QueryableStore<StockLedger>("stockLedger", p);
+    this.stockAdjustments = new QueryableStore<StockAdjustment>("stockAdjustments", p);
+    this.stockBalance = new QueryableStore<ProductBranchStock>("stockBalance", p);
+    this.productPriceHistory = new QueryableStore<ProductPriceHistory>("productPriceHistory", p);
+    this.sales = new QueryableStore<any>("sales", p);
+    this.payments = new QueryableStore<any>("payments", p);
+    this.receipts = new QueryableStore<any>("receipts", p);
+    this.customers = new QueryableStore<any>("customers", p);
+    this.suppliers = new QueryableStore<any>("suppliers", p);
+    this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
+    this.syncMetadata = new QueryableStore<string>("syncMetadata", p);
+    this.configuration = new QueryableStore<any>("configuration", p);
+    this.auditState = new QueryableStore<any>("auditState", p);
+    this.migrationJournal = new QueryableStore<MigrationJournalEntry>("migrationJournal", p);
+    this.recoverySnapshots = new QueryableStore<RecoverySnapshot>("recoverySnapshots", p);
+    this.updateState = new QueryableStore<any>("updateState", p);
+
     this.ready = this.initializeNativePersistence();
   }
 
@@ -322,7 +393,7 @@ export class LocalIndexedDbStore {
     });
   }
 
-  private persist<T>(store: NativeStore, key: string, value: T): void {
+  public persist<T>(store: NativeStore, key: string, value: T): void {
     if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return;
     this.persistenceTail = this.persistenceTail
       .catch(() => undefined)
@@ -792,6 +863,28 @@ export class LocalIndexedDbStore {
     return true;
   }
 
+  public mergeLocalDeltasIntoVariant(serverVariant: ProductVariant): ProductVariant {
+    const pendingDeltas = Array.from(this.stockAdjustments.values()).filter(
+      (adj: any) => adj.variantId === serverVariant.id && adj.status === "PENDING"
+    );
+    if (pendingDeltas.length === 0) return serverVariant;
+
+    let reconciledQty = Number(serverVariant.inventoryQuantity ?? (serverVariant as any).stock ?? 0);
+    for (const delta of pendingDeltas) {
+      const change = Number((delta as any).change ?? (delta as any).quantityChange ?? (delta as any).quantity ?? 0);
+      reconciledQty += change;
+      (delta as any).status = "RECONCILED";
+      this.persist("stockAdjustments", delta.id, delta);
+    }
+
+    return {
+      ...serverVariant,
+      inventoryQuantity: reconciledQty,
+      stock: reconciledQty,
+      lastSyncedAt: Date.now(),
+    } as any;
+  }
+
   async applyServerDelta(delta: SyncDeltaResponse): Promise<number> {
     await this.ready;
     const serverTime = Date.parse(delta.serverTimestamp);
@@ -822,7 +915,8 @@ export class LocalIndexedDbStore {
       }
       for (const variant of variants) {
         if (this.protectServerRecord("ProductVariant", variant.id)) continue;
-        this.saveVariantLocal(variant);
+        const reconciled = this.mergeLocalDeltasIntoVariant(variant);
+        this.saveVariantLocal(reconciled);
         appliedCount += 1;
       }
       for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
@@ -882,15 +976,17 @@ export class LocalIndexedDbStore {
       appliedCount += 1;
       for (const variant of product.variants || []) {
         if (this.protectServerRecord("ProductVariant", variant.id)) continue;
-        variantsStore.put(variant, variant.id);
-        this.productVariants.set(variant.id, variant);
+        const reconciled = this.mergeLocalDeltasIntoVariant(variant);
+        variantsStore.put(reconciled, reconciled.id);
+        this.productVariants.set(reconciled.id, reconciled);
         appliedCount += 1;
       }
     }
     for (const variant of variants) {
       if (this.protectServerRecord("ProductVariant", variant.id)) continue;
-      variantsStore.put(variant, variant.id);
-      this.productVariants.set(variant.id, variant);
+      const reconciled = this.mergeLocalDeltasIntoVariant(variant);
+      variantsStore.put(reconciled, reconciled.id);
+      this.productVariants.set(reconciled.id, reconciled);
       appliedCount += 1;
     }
     for (const entry of ledger) {
@@ -992,7 +1088,8 @@ export class LocalIndexedDbStore {
 
     for (const variant of variants) {
       if (this.protectServerRecord("ProductVariant", variant.id)) continue;
-      this.saveVariantLocal(variant, ctx);
+      const reconciled = this.mergeLocalDeltasIntoVariant(variant);
+      this.saveVariantLocal(reconciled, ctx);
       appliedCount += 1;
     }
 
@@ -1139,6 +1236,11 @@ export class LocalIndexedDbStore {
     const all = [...this.syncOutbox.values()].filter((item) => item.status === "PENDING");
     const filtered = tenantId ? all.filter((i) => i.tenantId === tenantId) : all;
     return orderPendingOutbox(filtered);
+  }
+
+  async getPendingOutboxCount(tenantId?: string): Promise<number> {
+    await this.ready;
+    return this.getPendingOutbox(tenantId).length;
   }
 
   getFailedOutbox(tenantId?: string): OutboxItem[] {
@@ -1303,3 +1405,5 @@ export class LocalIndexedDbStore {
     }
   }
 }
+
+export const db = new LocalIndexedDbStore(4);

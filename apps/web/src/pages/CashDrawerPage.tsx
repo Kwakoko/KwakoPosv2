@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KwakoPosv2 — Cash Drawer & Shift Financial Control Command Center
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete, production-grade Cash Drawer & Shift Financial Control workspace:
@@ -28,7 +28,7 @@ import { useAuth, useBranch, useRbac, useSync, useTenant } from "../context/Kwak
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
-import { DEMO_DATA_EVENT, loadSampleData } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
@@ -280,8 +280,8 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   useEffect(() => {
     void loadDrawerData();
     const handleSync = () => { void loadDrawerData(); };
-    window.addEventListener(DEMO_DATA_EVENT, handleSync);
-    return () => window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+    window.addEventListener(DATA_CHANGED_EVENT, handleSync);
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleSync);
   }, [loadDrawerData]);
 
   // Modals State
@@ -641,7 +641,7 @@ Manager Sign-off:  _____________________
         <div className="kpi-card">
           <div className="kpi-card-label">Expected Drawer Cash</div>
           <div className="kpi-card-value" style={{ color: "var(--text)" }}>{money(expectedCash)}</div>
-          <div className="kpi-card-desc">Float + Sales − Out − Drops</div>
+          <div className="kpi-card-desc">Float + Sales âˆ’ Out âˆ’ Drops</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Reconciliation Discrepancy</div>
@@ -695,17 +695,6 @@ Manager Sign-off:  _____________________
                 <div className="v2-flex v2-gap-2 v2-mt-2">
                   <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setModalType("OPEN_SHIFT")} type="button">
                     <Unlock size={13} /> Open Shift Now
-                  </button>
-                  <button
-                    className="v2-btn v2-btn-outline v2-btn-sm"
-                    onClick={async () => {
-                      const res = await loadSampleData(db, currentTenantName || undefined);
-                      toast.success("Sample Shift Loaded", `Loaded ${res.sales} sales and active register shift.`);
-                      playSuccessChime();
-                    }}
-                    type="button"
-                  >
-                    <Sparkles size={13} /> Load Sample Shift
                   </button>
                 </div>
               </div>
@@ -957,10 +946,10 @@ Manager Sign-off:  _____________________
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Opening Float:</span><span className="v2-mono">{money(openingFloat)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Total Cash Sales:</span><span className="v2-mono">{money(cashSales)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Manual Cash In:</span><span className="v2-mono">{money(cashIn)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Customer Cash Refunds:</span><span className="v2-mono">−{money(cashRefunds)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Petty Cash Expenses:</span><span className="v2-mono">−{money(cashExpenses)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Manual Cash Out:</span><span className="v2-mono">−{money(cashOut)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Safe & Bank Drops:</span><span className="v2-mono">−{money(safeDrops)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Customer Cash Refunds:</span><span className="v2-mono">âˆ’{money(cashRefunds)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Petty Cash Expenses:</span><span className="v2-mono">âˆ’{money(cashExpenses)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Manual Cash Out:</span><span className="v2-mono">âˆ’{money(cashOut)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Safe & Bank Drops:</span><span className="v2-mono">âˆ’{money(safeDrops)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-sm v2-font-black v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
                   <span>SYSTEM EXPECTED CASH:</span>
                   <span className="v2-mono" style={{ color: "var(--accent)" }}>{money(expectedCash)}</span>
@@ -977,7 +966,7 @@ Manager Sign-off:  _____________________
                 </div>
                 <div className="v2-p-3" style={{ background: isVarianceAccepted ? "var(--success-muted)" : "var(--danger-muted)", borderRadius: "var(--radius-md)" }}>
                   <div className="v2-font-bold v2-text-xs" style={{ color: isVarianceAccepted ? "var(--success)" : "var(--danger)" }}>
-                    {discrepancy === 0 ? "✅ PERFECTLY BALANCED" : isVarianceAccepted ? "⚠️ VARIANCE ACCEPTED (WITHIN TZS 500 TOLERANCE)" : "🚨 LARGE VARIANCE — REQUIRES MANAGER APPROVAL"}
+                    {discrepancy === 0 ? "âœ… PERFECTLY BALANCED" : isVarianceAccepted ? "âš ï¸ VARIANCE ACCEPTED (WITHIN TZS 500 TOLERANCE)" : "ðŸš¨ LARGE VARIANCE — REQUIRES MANAGER APPROVAL"}
                   </div>
                 </div>
               </div>
@@ -1437,8 +1426,8 @@ Manager Sign-off:  _____________________
               <div className="v2-flex v2-justify-between"><span>(+) Opening Float:</span><span>{money(activeReportSlip.openingFloat)}</span></div>
               <div className="v2-flex v2-justify-between"><span>(+) Cash Sales:</span><span>{money(activeReportSlip.cashSales)}</span></div>
               <div className="v2-flex v2-justify-between"><span>(+) Manual Cash In:</span><span>{money(activeReportSlip.cashIn)}</span></div>
-              <div className="v2-flex v2-justify-between"><span>(−) Manual Cash Out:</span><span>−{money(activeReportSlip.cashOut)}</span></div>
-              <div className="v2-flex v2-justify-between"><span>(−) Safe Transfers:</span><span>−{money(activeReportSlip.safeDrops)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(âˆ’) Manual Cash Out:</span><span>âˆ’{money(activeReportSlip.cashOut)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(âˆ’) Safe Transfers:</span><span>âˆ’{money(activeReportSlip.safeDrops)}</span></div>
               <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, paddingTop: "0.3rem", borderTop: "1px dotted #cbd5e1" }}>
                 <span>EXPECTED IN DRAWER:</span>
                 <span>{money(activeReportSlip.expectedCash)}</span>
@@ -1509,3 +1498,6 @@ Manager Sign-off:  _____________________
     </div>
   );
 };
+
+
+

@@ -1,6 +1,6 @@
 /**
- * KwakoPosv2 — Super Admin Database Control & SQL Studio Routes
- * ─────────────────────────────────────────────────────────────
+ * KwakoPosv2 â€” Super Admin Database Control & SQL Studio Routes
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * Authoritative platform API providing in-browser SQL studio,
  * live schema inspection, table pagination, and maintenance tools.
  */
@@ -109,15 +109,10 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
           rowCount = rows.length;
         }
       } catch (dbErr: any) {
-        // Fallback for demo / development query runner if direct DB connection not active
-        if (/tenants/i.test(query)) {
-          rows = [
-            { id: "tenant-dar-01", name: "Kwakoko Dar Flagship", plan: "ENTERPRISE", status: "ACTIVE", business_code: "TZ-DAR-01", created_at: new Date().toISOString() },
-            { id: "tenant-msa-02", name: "Mwanza Lake Central Store", plan: "GROWTH", status: "ACTIVE", business_code: "TZ-MZA-02", created_at: new Date().toISOString() },
-            { id: "tenant-aru-03", name: "Arusha Northern Hub", plan: "STARTER", status: "ACTIVE", business_code: "TZ-ARU-03", created_at: new Date().toISOString() }
-          ];
-          rowCount = rows.length;
-        } else if (/table_sizes|pg_stat_user_tables/i.test(query)) {
+        // Production never fabricates database query results.
+        rows = [];
+        rowCount = 0;
+        if (/table_sizes|pg_stat_user_tables/i.test(query)) {
           rows = KNOWN_TABLES.map((t) => ({
             table_name: t.name,
             row_count: t.estimatedRows,
@@ -132,7 +127,7 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
             rows = products.slice(0, 50).map(p => ({
               id: p.id,
               name: p.name,
-              category: (p as any).category || "General",
+              category: (p as any).category || null,
               selling_price: p.sellingPrice,
               stock: p.totalStock
             }));
@@ -220,25 +215,14 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
             id: p.id,
             tenant_id: p.tenantId,
             name: p.name,
-            category: (p as any).category || "General",
+            category: (p as any).category || null,
             selling_price: p.sellingPrice,
             stock: p.totalStock,
             is_deleted: false
           }));
-        } else {
-          allRows = [
-            { id: "prd-001", tenant_id: "tenant-dar-01", name: "Kilimanjaro Water 500ml", category: "Beverages", selling_price: 1000, stock: 450, is_deleted: false },
-            { id: "prd-002", tenant_id: "tenant-dar-01", name: "Azam Wheat Flour 1kg", category: "Pantry", selling_price: 2500, stock: 120, is_deleted: false },
-            { id: "prd-003", tenant_id: "tenant-dar-01", name: "Mo Extra Sunflower Oil 1L", category: "Cooking Oil", selling_price: 6500, stock: 80, is_deleted: false },
-            { id: "prd-004", tenant_id: "tenant-dar-01", name: "Safari Lager 500ml", category: "Beverages", selling_price: 3000, stock: 240, is_deleted: false }
-          ];
-        }
+        } else { allRows = []; }
       } else if (table === "tenants") {
-        allRows = [
-          { id: "tenant-dar-01", name: "Kwakoko Dar Flagship", plan: "ENTERPRISE", status: "ACTIVE", created_at: "2026-01-10T08:00:00Z" },
-          { id: "tenant-msa-02", name: "Mwanza Lake Central Store", plan: "GROWTH", status: "ACTIVE", created_at: "2026-02-15T09:30:00Z" },
-          { id: "tenant-aru-03", name: "Arusha Northern Hub", plan: "STARTER", status: "ACTIVE", created_at: "2026-03-01T11:20:00Z" }
-        ];
+        allRows = [];
       } else {
         allRows = [
           { id: `${table}-rec-01`, status: "ACTIVE", created_at: new Date().toISOString() },
@@ -366,13 +350,7 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
       const level = String(query.level || "ALL").toUpperCase();
       const now = Date.now();
 
-      const allLogs = [
-        { id: "log-1", timestamp: now - 3000, level: "INFO", message: "HLC causality clock re-anchored with zero drift detected." },
-        { id: "log-2", timestamp: now - 15000, level: "SYNC", message: "Tenant tenant-dar-01 outbox drained successfully (24 mutations converged)." },
-        { id: "log-3", timestamp: now - 45000, level: "SECURITY", message: "Super Admin step-up TOTP verification successful for user admin@kwakoko.co.tz." },
-        { id: "log-4", timestamp: now - 120000, level: "SQL", message: "Read-only query executed on relation `tenants` (duration: 4ms)." },
-        { id: "log-5", timestamp: now - 360000, level: "MAINTENANCE", message: "Autonomous vacuum & foreign key validation completed with zero integrity errors." }
-      ];
+      const allLogs: any[] = [];
 
       const logs = level === "ALL" ? allLogs : allLogs.filter(l => l.level === level);
       return reply.send({ success: true, logs });
@@ -381,3 +359,5 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
     }
   });
 }
+
+

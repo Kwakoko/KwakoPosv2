@@ -1,7 +1,7 @@
 import type { StockLedger, StockMovementType } from "@kwakopos2/contracts";
 import type { LocalIndexedDbStore, OutboxItem } from "../indexedDb.js";
 import { safeUUID } from "./apiClient.js";
-import { DEMO_DATA_EVENT } from "./sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "./dataChangeEvent.js";
 
 export const STOCK_CHANGED_EVENT = "kwakopos:stock-changed";
 
@@ -242,7 +242,7 @@ export async function queueAddStock(
   // 4. Notify UI subscribers across modules
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: command.productId, variantId: command.variantId, quantityAfter } }));
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
     window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { operationId, entityType: "StockAdjustment" } }));
   }
 
@@ -370,12 +370,33 @@ export function recordPosSaleDeductions(
     };
 
     db.saveStockLedgerLocal(ledgerRecord as any, ctx);
+
+    // Record local pending StockAdjustment delta so merge reconciliation applies relative mutations over incoming server snapshots
+    const adjustmentRecord: any = {
+      id: `adj-sale-${saleId}-${resolvedVariantId}`,
+      tenantId,
+      branchId,
+      productId: prod.id,
+      variantId: resolvedVariantId,
+      sku: targetVariant?.sku || prod.sku,
+      adjustmentType: "DECREASE",
+      quantityChange: -qty,
+      change: -qty,
+      reason: `POS Sale ${saleId}`,
+      status: "PENDING",
+      deviceId: deviceId || "pos-terminal",
+      operationId: `adj-sale-${saleId}-${resolvedVariantId}`,
+      idempotencyKey: `ADJ-SALE-${saleId}-${resolvedVariantId}`,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    };
+    db.saveStockAdjustmentLocal(adjustmentRecord as any, ctx);
   }
 
   // 4. Dispatch events for real-time reactivity in both POS and Inventory views
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } }));
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
   }
 }
 
@@ -469,6 +490,8 @@ export function recordPosSaleRefundRestock(
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } }));
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
   }
 }
+
+

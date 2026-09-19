@@ -31,6 +31,9 @@ import {
   useTranslation, useFormatters,
 } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/apiClient.js";
+import { clientSyncEngine } from "../clientSyncEngine.js";
+import { Button } from "../components/UI/Button.js";
+import { SyncErrorsPanel } from "../components/SyncErrorsPanel.js";
 
 type Sale = { id: string; saleNumber: string; grandTotal: number; soldAt: string; paymentStatus: string };
 
@@ -134,13 +137,39 @@ export { UsersPage };
 
 export const DiagnosticsPage: React.FC = () => {
   const { t } = useTranslation();
-  const { db, syncOutbox, syncError, isOnline, pendingOutboxCount } = useSync();
+  const { db, syncError, isOnline, pendingOutboxCount: contextPendingCount } = useSync();
+  const [syncStatus, setSyncStatus] = useState<"IDLE" | "RUNNING" | "SUCCESS" | "FAILED">("IDLE");
+  const [outboxCount, setOutboxCount] = useState<number>(contextPendingCount || 0);
   const outbox = db.getPendingOutbox();
+
+  const refreshOutboxCount = async () => {
+    const count = await clientSyncEngine.localDb.getPendingOutboxCount();
+    setOutboxCount(count);
+  };
+
+  useEffect(() => {
+    void refreshOutboxCount();
+  }, []);
+
+  const handleSyncNow = async () => {
+    try {
+      setSyncStatus("RUNNING"); // update UI state
+      const result = await clientSyncEngine.runSync(); // run sync
+      console.log("Sync result:", result);
+      setSyncStatus("SUCCESS");
+    } catch (err) {
+      console.error("Sync failed:", err);
+      setSyncStatus("FAILED");
+    } finally {
+      await refreshOutboxCount();
+    }
+  };
+
   return (
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("nav.diagnostics")}</h1>
-        <div className="v2-flex v2-gap-2">
+        <div className="v2-flex v2-gap-2 v2-items-center">
           <button
             className="v2-btn v2-btn-secondary v2-btn-sm"
             onClick={() => {
@@ -151,18 +180,29 @@ export const DiagnosticsPage: React.FC = () => {
           >
             <Activity size={13} /> Persistence &amp; Sync Test Lab
           </button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={!isOnline} onClick={() => void syncOutbox().catch(() => undefined)} type="button">
-            <RefreshCw size={13} /> {t("sync.forceSync")}
-          </button>
+          <Button
+            variant="primary"
+            onClick={handleSyncNow}
+            disabled={syncStatus === "RUNNING"}
+          >
+            {syncStatus === "RUNNING" && <RefreshCw size={13} className="v2-animate-spin v2-mr-1" />}
+            Sync Now
+          </Button>
         </div>
+      </div>
+      <div className="v2-mb-3">
+        {syncStatus === "RUNNING" && <p className="v2-text-info">Syncing…</p>}
+        {syncStatus === "SUCCESS" && <p className="v2-text-success">Sync completed!</p>}
+        {syncStatus === "FAILED" && <p className="v2-text-danger">Sync failed. Check logs.</p>}
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
         <KpiCard label="Network Status"    value={isOnline ? t("sync.networkOnline") : t("sync.networkOffline")} icon={isOnline ? <Wifi size={18} /> : <WifiOff size={18} />} accent={isOnline ? "#4ade80" : "#fbbf24"} />
-        <KpiCard label={t("sync.syncOutbox")} value={pendingOutboxCount} desc={t("sync.pendingTransactions")}        icon={<Upload size={18} />}    accent="#38bdf8" />
+        <KpiCard label={t("sync.syncOutbox")} value={outboxCount} desc={t("sync.pendingTransactions")}        icon={<Upload size={18} />}    accent="#38bdf8" />
         <KpiCard label="Stock Ledger"      value={db.stockLedger.size} desc="Local IDB entries"        icon={<Activity size={18} />}  accent="#818cf8" />
         <KpiCard label="Sync Status"       value={syncError ? t("sync.syncError") : t("sync.syncSuccess")} icon={<AlertTriangle size={18} />} accent={syncError ? "#f87171" : "#4ade80"} />
       </div>
       {syncError && <div className="badge v2-badge-danger v2-mb-4">{syncError}</div>}
+      <SyncErrorsPanel onRetry={handleSyncNow} className="v2-mb-4" />
       <div className="v2-card">
         <div className="v2-card-header"><div className="v2-card-title">{t("sync.syncOutbox")} ({outbox.length})</div></div>
         <div className="v2-card-body">

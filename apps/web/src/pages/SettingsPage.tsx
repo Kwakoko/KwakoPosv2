@@ -27,7 +27,7 @@ import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
 import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
-import { loadSampleData, purgeSampleData, isDemoModeActive, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+
 
 type SettingsTab =
   | "profile" | "localization" | "pos" | "tax" | "inventory"
@@ -84,15 +84,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     }
   }, [propActiveTab]);
 
-  const [isDemoActive, setIsDemoActive] = useState(() => isDemoModeActive(db));
-  const [isLoadingSample, setIsLoadingSample] = useState(false);
-
-  useEffect(() => {
-    const handleDemoChange = () => setIsDemoActive(isDemoModeActive(db));
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
-    return () => window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
-  }, [db]);
-
   // Form states across tabs
   const [profile, setProfile] = useState(() => {
     const saved = db.getConfigurationLocal?.("store_profile") as any;
@@ -122,16 +113,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       }));
     }
   }, [currentTenantName, db]);
-
-  useEffect(() => {
-    const handleDemoChange = () => {
-      setIsDemoActive(isDemoModeActive(db));
-    };
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
-    return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
-    };
-  }, [db]);
 
   useEffect(() => {
     const saved = db.getConfigurationLocal?.("tax_config") as any;
@@ -346,7 +327,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                     </div>
                     <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".75rem", lineHeight: 1.4 }}>
                       {loc.code === "en" && "Official commercial and international trade terminology with global standard notation."}
-                      {loc.code === "fr" && "Terminologie commerciale conforme aux normes OHADA et au français d'affaires."}
+                      {loc.code === "fr" && "Terminologie commerciale conforme aux normes OHADA et au franÃ§ais d'affaires."}
                       {loc.code === "sw" && "Lugha ya kibiashara ya Afrika Mashariki iliyorahisishwa kwa wajasiriamali na wafanyabiashara."}
                     </div>
                   </div>
@@ -504,147 +485,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         </div>
       )}
 
-      {/* Developer Options & Sample Data */}
-      {activeTab === "developer" && (
-        <div className="v2-space-y-4">
-          <div
-            className="v2-card"
-            style={{
-              border: isDemoActive ? "1px solid rgba(245, 158, 11, 0.4)" : "1px solid var(--surface-border)",
-              background: isDemoActive ? "linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%)" : undefined,
-            }}
-          >
-            <div className="v2-card-header" style={{ borderBottom: "1px solid var(--surface-border)" }}>
-              <div className="v2-flex v2-items-center v2-justify-between">
-                <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
-                  <Sparkles size={18} style={{ color: "#f59e0b" }} />
-                  <span>Developer Options: Sandbox &amp; Sample Retail Data</span>
-                </div>
-                <span
-                  style={{
-                    fontSize: "0.7rem",
-                    fontWeight: 800,
-                    textTransform: "uppercase",
-                    padding: "2px 8px",
-                    borderRadius: "4px",
-                    background: isDemoActive ? "rgba(245, 158, 11, 0.2)" : "var(--surface-3)",
-                    color: isDemoActive ? "#f59e0b" : "var(--text-muted)",
-                    border: isDemoActive ? "1px solid rgba(245, 158, 11, 0.4)" : "1px solid var(--surface-border)",
-                  }}
-                >
-                  {isDemoActive ? "⚡ Demo Mode Active" : "Production Mode Clean"}
-                </span>
-              </div>
-            </div>
-
-            <div className="v2-card-body v2-space-y-4">
-              <div className="v2-text-xs v2-text-muted">
-                Populate your workspace with a complete, localized retail simulation dataset (fast-moving products, barcode variants, suppliers, customer accounts, realistic sales ledger, and active cash drawer float). All sample records are cleanly tagged and isolated for testing and onboarding.
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "1.25rem",
-                  borderRadius: "var(--radius-md, 0.55rem)",
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--surface-border)",
-                  gap: "1rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>
-                    {isDemoActive ? "Reset / Reload Sample Retail Data" : "Load Sample Retail Data"}
-                  </div>
-                  <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
-                    Injects Azam Flour, Coca Cola, ASAS Milk, Korie Oil, VIP customers, sales ledger, and active shift.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-sm"
-                  disabled={isLoadingSample}
-                  style={{
-                    background: "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
-                    color: "#ffffff",
-                    border: "none",
-                    fontWeight: 800,
-                    fontSize: "12px",
-                    padding: "8px 18px",
-                    borderRadius: "8px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "7px",
-                    cursor: isLoadingSample ? "not-allowed" : "pointer",
-                    boxShadow: "0 2px 6px rgba(245, 158, 11, 0.3)",
-                    transition: "all 0.15s ease",
-                    opacity: isLoadingSample ? 0.7 : 1,
-                  }}
-                  onClick={async () => {
-                    setIsLoadingSample(true);
-                    try {
-                      const res = await loadSampleData(db, currentTenantId || undefined);
-                      setIsDemoActive(true);
-                      toast.success(
-                        "Sample Data Loaded",
-                        `Injected ${res.products} products, ${res.customers} customers, ${res.sales} sales, and ${res.expenses} expense records.`
-                      );
-                    } catch (err: any) {
-                      toast.error("Failed to load sample data", err?.message || String(err));
-                    } finally {
-                      setIsLoadingSample(false);
-                    }
-                  }}
-                >
-                  <Sparkles size={14} className={isLoadingSample ? "animate-spin" : ""} />
-                  <span>{isLoadingSample ? "Loading Sample Data..." : isDemoActive ? "Re-load Sample Data" : "Load Sample Data"}</span>
-                </button>
-              </div>
-
-              {isDemoActive && (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "1rem",
-                    borderRadius: "var(--radius-md, 0.55rem)",
-                    background: "rgba(248, 113, 113, 0.08)",
-                    border: "1px solid rgba(248, 113, 113, 0.3)",
-                    gap: "1rem",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div>
-                    <div className="v2-font-bold v2-text-sm" style={{ color: "var(--danger)" }}>
-                      1-Click Purge All Sample Data
-                    </div>
-                    <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.2rem" }}>
-                      Instantly purges all tagged demo products, customers, suppliers, sales, and demo expenses back to 100% pristine zero data.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="v2-btn v2-btn-danger v2-btn-sm"
-                    onClick={async () => {
-                      await purgeSampleData(db, currentTenantId || undefined);
-                      setIsDemoActive(false);
-                      toast.success(
-                        "Sample Data Purged",
-                        "All demo products, sales, customers, and active shift data have been wiped."
-                      );
-                    }}
-                  >
-                    <Trash2 size={13} /> Purge All Sample Data
-                  </button>
-                </div>
-              )}
-            </div>
+      {/* Production-safe developer diagnostics: sample/demo data injection is deliberately unavailable. */}
+      <div className="v2-card">
+        <div className="v2-card-header">
+          <div className="v2-card-title">Production Data Policy</div>
+        </div>
+        <div className="v2-card-body v2-space-y-2">
+          <div className="v2-text-sm v2-font-bold">Clean tenant initialization is enforced.</div>
+          <div className="v2-text-xs v2-text-muted">
+            Categories, brands, products, customers, suppliers, sales, expenses, receipts, and stock are created only from real business actions or authoritative synchronization. Sample/demo injection is not available in the production UI.
           </div>
-
+        </div>
+      </div>
           {/* Database Diagnostics & Developer Telemetry */}
           <div className="v2-card">
             <div className="v2-card-header">
@@ -674,8 +526,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
               </div>
             </div>
           </div>
-        </div>
-      )}
 
       {/* Advanced Settings & Danger Zone */}
       {activeTab === "advanced" && (
@@ -932,3 +782,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     </div>
   );
 };
+
+
+
+
+
+
+

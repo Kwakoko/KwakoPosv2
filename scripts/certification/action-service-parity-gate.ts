@@ -36,12 +36,12 @@ function getTagName(node: ts.JsxElement | ts.JsxSelfClosingElement): string {
   return ts.isJsxElement(node) ? node.openingElement.tagName.getText() : node.tagName.getText();
 }
 
-function getProps(node: ts.JsxElement | ts.JsxSelfClosingElement): ts.JsxAttributeLike[] {
+function getProps(node: ts.JsxElement | ts.JsxSelfClosingElement): ts.JsxAttributes["properties"] {
   return ts.isJsxElement(node) ? node.openingElement.attributes.properties : node.attributes.properties;
 }
 
 function attr(node: ts.JsxElement | ts.JsxSelfClosingElement, name: string): ts.JsxAttribute | undefined {
-  return getProps(node).find((p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.text === name);
+  return getProps(node).find((p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.getText() === name);
 }
 
 function textOf(node: ts.Node): string {

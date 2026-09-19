@@ -27,7 +27,8 @@ import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslat
 import { apiFetch, safeUUID } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
@@ -140,11 +141,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       }
     };
     void hydrateCatalog();
-    window.addEventListener(DEMO_DATA_EVENT, hydrateCatalog);
+    window.addEventListener(DATA_CHANGED_EVENT, hydrateCatalog);
     window.addEventListener(STOCK_CHANGED_EVENT, hydrateCatalog);
     return () => {
       active = false;
-      window.removeEventListener(DEMO_DATA_EVENT, hydrateCatalog);
+      window.removeEventListener(DATA_CHANGED_EVENT, hydrateCatalog);
       window.removeEventListener(STOCK_CHANGED_EVENT, hydrateCatalog);
     };
   }, [db]);
@@ -255,10 +256,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       } catch {}
     };
     void hydrateCustomers();
-    window.addEventListener(DEMO_DATA_EVENT, hydrateCustomers);
+    window.addEventListener(DATA_CHANGED_EVENT, hydrateCustomers);
     return () => {
       active = false;
-      window.removeEventListener(DEMO_DATA_EVENT, hydrateCustomers);
+      window.removeEventListener(DATA_CHANGED_EVENT, hydrateCustomers);
     };
   }, [db]);
 
@@ -297,7 +298,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setQuickCustomerModal(false);
     playSuccessChime();
     toast.success("Customer Registered", `${trimmed} is now selected for this sale.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
   };
 
   // Held Carts State with Authoritative Dual Persistence (LocalStorage + IndexedDB)
@@ -440,10 +441,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       } catch {}
     };
     void loadOrders();
-    window.addEventListener(DEMO_DATA_EVENT, loadOrders);
+    window.addEventListener(DATA_CHANGED_EVENT, loadOrders);
     return () => {
       active = false;
-      window.removeEventListener(DEMO_DATA_EVENT, loadOrders);
+      window.removeEventListener(DATA_CHANGED_EVENT, loadOrders);
     };
   }, [db]);
 
@@ -886,7 +887,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setHoldCartModal(false);
     playBeep(550, 80);
     toast.info("Cart Held", `"${newHold.name}" (${money(newHold.total)}) safely parked.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CART_HELD", hold: newHold } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_HELD", hold: newHold } }));
   };
 
   const handleResumeCart = (held: HeldCartRecord) => {
@@ -900,7 +901,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setResumeCartModal(false);
     playBeep(700, 80);
     toast.info("Cart Resumed", `Resumed "${held.name}" into active counter.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CART_RESUMED", hold: held } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_RESUMED", hold: held } }));
   };
 
   const handleDiscardHeldCart = (held: HeldCartRecord, e?: React.MouseEvent) => {
@@ -910,7 +911,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     persistHeldCarts(updated);
     playBeep(440, 80);
     toast.info("Held Cart Discarded", `Deleted parked order "${held.name}".`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CART_DISCARDED", hold: held } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_DISCARDED", hold: held } }));
   };
 
   // Validation guard: prevent empty sales and sales with grand total <= 0
@@ -1083,11 +1084,44 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       }
     }
 
-    // 6. Sync via Fastify API or IndexedDB Outbox
+    // 6. Guarantee Outbox-First Persistence: unconditionally enqueue to syncOutbox first
+    const outboxItem = db.enqueueOutbox({
+      entityType: "Sale" as never,
+      entityId: saleId,
+      operationType: "CREATE",
+      payload: saleRecord,
+      idempotencyKey: saleId,
+      tenantId: currentTenantId || undefined,
+      branchId: currentBranchId || undefined,
+    });
+
     if (isOnline) {
-      await apiFetch("/api/v1/pos/sales", { method: "POST", body: JSON.stringify(saleRecord) }).catch(() => {});
-    } else {
-      db.enqueueOutbox({ entityType: "Sale" as never, entityId: saleId, operationType: "CREATE", payload: saleRecord, idempotencyKey: saleId });
+      void (async () => {
+        await retryWithBackoff(
+          async () => {
+            const res = await apiFetch("/api/v1/pos/sales", {
+              method: "POST",
+              body: JSON.stringify(saleRecord),
+            });
+            if (res) {
+              db.markOutboxSynced(outboxItem.id);
+              await db.flushPersistence?.().catch(() => {});
+            }
+          },
+          {
+            retries: 5,
+            baseDelay: 500,
+            factor: 2,
+            onFailure: async (err: any) => {
+              console.error("Outbox push failed:", err);
+              const errMsg = err instanceof Error ? err.message : String(err);
+              db.markOutboxFailed(outboxItem.id, errMsg);
+              await db.flushPersistence?.().catch(() => {});
+              void syncOutbox?.().catch(() => {});
+            },
+          }
+        );
+      })();
     }
 
     setPastOrders((prev) => [saleRecord, ...prev]);
@@ -1107,7 +1141,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     toast.success("Sale Completed", `Receipt #${saleId} issued successfully.`);
 
     // 7. Broadcast event so Dashboard, Inventory, Cash Drawer and other tabs update live
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SALE_COMPLETED", sale: saleRecord } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SALE_COMPLETED", sale: saleRecord } }));
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1163,7 +1197,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setSelectedOrderToReturn(null);
     setReturnItems({});
     setIsReturnsModalOpen(false);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SALE_RETURNED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SALE_RETURNED" } }));
   };
 
   // Keyboard Function Keys Listener (F1 - F9, Esc, Enter)
@@ -1273,7 +1307,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             type="button"
             title="Toggle Fast-Tap Favorites"
           >
-            ★ Favorites
+            â˜… Favorites
           </button>
           <button
             className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
@@ -1325,7 +1359,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             >
               <div className="v2-flex v2-items-center v2-justify-between v2-mb-2">
                 <div className="v2-flex v2-items-center v2-gap-2">
-                  <span style={{ color: "#f59e0b", fontSize: "14px" }}>★</span>
+                  <span style={{ color: "#f59e0b", fontSize: "14px" }}>â˜…</span>
                   <span className="v2-text-xs v2-font-black" style={{ letterSpacing: "0.03em", textTransform: "uppercase" }}>
                     Quick-Keys Fast Tap
                   </span>
@@ -1688,7 +1722,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               {discountPercent > 0 && (
                 <div className="v2-flex v2-justify-between" style={{ color: "var(--success)" }}>
                   <span>{t("pos.applyDiscount")} ({discountPercent}%)</span>
-                  <span className="v2-mono v2-font-bold">−{money(discountAmount)}</span>
+                  <span className="v2-mono v2-font-bold">âˆ’{money(discountAmount)}</span>
                 </div>
               )}
               <div className="v2-flex v2-justify-between v2-items-center">
@@ -1924,7 +1958,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         }}
                       >
                         <span className="v2-text-xs v2-font-bold">
-                          {remaining === 0 ? "Tender Balanced ✓" : remaining > 0 ? "Remaining Due:" : "Overpaid:"}
+                          {remaining === 0 ? "Tender Balanced âœ“" : remaining > 0 ? "Remaining Due:" : "Overpaid:"}
                         </span>
                         <span
                           className="v2-mono v2-font-black v2-text-sm"
@@ -3004,7 +3038,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         {money(denom)}
                       </span>
                       <div className="v2-flex v2-items-center v2-gap-1">
-                        <span className="v2-text-xs v2-text-muted">×</span>
+                        <span className="v2-text-xs v2-text-muted">Ã—</span>
                         <input
                           type="number"
                           min="0"
@@ -3067,7 +3101,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         color: variance === 0 ? "var(--success)" : variance > 0 ? "var(--accent)" : "var(--danger)",
                       }}
                     >
-                      {variance > 0 ? `+${money(variance)} (Overage)` : variance < 0 ? `${money(variance)} (Shortage)` : "0 Tsh (Balanced ✓)"}
+                      {variance > 0 ? `+${money(variance)} (Overage)` : variance < 0 ? `${money(variance)} (Shortage)` : "0 Tsh (Balanced âœ“)"}
                     </span>
                   </div>
                 </div>
@@ -3310,3 +3344,5 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     </div>
   );
 };
+
+

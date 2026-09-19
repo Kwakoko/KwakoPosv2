@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KwakoPosv2 — Purchasing, Suppliers & Goods Receiving (GRN)
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete procurement management command center matching mature legacy UX:
@@ -20,7 +20,7 @@ import {
 import { useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { DEMO_DATA_EVENT, purgeSampleData } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
@@ -31,17 +31,17 @@ const fmtDate = (d: string) =>
 
 // Tax Compliance Validators (Tanzania TRA)
 const validateTin = (tin?: string) => {
-  if (!tin) return { valid: false, text: "⚠ Missing TIN", badgeClass: "v2-badge-warning" };
+  if (!tin) return { valid: false, text: "âš  Missing TIN", badgeClass: "v2-badge-warning" };
   const clean = tin.replace(/-/g, "");
-  if (/^\d{9}$/.test(clean)) return { valid: true, text: "✓ TIN Valid", badgeClass: "v2-badge-success" };
-  return { valid: false, text: "⚠ Invalid TIN (9 digits)", badgeClass: "v2-badge-danger" };
+  if (/^\d{9}$/.test(clean)) return { valid: true, text: "âœ“ TIN Valid", badgeClass: "v2-badge-success" };
+  return { valid: false, text: "âš  Invalid TIN (9 digits)", badgeClass: "v2-badge-danger" };
 };
 
 const validateVrn = (vrn?: string) => {
-  if (!vrn) return { valid: false, text: "⚠ Missing VRN", badgeClass: "v2-badge-muted" };
+  if (!vrn) return { valid: false, text: "âš  Missing VRN", badgeClass: "v2-badge-muted" };
   const clean = vrn.replace(/-/g, "");
-  if (/^\d{8}[A-Z]$/i.test(clean)) return { valid: true, text: "✓ VRN Valid", badgeClass: "v2-badge-success" };
-  return { valid: false, text: "⚠ Invalid VRN", badgeClass: "v2-badge-danger" };
+  if (/^\d{8}[A-Z]$/i.test(clean)) return { valid: true, text: "âœ“ VRN Valid", badgeClass: "v2-badge-success" };
+  return { valid: false, text: "âš  Invalid VRN", badgeClass: "v2-badge-danger" };
 };
 
 export interface PurchasingPageProps {
@@ -240,8 +240,8 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   useEffect(() => {
     void loadProcurement();
     const handleEvent = () => { void loadProcurement(); };
-    window.addEventListener(DEMO_DATA_EVENT, handleEvent);
-    return () => window.removeEventListener(DEMO_DATA_EVENT, handleEvent);
+    window.addEventListener(DATA_CHANGED_EVENT, handleEvent);
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleEvent);
   }, [loadProcurement]);
 
   // Check if demo supplier or procurement records are present
@@ -250,36 +250,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   }, [suppliers, orders, grns]);
 
   // Clean Fabricated Procurement Data (Pillars CLN-01, CLN-03, CLN-04)
-  const cleanFabricatedProcurement = useCallback(async () => {
-    setIsCleaning(true);
-    try {
-      await purgeSampleData(db, currentTenantId || undefined);
-      const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
-      db.saveConfigurationLocal("procurement_suppliers", [], ctx);
-      db.saveConfigurationLocal("procurement_purchase_orders", [], ctx);
-      db.saveConfigurationLocal("procurement_grns", [], ctx);
-      if (db.suppliers) {
-        for (const [id, sup] of Array.from(db.suppliers.entries())) {
-          if (isDemoSupplier(sup)) {
-            db.suppliers.delete(id);
-            (db as any).persist?.("suppliers", id, null);
-          }
-        }
-      }
-      setSuppliers([]);
-      setOrders([]);
-      setGrns([]);
-      await loadProcurement();
-      toast.success(
-        "Fabricated Procurement Cleaned",
-        "Purged simulated supplier debt (Tsh 6,050,000) and mock purchase orders in accordance with Production Cleanliness Pillars (CLN-01 to CLN-10)."
-      );
-    } catch (err: any) {
-      toast.error("Cleanup Error", `Unable to purge procurement demo data: ${err?.message || err}`);
-    } finally {
-      setIsCleaning(false);
-    }
-  }, [db, currentTenantId, loadProcurement, toast]);
+
 
   // Modals visibility
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -343,7 +314,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setSupplierForm({ name: "", category: "General", tin: "", vrn: "", phone: "", creditLimit: 5000000 });
     playSuccessChime();
     toast.success("Supplier Added", `Supplier "${newSup.name}" registered with TIN/VRN compliance.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SUPPLIER_CREATED", supplier: newSup } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_CREATED", supplier: newSup } }));
   };
 
   // Create PO
@@ -384,7 +355,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setShowPoModal(false);
     playSuccessChime();
     toast.success("Purchase Order Created", `PO #${poNumber} issued to ${poSupplier} (${fmt(grandTotal)}).`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: newPo } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: newPo } }));
   };
 
   // Open GRN Modal for a PO
@@ -517,7 +488,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setSelectedPoForGrn(null);
     playSuccessChime();
     toast.success("Delivery Received & Stock Updated", `GRN #${grnId} verified. Added ${totalIntakeUnits} stock units across inventory.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "GRN_VERIFIED", grn: newGrn } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "GRN_VERIFIED", grn: newGrn } }));
   };
 
   // Settle Supplier Debt
@@ -537,7 +508,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setPayingSupplier(null);
     setDebtPayAmount(0);
     setDebtPayRef("");
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SUPPLIER_PAID" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_PAID" } }));
   };
 
   return (
@@ -556,13 +527,13 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           {hasDemoData && (
             <button
               className="v2-btn v2-btn-danger v2-btn-sm"
-              onClick={cleanFabricatedProcurement}
+              onClick={() => void loadProcurement()}
               disabled={isCleaning}
               type="button"
               title="Purge all fabricated demo suppliers, simulated debt & mock purchase orders (Pillars CLN-01, CLN-03, CLN-04)"
             >
               <Trash2 size={13} className={isCleaning ? "v2-spin" : ""} />
-              {isCleaning ? "Purging..." : "Clean Fabricated Data"}
+              {isCleaning ? "Purging..." : "Refresh Procurement"}
             </button>
           )}
           <button
@@ -638,7 +609,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                   border: `1px solid ${isProductionLocked ? "rgba(34, 197, 94, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
                 }}
               >
-                {isProductionLocked ? "🔒 Production Locked" : "⚡ Sandbox Mode"}
+                {isProductionLocked ? "ðŸ”’ Production Locked" : "âš¡ Sandbox Mode"}
               </span>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShowPillarsInfo(false)} type="button">
                 Close
@@ -744,12 +715,12 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
             </div>
             <button
               className="v2-btn v2-btn-danger v2-btn-sm"
-              onClick={cleanFabricatedProcurement}
+              onClick={() => void loadProcurement()}
               disabled={isCleaning}
               type="button"
             >
               <Trash2 size={13} className={isCleaning ? "v2-spin" : ""} />
-              {isCleaning ? "Purging..." : "Purge Fabricated Procurement"}
+              {isCleaning ? "Purging..." : "Refresh Procurement"}
             </button>
           </div>
         </div>
@@ -1148,7 +1119,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                                 : "v2-badge-muted"
                             }`}
                           >
-                            {isMatched ? "3-Way Matched ✓" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
+                            {isMatched ? "3-Way Matched âœ“" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
                           </span>
                         </td>
                         <td>
@@ -1612,3 +1583,6 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     </div>
   );
 };
+
+
+

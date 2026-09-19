@@ -1381,6 +1381,7 @@ export * from "./financeHardening.js";
 export * from "./receiptRepositories.js";
 export * from "./legalRepositories.js";
 export * from "./rollbackRepositories.js";
+export * from "./syntheticVariantReconciliation.js";
 
 
 

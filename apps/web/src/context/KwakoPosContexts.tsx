@@ -2,7 +2,7 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from "react";
 import { LocalIndexedDbStore } from "../indexedDb.js";
-import { ClientSyncEngine } from "../clientSyncEngine.js";
+import { ClientSyncEngine, clientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
 import {
   getAccessToken,
@@ -12,7 +12,7 @@ import {
   restoreSession,
   switchContext as apiSwitchContext,
 } from "../services/apiClient.js";
-import { DEMO_DATA_EVENT, reconcileLocalInventoryToOutbox } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import {
   type IndustryModule,
   type ModuleManifest,
@@ -454,11 +454,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
     refreshCount();
     window.addEventListener("kwakopos:outbox-enqueued", refreshCount);
-    window.addEventListener(DEMO_DATA_EVENT, refreshCount);
+    window.addEventListener(DATA_CHANGED_EVENT, refreshCount);
     const interval = setInterval(refreshCount, 20000);
     return () => {
       window.removeEventListener("kwakopos:outbox-enqueued", refreshCount);
-      window.removeEventListener(DEMO_DATA_EVENT, refreshCount);
+      window.removeEventListener(DATA_CHANGED_EVENT, refreshCount);
       clearInterval(interval);
     };
   }, [db]);
@@ -664,6 +664,55 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const consecutiveFailuresRef = useRef<number>(0);
   const hasBootReconciledRef = useRef(false);
   const outboxDebounceTimerRef = useRef<any>(null);
+  // Ensure clientSyncEngine is initialized with DB + API references
+  useEffect(() => {
+    const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
+    const targetBranchId = user?.branchId || currentBranchId || "branch-default";
+    const targetUserId = user?.id || "user-default";
+
+    clientSyncEngine.init({
+      localDb: db,
+      pushApiFn: async (request) => {
+        const token = getAccessToken();
+        const authHeaders: Record<string, string> = {
+          "x-tenant-id": targetTenantId,
+          "x-branch-id": targetBranchId,
+          "x-user-id": targetUserId,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+        const response = await fetch("/sync/push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          credentials: "include",
+          body: JSON.stringify(request),
+        });
+        if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
+        const body = await response.json();
+        return body.data || body;
+      },
+      deltaApiFn: async (since) => {
+        const token = getAccessToken();
+        const authHeaders: Record<string, string> = {
+          "x-tenant-id": targetTenantId,
+          "x-branch-id": targetBranchId,
+          "x-user-id": targetUserId,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+        const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
+        const response = await fetch(url, {
+          headers: authHeaders,
+          credentials: "include",
+        });
+        if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
+        const body = await response.json();
+        return body.data || body;
+      },
+      tenantId: targetTenantId,
+    });
+  }, [db, user, currentTenantId, currentBranchId]);
 
   const syncOutbox = useCallback(async (options?: { quiet?: boolean; force?: boolean }) => {
     if (!isOnline) return;
@@ -739,8 +788,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setPendingOutboxCount(db.getPendingOutbox().length);
 
       if (result && (result.pulled > 0 || result.pushed > 0)) {
-        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
-        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
+        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
         try {
           if (typeof window !== "undefined" && "BroadcastChannel" in window) {
             const bc = new BroadcastChannel("kwakopos_sync_channel");
@@ -776,7 +825,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           void syncOutbox({ quiet: true }).catch(() => {});
         }
       } else if (data.type === "SYNC_CONVERGED") {
-        window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
       }
     };
     return () => {
@@ -1004,3 +1053,5 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = KwakoPosP
 export const BranchProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
 export const RbacProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = KwakoPosProvider;
+
+

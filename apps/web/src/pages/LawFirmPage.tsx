@@ -1,5 +1,5 @@
 /**
- * KwakoPosv2 â€” Law Firm Module Page
+ * KwakoPosv2 — Law Firm Module Page
  * Full sub-navigation: Dashboard, Clients, Cases, Calendar, Tasks,
  * Documents, Billing & Retainers, Reports, Settings
  * CSS: V2 design system only. No static inline styles.
@@ -15,20 +15,20 @@ import {
 import { useModule } from "../context/KwakoPosContexts.js";
 import { recordLawFirmPayment, saveLawFirmSettings } from "../services/verticalMutationService.js";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Types ────────────────────────────────────────────────────────────────────
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
   : v >= 1_000 ? `Tsh ${(v / 1_000).toFixed(0)}K`
   : `Tsh ${Math.round(v).toLocaleString()}`;
 
-// â”€â”€â”€ Sub-nav tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-nav tabs ─────────────────────────────────────────────────────────────
 const LAW_TABS = [
   "Legal Dashboard", "Clients", "Cases", "Court Calendar",
   "Legal Tasks", "Documents", "Billing & Retainers", "Legal Reports", "Legal Settings",
 ] as const;
 type LawTab = typeof LAW_TABS[number];
 
-// â”€â”€â”€ Shared components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Shared components ────────────────────────────────────────────────────────
 const KpiCard: React.FC<{
   label: string; value: string | number; desc?: string;
   icon: React.ReactNode; accent: string; onClick?: () => void;
@@ -62,13 +62,13 @@ const Empty: React.FC<{ icon?: React.ReactNode; message: string; action?: React.
   </div>
 );
 
-// â”€â”€â”€ Demo Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Demo Data ────────────────────────────────────────────────────────────────
 const DEMO_CASES = [
   { id: "LC-2026-001", title: "Mwangi v. Tanzania Revenue Authority",  client: "John Mwangi",    status: "IN_PROGRESS", type: "Tax Dispute",   court: "High Court Dar", nextHearing: "2026-09-15" },
-  { id: "LC-2026-002", title: "Safaricom Ltd â€” Contract Review",       client: "Safaricom Ltd",  status: "OPEN",        type: "Commercial",    court: "Commercial Court", nextHearing: "â€”" },
+  { id: "LC-2026-002", title: "Safaricom Ltd — Contract Review",       client: "Safaricom Ltd",  status: "OPEN",        type: "Commercial",    court: "Commercial Court", nextHearing: "—" },
   { id: "LC-2026-003", title: "R v. Hassan Mohamed",                    client: "Hassan Mohamed", status: "IN_PROGRESS", type: "Criminal",      court: "Resident Magistrate", nextHearing: "2026-09-08" },
-  { id: "LC-2026-004", title: "Fatuma Estate â€” Succession Matter",      client: "Fatuma Salum",   status: "INTAKE",      type: "Succession",    court: "High Court PBD", nextHearing: "2026-09-22" },
-  { id: "LC-2026-005", title: "THA v. Dar Port Authority",             client: "THA",            status: "CLOSED",      type: "Admin Law",     court: "High Court Dar", nextHearing: "â€”" },
+  { id: "LC-2026-004", title: "Fatuma Estate — Succession Matter",      client: "Fatuma Salum",   status: "INTAKE",      type: "Succession",    court: "High Court PBD", nextHearing: "2026-09-22" },
+  { id: "LC-2026-005", title: "THA v. Dar Port Authority",             client: "THA",            status: "CLOSED",      type: "Admin Law",     court: "High Court Dar", nextHearing: "—" },
 ];
 
 const DEMO_CLIENTS = [
@@ -82,29 +82,29 @@ const DEMO_CLIENTS = [
 const DEMO_HEARINGS = [
   { id: "H-001", caseId: "LC-2026-001", title: "Tax Tribunal Mention",         date: "2026-09-08", time: "09:00", court: "High Court Dar",      type: "Mention",  status: "Scheduled" },
   { id: "H-002", caseId: "LC-2026-003", title: "Criminal Bail Hearing",        date: "2026-09-10", time: "10:30", court: "Res. Magistrate Dar", type: "Hearing",  status: "Scheduled" },
-  { id: "H-003", caseId: "LC-2026-001", title: "Substantive Hearing â€” Day 1",  date: "2026-09-15", time: "08:30", court: "High Court Dar",      type: "Trial",    status: "Scheduled" },
+  { id: "H-003", caseId: "LC-2026-001", title: "Substantive Hearing — Day 1",  date: "2026-09-15", time: "08:30", court: "High Court Dar",      type: "Trial",    status: "Scheduled" },
   { id: "H-004", caseId: "LC-2026-004", title: "Succession Application",       date: "2026-09-22", time: "14:00", court: "High Court PBD",      type: "Petition", status: "Scheduled" },
 ];
 
 const DEMO_TASKS = [
-  { id: "T-001", title: "File Written Submissions â€” Mwangi Tax Case", caseId: "LC-2026-001", dueDate: "2026-09-05", priority: "HIGH",   status: "OVERDUE",   assignee: "Adv. Kamau" },
-  { id: "T-002", title: "Draft Contract Opinion â€” Safaricom",         caseId: "LC-2026-002", dueDate: "2026-09-12", priority: "MEDIUM", status: "OPEN",      assignee: "Adv. Kimani" },
+  { id: "T-001", title: "File Written Submissions — Mwangi Tax Case", caseId: "LC-2026-001", dueDate: "2026-09-05", priority: "HIGH",   status: "OVERDUE",   assignee: "Adv. Kamau" },
+  { id: "T-002", title: "Draft Contract Opinion — Safaricom",         caseId: "LC-2026-002", dueDate: "2026-09-12", priority: "MEDIUM", status: "OPEN",      assignee: "Adv. Kimani" },
   { id: "T-003", title: "Serve pleadings on opposing counsel",        caseId: "LC-2026-003", dueDate: "2026-09-09", priority: "HIGH",   status: "OPEN",      assignee: "Clerk Joan" },
-  { id: "T-004", title: "Confirm court attendance â€” Fatuma matter",   caseId: "LC-2026-004", dueDate: "2026-09-20", priority: "LOW",    status: "COMPLETED", assignee: "Adv. Kimani" },
+  { id: "T-004", title: "Confirm court attendance — Fatuma matter",   caseId: "LC-2026-004", dueDate: "2026-09-20", priority: "LOW",    status: "COMPLETED", assignee: "Adv. Kimani" },
 ];
 
 const DEMO_DOCS = [
-  { id: "DOC-001", name: "Mwangi â€” Notice of Appeal.pdf",    caseId: "LC-2026-001", type: "Pleading",  size: "1.2 MB", uploaded: "2026-08-20" },
+  { id: "DOC-001", name: "Mwangi — Notice of Appeal.pdf",    caseId: "LC-2026-001", type: "Pleading",  size: "1.2 MB", uploaded: "2026-08-20" },
   { id: "DOC-002", name: "Safaricom Contract v3 Draft.docx", caseId: "LC-2026-002", type: "Contract",  size: "680 KB", uploaded: "2026-08-22" },
-  { id: "DOC-003", name: "Hassan â€” Bail Application.pdf",   caseId: "LC-2026-003", type: "Motion",    size: "840 KB", uploaded: "2026-08-28" },
+  { id: "DOC-003", name: "Hassan — Bail Application.pdf",   caseId: "LC-2026-003", type: "Motion",    size: "840 KB", uploaded: "2026-08-28" },
   { id: "DOC-004", name: "THA Correspondence Chain.pdf",    caseId: "LC-2026-005", type: "Correspondence", size: "2.1 MB", uploaded: "2026-07-14" },
 ];
 
 const DEMO_BILLING = [
   { id: "INV-2026-081", client: "John Mwangi",    description: "Substantive Hearing Attendance Ã— 2", amount: 2800000, hours: 6,   status: "UNPAID",    date: "2026-08-25" },
-  { id: "INV-2026-082", client: "Safaricom Ltd",  description: "Contract Advisory â€” 12 hrs",         amount: 7200000, hours: 12,  status: "PAID",      date: "2026-08-20" },
+  { id: "INV-2026-082", client: "Safaricom Ltd",  description: "Contract Advisory — 12 hrs",         amount: 7200000, hours: 12,  status: "PAID",      date: "2026-08-20" },
   { id: "INV-2026-083", client: "Hassan Mohamed", description: "Criminal Defence Retainer Draw",      amount: 1500000, hours: 4,   status: "UNPAID",    date: "2026-08-30" },
-  { id: "INV-2026-084", client: "THA",            description: "Admin Law Matter â€” Research",         amount: 4800000, hours: 10,  status: "PARTIAL",   date: "2026-08-18" },
+  { id: "INV-2026-084", client: "THA",            description: "Admin Law Matter — Research",         amount: 4800000, hours: 10,  status: "PARTIAL",   date: "2026-08-18" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -114,7 +114,7 @@ const STATUS_BADGE: Record<string, string> = {
   Scheduled: "v2-badge-accent",
 };
 
-// â”€â”€â”€ Sub-page: Legal Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Legal Dashboard ────────────────────────────────────────────────
 const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) => {
   const activeCases   = DEMO_CASES.filter((c) => ["INTAKE","OPEN","IN_PROGRESS"].includes(c.status)).length;
   const overdueTasks  = DEMO_TASKS.filter((t) => t.status === "OVERDUE").length;
@@ -166,11 +166,11 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
                     <span className="v2-text-sm v2-font-black v2-truncate">{c.title}</span>
                   </div>
                   <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".15rem" }}>
-                    Client: <strong>{c.client}</strong> Â· {c.type} Â· {c.court}
+                    Client: <strong>{c.client}</strong> · {c.type} · {c.court}
                   </div>
                 </div>
                 <div className="v2-flex v2-items-center v2-gap-2">
-                  {c.nextHearing !== "â€”" && <span className="v2-text-xs v2-text-muted">{c.nextHearing}</span>}
+                  {c.nextHearing !== "—" && <span className="v2-text-xs v2-text-muted">{c.nextHearing}</span>}
                   <span className={`badge ${STATUS_BADGE[c.status] || "v2-badge-muted"}`}>{c.status}</span>
                 </div>
               </div>
@@ -192,7 +192,7 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
                 <div key={h.id} className="v2-card" style={{ background: "var(--surface-2)", padding: ".65rem .85rem" }}>
                   <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
                     <span className={`badge ${STATUS_BADGE[h.type] || "v2-badge-muted"}`} style={{ fontSize: ".6rem" }}>{h.type}</span>
-                    <span className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-1"><Clock size={10} /> {h.date} Â· {h.time}</span>
+                    <span className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-1"><Clock size={10} /> {h.date} · {h.time}</span>
                   </div>
                   <div className="v2-text-xs v2-font-black">{h.title}</div>
                   <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".1rem" }}>{h.court}</div>
@@ -206,7 +206,7 @@ const LegalDashboard: React.FC<{ onNav: (tab: LawTab) => void }> = ({ onNav }) =
   );
 };
 
-// â”€â”€â”€ Sub-page: Clients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Clients ────────────────────────────────────────────────────────
 const LegalClients: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_CLIENTS.filter((c) => !search || `${c.name} ${c.type} ${c.email}`.toLowerCase().includes(search.toLowerCase()));
@@ -251,7 +251,7 @@ const LegalClients: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Cases & Matters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Cases & Matters ────────────────────────────────────────────────
 const LegalCases: React.FC = () => {
   const [filter, setFilter] = useState("All");
   const statuses = ["All", "INTAKE", "OPEN", "IN_PROGRESS", "CLOSED"];
@@ -298,7 +298,7 @@ const LegalCases: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Court Calendar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Court Calendar ─────────────────────────────────────────────────
 const LegalCalendar: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -312,7 +312,7 @@ const LegalCalendar: React.FC = () => (
       <KpiCard label="Deadlines"    value="3 Filing"             desc="This month"   icon={<AlertCircle size={18} />} accent="#fbbf24" />
     </div>
     <div className="v2-card">
-      <div className="v2-card-header"><div className="v2-card-title">September 2026 â€” Court Diary</div></div>
+      <div className="v2-card-header"><div className="v2-card-title">September 2026 — Court Diary</div></div>
       <table className="v2-table">
         <thead><tr><th>Date</th><th>Time</th><th>Event</th><th>Case</th><th>Court</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
@@ -339,7 +339,7 @@ const LegalCalendar: React.FC = () => (
   </div>
 );
 
-// â”€â”€â”€ Sub-page: Legal Tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Legal Tasks ────────────────────────────────────────────────────
 const LegalTasks: React.FC = () => {
   const [filter, setFilter] = useState("All");
   const filters = ["All", "OVERDUE", "OPEN", "COMPLETED"];
@@ -382,7 +382,7 @@ const LegalTasks: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Documents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Documents ──────────────────────────────────────────────────────
 const LegalDocuments: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -427,7 +427,7 @@ const LegalDocuments: React.FC = () => (
   </div>
 );
 
-// â”€â”€â”€ Sub-page: Billing & Retainers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Billing & Retainers ────────────────────────────────────────────
 const LegalBilling: React.FC = () => {
   const [paidInvoices, setPaidInvoices] = useState<Set<string>>(() => new Set());
   const [paymentNotice, setPaymentNotice] = useState("");
@@ -483,7 +483,7 @@ const LegalBilling: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Reports ────────────────────────────────────────────────────────
 const LegalReports: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -507,7 +507,7 @@ const LegalReports: React.FC = () => (
   </div>
 );
 
-// â”€â”€â”€ Sub-page: Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Settings ───────────────────────────────────────────────────────
 const LegalSettings: React.FC = () => (
   <div className="v2-animate-page-enter">
     <h2 className="v2-text-xl v2-font-black v2-mb-4">Law Firm Module Settings</h2>
@@ -519,7 +519,7 @@ const LegalSettings: React.FC = () => (
           { label: "LST REGISTRATION", value: "LST/ADV/2018/0042" },
           { label: "TRA TIN", value: "100-XXX-XXX" },
           { label: "DEFAULT HOURLY RATE (TZS)", value: "600,000" },
-          { label: "CONFLICT CHECK POLICY", value: "Mandatory â€” All New Matters" },
+          { label: "CONFLICT CHECK POLICY", value: "Mandatory — All New Matters" },
           { label: "RETAINER MINIMUM THRESHOLD (TZS)", value: "1,000,000" },
         ].map((f) => (
           <div key={f.label}>
@@ -533,7 +533,7 @@ const LegalSettings: React.FC = () => (
   </div>
 );
 
-// â”€â”€â”€ Law Firm Module Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Law Firm Module Entry Point ──────────────────────────────────────────────
 export const LawFirmPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<LawTab>("Legal Dashboard");
 

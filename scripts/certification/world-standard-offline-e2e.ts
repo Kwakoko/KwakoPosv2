@@ -51,7 +51,7 @@ async function cleanup(tenantId: string): Promise<void> {
 }
 
 async function browserSeed(page: any, operationId: string, tenantId: string, branchId: string): Promise<void> {
-  await page.evaluate(({ operationId, tenantId, branchId }) => new Promise<void>((resolve, reject) => {
+  await page.evaluate(({ operationId, tenantId, branchId }: { operationId: string; tenantId: string; branchId: string }) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -91,7 +91,7 @@ async function browserRead(page: any): Promise<{ outbox: number; product: boolea
 }
 
 async function writeServerChange(page: any, change: any): Promise<void> {
-  await page.evaluate((change) => new Promise<void>((resolve, reject) => {
+  await page.evaluate((change: any) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
@@ -118,6 +118,10 @@ async function run(): Promise<void> {
     const pageA = await ctxA.newPage();
     await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
     await pageA.waitForTimeout(1000);
+    await pageA.evaluate(async () => {
+      if (!("serviceWorker" in navigator)) throw new Error("SERVICE_WORKER_API_UNAVAILABLE");
+      await navigator.serviceWorker.ready;
+    });
 
     const operationId = `browser-offline-${randomUUID()}`;
     await browserSeed(pageA, operationId, seeded.tenantId, seeded.branchId);

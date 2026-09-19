@@ -24,3 +24,6 @@ test-results/
 
 # Temporary scripts and fixtures
 tmp-*
+Project_Export.txt
+pnpm-lock.yaml
+pnpm-workspace.yaml
