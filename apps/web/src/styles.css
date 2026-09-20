@@ -1876,7 +1876,7 @@ th { background: var(--bg); color: var(--muted); font-size: .7rem; text-transfor
 .v2-animate-slide-left { animation: v2-slide-in-left .25s ease-out forwards; }
 .v2-animate-page-enter { animation: v2-page-enter .22s ease-out forwards; }
 .v2-animate-pulse { animation: v2-pulse-soft 2s ease-in-out infinite; }
-.v2-animate-spin { animation: v2-spin 1s linear infinite; }
+.v2-animate-spin, .v2-spin, .animate-spin { animation: v2-spin 1s linear infinite; }
 .v2-animate-shimmer { background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 400% 100%; animation: v2-shimmer 1.6s ease-in-out infinite; }
 
 /* Legacy compat aliases */

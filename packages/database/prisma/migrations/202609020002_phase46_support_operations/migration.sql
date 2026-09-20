@@ -1,3 +1,23 @@
+-- sync_operations is a core persistence primitive used by this migration and later sync hardening.
+CREATE TABLE IF NOT EXISTS "sync_operations" (
+  "id" TEXT PRIMARY KEY,
+  "tenant_id" TEXT NOT NULL,
+  "branch_id" TEXT NOT NULL,
+  "device_id" TEXT NOT NULL,
+  "operation_id" TEXT NOT NULL,
+  "entity_type" TEXT NOT NULL,
+  "entity_id" TEXT NOT NULL,
+  "operation_type" TEXT NOT NULL,
+  "payload" JSONB NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'PROCESSED',
+  "idempotency_key" TEXT NOT NULL UNIQUE,
+  "client_created_at" TIMESTAMPTZ NOT NULL,
+  "processed_at" TIMESTAMPTZ,
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT "sync_operations_operation_scope_uq" UNIQUE ("tenant_id", "device_id", "operation_id")
+);
+CREATE INDEX IF NOT EXISTS "sync_operations_tenant_branch_created_idx" ON "sync_operations" ("tenant_id", "branch_id", "created_at");
+
 -- Phase 46: KwakoPos 360° Customer Support & Autonomous Operations
 CREATE TABLE IF NOT EXISTS "SupportTicket" (
   "id" TEXT PRIMARY KEY, "tenant_id" TEXT NOT NULL, "branch_id" TEXT, "created_by_user_id" TEXT,
@@ -36,4 +56,4 @@ CREATE INDEX IF NOT EXISTS "SupportEvent_ticket_created_idx" ON "SupportEvent" (
 CREATE INDEX IF NOT EXISTS "SupportIncident_status_created_idx" ON "SupportIncident" ("status", "created_at");
 CREATE INDEX IF NOT EXISTS "SupportIncidentTenant_tenant_idx" ON "SupportIncidentTenant" ("tenant_id", "last_seen_at");
 CREATE INDEX IF NOT EXISTS "SupportRemediation_tenant_created_idx" ON "SupportRemediation" ("tenant_id", "created_at");
-CREATE INDEX IF NOT EXISTS "sync_operations_tenant_status_created_idx" ON "sync_operations" ("tenantId", "status", "createdAt");
+CREATE INDEX IF NOT EXISTS "sync_operations_tenant_status_created_idx" ON "sync_operations" ("tenant_id", "status", "created_at");

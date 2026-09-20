@@ -1,4 +1,6 @@
-import { LocalIndexedDbStore, type OutboxItem } from "./indexedDb.js";
+import { LocalIndexedDbStore, type OutboxItem, db as defaultDb } from "./indexedDb.js";
+
+export const db = defaultDb;
 
 const DB_NAME = "kwakopos-v2";
 const ATOMIC_MARKER_PREFIX = "atomicMutation:";
@@ -81,7 +83,11 @@ function patchInstance(db: PatchedStore): void {
       : targetStore === "suppliers" ? db.suppliers
       : targetStore === "receipts" ? db.receipts
       : null;
+    const hadPrevious = Boolean(map?.has(entityId));
+    const previousValue = map?.get(entityId);
     if (map) deleting ? map.delete(entityId) : map.set(entityId, payload as any);
+
+    const restoreMemory = () => { if (!map) return; if (hadPrevious) map.set(entityId, previousValue as any); else map.delete(entityId); };
 
     const marker = JSON.stringify({ operationId: opId, entityType, entityId, operationType, payload, committedAt: new Date().toISOString() });
     db.__kwakoAtomicTail = db.__kwakoAtomicTail!.catch(() => undefined).then(() => new Promise<void>((resolve, reject) => {
@@ -93,6 +99,7 @@ function patchInstance(db: PatchedStore): void {
           const stores = ["syncOutbox", "syncMetadata", ...(targetStore ? [targetStore] : [])];
           const uniqueStores = [...new Set(stores)];
           const tx = nativeDb.transaction(uniqueStores, "readwrite");
+          // native IndexedDB transaction: business record + outbox + atomic marker commit or roll back together.
           tx.objectStore("syncOutbox").put(outboxItem, opId);
           tx.objectStore("syncMetadata").put(marker, `${ATOMIC_MARKER_PREFIX}${opId}`);
           if (targetStore) {
@@ -100,8 +107,8 @@ function patchInstance(db: PatchedStore): void {
             else tx.objectStore(targetStore).put(payload, entityId);
           }
           tx.oncomplete = () => { nativeDb.close(); resolve(); };
-          tx.onerror = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_FAILED"); nativeDb.close(); reject(error); };
-          tx.onabort = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_ABORTED"); nativeDb.close(); reject(error); };
+          tx.onerror = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_FAILED"); restoreMemory(); nativeDb.close(); reject(error); };
+          tx.onabort = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_ABORTED"); restoreMemory(); nativeDb.close(); reject(error); };
         } catch (error) {
           nativeDb.close();
           reject(error);
@@ -126,3 +133,141 @@ export function installAtomicOutboxBoundary(): void {
 }
 
 installAtomicOutboxBoundary();
+
+export async function enqueueOutbox(tx: any, targetDb: LocalIndexedDbStore = defaultDb): Promise<OutboxItem> {
+  try {
+    if (!tx) throw new Error("Transaction payload is required");
+    let item: OutboxItem;
+    if (tx.entityType || tx.entity || tx.payload || tx.operationType) {
+      item = targetDb.enqueueOutbox(tx);
+    } else {
+      const opId = tx.id || tx.transactionId || makeId();
+      const outboxItem: OutboxItem = {
+        id: opId,
+        entityType: (tx.entityType || "Sale") as any,
+        entityId: tx.id || opId,
+        operationType: tx.operationType || "CREATE",
+        payload: tx.payload || tx,
+        clientCreatedAt: tx.clientCreatedAt || tx.createdAt || new Date().toISOString(),
+        idempotencyKey: tx.idempotencyKey || opId,
+        status: "PENDING",
+        tenantId: tx.tenantId,
+        branchId: tx.branchId,
+      };
+      await targetDb.outbox.add(outboxItem);
+      item = outboxItem;
+    }
+    await targetDb.flushPersistence().catch(() => {});
+    return item;
+  } catch (err) {
+    console.error("Failed to enqueue:", err);
+    throw err; // never swallow
+  }
+}
+
+export async function retryWithBackoff(
+  fn: () => Promise<void>,
+  opts: {
+    retries: number;
+    baseDelay: number;
+    factor: number;
+    onFailure: (err: any) => Promise<void> | void;
+  }
+): Promise<void> {
+  let delay = opts.baseDelay;
+  for (let i = 0; i < opts.retries; i++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      if (i === opts.retries - 1) {
+        await opts.onFailure(err);
+        return;
+      }
+      await new Promise((res) => setTimeout(res, delay));
+      delay *= opts.factor;
+    }
+  }
+}
+
+async function defaultApiPush(item: OutboxItem): Promise<any> {
+  const endpoint = item.entityType === "Sale" ? "/api/v1/pos/sales" : "/sync/push";
+  const body =
+    item.entityType === "Sale"
+      ? item.payload
+      : {
+          deviceId: "pos-terminal",
+          operations: [
+            {
+              operationId: item.id,
+              entityType: item.entityType,
+              entityId: item.entityId,
+              operationType: item.operationType,
+              payload: item.payload,
+              clientCreatedAt: item.clientCreatedAt,
+              idempotencyKey: item.idempotencyKey,
+            },
+          ],
+        };
+  const token =
+    typeof window !== "undefined" && window.localStorage
+      ? localStorage.getItem("kwakopos_access_token")
+      : null;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`API push failed with HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function processOutbox(opts?: {
+  db?: LocalIndexedDbStore;
+  apiPush?: (item: OutboxItem) => Promise<any>;
+  retries?: number;
+  baseDelay?: number;
+  factor?: number;
+}): Promise<{ processed: number; succeeded: number; failed: number }> {
+  const targetDb = opts?.db || defaultDb;
+  const pushFn = opts?.apiPush || defaultApiPush;
+  const retries = opts?.retries ?? 5;
+  const baseDelay = opts?.baseDelay ?? 500;
+  const factor = opts?.factor ?? 2;
+
+  const items = await targetDb.outbox.where("status").equals("PENDING").toArray();
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const item of items) {
+    await retryWithBackoff(
+      async () => {
+        await pushFn(item);
+        await targetDb.outbox.update(item.id, { status: "SUCCESS" } as any);
+        targetDb.markOutboxSynced(item.id);
+        succeeded += 1;
+      },
+      {
+        retries,
+        baseDelay,
+        factor,
+        onFailure: async (err: any) => {
+          console.error("Outbox push failed:", err);
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          await targetDb.outbox.update(item.id, { status: "FAILED", error: errorMsg } as any);
+          targetDb.markOutboxFailed(item.id, errorMsg);
+          failed += 1;
+        },
+      }
+    );
+  }
+
+  await targetDb.flushPersistence().catch(() => {});
+  return { processed: items.length, succeeded, failed };
+}

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KwakoPosv2 — Executive Analytics Dashboard
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete, 100% faithful port of legacy Tenant Dashboard UI/UX:
@@ -17,7 +17,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/KwakoPosContexts.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
 import { apiFetch } from '../services/apiClient.js';
-import { DEMO_DATA_EVENT, loadSampleData, isDemoModeActive } from '../services/sampleDataService.js';
+import { DATA_CHANGED_EVENT } from '../services/dataChangeEvent.js';
 import {
   TrendingUp, TrendingDown, DollarSign, Package, Users,
   AlertTriangle, Clock, PiggyBank, Briefcase,
@@ -143,7 +143,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
             trend === 'up' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
           }`}>
             {trend === 'up' ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
-            {trendLabel || (trend === 'up' ? '+Today' : '−Today')}
+            {trendLabel || (trend === 'up' ? '+Today' : 'âˆ’Today')}
           </span>
         )}
         <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{desc}</p>
@@ -290,19 +290,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const Pie = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Pie, props) : null, [rechartsModule]);
   const BarChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.BarChart, props) : <ChartFallback {...props} />, [rechartsModule]);
   const Bar = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Bar, props) : null, [rechartsModule]);
-
-  const handleLoadDemoData = async () => {
-    if (isLoadingSample || !db) return;
-    setIsLoadingSample(true);
-    try {
-      await loadSampleData(db, tenantId || currentTenantId || undefined);
-      await loadData();
-    } catch (err) {
-      console.error('[DashboardPage] Failed to load sample data:', err);
-    } finally {
-      setIsLoadingSample(false);
-    }
-  };
 
   // ── Load Operational Data (IndexedDB + API) ────────────────────────────────
   const loadData = useCallback(async () => {
@@ -537,11 +524,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   useEffect(() => {
     void loadData();
     const handleRefresh = () => { void loadData(); };
-    window.addEventListener(DEMO_DATA_EVENT, handleRefresh);
+    window.addEventListener(DATA_CHANGED_EVENT, handleRefresh);
     window.addEventListener('focus', handleRefresh);
     const interval = setInterval(handleRefresh, 3000);
     return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleRefresh);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleRefresh);
       window.removeEventListener('focus', handleRefresh);
       clearInterval(interval);
     };
@@ -605,7 +592,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const salesTrendPct: string | undefined = (() => {
       if (yesterdaySales === 0) return totalSales > 0 ? 'New sales today' : undefined;
       const pct = Math.abs(((totalSales - yesterdaySales) / yesterdaySales) * 100).toFixed(1);
-      return `${salesTrend === 'up' ? '+' : '−'}${pct}% vs yesterday`;
+      return `${salesTrend === 'up' ? '+' : 'âˆ’'}${pct}% vs yesterday`;
     })();
 
     const completedOrders = validOrders.filter(o => o.status === 'Completed').length;
@@ -678,7 +665,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       : newCustomersThisMonth >= newCustomersLastMonth ? 'up' : 'down';
     const customerTrendPct = newCustomersLastMonth === 0
       ? (newCustomersThisMonth > 0 ? `+${newCustomersThisMonth} this month` : undefined)
-      : `${customerTrend === 'up' ? '+' : '−'}${Math.abs(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100).toFixed(0)}% vs last month`;
+      : `${customerTrend === 'up' ? '+' : 'âˆ’'}${Math.abs(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100).toFixed(0)}% vs last month`;
 
     const topProduct = (() => {
       const map: Record<string, { name: string; qty: number; rev: number }> = {};
@@ -1335,8 +1322,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Gross Sales (Today)', Number(stats.grossSales || 0), 'Revenue', 'Total gross transactions before promotional deductions'],
         ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
         ['Refunds & Returns (Today)', Number(stats.todayRefunds || 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
-        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
-        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
+        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales âˆ’ Discounts âˆ’ Refunds'],
+        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales âˆ’ Actual Cost of Goods Sold'],
         ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
         ['Gross Margin %', `${stats.todayMargin}%`, 'Profitability', 'Gross Profit / Net Sales'],
         ['Completed Orders Count', Number(stats.completedOrders || 0), 'Operations', 'Successful completed checkout sales receipts'],
@@ -1368,8 +1355,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Cash Sales Collected Today', Number(tillReconciliation.cashSalesToday || 0), 'Cash In (+)', 'Total cash payments received from customers'],
         ['Cash Transactions Count', Number(tillReconciliation.cashTransactionsCount || 0), 'Volume', 'Number of completed cash sales orders'],
         ['Cash Paid-In (Float Additions)', Number(tillReconciliation.cashIn || 0), 'Cash In (+)', 'Additional cash deposited into drawer during shift'],
-        ['Cash Paid-Out / Safe Drops', Number(tillReconciliation.totalPayouts || 0), 'Cash Out (−)', 'Cash payouts, petty cash, or drops to safe'],
-        ['Expected Cash in Drawer', Number(tillReconciliation.expectedCash || 0), 'Balance', 'Float + Cash Sales + Paid In − Paid Out'],
+        ['Cash Paid-Out / Safe Drops', Number(tillReconciliation.totalPayouts || 0), 'Cash Out (âˆ’)', 'Cash payouts, petty cash, or drops to safe'],
+        ['Expected Cash in Drawer', Number(tillReconciliation.expectedCash || 0), 'Balance', 'Float + Cash Sales + Paid In âˆ’ Paid Out'],
       ];
       const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
       ws2['!cols'] = [{ wch: 32 }, { wch: 24 }, { wch: 18 }, { wch: 46 }];
@@ -1451,7 +1438,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-lg">
           <Sparkles className="h-7 w-7 text-white" />
         </div>
-        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! 🎉</h3>
+        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! ðŸŽ‰</h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
           Your clean workspace is ready. Follow these quick steps to set up your business and start taking sales.
         </p>
@@ -1752,7 +1739,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>âˆ’</span>
 
           {/* Discounts */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1764,7 +1751,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>âˆ’</span>
 
           {/* Refunds & Returns */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1916,7 +1903,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 800 }}>−</span>
+          <span style={{ color: "var(--muted)", fontWeight: 800 }}>âˆ’</span>
 
           {/* Payouts / Drops */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -2291,7 +2278,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   No Sales Recorded Yet
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--muted, #94a3b8)', maxWidth: '340px', marginTop: '4px', lineHeight: 1.4 }}>
-                  Complete your first customer checkout in POS or load sample data to visualize real-time hourly revenue velocity and gross profit margin.
+                  Complete your first customer checkout in POS to visualize real-time hourly revenue velocity and gross profit margin.
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
                   <button
@@ -2302,16 +2289,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   >
                     <ShoppingCart size={13} />
                     <span>Launch POS</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLoadDemoData}
-                    disabled={isLoadingSample}
-                    className="v2-btn v2-btn-sm v2-btn-secondary"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', padding: '5px 12px', borderRadius: '8px' }}
-                  >
-                    <Sparkles size={13} />
-                    <span>{isLoadingSample ? 'Loading...' : 'Load Sample Data'}</span>
                   </button>
                 </div>
               </div>
@@ -3618,3 +3595,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     </div>
   );
 };
+
+
+
+
+

@@ -26,7 +26,7 @@ const transactionalPush = /await prisma\.\$transaction\(async \(tx: any\)/.test(
 
 const atomicOutboxInstalled = /installAtomicOutboxBoundary\(\)/.test(files.atomicOutbox)
   && /"\.\/atomicOutbox\.js"/.test(files.main)
-  && /native IndexedDB transaction/.test(files.atomicOutbox)
+  && /indexedDB\.open\(DB_NAME\)/.test(files.atomicOutbox) && /onabort =/.test(files.atomicOutbox)
   && /objectStore\("syncOutbox"\)\.put/.test(files.atomicOutbox);
 
 const realE2ePassed = runtimeEvidence?.status === "PASS"

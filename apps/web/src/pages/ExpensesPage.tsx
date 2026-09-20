@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
-import { loadSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 export interface ExpenseRecord {
   id: string;
@@ -132,11 +132,11 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     const handleDemoChange = () => {
       void loadData();
     };
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    window.addEventListener(DATA_CHANGED_EVENT, handleDemoChange);
 
     return () => {
       active = false;
-      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     };
   }, [db, isOnline]);
 
@@ -522,17 +522,6 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
               >
                 <Plus size={13} /> Record Expense Voucher
               </button>
-              {expenses.length === 0 && (
-                <button
-                  className="v2-btn v2-btn-secondary v2-btn-sm"
-                  onClick={async () => {
-                    await loadSampleData(db, user?.tenantId);
-                  }}
-                  type="button"
-                >
-                  <Sparkles size={13} /> Load Sample Expenses
-                </button>
-              )}
             </div>
           </div>
         ) : (
@@ -885,3 +874,6 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     </div>
   );
 };
+
+
+

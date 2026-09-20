@@ -33,7 +33,7 @@ import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { safeUUID } from "../services/apiClient.js";
 import { queueAddStock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
-import { loadSampleData, DEMO_DATA_EVENT, isDemoModeActive } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -67,27 +67,7 @@ export const CATEGORY_COLORS = [
   { name: "Indigo", hex: "#6366f1", label: "Deep Indigo" },
 ];
 
-export const DEFAULT_CATEGORY_RECORDS: CategoryRecord[] = [
-  { id: "cat-1", name: "Grains & Flour", description: "Flour, cereals, maize, rice, and bulk staples", color: "#10b981", isDefault: true },
-  { id: "cat-2", name: "Beverages", description: "Juices, mineral water, sodas, and energy drinks", color: "#0ea5e9", isDefault: true },
-  { id: "cat-3", name: "Dairy", description: "Fresh milk, yogurt, butter, and cheese", color: "#6366f1", isDefault: true },
-  { id: "cat-4", name: "Edible Oils", description: "Cooking oil, sunflower, and vegetable fats", color: "#f59e0b", isDefault: true },
-  { id: "cat-5", name: "Pharmacy", description: "Over-the-counter wellness and health supplies", color: "#ec4899", isDefault: true },
-  { id: "cat-6", name: "Household & Cleaning", description: "Detergents, soaps, and home disinfectants", color: "#14b8a6", isDefault: true },
-  { id: "cat-7", name: "Bakery & Confectionery", description: "Bread, pastries, biscuits, and sweets", color: "#f97316", isDefault: true },
-  { id: "cat-8", name: "Personal Care", description: "Toiletries, hygiene, and skincare products", color: "#8b5cf6", isDefault: true },
-];
-
-export const DEFAULT_BRAND_RECORDS: BrandRecord[] = [
-  { id: "br-1", name: "Azam", origin: "Tanzania (SS Bakhresa)", notes: "Primary milling & consumer goods supplier", isDefault: true },
-  { id: "br-2", name: "Bakhresa", origin: "Tanzania", notes: "Grain milling and consumer staples", isDefault: true },
-  { id: "br-3", name: "Kilombero", origin: "Morogoro, Tanzania", notes: "Premium white cane sugar", isDefault: true },
-  { id: "br-4", name: "Mo Dewji", origin: "MeTL Group Tanzania", notes: "Edible oils, beverages, soaps", isDefault: true },
-  { id: "br-5", name: "Sayona", origin: "Tanzania", notes: "Carbonated drinks and fruit juices", isDefault: true },
-  { id: "br-6", name: "SERENGETI", origin: "Tanzania Breweries Ltd", notes: "Serengeti Premium Lager and malt", isDefault: true },
-  { id: "br-7", name: "TBL", origin: "Tanzania Breweries Ltd", notes: "National beverages and beer products", isDefault: true },
-  { id: "br-8", name: "General", origin: "Domestic / Unspecified", notes: "General unbranded or commodity stock", isDefault: true },
-];
+export const DEFAULT_CATEGORY_RECORDS: CategoryRecord[] = []; const DEFAULT_BRAND_RECORDS: BrandRecord[] = [];
 
 export interface ProductVariantData {
   id: string;
@@ -178,7 +158,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [editProductModal, setEditProductModal] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [editProd, setEditProd] = useState({
-    name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, status: "Active", batchNumber: "", expiryDate: ""
+    name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, status: "Active", batchNumber: "", expiryDate: ""
   });
 
   // Archive / Delete Confirmation State
@@ -272,7 +252,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
   // New Product Form State
   const [newProd, setNewProd] = useState({
-    name: "", category: "Grains & Flour", brand: "General", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: ""
+    name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: ""
   });
 
   // Stock Movement Ledger Filter & Entry State
@@ -351,8 +331,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: prod.id,
           name: prod.name,
           sku: prod.sku,
-          category: (pAny.categoryId && categoryById.get(pAny.categoryId)) || pAny.category || "General",
-          brand: (pAny.brandId && brandById.get(pAny.brandId)) || pAny.brand || "General",
+          category: (pAny.categoryId && categoryById.get(pAny.categoryId)) || pAny.category || "",
+          brand: (pAny.brandId && brandById.get(pAny.brandId)) || pAny.brand || "",
           buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
           sellingPrice: Number(pAny.sellingPrice || pAny.price || 0),
           stock: pStock,
@@ -397,7 +377,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           // Backward compatibility fallback to legacy string array
           const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId ? { tenantId: currentTenantId } : undefined);
           if (Array.isArray(legacyCats) && legacyCats.length > 0) {
-            const merged: CategoryRecord[] = [...DEFAULT_CATEGORY_RECORDS];
+            const merged: CategoryRecord[] = [];
             let cIdx = 0;
             for (const cStr of legacyCats) {
               if (typeof cStr === "string" && !merged.some((m) => m.name.toLowerCase() === cStr.toLowerCase())) {
@@ -419,7 +399,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         } else {
           const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId ? { tenantId: currentTenantId } : undefined);
           if (Array.isArray(legacyBrands) && legacyBrands.length > 0) {
-            const merged: BrandRecord[] = [...DEFAULT_BRAND_RECORDS];
+            const merged: BrandRecord[] = [];
             let bIdx = 0;
             for (const bStr of legacyBrands) {
               if (typeof bStr === "string" && !merged.some((m) => m.name.toLowerCase() === bStr.toLowerCase())) {
@@ -445,10 +425,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   useEffect(() => {
     void loadInventory();
     const handleSync = () => { void loadInventory(); };
-    window.addEventListener(DEMO_DATA_EVENT, handleSync);
+    window.addEventListener(DATA_CHANGED_EVENT, handleSync);
     window.addEventListener(STOCK_CHANGED_EVENT, handleSync);
     return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleSync);
       window.removeEventListener(STOCK_CHANGED_EVENT, handleSync);
     };
   }, [loadInventory]);
@@ -695,14 +675,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const status: InventoryItem["status"] = computedStock === 0 ? "Out of Stock" : computedStock <= Number(newProd.reorderLevel) ? "Low Stock" : "Active";
 
     const selectedCategory = categoriesMeta.find((c) => c.name.toLowerCase() === newProd.category.toLowerCase());
-    const selectedBrand = brandsMeta.find((b) => b.name.toLowerCase() === (newProd.brand.trim() || "General").toLowerCase());
+    const selectedBrand = brandsMeta.find((b) => b.name.toLowerCase() === newProd.brand.trim().toLowerCase());
     const newProductRecord = {
       id: prodId,
       name: newProd.name.trim(),
       sku: autoSku,
       category: newProd.category,
       categoryId: selectedCategory && isUuid(selectedCategory.id) ? selectedCategory.id : undefined,
-      brand: newProd.brand.trim() || "General",
+      brand: newProd.brand.trim(),
       brandId: selectedBrand && isUuid(selectedBrand.id) ? selectedBrand.id : undefined,
       sellingPrice: computedSelling,
       costPrice: computedBuying,
@@ -929,13 +909,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     }
 
     void loadInventory();
-    setNewProd({ name: "", category: "Grains & Flour", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
+    setNewProd({ name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
     setHasVariantsToggle(false);
     setInflowVariants([]);
     setAddProductModal(false);
     toast.success("Product Created", isVariantProduct ? `Product "${newProductRecord.name}" created with ${inflowVariants.length} variants.` : `Product "${newProductRecord.name}" added to inventory.`);
     playSuccessChime();
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
     void syncOutbox?.().catch(() => {});
   };
 
@@ -982,8 +962,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       sku: prevItem.sku,
       category: editProd.category,
       categoryId: (() => { const c = categoriesMeta.find((x) => x.name.toLowerCase() === editProd.category.toLowerCase()); return c && isUuid(c.id) ? c.id : undefined; })(),
-      brand: editProd.brand.trim() || "General",
-      brandId: (() => { const b = brandsMeta.find((x) => x.name.toLowerCase() === (editProd.brand.trim() || "General").toLowerCase()); return b && isUuid(b.id) ? b.id : undefined; })(),
+      brand: editProd.brand.trim(),
+      brandId: (() => { const b = brandsMeta.find((x) => x.name.toLowerCase() === editProd.brand.trim().toLowerCase()); return b && isUuid(b.id) ? b.id : undefined; })(),
       costPrice: Number(editProd.buyingPrice),
       buyingPrice: Number(editProd.buyingPrice),
       sellingPrice: Number(editProd.sellingPrice),
@@ -1073,7 +1053,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setEditingItem(null);
     playSuccessChime();
     toast.success("SKU Updated", `Product "${updatedRecord.name}" successfully updated.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1145,7 +1125,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setItemToDelete(null);
     playSuccessChime();
     toast.success("Product Archived", `"${target.name}" (${target.sku}) archived. Hidden from POS counter.`);
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1165,7 +1145,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setAddCategoryModal(false); setEditingCategory(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
   };
   const handleOpenDeleteCategory = (name: string, assignedCount: number) => {
-    const cat = allCategories.find((c) => c.name.toLowerCase() === name.toLowerCase()); const fallback = allCategories.find((c) => c.name.toLowerCase() === "general" && c.id !== cat?.id) || allCategories.find((c) => c.id !== cat?.id && isUuid(c.id));
+    const cat = allCategories.find((c) => c.name.toLowerCase() === name.toLowerCase()); const fallback = allCategories.find((c) => c.id !== cat?.id && isUuid(c.id));
     if (!cat || !isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement category first."); return; }
     setDeleteCategorySafeguard({ category: cat.name, assignedCount, fallbackCategory: fallback?.name || "" });
@@ -1193,7 +1173,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   };
 
   const handleOpenDeleteBrand = (name: string, assignedCount: number) => {
-    const brand = allBrands.find((b) => b.name.toLowerCase() === name.toLowerCase()); const fallback = allBrands.find((b) => b.name.toLowerCase() === "general" && b.id !== brand?.id) || allBrands.find((b) => b.id !== brand?.id && isUuid(b.id));
+    const brand = allBrands.find((b) => b.name.toLowerCase() === name.toLowerCase()); const fallback = allBrands.find((b) => b.id !== brand?.id && isUuid(b.id));
     if (!brand || !isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement brand first."); return; }
     setDeleteBrandSafeguard({ brand: brand.name, assignedCount, fallbackBrand: fallback?.name || "" });
@@ -1362,7 +1342,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           db.saveConfigurationLocal("procurement_purchase_orders", updatedOrders, currentTenantId ? { tenantId: currentTenantId } : undefined);
                           playSuccessChime();
                           toast.success("Draft PO Created", `Generated PO #${poId} with ${lowItems.length} replenishment SKUs. Available in Purchasing.`);
-                          window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: draftPO } }));
+                          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: draftPO } }));
                         }}
                       >
                         <Truck size={13} /> Draft Low-Stock PO ({items.filter((i) => i.stock <= i.reorderLevel).length})
@@ -1448,7 +1428,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <PackageOpen size={36} style={{ color: "var(--muted)", opacity: 0.6 }} />
                       <div className="v2-font-bold v2-text-sm">No Products in Inventory Catalog</div>
                       <div className="v2-text-xs v2-text-muted" style={{ maxWidth: 380 }}>
-                        Your inventory catalog is currently empty. Add your first retail SKU, import via CSV, or load sample retail data to test.
+                        Your inventory catalog is currently empty. Add your first product or import your real catalog via CSV.
                       </div>
                       <div className="v2-flex v2-gap-2 v2-mt-2">
                         <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
@@ -1456,17 +1436,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                         </button>
                         <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
                           <Upload size={13} /> Bulk CSV Import
-                        </button>
-                        <button
-                          className="v2-btn v2-btn-outline v2-btn-sm"
-                          onClick={async () => {
-                            const res = await loadSampleData(db, currentTenantId || undefined);
-                            toast.success("Sample Data Loaded", `Added ${res.products} retail products and sample ledger.`);
-                            playSuccessChime();
-                          }}
-                          type="button"
-                        >
-                          <Sparkles size={13} /> Load Sample Data
                         </button>
                       </div>
                     </div>
@@ -1991,7 +1960,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       {l.qty > 0 ? `+${l.qty}` : l.qty}
                     </td>
                     <td className="v2-mono v2-text-xs">
-                      {l.qtyBefore} → <span className="v2-font-bold">{l.balance}</span>
+                      {l.qtyBefore} â†’ <span className="v2-font-bold">{l.balance}</span>
                     </td>
                     <td className="v2-mono">{money(l.unitCost || 0)}</td>
                     <td className="v2-mono v2-font-bold">{money(l.totalCost || 0)}</td>
@@ -2182,10 +2151,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 </div>
                 <select
                   className="v2-input"
-                  value={editProd.brand || "General"}
+                  value={editProd.brand}
                   onChange={(e) => setEditProd({ ...editProd, brand: e.target.value })}
                 >
-                  <option value="General">General (Unbranded)</option>
+                  
                   {allBrands
                     .filter((b) => b.name.toLowerCase() !== "general")
                     .map((b) => (
@@ -2635,7 +2604,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           {c.name}
                         </option>
                       ))}
-                    <option value="General">General (Default Fallback)</option>
+                    
                   </select>
                   <p className="v2-text-xs v2-text-muted v2-mt-1">
                     All {deleteCategorySafeguard.assignedCount} products will be safely moved to this category to prevent orphans.
@@ -2736,7 +2705,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           {b.name}
                         </option>
                       ))}
-                    <option value="General">General (Default Fallback)</option>
+                    
                   </select>
                   <p className="v2-text-xs v2-text-muted v2-mt-1">
                     All {deleteBrandSafeguard.assignedCount} products will be safely moved to this brand.
@@ -2977,7 +2946,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               setPriceAuditOpen(false);
                               playSuccessChime();
                               toast.success("Price Version Recorded", `New Margin: ${money(margin)} (${marginPct}%) · Reason: ${priceAuditReason}`);
-                              window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                              window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                             }}
                           >
                             <Check size={12} /> Commit Price Version
@@ -3285,7 +3254,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             setVariantStudioPanel("none");
                             playSuccessChime();
                             toast.success("Variant Created", `Variant "${newVar.name}" added and synced.`);
-                            window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                             void syncOutbox?.().catch(() => {});
                           }}
                         >
@@ -3466,7 +3435,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             setVariantStudioPanel("none");
                             playSuccessChime();
                             toast.success("Variants Matrix Generated", `Generated and synced ${generated.length} variant combinations.`);
-                            window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                             void syncOutbox?.().catch(() => {});
                           }}
                         >
@@ -3554,7 +3523,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
                                 toast.success("Bulk Prices Adjusted", `Shifted selling price by ${pct > 0 ? `+${pct}` : pct}% across all variants.`);
-                                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                                 void syncOutbox?.().catch(() => {});
                               }}
                             >
@@ -3641,7 +3610,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
                                 toast.success("Bulk Stock Updated", `Added ${addStock} units to all variants.`);
-                                window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                                 void syncOutbox?.().catch(() => {});
                               }}
                             >
@@ -3815,7 +3784,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
                                       toast.success("Variant Updated", `Variant "${inlineVariantEdit.name}" saved.`);
-                                      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                                       void syncOutbox?.().catch(() => {});
                                     }}
                                   >
@@ -3890,7 +3859,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       setVariantModalProduct(updatedProduct);
                                       playSuccessChime();
                                       toast.success("Variant Deleted", `Removed "${v.name}". Parent SKU stock recalculated.`);
-                                      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                                       void syncOutbox?.().catch(() => {});
                                     }}
                                   >
@@ -4048,7 +4017,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   await loadInventory();
                   playSuccessChime();
                   toast.success("Stock Added", String(quantity) + " " + (targetVariant.name || targetItem.name) + " added. New local ledger balance: " + String(result.quantityAfter) + ".");
-                  window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                  window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
                   void syncOutbox().catch(() => {});
                   setStockAdjModal(false);
                   setAdjNotes("");
@@ -4129,3 +4098,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     </div>
   );
 };
+
+
+
+
+
+
+

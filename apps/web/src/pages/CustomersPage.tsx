@@ -6,7 +6,7 @@ import {
 import { useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
-import { loadSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 export interface CustomerRecord {
   id: string;
@@ -133,9 +133,9 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     const handleDemoChange = () => {
       void loadCustomers();
     };
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    window.addEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     };
   }, [loadCustomers]);
 
@@ -206,7 +206,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
       db.enqueueOutbox({ entityType: "Customer", operationType: "CREATE", payload: { ...newCust } as Record<string, unknown> });
       db.saveCustomerLocal(newCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
       setCustomers((prev) => [newCust, ...prev]);
-      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
     } else if (selectedCust) {
       const updatedCust: CustomerRecord = {
         ...selectedCust,
@@ -221,7 +221,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
       db.enqueueOutbox({ entityType: "Customer", operationType: "UPDATE", payload: { ...updatedCust } as Record<string, unknown> });
       db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
       setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_UPDATED", customer: updatedCust } }));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_UPDATED", customer: updatedCust } }));
     }
     setIsFormOpen(false);
     resetForm();
@@ -266,7 +266,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
       db.customers.delete(c.id);
       setCustomers((prev) => prev.filter((item) => item.id !== c.id));
       toast.success("Profile Deleted", `Customer ${c.name} was removed.`);
-      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_DELETED", customerId: c.id } }));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DELETED", customerId: c.id } }));
     }
   };
 
@@ -291,7 +291,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_DEBT_PAID", customer: updatedCust } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DEBT_PAID", customer: updatedCust } }));
 
     setIsPayOpen(false);
     setSelectedCust(null);
@@ -310,7 +310,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-    window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust } }));
 
     setIsWalletOpen(false);
     setSelectedCust(null);
@@ -398,18 +398,6 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
               <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openCreateForm} type="button">
                 <UserPlus size={13} /> Add {targetType}
               </button>
-              {customers.length === 0 && (
-                <button
-                  className="v2-btn v2-btn-secondary v2-btn-sm"
-                  onClick={async () => {
-                    await loadSampleData(db);
-                    await loadCustomers();
-                  }}
-                  type="button"
-                >
-                  <Sparkles size={13} /> Load Sample Customers
-                </button>
-              )}
             </div>
           </div>
         ) : (
@@ -614,3 +602,6 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     </div>
   );
 };
+
+
+

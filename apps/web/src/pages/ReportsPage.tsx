@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KwakoPosv2 — Reports & Analytics Command Center
  * ─────────────────────────────────────────────────────────────────────────────
  * Full-fidelity reporting suite featuring 14 sub-report modules:
@@ -33,7 +33,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 import { useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { DEMO_DATA_EVENT, loadSampleData } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
 type ReportTab =
@@ -127,8 +127,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   useEffect(() => {
     void loadReportData();
     const handleSync = () => { void loadReportData(); };
-    window.addEventListener(DEMO_DATA_EVENT, handleSync);
-    return () => window.removeEventListener(DEMO_DATA_EVENT, handleSync);
+    window.addEventListener(DATA_CHANGED_EVENT, handleSync);
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleSync);
   }, [loadReportData]);
 
   // ─── Dynamic Aggregations ──────────────────────────────────────────────────
@@ -422,15 +422,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                 <p className="v2-text-xs v2-text-muted v2-mt-1" style={{ maxWidth: 360, margin: ".25rem auto 1rem" }}>
                   Orders processed through the POS counter will automatically compile into this real-time revenue trend.
                 </p>
-                <button
-                  className="v2-btn v2-btn-outline v2-btn-sm"
-                  onClick={async () => {
-                    await loadSampleData(db, currentTenantName || undefined);
-                  }}
-                  type="button"
-                >
-                  <Sparkles size={13} /> Load Sample Sales for Testing
-                </button>
               </div>
             ) : (
               <div style={{ height: 300, width: "100%" }}>
@@ -803,3 +794,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     </div>
   );
 };
+
+
+

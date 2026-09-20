@@ -76,11 +76,10 @@ function killTree(child?: ChildProcess) {
   }
 }
 
-// Ensure ports 3000 (API) and 5173 (Web) are clear before starting
+// Ensure port 3000 (API) is clear before starting
 freePort(3000);
-freePort(5173);
 
-console.log("\x1b[36m[KwakoPos]\x1b[0m Starting API server (http://127.0.0.1:3000) and Web client (http://localhost:5173)...");
+console.log("\x1b[36m[KwakoPos]\x1b[0m Starting API server (http://127.0.0.1:3000) and Web client (dynamic port)...");
 
 // Use command string on Windows with shell: true to avoid DEP0190 warning
 const api = isWindows

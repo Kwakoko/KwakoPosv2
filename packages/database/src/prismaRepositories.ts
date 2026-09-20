@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   TenantContext,
   Product,
   ProductVariant,
@@ -372,33 +372,9 @@ export class PrismaCatalogRepository {
     return { id: row.id, tenantId: row.tenantId, branchId: row.branchId, name: row.name, code: row.code, origin: row.origin ?? null, notes: row.notes ?? null, isActive: row.isActive, createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
-  async ensureDefaults(ctx: TenantContext): Promise<void> {
-    const categoryDefaults = [
-      ["GRAPINS_FLOUR", "Grains & Flour", "Flour, cereals, maize, rice, and bulk staples", "#10b981"],
-      ["BEVERAGES", "Beverages", "Juices, mineral water, sodas, and energy drinks", "#0ea5e9"],
-      ["DAIRY", "Dairy", "Fresh milk, yogurt, butter, and cheese", "#6366f1"],
-      ["EDIBLE_OILS", "Edible Oils", "Cooking oil, sunflower, and vegetable fats", "#f59e0b"],
-      ["PHARMACY", "Pharmacy", "Over-the-counter wellness and health supplies", "#ec4899"],
-      ["HOUSEHOLD_CLEANING", "Household & Cleaning", "Detergents, soaps, and home disinfectants", "#14b8a6"],
-      ["BAKERY_CONFECTIONERY", "Bakery & Confectionery", "Bread, pastries, biscuits, and sweets", "#f97316"],
-      ["PERSONAL_CARE", "Personal Care", "Toiletries, hygiene, and skincare products", "#8b5cf6"],
-    ] as const;
-    for (const [code, name, description, color] of categoryDefaults) {
-      await prisma.category.upsert({ where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code } }, create: { tenantId: ctx.tenantId, branchId: ctx.branchId, name, code, description, color, isActive: true }, update: {} });
-    }
-    const brandDefaults = [
-      ["AZAM", "Azam", "Tanzania (SS Bakhresa)", "Primary milling & consumer goods supplier"],
-      ["BAKHRESA", "Bakhresa", "Tanzania", "Grain milling and consumer staples"],
-      ["KILOMBERO", "Kilombero", "Morogoro, Tanzania", "Premium white cane sugar"],
-      ["MO_DEWJI", "Mo Dewji", "MeTL Group Tanzania", "Edible oils, beverages, soaps"],
-      ["SAYONA", "Sayona", "Tanzania", "Carbonated drinks and fruit juices"],
-      ["SERENGETI", "SERENGETI", "Tanzania Breweries Ltd", "Serengeti Premium Lager and malt"],
-      ["TBL", "TBL", "Tanzania Breweries Ltd", "National beverages and beer products"],
-      ["GENERAL", "General", "Domestic / Unspecified", "General unbranded or commodity stock"],
-    ] as const;
-    for (const [code, name, origin, notes] of brandDefaults) {
-      await prisma.brand.upsert({ where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code } }, create: { tenantId: ctx.tenantId, branchId: ctx.branchId, name, code, origin, notes, isActive: true }, update: {} });
-    }
+  /** Production tenants start with zero business master data. */
+  async ensureDefaults(_ctx: TenantContext): Promise<void> {
+    return;
   }
 
   async listCategories(ctx: TenantContext): Promise<Category[]> {
@@ -642,3 +618,5 @@ export class PrismaStockRepository {
     return rows.map(ledgerShape);
   }
 }
+
+

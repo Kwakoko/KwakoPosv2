@@ -89,7 +89,6 @@ export class SyncEngine {
       const existingOp = Array.from(this.store.syncOperations.values()).find(
         (o) =>
           o.tenantId === ctx.tenantId &&
-          o.deviceId === req.deviceId &&
           (o.idempotencyKey === op.idempotencyKey || o.operationId === op.operationId)
       );
       if (existingOp) {
@@ -221,6 +220,51 @@ export class SyncEngine {
           });
         } else if (op.entityType === "CashSession" && op.operationType === "CREATE") {
           this.commercialRepo.openCashSession(ctx, op.payload as unknown as OpenCashSessionRequest);
+        } else if (op.entityType === "UnitConversionTransaction" && op.operationType === "CREATE") {
+          const payload = op.payload as any;
+          const parentVar = this.store.variants.get(payload.parentVariantId);
+          const childVar = this.store.variants.get(payload.childVariantId);
+          if (!parentVar || !childVar) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+          const parentQty = Number((parentVar as any).inventoryQuantity ?? parentVar.stock ?? 0);
+          const deduct = Number(payload.parentUnitsDeducted);
+          const produce = Number(payload.childUnitsProduced);
+          if (parentQty < deduct) {
+            throw new Error(`CONVERSION_CONFLICT: INSUFFICIENT_PARENT_STOCK (Available: ${parentQty}, Required: ${deduct})`);
+          }
+          const nextParent = parentQty - deduct;
+          const nextChild = Number((childVar as any).inventoryQuantity ?? childVar.stock ?? 0) + produce;
+          (parentVar as any).inventoryQuantity = nextParent;
+          parentVar.stock = nextParent;
+          (childVar as any).inventoryQuantity = nextChild;
+          childVar.stock = nextChild;
+          this.store.variants.set(parentVar.id, parentVar);
+          this.store.variants.set(childVar.id, childVar);
+          this.stockRepo.recordMovement(ctx, {
+            id: randomUUID(),
+            productId: parentVar.productId,
+            variantId: parentVar.id,
+            movementType: "ADJUSTMENT",
+            quantityChange: -deduct,
+            notes: `Unit Conversion to ${childVar.name}`,
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: `${op.idempotencyKey}-PARENT`,
+          });
+          this.stockRepo.recordMovement(ctx, {
+            id: randomUUID(),
+            productId: childVar.productId,
+            variantId: childVar.id,
+            movementType: "ADJUSTMENT",
+            quantityChange: produce,
+            notes: `Unit Conversion from ${parentVar.name}`,
+            deviceId: req.deviceId,
+            operationId: op.operationId,
+            idempotencyKey: `${op.idempotencyKey}-CHILD`,
+          });
+          this.productRepo.recalculateProductStock(ctx, parentVar.productId);
+          if (childVar.productId !== parentVar.productId) {
+            this.productRepo.recalculateProductStock(ctx, childVar.productId);
+          }
         } else if (op.entityType?.startsWith("Plugin:") || ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(op.entityType)) {
           const pluginEntityMap = (this.store as any).pluginCustomEntities || new Map();
           pluginEntityMap.set(`${ctx.tenantId}:${op.entityType}:${op.entityId}`, {
@@ -424,6 +468,7 @@ export class SyncEngine {
 }
 
 export { PrismaSyncEngine } from "./prismaSyncEngine.js";
+export { WorldStandardPrismaSyncEngine } from "./worldStandardPrismaSyncEngine.js";
 export {
   checkRollbackBarrier,
   validateSyncEpoch,

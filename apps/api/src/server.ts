@@ -1,3 +1,4 @@
+import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -22,6 +23,9 @@ function resolveWebDistFile(relativePath: string): string | null {
     path.resolve(process.cwd(), "dist/apps/web/dist"),
     path.resolve(process.cwd(), "../web/dist"),
     path.resolve(process.cwd(), "../../apps/web/dist"),
+    path.resolve(process.cwd(), "apps/web/public"),
+    path.resolve(process.cwd(), "../web/public"),
+    path.resolve(process.cwd(), "../../apps/web/public"),
   ];
   for (const dir of candidateDirs) {
     const full = path.join(dir, relativePath);
@@ -245,7 +249,7 @@ export interface BuildServerOptions {
 export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const config = opts.config ?? loadConfig();
   const server = Fastify({ logger: true });
-  const productionPersistence = opts.productionPersistence ?? isProductionEnv(config);
+  const productionPersistence = opts.productionPersistence ?? (isProductionEnv(config) || process.env.SYNC_CERTIFICATION_PRISMA === "true");
 
   // H-007: Hardened CORS configuration
   // - credentials: true  → allows cookies & Authorization headers cross-origin
@@ -480,8 +484,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return;
     }
 
-    // Static Asset Resolution (serving /assets/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist)
-    if (url.startsWith("/assets/") || url === "/manifest.json" || url === "/sw.js" || url === "/favicon.ico" || url === "/robots.txt") {
+    // Static Asset Resolution (serving /assets/*, /fonts/*, /brand/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist/public)
+    if (
+      url.startsWith("/assets/") ||
+      url.startsWith("/fonts/") ||
+      url.startsWith("/brand/") ||
+      url === "/manifest.json" ||
+      url === "/sw.js" ||
+      url === "/favicon.ico" ||
+      url === "/robots.txt" ||
+      url === "/asset-manifest.json" ||
+      url === "/release-manifest.json" ||
+      url === "/kwakopos-logo.png"
+    ) {
       const relativePath = url.startsWith("/") ? url.slice(1) : url;
       const assetPath = resolveWebDistFile(relativePath);
       if (assetPath && fs.existsSync(assetPath)) {
@@ -1343,6 +1358,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
+  server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
+    const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
+    const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
+    const result = await (syncEngine as any).resolveConflict(requireTenantContext(req), params.conflictId, body.resolution, body.mergedPayload);
+    return { success: true, data: result };
+  });
   // ==========================================
   // Commercial Core Routes (/api/v1/*)
   // ==========================================

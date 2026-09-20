@@ -1,4 +1,4 @@
-/**
+﻿/**
  * KwakoPosv2 — Production-Grade Receipt Management OS
  * ─────────────────────────────────────────────────────────────────────────────
  * Centralized receipt engine interface for KwakoPos SaaS.
@@ -22,7 +22,7 @@ import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopo
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { useSync, useAuth } from "../context/KwakoPosContexts.js";
-import { loadSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { Sheet } from "../components/UI/Sheet.js";
 
 type ReceiptTab = "register" | "templates" | "verification" | "analytics";
@@ -191,9 +191,9 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
     const handleDemoChange = () => {
       void loadReceipts();
     };
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
+    window.addEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     };
   }, [loadReceipts]);
 
@@ -400,16 +400,6 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
                         </p>
                         {receipts.length === 0 && (
                           <div className="v2-flex v2-justify-center v2-gap-2">
-                            <button
-                              className="v2-btn v2-btn-secondary v2-btn-sm"
-                              onClick={async () => {
-                                await loadSampleData(db, user?.tenantId);
-                                await loadReceipts();
-                              }}
-                              type="button"
-                            >
-                              <Sparkles size={13} /> Load Sample Receipts & Sales
-                            </button>
                           </div>
                         )}
                       </div>
@@ -781,3 +771,6 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
     </div>
   );
 };
+
+
+

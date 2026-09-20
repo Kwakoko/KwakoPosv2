@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore } from "./indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb } from "./indexedDb.js";
 import type {
   SyncPushRequest,
   SyncPushResponse,
@@ -11,6 +11,7 @@ import type {
 } from "@kwakopos2/contracts";
 import { globalRumCollector } from "./rum/rumCollector.js";
 import { globalClientCoordination } from "./persistence/clientCoordination.js";
+import { syncDiagnosticService } from "./services/syncDiagnosticService.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
@@ -25,6 +26,40 @@ type RevisionedChange = {
   record: any;
   source?: string;
 };
+
+async function defaultPushApi(req: SyncPushRequest): Promise<SyncPushResponse> {
+  const token = typeof window !== "undefined" && window.localStorage ? localStorage.getItem("kwakopos_access_token") : null;
+  const res = await fetch("/sync/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    throw new Error(`Sync push failed: HTTP ${res.status}`);
+  }
+  const body = await res.json();
+  return body.data || body;
+}
+
+async function defaultDeltaApi(since?: string): Promise<SyncDeltaResponse> {
+  const token = typeof window !== "undefined" && window.localStorage ? localStorage.getItem("kwakopos_access_token") : null;
+  const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
+  const res = await fetch(url, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(`Sync delta failed: HTTP ${res.status}`);
+  }
+  const body = await res.json();
+  return body.data || body;
+}
 
 async function applyRevisionedChanges(changes: RevisionedChange[], serverRevision: string, serverTimestamp: string): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
@@ -44,7 +79,12 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   })).filter((item) => item?.status === "PENDING");
 
   let applied = 0;
-  let cursor = Number(metadata.get("lastSyncRevision") || 0);
+  const initialRevisionRaw = await new Promise<any>((resolve) => {
+    const request = metadata.get("lastSyncRevision");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve("0");
+  });
+  let cursor = BigInt(initialRevisionRaw != null ? String(initialRevisionRaw) : "0");
   const sorted = [...changes].sort((a, b) => BigInt(a.revision) < BigInt(b.revision) ? -1 : 1);
 
   const storeForEntity = (entityType: string): KnownStore | null => {
@@ -105,7 +145,7 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
       metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, record: change.record }), `shadow:${change.entityType}:${change.entityId}`);
     }
 
-    cursor = Number(change.revision);
+    cursor = BigInt(change.revision);
     metadata.put(String(change.revision), "lastSyncRevision");
     applied += 1;
   }
@@ -129,15 +169,41 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
 export class ClientSyncEngine {
   public deviceId: string;
   public localDb: LocalIndexedDbStore;
+  public pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>;
+  public deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>;
+  public defaultTenantId?: string;
   private syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
   private retryCount = 0;
   private lastReconciliationStatus: "IN_SYNC" | "DIVERGENT" | "UNKNOWN" = "UNKNOWN";
 
-  constructor(deviceId: string, localDb: LocalIndexedDbStore) {
+  constructor(
+    deviceId: string,
+    localDb: LocalIndexedDbStore,
+    pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
+    deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
+    defaultTenantId?: string,
+  ) {
     if (!deviceId || deviceId.length > 128)
       throw new Error("SYNC_CONFIGURATION_INVALID: deviceId is required and must be <= 128 characters");
     this.deviceId = deviceId;
     this.localDb = localDb;
+    this.pushApiFn = pushApiFn;
+    this.deltaApiFn = deltaApiFn;
+    this.defaultTenantId = defaultTenantId;
+  }
+
+  public init(config: {
+    deviceId?: string;
+    localDb?: LocalIndexedDbStore;
+    pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>;
+    deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>;
+    tenantId?: string;
+  }): void {
+    if (config.deviceId) this.deviceId = config.deviceId;
+    if (config.localDb) this.localDb = config.localDb;
+    if (config.pushApiFn) this.pushApiFn = config.pushApiFn;
+    if (config.deltaApiFn) this.deltaApiFn = config.deltaApiFn;
+    if (config.tenantId) this.defaultTenantId = config.tenantId;
   }
 
   async bootstrapWithServer(
@@ -200,8 +266,8 @@ export class ClientSyncEngine {
   }
 
   async syncWithServer(
-    pushApiFn: (req: SyncPushRequest) => Promise<SyncPushResponse>,
-    deltaApiFn: (since?: string) => Promise<SyncDeltaResponse>,
+    pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
+    deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
   ): Promise<{ pushed: number; pulled: number }> {
     if (globalClientCoordination.isClientQuiesced()) {
@@ -216,14 +282,17 @@ export class ClientSyncEngine {
     return this.syncInFlight;
   }
 
-  private async runSync(
-    pushApiFn: (req: SyncPushRequest) => Promise<SyncPushResponse>,
-    deltaApiFn: (since?: string) => Promise<SyncDeltaResponse>,
+  public async runSync(
+    pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
+    deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
   ): Promise<{ pushed: number; pulled: number }> {
+    const effectivePush = pushApiFn || this.pushApiFn || defaultPushApi;
+    const effectiveDelta = deltaApiFn || this.deltaApiFn || defaultDeltaApi;
+    const effectiveTenantId = tenantId || this.defaultTenantId;
     const startTime = Date.now();
     await this.localDb.ready;
-    const pendingOps = this.localDb.getPendingOutbox(tenantId);
+    const pendingOps = this.localDb.getPendingOutbox(effectiveTenantId);
     let pushedCount = 0;
     let hadServerRejections = false;
 
@@ -247,7 +316,7 @@ export class ClientSyncEngine {
             idempotencyKey: op.idempotencyKey,
           })),
         };
-        const pushRes = await pushApiFn(pushPayload);
+        const pushRes = await effectivePush(pushPayload);
         const expectedIds = new Set(batch.map((op) => op.id));
         const seenIds = new Set<string>();
         if (!Array.isArray(pushRes.results) || pushRes.results.length !== batch.length) {
@@ -278,18 +347,27 @@ export class ClientSyncEngine {
         await this.localDb.flushPersistence();
       }
 
-      const lastSyncTime = this.localDb.syncMetadata.get("lastSyncTime");
-      const deltaRes = await deltaApiFn(lastSyncTime);
+      const lastRevision = this.localDb.syncMetadata.get("lastSyncRevision") || "0";
+      const deltaRes = (await effectiveDelta(`rev:${lastRevision}`)) as any;
       if (!deltaRes || typeof deltaRes.serverTimestamp !== "string")
         throw new Error("SYNC_PROTOCOL_VIOLATION: delta response is missing serverTimestamp");
-      const totalPulled = await this.localDb.applyServerDelta(deltaRes);
+      let totalPulled = 0;
+      if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
+        totalPulled = await applyRevisionedChanges(
+          deltaRes.changes as RevisionedChange[],
+          deltaRes.serverRevision,
+          deltaRes.serverTimestamp
+        );
+      } else {
+        totalPulled = await this.localDb.applyServerDelta(deltaRes);
+      }
 
       globalRumCollector.recordSyncMetrics({
         durationMs: Date.now() - startTime,
         pushedCount,
         deltaCount: totalPulled,
         success: !hadServerRejections,
-        outboxDepth: this.localDb.getPendingOutbox(tenantId).length,
+        outboxDepth: this.localDb.getPendingOutbox(effectiveTenantId).length,
       });
       if (hadServerRejections) {
         globalRumCollector.recordError(
@@ -312,12 +390,60 @@ export class ClientSyncEngine {
         pushedCount,
         deltaCount: 0,
         success: false,
-        outboxDepth: this.localDb.getPendingOutbox(tenantId).length,
+        outboxDepth: this.localDb.getPendingOutbox(effectiveTenantId).length,
       });
       globalRumCollector.recordError(err instanceof Error ? err : String(err));
+      syncDiagnosticService.logFailure(err, {
+        endpoint: "/sync/push",
+        outboxPendingCount: pendingOps.length,
+        tenantId: effectiveTenantId,
+      });
       throw err;
     }
   }
 }
 
+export const clientSyncEngine = new ClientSyncEngine(
+  typeof crypto !== "undefined" && crypto.randomUUID ? `web-${crypto.randomUUID()}` : `web-client-default`,
+  new LocalIndexedDbStore(4),
+);
+
+export async function reconcileInventory(
+  serverSnapshot: any,
+  customDb?: LocalIndexedDbStore
+): Promise<number> {
+  const db = customDb || clientSyncEngine.localDb || defaultDb;
+  const localDeltas = await db.stockAdjustments
+    .where("variantId")
+    .equals(serverSnapshot.id)
+    .and((adj: any) => adj.status === "PENDING")
+    .toArray();
+
+  let reconciledQty = Number(serverSnapshot.inventoryQuantity ?? (serverSnapshot as any).stock ?? 0);
+
+  for (const delta of localDeltas) {
+    const change = Number((delta as any).change ?? (delta as any).quantityChange ?? (delta as any).quantity ?? 0);
+    reconciledQty += change; // apply relative mutation
+  }
+
+  await db.productVariants.update(serverSnapshot.id, {
+    ...serverSnapshot,
+    inventoryQuantity: reconciledQty,
+    stock: reconciledQty,
+    lastSyncedAt: Date.now(),
+  } as any);
+
+  // mark deltas as reconciled
+  for (const delta of localDeltas) {
+    await db.stockAdjustments.update(delta.id, { status: "RECONCILED" } as any);
+  }
+
+  if (serverSnapshot.productId && typeof (db as any).recalculateProductStockLocal === "function") {
+    (db as any).recalculateProductStockLocal(serverSnapshot.productId);
+  }
+
+  return reconciledQty;
+}
+
 export * from "./rum/rumCollector.js";
+

@@ -24,7 +24,7 @@ import {
 import type { LocalIndexedDbStore } from "../../indexedDb.js";
 import { useToast } from "../../context/ToastContext.js";
 import { useAudioFeedback } from "../../utils/useAudioFeedback.js";
-import { DEMO_DATA_EVENT } from "../../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../../services/dataChangeEvent.js";
 import { STOCK_CHANGED_EVENT } from "../../services/inventoryStockService.js";
 
 export type ProductType = "STANDARD" | "COMPOSITE" | "SERVICE" | "SERIALIZED";
@@ -93,9 +93,12 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   // ── Step 1: Product Identity State ──────────────────────────────────────────
+  const defaultInitialCategory = allCategories[0]?.name || "";
+  const defaultInitialBrand = allBrands.find((b) => b.name.toLowerCase() !== "general")?.name || allBrands[0]?.name || "";
+
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(allCategories[0]?.name || "General");
-  const [brand, setBrand] = useState("General");
+  const [category, setCategory] = useState(defaultInitialCategory);
+  const [brand, setBrand] = useState(defaultInitialBrand);
   const [productType, setProductType] = useState<ProductType>("STANDARD");
   const [sku, setSku] = useState("");
   const [isManualSku, setIsManualSku] = useState(false);
@@ -123,13 +126,6 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
   const [opt2Values, setOpt2Values] = useState("");
   const [variants, setVariants] = useState<VariantMatrixRow[]>([]);
 
-  // Automatically ensure category is valid
-  useEffect(() => {
-    if (!category && allCategories.length > 0) {
-      setCategory(allCategories[0].name);
-    }
-  }, [allCategories, category]);
-
   // Derived Commercial Values
   const numBuying = typeof buyingPrice === "number" ? buyingPrice : 0;
   const numSelling = typeof sellingPrice === "number" ? sellingPrice : 0;
@@ -149,6 +145,21 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
       setSku(generateAutoSku(name));
     }
   }, [name, isManualSku, generateAutoSku]);
+
+  // Synchronize category and brand state with active catalog options
+  useEffect(() => {
+    if (isOpen) {
+      if (!category && allCategories.length > 0) {
+        setCategory(allCategories[0].name);
+      }
+      if (!brand && allBrands.length > 0) {
+        const defaultBrand = allBrands.find((b) => b.name.toLowerCase() !== "general") || allBrands[0];
+        if (defaultBrand) {
+          setBrand(defaultBrand.name);
+        }
+      }
+    }
+  }, [isOpen, allCategories, allBrands, category, brand]);
 
   // Generate Matrix Combinations from Options
   const generateVariantMatrix = useCallback(() => {
@@ -228,8 +239,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
     const errs: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
 
     // Step 1 Validation
+    const effectiveCategory = category.trim() || allCategories[0]?.name || "";
     if (!name.trim()) errs[1].push("Product Name is required.");
-    if (!category.trim()) errs[1].push("Category is required.");
+    if (!effectiveCategory) errs[1].push("Category is required.");
     if (!sku.trim()) errs[1].push("SKU Code is required.");
 
     // Check SKU tenant uniqueness
@@ -308,7 +320,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
 
     return errs;
   }, [
-    name, category, sku, currentTenantId, db, buyingPrice, sellingPrice,
+    name, category, allCategories, sku, currentTenantId, db, buyingPrice, sellingPrice,
     hasVariants, openingStock, reorderLevel, trackingType, batchNumber, variants
   ]);
 
@@ -320,6 +332,16 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
     if (!isCurrentStepValid) {
       playWarningTone();
       return;
+    }
+    // Ensure category and brand are populated from active selections if not already set
+    if (!category.trim() && allCategories.length > 0) {
+      setCategory(allCategories[0].name);
+    }
+    if (!brand.trim() && allBrands.length > 0) {
+      const defaultBrand = allBrands.find((b) => b.name.toLowerCase() !== "general") || allBrands[0];
+      if (defaultBrand) {
+        setBrand(defaultBrand.name);
+      }
     }
     if (currentStep < 5) {
       const next = (currentStep + 1) as 1 | 2 | 3 | 4 | 5;
@@ -360,8 +382,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
     setCurrentStep(1);
     setVisitedSteps(new Set([1]));
     setName("");
-    setCategory(allCategories[0]?.name || "General");
-    setBrand("General");
+    setCategory(allCategories[0]?.name || "");
+    const defaultBrand = allBrands.find((b) => b.name.toLowerCase() !== "general") || allBrands[0];
+    setBrand(defaultBrand?.name || "");
     setProductType("STANDARD");
     setSku("");
     setIsManualSku(false);
@@ -403,8 +426,11 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
       const retailPriceNum = Number(sellingPrice) || 0;
       const reorderLevelNum = Number(reorderLevel) || 10;
 
-      const selectedCategory = allCategories.find((c) => c.name.trim().toLowerCase() === category.trim().toLowerCase());
-      const selectedBrand = allBrands.find((b) => b.name.trim().toLowerCase() === (brand.trim() || "General").toLowerCase());
+      const finalCategory = (category.trim() || allCategories[0]?.name || "General").trim();
+      const finalBrand = (brand.trim() || allBrands.find((b) => b.name.toLowerCase() !== "general")?.name || allBrands[0]?.name || "General").trim();
+
+      const selectedCategory = allCategories.find((c) => c.name.trim().toLowerCase() === finalCategory.toLowerCase());
+      const selectedBrand = allBrands.find((b) => b.name.trim().toLowerCase() === finalBrand.toLowerCase());
 
       // Invariant: Product catalog stock values are strictly 0.
       // Stock quantity is projected solely from StockLedger movements.
@@ -414,9 +440,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
         branchId: currentBranchId || "default",
         name: name.trim(),
         sku: baseSku,
-        category: category.trim(),
+        category: finalCategory,
         categoryId: selectedCategory?.id && selectedCategory.id !== "default" ? selectedCategory.id : undefined,
-        brand: brand.trim() || "General",
+        brand: finalBrand,
         brandId: selectedBrand?.id && selectedBrand.id !== "default" ? selectedBrand.id : undefined,
         productType,
         buyingPrice: costPriceNum,
@@ -675,7 +701,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           : `Product "${name}" registered with initial stock movement.`
       );
 
-      window.dispatchEvent(new CustomEvent(DEMO_DATA_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
       window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: prodId, reason: "PRODUCT_CREATED" } }));
       void syncOutbox?.().catch(() => {});
 
@@ -896,9 +922,12 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                   </div>
                   <select
                     className="v2-input"
-                    value={category}
+                    value={category || (allCategories[0]?.name ?? "")}
                     onChange={(e) => setCategory(e.target.value)}
                   >
+                    {allCategories.length === 0 && (
+                      <option value="">-- No Categories Available --</option>
+                    )}
                     {allCategories.map((c) => (
                       <option key={c.id || c.name} value={c.name}>
                         {c.name}
@@ -921,10 +950,12 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                   </div>
                   <select
                     className="v2-input"
-                    value={brand}
+                    value={brand || (allBrands.find((b) => b.name.toLowerCase() !== "general")?.name ?? allBrands[0]?.name ?? "")}
                     onChange={(e) => setBrand(e.target.value)}
                   >
-                    <option value="General">General (Unbranded)</option>
+                    {allBrands.length === 0 && (
+                      <option value="">-- No Brands Available --</option>
+                    )}
                     {allBrands
                       .filter((b) => b.name.toLowerCase() !== "general")
                       .map((b) => (
@@ -932,7 +963,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                           {b.name}
                         </option>
                       ))}
-                    {brand && brand !== "General" && !allBrands.some((b) => b.name.toLowerCase() === brand.toLowerCase()) && (
+                    {brand && !allBrands.some((b) => b.name.toLowerCase() === brand.toLowerCase()) && (
                       <option value={brand}>{brand}</option>
                     )}
                   </select>
@@ -1633,8 +1664,8 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                     SKU: <strong className="v2-mono">{sku || "Not Generated"}</strong>
                   </div>
                   <div className="v2-flex v2-gap-2 v2-mt-2">
-                    <span className="badge v2-badge-primary">{category}</span>
-                    <span className="badge v2-badge-muted">{brand}</span>
+                    <span className="badge v2-badge-primary">{category || allCategories[0]?.name || "General"}</span>
+                    <span className="badge v2-badge-muted">{brand || allBrands[0]?.name || "General"}</span>
                     <span className="badge v2-badge-muted">{productType}</span>
                   </div>
                 </div>

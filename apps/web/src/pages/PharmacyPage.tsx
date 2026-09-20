@@ -1,5 +1,5 @@
 /**
- * KwakoPosv2 â€” Pharmacy Module Page
+ * KwakoPosv2 — Pharmacy Module Page
  * Sub-views: Dashboard, Pharmacy POS, Patients, Medicines, Batch & Expiry,
  * Prescriptions, Doctors, Drug Safety, Inventory, Insurance & NHIF,
  * Controlled Drugs, Reports, Settings
@@ -15,7 +15,7 @@ import {
   RefreshCw, Hash, Bell, Building, Filter,
 } from "lucide-react";
 
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(1)}M`
   : v >= 1_000 ? `Tsh ${(v / 1_000).toFixed(0)}K`
@@ -52,7 +52,7 @@ const KpiCard: React.FC<{
   </div>
 );
 
-// â”€â”€â”€ Demo Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Demo Data ────────────────────────────────────────────────────────────────
 const DEMO_PATIENTS = [
   { id: "PAT-001", name: "Grace Mwandani",  age: 42, phone: "+255 712 001 001", diagnosis: "Hypertension",    lastVisit: "2026-08-28", status: "Active" },
   { id: "PAT-002", name: "Said Hamisi",     age: 67, phone: "+255 754 002 002", diagnosis: "Diabetes T2",     lastVisit: "2026-08-25", status: "Active" },
@@ -85,9 +85,9 @@ const DEMO_PRESCRIPTIONS = [
 ];
 
 const DEMO_CONTROLLED = [
-  { id: "CD-001", medicine: "Morphine 10mg/mL",  batch: "BAT-2025-055", issue: "2026-08-20", patient: "Post-op â€” Ref: HC/2026/001", qty: 2, balance: 46, prescriber: "Dr. Masoud" },
-  { id: "CD-002", medicine: "Diazepam 5mg",       batch: "BAT-2026-114", issue: "2026-08-22", patient: "Grace Mwandani â€” Ref: RX-2026-001", qty: 30, balance: 90, prescriber: "Dr. Kamau" },
-  { id: "CD-003", medicine: "Tramadol 50mg",       batch: "BAT-2026-098", issue: "2026-08-28", patient: "Peter Ochieng â€” Ref: RX-2026-009",  qty: 14, balance: 146, prescriber: "Dr. Ouma" },
+  { id: "CD-001", medicine: "Morphine 10mg/mL",  batch: "BAT-2025-055", issue: "2026-08-20", patient: "Post-op — Ref: HC/2026/001", qty: 2, balance: 46, prescriber: "Dr. Masoud" },
+  { id: "CD-002", medicine: "Diazepam 5mg",       batch: "BAT-2026-114", issue: "2026-08-22", patient: "Grace Mwandani — Ref: RX-2026-001", qty: 30, balance: 90, prescriber: "Dr. Kamau" },
+  { id: "CD-003", medicine: "Tramadol 50mg",       batch: "BAT-2026-098", issue: "2026-08-28", patient: "Peter Ochieng — Ref: RX-2026-009",  qty: 14, balance: 146, prescriber: "Dr. Ouma" },
 ];
 
 const BATCH_STATUS_COLOR: Record<string, string> = {
@@ -97,7 +97,7 @@ const PRESC_STATUS: Record<string, string> = {
   Dispensed: "v2-badge-success", Pending: "v2-badge-warning", Cancelled: "v2-badge-danger",
 };
 
-// â”€â”€â”€ Sub-page: Pharmacy Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Pharmacy Dashboard ────────────────────────────────────────────
 const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav }) => {
   const nearExpiry  = DEMO_BATCHES.filter((b) => b.daysLeft <= 90 && b.daysLeft > 0).length;
   const expired     = DEMO_BATCHES.filter((b) => b.daysLeft <= 0).length;
@@ -113,7 +113,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
           </div>
           <div style={{ flex: 1 }}>
             <h1 className="v2-text-xl v2-font-black" style={{ color: "#fff", letterSpacing: "-.02em" }}>Clinical Pharmacy & FEFO Dispensing</h1>
-            <p className="v2-text-xs" style={{ color: "#6ee7b7", marginTop: ".2rem" }}>FEFO-compliant dispensing Â· Batch monitoring Â· Controlled drug register Â· NHIF claims</p>
+            <p className="v2-text-xs" style={{ color: "#6ee7b7", marginTop: ".2rem" }}>FEFO-compliant dispensing · Batch monitoring · Controlled drug register · NHIF claims</p>
           </div>
           <span className="badge v2-badge-success">PHARMACY</span>
         </div>
@@ -167,7 +167,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
                     <span className="v2-text-xs v2-text-muted">{b.daysLeft}d left</span>
                   </div>
                   <div className="v2-text-xs v2-font-black">{b.medicine}</div>
-                  <div className="v2-text-xs v2-text-muted">Batch: {b.id} Â· Qty: {b.qty} Â· Exp: {b.expiry}</div>
+                  <div className="v2-text-xs v2-text-muted">Batch: {b.id} · Qty: {b.qty} · Exp: {b.expiry}</div>
                 </div>
               ))}
             </div>
@@ -178,7 +178,7 @@ const PharmDashboard: React.FC<{ onNav: (tab: PharmTab) => void }> = ({ onNav })
   );
 };
 
-// â”€â”€â”€ Sub-page: Patients â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Patients ───────────────────────────────────────────────────────
 const PatientsPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_PATIENTS.filter((p) => !search || `${p.name} ${p.diagnosis}`.toLowerCase().includes(search.toLowerCase()));
@@ -222,7 +222,7 @@ const PatientsPage: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Medicines Master â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Medicines Master ───────────────────────────────────────────────
 const MedicinesPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const filtered = DEMO_MEDICINES.filter((m) => !search || `${m.name} ${m.category}`.toLowerCase().includes(search.toLowerCase()));
@@ -253,7 +253,7 @@ const MedicinesPage: React.FC = () => {
                 <td className="v2-text-xs v2-text-muted">{m.unit}</td>
                 <td className="v2-font-black">{money(m.price)}</td>
                 <td style={{ color: m.stock < m.reorder ? "var(--danger)" : "inherit" }}>{m.stock}</td>
-                <td>{m.controlled ? <span className="badge v2-badge-danger">CD</span> : <span className="badge v2-badge-muted">â€”</span>}</td>
+                <td>{m.controlled ? <span className="badge v2-badge-danger">CD</span> : <span className="badge v2-badge-muted">—</span>}</td>
                 <td>
                   <div className="v2-flex v2-gap-1">
                     <button className="v2-btn v2-btn-ghost v2-btn-icon-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.PharmacyPage.257.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.PharmacyPage.257.button"><Edit2 size={13} /></button>
@@ -269,7 +269,7 @@ const MedicinesPage: React.FC = () => {
   );
 };
 
-// â”€â”€â”€ Sub-page: Batch & Expiry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Batch & Expiry ─────────────────────────────────────────────────
 const BatchExpiryPage: React.FC<{ onMutation?: (message: string) => void }> = ({ onMutation }) => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -318,7 +318,7 @@ const BatchExpiryPage: React.FC<{ onMutation?: (message: string) => void }> = ({
   </div>
 );
 
-// â”€â”€â”€ Sub-page: Prescriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Prescriptions ──────────────────────────────────────────────────
 const PrescriptionsPage: React.FC<{ onMutation?: (message: string) => void }> = ({ onMutation }) => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -352,7 +352,7 @@ const PrescriptionsPage: React.FC<{ onMutation?: (message: string) => void }> = 
   </div>
 );
 
-// â”€â”€â”€ Sub-page: Controlled Drugs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-page: Controlled Drugs ───────────────────────────────────────────────
 const ControlledDrugsPage: React.FC = () => (
   <div className="v2-animate-page-enter">
     <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
@@ -394,7 +394,7 @@ const ControlledDrugsPage: React.FC = () => (
   </div>
 );
 
-// â”€â”€â”€ Generic stub sub-page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Generic stub sub-page ────────────────────────────────────────────────────
 const PharmStub: React.FC<{ title: string }> = ({ title }) => (
   <div className="v2-animate-page-enter">
     <h2 className="v2-text-xl v2-font-black v2-mb-4">{title}</h2>
@@ -402,13 +402,13 @@ const PharmStub: React.FC<{ title: string }> = ({ title }) => (
       <div className="v2-empty">
         <div className="v2-empty-icon"><Pill size={22} /></div>
         <p className="v2-empty-title">{title}</p>
-        <p className="v2-empty-desc">Full feature panel â€” coming in Phase 7 expansion.</p>
+        <p className="v2-empty-desc">Full feature panel — coming in Phase 7 expansion.</p>
       </div>
     </div>
   </div>
 );
 
-// â”€â”€â”€ Pharmacy Module Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Pharmacy Module Entry Point ──────────────────────────────────────────────
 export const PharmacyPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PharmTab>("Pharmacy Dashboard");
   const [mutationNotice, setMutationNotice] = useState<string>("");

@@ -17,7 +17,7 @@ export class TenantScopedSyncEngine extends WorldStandardPrismaSyncEngine {
       ? BigInt(changes[changes.length - 1].revision || prior.toString())
       : prior;
 
-    const scopedHeadRows = await prisma.$queryRawUnsafe<Array<{ revision: bigint | null }>>(
+    const scopedHeadRows = await prisma.$queryRawUnsafe<Array<{ revision: bigint | number | string | null }>>(
       `SELECT MAX(revision) AS revision
          FROM sync_change_journal
         WHERE tenant_id = $1 AND branch_id = $2`,

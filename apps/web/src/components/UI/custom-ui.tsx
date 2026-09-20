@@ -35,3 +35,6 @@ export const CardFooter: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ chi
     {children}
   </div>
 );
+
+export { Button, type ButtonProps } from './Button.js';
+

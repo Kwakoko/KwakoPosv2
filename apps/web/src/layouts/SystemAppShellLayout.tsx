@@ -52,7 +52,7 @@ import { KeyboardShortcutsModal } from "../components/UI/KeyboardShortcutsModal.
 import { CommandPaletteModal } from "../components/UI/CommandPaletteModal.js";
 import { audioSynthesizer } from "../utils/useAudioFeedback.js";
 import { useToast } from "../context/ToastContext.js";
-import { isDemoModeActive, purgeSampleData, DEMO_DATA_EVENT } from "../services/sampleDataService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { WindowManagerContainer } from "../components/WindowManager/WindowManagerContainer.js";
 import { SyncTelemetryHUD } from "../components/SyncTelemetryHUD.js";
 import { useWindowManager } from "../context/WindowManagerContext.js";
@@ -96,7 +96,7 @@ export interface ShellLayoutProps {
 type SearchResult = { type: string; label: string; id: string; target: string };
 
 // ─── Icon Map ─────────────────────────────────────────────────────────────────
-// Map lucide icon names (as strings in the registry) → actual components.
+// Map lucide icon names (as strings in the registry) â†’ actual components.
 // Used for module cards and sidebar icons.
 const ICON_MAP: Record<string, React.ElementType> = {
   Activity, AlertTriangle, AlignLeft, BarChart2, BarChart, BarChart3, Bed: BedDouble, BedDouble, Bell,
@@ -790,7 +790,7 @@ function getSidebarIcon(name: string): string {
 
 
 // ─── Sidebar Icon Colour Map ───────────────────────────────────────────────────
-// Each key maps an exact tab/section name → a CSS colour token (or hex).
+// Each key maps an exact tab/section name â†’ a CSS colour token (or hex).
 // These colours intentionally match the legacy KwakoPOS icon palette.
 const SIDEBAR_ICON_COLOR_MAP: Record<string, string> = {
   // ── Universal ──────────────────────────────────────────────────────────────
@@ -1123,7 +1123,7 @@ export const Sidebar: React.FC<{
               }}
               type="button"
             >
-              Exit Inspection &amp; Return to CPanel →
+              Exit Inspection &amp; Return to CPanel â†’
             </button>
           </div>
         )}
@@ -1265,38 +1265,54 @@ export const AppVersionFooter: React.FC<{
 
 // ─── Sync Dropdown Panel ──────────────────────────────────────────────────────
 
-const SyncPanel: React.FC<{ isOnline: boolean; pending: number; onSync: () => void; onClose: () => void }> = ({
+const SyncPanel: React.FC<{ isOnline: boolean; pending: number; onSync: () => void | Promise<void>; onClose: () => void }> = ({
   isOnline, pending, onSync, onClose,
-}) => (
-  <div className="dropdown-panel sync-panel">
-    <div className="dropdown-header">
-      Sync Status
-      <button className="topbar-icon-btn" onClick={onClose} aria-label="Close sync panel"><X size={13} /></button>
-    </div>
-    <div className="v2-p-4 v2-space-y-4">
-      <div className="v2-flex v2-items-center v2-gap-3">
-        {isOnline
-          ? <Wifi size={16} className="v2-text-success" />
-          : <WifiOff size={16} className="v2-text-warning" />
-        }
-        <span className="v2-text-sm">{isOnline ? "Online — server reachable" : "Offline — local mode"}</span>
+}) => {
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncNow = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await onSync();
+    } catch (err) {
+      console.error("[SyncPanel] Manual sync failed:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  return (
+    <div className="dropdown-panel sync-panel">
+      <div className="dropdown-header">
+        Sync Status
+        <button className="topbar-icon-btn" onClick={onClose} aria-label="Close sync panel"><X size={13} /></button>
       </div>
-      <div className="v2-flex v2-items-center v2-gap-3">
-        <span className="badge v2-badge-warning" style={{ minWidth: 0 }}>{pending}</span>
-        <span className="v2-text-sm v2-text-muted">Pending changes in outbox</span>
+      <div className="v2-p-4 v2-space-y-4">
+        <div className="v2-flex v2-items-center v2-gap-3">
+          {isOnline
+            ? <Wifi size={16} className="v2-text-success" />
+            : <WifiOff size={16} className="v2-text-warning" />
+          }
+          <span className="v2-text-sm">{isOnline ? "Online — server reachable" : "Offline — local mode"}</span>
+        </div>
+        <div className="v2-flex v2-items-center v2-gap-3">
+          <span className="badge v2-badge-warning" style={{ minWidth: 0 }}>{pending}</span>
+          <span className="v2-text-sm v2-text-muted">Pending changes in outbox</span>
+        </div>
+        <button
+          className="btn v2-btn-primary v2-w-full"
+          onClick={handleSyncNow}
+          disabled={isSyncing}
+          type="button"
+        >
+          <RefreshCw size={14} aria-hidden="true" className={isSyncing ? "v2-spin" : ""} />
+          {isSyncing ? "Syncing..." : "Sync Now"}
+        </button>
       </div>
-      <button
-        className="btn v2-btn-primary v2-w-full"
-        onClick={onSync}
-        disabled={!isOnline || pending === 0}
-        type="button"
-      >
-        <RefreshCw size={14} aria-hidden="true" />
-        Sync Now
-      </button>
     </div>
-  </div>
-);
+  );
+};
 
 // ─── Notifications Panel (Separated: Super Admin vs Tenants) ──────────────────
 
@@ -1657,7 +1673,7 @@ const NotificationsPanel: React.FC<{
                     <span className="notif-time">{item.timeAgo}</span>
                     {item.actionLabel && (
                       <span className="notif-action-btn">
-                        {item.actionLabel} →
+                        {item.actionLabel} â†’
                       </span>
                     )}
                   </div>
@@ -1691,7 +1707,7 @@ const NotificationsPanel: React.FC<{
             onClose();
           }}
         >
-          {activeScope === "SUPER_ADMIN" ? "Support Tower →" : "Help & Docs →"}
+          {activeScope === "SUPER_ADMIN" ? "Support Tower â†’" : "Help & Docs â†’"}
         </button>
       </div>
     </div>
@@ -1845,7 +1861,7 @@ export const TopBar: React.FC<{
   onLogout: () => void;
   user: { name: string; email: string; role: string } | null;
   onOpenMobileSidebar: () => void;
-  onSync: () => void;
+  onSync: () => void | Promise<void>;
   onOpenInspectModal?: () => void;
   onOpenShortcuts?: () => void;
   isAudioMuted?: boolean;
@@ -1862,17 +1878,6 @@ export const TopBar: React.FC<{
   const { impersonatedTenant, stopImpersonation } = useAuth();
   const { t } = useTranslation();
   const { db } = useSync();
-  const [isDemoActive, setIsDemoActive] = useState(() => isDemoModeActive(db));
-
-  useEffect(() => {
-    const handleDemoChange = () => {
-      setIsDemoActive(isDemoModeActive(db));
-    };
-    window.addEventListener(DEMO_DATA_EVENT, handleDemoChange);
-    return () => {
-      window.removeEventListener(DEMO_DATA_EVENT, handleDemoChange);
-    };
-  }, [db]);
 
   const [showModule, setShowModule] = useState(false);
   const [showSync, setShowSync] = useState(false);
@@ -2207,36 +2212,6 @@ export const TopBar: React.FC<{
           )}
 
           {/* Demo Mode HUD Badge */}
-          {isDemoActive && (
-            <button
-              type="button"
-              onClick={async () => {
-                if (window.confirm("Purge all demo data and restore store to pristine zero data?")) {
-                  await purgeSampleData(db, currentTenantId || undefined);
-                  onNavigate("/settings");
-                }
-              }}
-              style={{
-                background: "rgba(245, 158, 11, 0.16)",
-                color: "#f59e0b",
-                border: "1px solid rgba(245, 158, 11, 0.45)",
-                fontSize: "0.72rem",
-                fontWeight: 800,
-                padding: "0.22rem 0.6rem",
-                borderRadius: "6px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.35rem",
-                cursor: "pointer",
-                letterSpacing: "0.03em",
-                textTransform: "uppercase",
-              }}
-              title="Demo Training Sandbox Active. Click to purge all sample data."
-            >
-              <Sparkles size={12} />
-              <span>⚡ Demo Mode</span>
-            </button>
-          )}
 
           {/* Sync status */}
           <div style={{ position: "relative" }}>
@@ -2492,7 +2467,9 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         }}
         user={user ? { name: user.name, email: user.email, role: user.role } : null}
         onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
-        onSync={() => void syncOutbox()}
+        onSync={async () => {
+          await syncOutbox({ force: true });
+        }}
         onOpenInspectModal={() => setIsInspectModalOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
         isAudioMuted={isAudioMuted}
@@ -2624,3 +2601,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
     </div>
   );
 };
+
+
+
+

@@ -1,8 +1,8 @@
-import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import http from "http";
 import https from "https";
+import { execSync } from "child_process";
 import { assertReleaseIdentityMatch, assertVerifiedTrafficPromotion, assessProductionRelease } from "@kwakopos2/domain";
 import { CandidateDeploymentEvidence } from "./deploy-candidate.js";
 
@@ -44,7 +44,7 @@ export async function promoteCandidateRevision(candidateInput?: CandidateDeploym
     : 100;
 
   console.log("----------------------------------------------------------------");
-  console.log(` STEP 5 â€” Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
+  console.log(` STEP 5 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Promote Certified Candidate Revision to ${targetTrafficPercent}% Traffic `);
   console.log("----------------------------------------------------------------");
 
   const isProdCert = process.env.NODE_ENV === "production-certification";
@@ -183,4 +183,3 @@ if (process.argv[1] && process.argv[1].endsWith("promote-revision.ts")) {
     process.exit(1);
   });
 }
-import { assessProductionRelease } from "@kwakopos2/domain";
