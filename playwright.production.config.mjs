@@ -8,5 +8,6 @@ export default {
   use: {
     headless: true,
     ignoreHTTPSErrors: false,
+    ...(process.env.KWAKOPOS_USE_SYSTEM_CHROME === "1" ? { channel: "chrome" } : {}),
   },
 };

@@ -8,6 +8,26 @@ import { LanguageSelector } from "../components/LanguageSelector.js";
 const STEPS = ["Business Profile", "Localization", "Industry / Modules", "Main Branch", "Owner Account", "Review & Confirm", "Provisioning / Completion"] as const;
 type FormState = { businessName: string; slug: string; country: string; currency: string; timezone: string; locale: string; industry: string; modules: string[]; branchName: string; branchCode: string; ownerName: string; ownerEmail: string; ownerPassword: string };
 const initialForm: FormState = { businessName: "", slug: "", country: "TZ", currency: "TZS", timezone: "Africa/Dar_es_Salaam", locale: "en-TZ", industry: "Retail", modules: ["Retail"], branchName: "Main Branch", branchCode: "", ownerName: "", ownerEmail: "", ownerPassword: "" };
+const ONBOARDING_DRAFT_KEY = "kwakopos:v2:tenant-onboarding:draft";
+type PersistedDraft = { version: 1; step: number; form: Omit<FormState, "ownerPassword">; idempotencyKey: string; branchCodeManuallyEdited: boolean; savedAt: string };
+
+function readDraft(): PersistedDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ONBOARDING_DRAFT_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as PersistedDraft;
+    if (draft?.version !== 1 || !draft.form || !draft.idempotencyKey) return null;
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(): void {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.removeItem(ONBOARDING_DRAFT_KEY); } catch { /* ignore storage failures */ }
+}
 function makeIdempotencyKey(): string { return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 
 /** Derive a slug from a business name: lowercase, alphanumeric + hyphens, max 32 chars */
@@ -46,14 +66,36 @@ type CompletionResponse = { success: boolean; data: { id: string; tenantId: stri
 export const TenantOnboardingPage: React.FC = () => {
   const { login: authenticateOwner } = useAuth();
   const { t } = useTranslation();
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [idempotencyKey] = useState(makeIdempotencyKey);
+  const existingDraft = useMemo(() => readDraft(), []);
+  const [step, setStep] = useState(existingDraft?.step ?? 0);
+  const [form, setForm] = useState<FormState>(() => existingDraft ? { ...initialForm, ...existingDraft.form, ownerPassword: "" } : initialForm);
+  const [idempotencyKey] = useState(() => existingDraft?.idempotencyKey || makeIdempotencyKey());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CompletionResponse["data"] | null>(null);
-  // Track whether the user has manually edited the branch code field
-  const branchCodeManuallyEdited = useRef(false);
+  // Track whether the user has manually edited the branch code field.
+  const branchCodeManuallyEdited = useRef(existingDraft?.branchCodeManuallyEdited ?? false);
+
+  // Persist the wizard after every meaningful change. Never persist the owner password.
+  useEffect(() => {
+    if (submitting || result) return;
+    const draft: PersistedDraft = {
+      version: 1,
+      step,
+      form: Object.fromEntries(Object.entries(form).filter(([key]) => key !== "ownerPassword")) as Omit<FormState, "ownerPassword">,
+      idempotencyKey,
+      branchCodeManuallyEdited: branchCodeManuallyEdited.current,
+      savedAt: new Date().toISOString(),
+    };
+    try { window.localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify(draft)); } catch { /* storage is best-effort */ }
+  }, [step, form, idempotencyKey, submitting, result]);
+
+  // The password is intentionally not recoverable; require it again after a refresh.
+  useEffect(() => {
+    if (existingDraft && !existingDraft.form.ownerEmail) return;
+    if (existingDraft && !existingDraft.form.ownerName) return;
+    if (existingDraft && existingDraft.step >= 4) setError("Draft restored. Re-enter the owner password before provisioning.");
+  }, [existingDraft]);
   const modules = useMemo(() => ALL_MODULE_KEYS.slice().sort((a, b) => a.localeCompare(b)), []);
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
   const toggleModule = (module: string) => update("modules", form.modules.includes(module) ? form.modules.filter((m) => m !== module) : [...form.modules, module]);
@@ -128,6 +170,7 @@ export const TenantOnboardingPage: React.FC = () => {
 
       setResult(completed.data);
       setForm((current) => ({ ...current, ownerPassword: "" }));
+      clearDraft();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Tenant provisioning failed");
       setStep(5);
