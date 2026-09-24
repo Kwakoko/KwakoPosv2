@@ -105,25 +105,27 @@ async function acknowledgeOutbox(page: any, operationId: string): Promise<void> 
   }), operationId);
 }
 
-async function writeServerChange(page: any, change: any): Promise<void> {
-  await page.evaluate((change) => new Promise<void>((resolve, reject) => {
+async function applyDeltaToBrowser(page: any, delta: any): Promise<void> {
+  await page.evaluate((payload) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       const db = req.result;
       const tx = db.transaction(["products", "productVariants", "stockAdjustments", "stockLedger", "customers", "suppliers", "syncMetadata"], "readwrite");
-      if (change?.record?.id && change.entityType === "Product") tx.objectStore("products").put(change.record, change.entityId);
-      if (change?.record?.id && change.entityType === "ProductVariant") tx.objectStore("productVariants").put(change.record, change.entityId);
-      if (change?.record?.id && change.entityType === "Customer") tx.objectStore("customers").put(change.record, change.entityId);
-      if (change?.record?.id && change.entityType === "Supplier") tx.objectStore("suppliers").put(change.record, change.entityId);
-      if (change?.record?.id && change.entityType === "StockAdjustment") tx.objectStore("stockAdjustments").put(change.record, change.entityId);
-      if (change?.record?.id && change.entityType === "StockLedger") tx.objectStore("stockLedger").put(change.record, change.entityId);
-      tx.objectStore("syncMetadata").put(String(change.revision), "lastSyncRevision");
+      for (const record of payload.products || []) tx.objectStore("products").put(record, record.id);
+      for (const record of payload.variants || []) tx.objectStore("productVariants").put(record, record.id);
+      for (const record of payload.adjustments || []) tx.objectStore("stockAdjustments").put(record, record.id);
+      for (const record of payload.stockLedger || []) tx.objectStore("stockLedger").put(record, record.id);
+      for (const record of payload.customers || []) tx.objectStore("customers").put(record, record.id);
+      for (const record of payload.suppliers || []) tx.objectStore("suppliers").put(record, record.id);
+      tx.objectStore("syncMetadata").put(String(payload.serverTimestamp || "0"), "lastSyncRevision");
       tx.oncomplete = () => { db.close(); resolve(); };
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("SYNC_DELTA_APPLY_ABORTED"));
     };
-  }), change);
+  }), delta);
 }
+
 
 async function apiJson(path: string, options: { method?: string; tenantId: string; branchId: string; userId: string; body?: unknown }): Promise<any> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -141,6 +143,7 @@ async function run(): Promise<void> {
   const web = spawnWeb();
   const api = spawnApi();
   let tenantId = "";
+  let isolationTenantId = "";
   const browser = await chromium.launch({ headless: true });
   try {
     await waitForHttp(`${WEB_URL}/manifest.json`);
@@ -151,6 +154,10 @@ async function run(): Promise<void> {
     if (typeof acceptance.data?.acceptedCount !== "number") throw new Error(`LEGAL_ACCEPTANCE_FAILED:${JSON.stringify(acceptance)}`);
     const compliance = await apiJson("/api/legal/acceptance/status", { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
     if (compliance.data?.isCompliant !== true) throw new Error(`LEGAL_ACCEPTANCE_NOT_COMPLIANT:${JSON.stringify(compliance)}`);
+    const isolationTenant = await seedTenant();
+    isolationTenantId = isolationTenant.tenantId;
+    const isolationAcceptance = await apiJson("/api/legal/acceptance/accept-all", { method: "POST", tenantId: isolationTenant.tenantId, branchId: isolationTenant.branchId, userId: isolationTenant.userId, body: {} });
+    if (typeof isolationAcceptance.data?.acceptedCount !== "number") throw new Error(`ISOLATION_LEGAL_ACCEPTANCE_FAILED:${JSON.stringify(isolationAcceptance)}`);
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
     await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
@@ -189,6 +196,8 @@ async function run(): Promise<void> {
     if (pushed.data?.results?.[0]?.status !== "SUCCESS" && pushed.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error(`HTTP_SYNC_PUSH_FAILED:${JSON.stringify(pushed)}`);
     const replay = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: pushBody });
     if (replay.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error("HTTP_IDEMPOTENT_REPLAY_FAILED");
+    const serverProduct = await prisma.product.findFirst({ where: { id: "E2E-PRODUCT", tenantId: seeded.tenantId } });
+    if (!serverProduct || serverProduct.name !== "Offline Proof Product") throw new Error("POSTGRES_PRODUCT_PERSISTENCE_FAILED:" + JSON.stringify(serverProduct));
     await acknowledgeOutbox(pageA, operationId);
     const acknowledged = await browserRead(pageA);
     if (acknowledged.outbox !== 0) throw new Error("LOCAL_OUTBOX_ACK_FAILED:" + JSON.stringify(acknowledged));
@@ -196,25 +205,30 @@ async function run(): Promise<void> {
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
     await pageB.goto(WEB_URL, { waitUntil: "domcontentloaded" });
-    const delta = await apiJson(`/sync/delta?since=${encodeURIComponent("rev:0")}`, { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
-    const change = (delta.data?.changes || []).find((x: any) => x.entityId === "E2E-PRODUCT");
-    if (!change) throw new Error("HTTP_REVISION_REPLAY_FAILED");
-    await writeServerChange(pageA, change);
-    await writeServerChange(pageB, change);
+    const delta = await apiJson(`/sync/delta?since=${encodeURIComponent(new Date(0).toISOString())}`, { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
+    const productChange = (delta.data?.products || []).find((x: any) => x.id === "E2E-PRODUCT");
+    if (!productChange) throw new Error("HTTP_REVISION_REPLAY_FAILED");
+    await applyDeltaToBrowser(pageA, delta.data);
+    await applyDeltaToBrowser(pageB, delta.data);
     const convergenceA = await browserRead(pageA);
     const convergenceB = await browserRead(pageB);
+    if (convergenceA.outbox !== 0 || convergenceB.outbox !== 0 || !convergenceA.product || !convergenceB.product) throw new Error(`MULTI_DEVICE_STATE_INCOMPLETE:${JSON.stringify({ convergenceA, convergenceB })}`);
     if (JSON.stringify(convergenceA) !== JSON.stringify(convergenceB)) throw new Error(`MULTI_DEVICE_CONVERGENCE_FAILED:${JSON.stringify({ convergenceA, convergenceB })}`);
+    const isolationDelta = await apiJson(`/sync/delta?since=${encodeURIComponent(new Date(0).toISOString())}`, { tenantId: isolationTenant.tenantId, branchId: isolationTenant.branchId, userId: isolationTenant.userId });
+    const tenantIsolationPass = !(isolationDelta.data?.products || []).some((x: any) => x.id === "E2E-PRODUCT");
+    if (!tenantIsolationPass) throw new Error("TENANT_ISOLATION_FAILED");
 
     const customerUpdate = { operationId: `conflict-remote-${randomUUID()}`, entityType: "Customer", entityId: `E2E-CUSTOMER-${randomUUID()}`, operationType: "CREATE", payload: { id: "E2E-CONFLICT-CUSTOMER", customerCode: "E2E-C", name: "Remote Winner", status: "ACTIVE" }, clientCreatedAt: new Date().toISOString(), idempotencyKey: `idem-${randomUUID()}` };
     const customerCreate = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: { deviceId: "e2e-http-device-b", operations: [customerUpdate] } });
     if (!["SUCCESS", "ALREADY_PROCESSED"].includes(customerCreate.data?.results?.[0]?.status)) throw new Error("HTTP_CONFLICT_SEED_FAILED");
-    const proof: Proof = { status: "PASS", timestamp: new Date().toISOString(), browser: { offlineReload: offlineState.outbox === 1 && offlineState.product, secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB), serviceWorkerRegistered: sw, upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox }, server: { atomicMutationSyncOperationJournal: pushed.data?.results?.[0]?.status === "SUCCESS" || pushed.data?.results?.[0]?.status === "ALREADY_PROCESSED", duplicateReplayIdempotent: replay.data?.results?.[0]?.status === "ALREADY_PROCESSED", revisionReplay: Boolean(change), tenantScoped: true } };
+    const proof: Proof = { status: "PASS", timestamp: new Date().toISOString(), browser: { offlineReload: offlineState.outbox === 1 && offlineState.product, secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB), serviceWorkerRegistered: sw, upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox }, server: { atomicMutationSyncOperationJournal: pushed.data?.results?.[0]?.status === "SUCCESS" || pushed.data?.results?.[0]?.status === "ALREADY_PROCESSED", duplicateReplayIdempotent: replay.data?.results?.[0]?.status === "ALREADY_PROCESSED", revisionReplay: Boolean(productChange), tenantScoped: tenantIsolationPass } };
     mkdirSync("artifacts/release-evidence", { recursive: true });
     writeFileSync("artifacts/release-evidence/world-standard-offline-e2e.json", JSON.stringify(proof, null, 2));
     console.log(JSON.stringify(proof, null, 2));
     await ctxB.close(); await ctxA.close();
   } finally {
     if (tenantId) await cleanup(tenantId).catch(() => undefined);
+    if (isolationTenantId) await cleanup(isolationTenantId).catch(() => undefined);
     await browser.close(); web.kill("SIGTERM"); api.kill("SIGTERM");
   }
 }
