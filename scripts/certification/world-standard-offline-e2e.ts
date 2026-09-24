@@ -5,8 +5,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "@playwright/test";
 import { prisma } from "@kwakopos2/database";
 
-const WEB_URL = process.env.E2E_WEB_URL || "http://127.0.0.1:4175";
-const API_URL = process.env.E2E_API_URL || "http://127.0.0.1:18080";
+const WEB_PORT = Number(process.env.E2E_WEB_PORT || "4177");
+const API_PORT = Number(process.env.E2E_API_PORT || "18082");
+const WEB_URL = process.env.E2E_WEB_URL || `http://127.0.0.1:${WEB_PORT}`;
+const API_URL = process.env.E2E_API_URL || `http://127.0.0.1:${API_PORT}`;
 
 type Proof = {
   status: "PASS";
@@ -27,11 +29,11 @@ async function waitForHttp(url: string): Promise<void> {
 }
 
 function spawnWeb(): ChildProcess {
-  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", "4175"], { cwd: "apps/web", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: process.env });
+  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", String(WEB_PORT)], { cwd: "apps/web", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: process.env });
 }
 
 function spawnApi(): ChildProcess {
-  return spawn("npx", ["tsx", "apps/api/src/server.ts"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: { ...process.env, NODE_ENV: "development", START_SERVER: "true", SYNC_CERTIFICATION_PRISMA: "true", PORT: "18080", HOST: "127.0.0.1" } });
+  return spawn("npx", ["tsx", "apps/api/src/server.ts"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: { ...process.env, NODE_ENV: "development", START_SERVER: "true", SYNC_CERTIFICATION_PRISMA: "true", PORT: String(API_PORT), HOST: "127.0.0.1" } });
 }
 
 async function seedTenant(): Promise<{ tenantId: string; branchId: string; userId: string; variantId: string }> {
@@ -89,15 +91,33 @@ async function browserRead(page: any): Promise<{ outbox: number; product: boolea
   }));
 }
 
+async function acknowledgeOutbox(page: any, operationId: string): Promise<void> {
+  await page.evaluate((operationId) => new Promise<void>((resolve, reject) => {
+    const req = indexedDB.open("kwakopos-v2");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(["syncOutbox"], "readwrite");
+      tx.objectStore("syncOutbox").delete(operationId);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), operationId);
+}
+
 async function writeServerChange(page: any, change: any): Promise<void> {
   await page.evaluate((change) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       const db = req.result;
-      const tx = db.transaction(["stockAdjustments", "stockLedger", "syncMetadata"], "readwrite");
-      if (change.record?.id && change.entityType === "StockAdjustment") tx.objectStore("stockAdjustments").put(change.record, change.entityId);
-      if (change.record?.id && change.entityType === "StockLedger") tx.objectStore("stockLedger").put(change.record, change.entityId);
+      const tx = db.transaction(["products", "productVariants", "stockAdjustments", "stockLedger", "customers", "suppliers", "syncMetadata"], "readwrite");
+      if (change?.record?.id && change.entityType === "Product") tx.objectStore("products").put(change.record, change.entityId);
+      if (change?.record?.id && change.entityType === "ProductVariant") tx.objectStore("productVariants").put(change.record, change.entityId);
+      if (change?.record?.id && change.entityType === "Customer") tx.objectStore("customers").put(change.record, change.entityId);
+      if (change?.record?.id && change.entityType === "Supplier") tx.objectStore("suppliers").put(change.record, change.entityId);
+      if (change?.record?.id && change.entityType === "StockAdjustment") tx.objectStore("stockAdjustments").put(change.record, change.entityId);
+      if (change?.record?.id && change.entityType === "StockLedger") tx.objectStore("stockLedger").put(change.record, change.entityId);
       tx.objectStore("syncMetadata").put(String(change.revision), "lastSyncRevision");
       tx.oncomplete = () => { db.close(); resolve(); };
       tx.onerror = () => reject(tx.error);
@@ -127,6 +147,10 @@ async function run(): Promise<void> {
     await waitForHttp(`${API_URL}/health`);
     const seeded = await seedTenant();
     tenantId = seeded.tenantId;
+    const acceptance = await apiJson("/api/legal/acceptance/accept-all", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: {} });
+    if (typeof acceptance.data?.acceptedCount !== "number") throw new Error(`LEGAL_ACCEPTANCE_FAILED:${JSON.stringify(acceptance)}`);
+    const compliance = await apiJson("/api/legal/acceptance/status", { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
+    if (compliance.data?.isCompliant !== true) throw new Error(`LEGAL_ACCEPTANCE_NOT_COMPLIANT:${JSON.stringify(compliance)}`);
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
     await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
@@ -165,6 +189,9 @@ async function run(): Promise<void> {
     if (pushed.data?.results?.[0]?.status !== "SUCCESS" && pushed.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error(`HTTP_SYNC_PUSH_FAILED:${JSON.stringify(pushed)}`);
     const replay = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: pushBody });
     if (replay.data?.results?.[0]?.status !== "ALREADY_PROCESSED") throw new Error("HTTP_IDEMPOTENT_REPLAY_FAILED");
+    await acknowledgeOutbox(pageA, operationId);
+    const acknowledged = await browserRead(pageA);
+    if (acknowledged.outbox !== 0) throw new Error("LOCAL_OUTBOX_ACK_FAILED:" + JSON.stringify(acknowledged));
 
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();

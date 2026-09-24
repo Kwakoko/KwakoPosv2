@@ -136,6 +136,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
           </div>
           <button
             type="button"
+            aria-label="Close conflict resolution"
             onClick={onClose}
             style={{
               background: "transparent",
@@ -305,6 +306,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
         >
           <button
             type="button"
+            aria-label="Close conflict resolution"
             onClick={onClose}
             style={{
               padding: "0.5rem 1rem",

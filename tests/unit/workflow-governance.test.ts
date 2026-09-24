@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KWAKOKO_WORKFLOW_GOVERNANCE } from "../../packages/config/src/workflowGovernance.js";
+import { runWorkflowIntegrityVerification } from "../../scripts/release/verify-workflow-integrity.js";
 
 describe("Kwakoko workflow governance", () => {
   it("defines the complete experience lifecycle", () => {
@@ -25,6 +26,11 @@ describe("Kwakoko workflow governance", () => {
 
   it("keeps unresolved findings visible rather than suppressing them", () => {
     expect(KWAKOKO_WORKFLOW_GOVERNANCE.certification.unresolvedHeuristicFindingsRemainVisible).toBe(true);
+  });
+
+  it("does not classify the reusable Button primitive as a customer-facing orphan action", () => {
+    const result = runWorkflowIntegrityVerification();
+    expect(result.findings.some((f) => f.file.endsWith("components/UI/Button.tsx"))).toBe(false);
   });
 
   it("defines the Step 9 release certificate", () => {

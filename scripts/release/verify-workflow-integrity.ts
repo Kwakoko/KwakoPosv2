@@ -61,7 +61,10 @@ function sourceRouteSet(){
 }
 
 function analyzeFile(file:string,routes:Set<string>):Control[]{
-  const source=fs.readFileSync(file,"utf8"); const rel=path.relative(ROOT,file).replaceAll("\\","/"); const controls:Control[]=[];
+  const source=fs.readFileSync(file,"utf8"); const rel=path.relative(ROOT,file).replaceAll("\\","/");
+  // Reusable UI primitives are definitions, not concrete customer-facing controls.
+  if (rel === "apps/web/src/components/UI/Button.tsx") return [];
+  const controls:Control[]=[];
   const rx=/<button\b[\s\S]*?<\/button>/gi;
   for(const m of source.matchAll(rx)){
     const tag=extractOpeningTag(m[0]); const start=m.index??0;

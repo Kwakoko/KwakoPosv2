@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { KWAKOKO_VISUAL_IDENTITY } from "../../packages/config/src/visualIdentity.js";
 
 const dir = typeof __dirname !== "undefined"
   ? __dirname
@@ -72,12 +73,16 @@ safeWriteFileSync(path.join(publicDir, "manifest.json"), JSON.stringify({
   description: "Kwakoko Business Operating System with offline-first KwakoPos Point of Sale capability",
   start_url: "/",
   display: "standalone",
-  background_color: "#0f172a",
-  theme_color: "#0f172a",
+  background_color: KWAKOKO_VISUAL_IDENTITY.palette.cloud,
+  theme_color: KWAKOKO_VISUAL_IDENTITY.masterBrandColor,
   version,
   icons: [
-    { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
-    { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    { src: "/brand/kwakoko-mark.svg", sizes: "128x128", type: "image/svg+xml", purpose: "any maskable" },
+    { src: "/brand/favicon.svg", sizes: "64x64", type: "image/svg+xml", purpose: "any" },
+  ],
+  shortcuts: [
+    { name: "Open KwakoPos", short_name: "POS", url: "/pos", icons: [{ src: "/brand/kwakoko-mark.svg", sizes: "128x128", type: "image/svg+xml" }] },
+    { name: "Inventory", short_name: "Inventory", url: "/inventory", icons: [{ src: "/brand/kwakoko-mark.svg", sizes: "128x128", type: "image/svg+xml" }] },
   ],
 }, null, 2));
 

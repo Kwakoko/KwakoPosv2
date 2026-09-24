@@ -1,4 +1,4 @@
-import { getReleaseIdentity, loadConfig } from "../../packages/config/src/index.js";
+import { getReleaseIdentity, loadConfig, getAuthoritativeBrandIdentity } from "../../packages/config/src/index.js";
 import { execSync } from "node:child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -21,6 +21,7 @@ export interface ReleaseManifest {
     recommendedClientVersion: string;
   };
   evidencePath?: string;
+  brand: { parentBrand: string; platform: string; };
 }
 
 export function generateReleaseManifest(options?: {
@@ -40,6 +41,7 @@ export function generateReleaseManifest(options?: {
   const gitSha = options?.gitSha || identity.gitSha;
   if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
   const targetTag = `v${targetVersion}`;
+  const brand = getAuthoritativeBrandIdentity();
   const certification = options?.certification || "FAIL";
   const containerDigest = options?.containerDigest ?? identity.containerDigest ?? null;
   const cloudRunRevision = options?.cloudRunRevision ?? identity.cloudRunRevision ?? null;
@@ -72,6 +74,7 @@ export function generateReleaseManifest(options?: {
       recommendedClientVersion: targetVersion,
     },
     evidencePath: options?.evidencePath,
+    brand: { parentBrand: brand.masterBrand, platform: brand.flagshipPlatform },
   };
 
   const outDir = path.resolve(process.cwd(), "artifacts/release-evidence");
