@@ -12,6 +12,7 @@ const API_URL = process.env.E2E_API_URL || `http://127.0.0.1:${API_PORT}`;
 
 type Proof = {
   status: "PASS";
+  release: { gitSha: string; version: string; environment: "CONTROLLED" };
   timestamp: string;
   browser: { offlineReload: boolean; secondDeviceConverged: boolean; serviceWorkerRegistered: boolean; upgradePreservedOutbox: boolean };
   server: { atomicMutationSyncOperationJournal: boolean; duplicateReplayIdempotent: boolean; revisionReplay: boolean; tenantScoped: boolean };
@@ -221,7 +222,7 @@ async function run(): Promise<void> {
     const customerUpdate = { operationId: `conflict-remote-${randomUUID()}`, entityType: "Customer", entityId: `E2E-CUSTOMER-${randomUUID()}`, operationType: "CREATE", payload: { id: "E2E-CONFLICT-CUSTOMER", customerCode: "E2E-C", name: "Remote Winner", status: "ACTIVE" }, clientCreatedAt: new Date().toISOString(), idempotencyKey: `idem-${randomUUID()}` };
     const customerCreate = await apiJson("/sync/push", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: { deviceId: "e2e-http-device-b", operations: [customerUpdate] } });
     if (!["SUCCESS", "ALREADY_PROCESSED"].includes(customerCreate.data?.results?.[0]?.status)) throw new Error("HTTP_CONFLICT_SEED_FAILED");
-    const proof: Proof = { status: "PASS", timestamp: new Date().toISOString(), browser: { offlineReload: offlineState.outbox === 1 && offlineState.product, secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB), serviceWorkerRegistered: sw, upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox }, server: { atomicMutationSyncOperationJournal: pushed.data?.results?.[0]?.status === "SUCCESS" || pushed.data?.results?.[0]?.status === "ALREADY_PROCESSED", duplicateReplayIdempotent: replay.data?.results?.[0]?.status === "ALREADY_PROCESSED", revisionReplay: Boolean(productChange), tenantScoped: tenantIsolationPass } };
+    const proof: Proof = { status: "PASS", release: { gitSha: String(process.env.RELEASE_GIT_SHA || "UNKNOWN"), version: String(process.env.RELEASE_VERSION || "2.13.0"), environment: "CONTROLLED" }, timestamp: new Date().toISOString(), browser: { offlineReload: offlineState.outbox === 1 && offlineState.product, secondDeviceConverged: JSON.stringify(convergenceA) === JSON.stringify(convergenceB), serviceWorkerRegistered: sw, upgradePreservedOutbox: afterUpgrade.outbox === beforeUpgrade.outbox }, server: { atomicMutationSyncOperationJournal: pushed.data?.results?.[0]?.status === "SUCCESS" || pushed.data?.results?.[0]?.status === "ALREADY_PROCESSED", duplicateReplayIdempotent: replay.data?.results?.[0]?.status === "ALREADY_PROCESSED", revisionReplay: Boolean(productChange), tenantScoped: tenantIsolationPass } };
     mkdirSync("artifacts/release-evidence", { recursive: true });
     writeFileSync("artifacts/release-evidence/world-standard-offline-e2e.json", JSON.stringify(proof, null, 2));
     console.log(JSON.stringify(proof, null, 2));
