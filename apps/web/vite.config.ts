@@ -2,20 +2,44 @@ import { defineConfig } from "vite";
 
 const configureProxy = (proxy: any) => {
   proxy.on("error", (_err: any, _req: any, res: any) => {
-    if (res && !res.headersSent && typeof res.writeHead === "function") {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          success: false,
-          error: {
-            code: "BACKEND_UNAVAILABLE",
-            message: "API server (port 3000) is unreachable. Please ensure the backend server is running.",
-          },
-        })
-      );
+    try {
+      if (res && !res.headersSent && typeof res.writeHead === "function") {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "BACKEND_UNAVAILABLE",
+              message: "API server (port 3000) is unreachable. Please ensure the backend server is running.",
+            },
+          })
+        );
+      } else if (res && typeof res.destroy === "function" && !res.destroyed) {
+        res.destroy();
+      }
+    } catch {
+      // Safe no-op on aborted or already closed client sockets
+    }
+  });
+
+  proxy.on("proxyReq", (_proxyReq: any, req: any) => {
+    if (req && typeof req.on === "function") {
+      req.on("error", () => {});
+    }
+  });
+
+  proxy.on("proxyRes", (_proxyRes: any, _req: any, res: any) => {
+    if (res && typeof res.on === "function") {
+      res.on("error", () => {});
     }
   });
 };
+
+const webPort = process.env.WEB_PORT
+  ? parseInt(process.env.WEB_PORT, 10)
+  : process.env.PORT && process.env.PORT !== "3000"
+    ? parseInt(process.env.PORT, 10)
+    : 5173;
 
 export default defineConfig({
   build: {
@@ -26,8 +50,8 @@ export default defineConfig({
   },
   server: {
     host: true,
+    port: webPort,
     strictPort: false,
-    ...(process.env.PORT ? { port: parseInt(process.env.PORT, 10) } : {}),
     proxy: {
       "/auth": {
         target: "http://127.0.0.1:3000",

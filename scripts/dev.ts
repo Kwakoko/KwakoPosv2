@@ -49,6 +49,18 @@ function freePort(port: number) {
     try {
       console.log(`\x1b[33m[KwakoPos]\x1b[0m Port ${port} is currently occupied by PID ${pid}. Terminating orphaned process...`);
       if (isWindows) {
+        try {
+          const parentOutput = execSync(
+            `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \\"ProcessId = ${pid}\\").ParentProcessId"`,
+            { encoding: "utf8" }
+          ).trim();
+          const ppid = parseInt(parentOutput, 10);
+          if (ppid && ppid !== process.pid && ppid !== 0 && ppid !== 4) {
+            execSync(`taskkill /pid ${ppid} /T /F`, { stdio: "ignore" });
+          }
+        } catch {
+          // Ignore parent lookup failures
+        }
         execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" });
       } else {
         process.kill(pid, "SIGKILL");
@@ -76,10 +88,11 @@ function killTree(child?: ChildProcess) {
   }
 }
 
-// Ensure port 3000 (API) is clear before starting
+// Ensure ports 3000 (API) and 5173 (Web) are clear before starting
 freePort(3000);
+freePort(5173);
 
-console.log("\x1b[36m[KwakoPos]\x1b[0m Starting API server (http://127.0.0.1:3000) and Web client (dynamic port)...");
+console.log("\x1b[36m[KwakoPos]\x1b[0m Starting API server (http://127.0.0.1:3000) and Web client (http://localhost:5173)...");
 
 // Use command string on Windows with shell: true to avoid DEP0190 warning
 const api = isWindows
@@ -94,16 +107,19 @@ const api = isWindows
       env: { ...process.env, PORT: "3000", HOST: "0.0.0.0" },
     });
 
+const webEnv = { ...process.env, WEB_PORT: "5173" };
+delete (webEnv as any).PORT; // Ensure web client does not inherit backend API PORT=3000
+
 const web = isWindows
   ? spawn(`${npmCmd} run dev:web`, {
       stdio: ["ignore", "inherit", "inherit"],
       shell: true,
-      env: { ...process.env },
+      env: webEnv,
     })
   : spawn(npmCmd, ["run", "dev:web"], {
       stdio: ["ignore", "inherit", "inherit"],
       shell: false,
-      env: { ...process.env },
+      env: webEnv,
     });
 
 let isCleaningUp = false;
