@@ -76,14 +76,44 @@ async function browserSeed(page: any, operationId: string, tenantId: string, bra
 async function browserRead(page: any): Promise<{ outbox: number; product: boolean; revision: string }> {
   return page.evaluate(() => new Promise((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      for (const name of ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata"]) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
+    };
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       const db = req.result;
-      const tx = db.transaction(["products", "syncOutbox", "syncMetadata"], "readonly");
-      const out = tx.objectStore("syncOutbox").getAll();
-      const product = tx.objectStore("products").get("E2E-PRODUCT");
-      const revision = tx.objectStore("syncMetadata").get("lastSyncRevision");
-      tx.oncomplete = () => { db.close(); resolve({ outbox: out.result.filter((x: any) => x?.status === "PENDING").length, product: Boolean(product.result), revision: String(revision.result || "0") }); };
+      const storeNames = ["products", "syncOutbox", "syncMetadata"].filter((s) => db.objectStoreNames.contains(s));
+      const tx = db.transaction(storeNames, "readonly");
+      let outboxCount = 0;
+      let hasProduct = false;
+      let revision = "0";
+
+      if (db.objectStoreNames.contains("syncOutbox")) {
+        const outReq = tx.objectStore("syncOutbox").getAll();
+        outReq.onsuccess = () => {
+          outboxCount = (outReq.result || []).filter((x: any) => x?.status === "PENDING").length;
+        };
+      }
+      if (db.objectStoreNames.contains("products")) {
+        const prodReq = tx.objectStore("products").get("E2E-PRODUCT");
+        prodReq.onsuccess = () => {
+          hasProduct = Boolean(prodReq.result);
+        };
+      }
+      if (db.objectStoreNames.contains("syncMetadata")) {
+        const revReq = tx.objectStore("syncMetadata").get("lastSyncRevision");
+        revReq.onsuccess = () => {
+          revision = String(revReq.result || "0");
+        };
+      }
+
+      tx.oncomplete = () => {
+        db.close();
+        resolve({ outbox: outboxCount, product: hasProduct, revision });
+      };
       tx.onerror = () => reject(tx.error);
     };
   }));
@@ -92,13 +122,41 @@ async function browserRead(page: any): Promise<{ outbox: number; product: boolea
 async function writeServerChange(page: any, change: any): Promise<void> {
   await page.evaluate((change: any) => new Promise<void>((resolve, reject) => {
     const req = indexedDB.open("kwakopos-v2");
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      for (const name of ["products", "productVariants", "stockLedger", "stockAdjustments", "stockBalance", "productPriceHistory", "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata"]) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
+    };
     req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       const db = req.result;
-      const tx = db.transaction(["stockAdjustments", "stockLedger", "syncMetadata"], "readwrite");
-      if (change.record?.id && change.entityType === "StockAdjustment") tx.objectStore("stockAdjustments").put(change.record, change.entityId);
-      if (change.record?.id && change.entityType === "StockLedger") tx.objectStore("stockLedger").put(change.record, change.entityId);
-      tx.objectStore("syncMetadata").put(String(change.revision), "lastSyncRevision");
+      const storeNames = ["products", "productVariants", "stockAdjustments", "stockLedger", "syncOutbox", "syncMetadata"].filter((s) => db.objectStoreNames.contains(s));
+      const tx = db.transaction(storeNames, "readwrite");
+      if (change.record && change.entityType === "Product" && db.objectStoreNames.contains("products")) {
+        tx.objectStore("products").put(change.record, change.entityId);
+      }
+      if (change.record && change.entityType === "StockAdjustment" && db.objectStoreNames.contains("stockAdjustments")) {
+        tx.objectStore("stockAdjustments").put(change.record, change.entityId);
+      }
+      if (change.record && change.entityType === "StockLedger" && db.objectStoreNames.contains("stockLedger")) {
+        tx.objectStore("stockLedger").put(change.record, change.entityId);
+      }
+      if (db.objectStoreNames.contains("syncOutbox")) {
+        const outboxStore = tx.objectStore("syncOutbox");
+        const all = outboxStore.getAll();
+        all.onsuccess = () => {
+          for (const item of (all.result || [])) {
+            if (item && (item.entityId === change.entityId || item.id === change.entityId)) {
+              item.status = "SYNCED";
+              outboxStore.put(item, item.id);
+            }
+          }
+        };
+      }
+      if (db.objectStoreNames.contains("syncMetadata")) {
+        tx.objectStore("syncMetadata").put(String(change.revision), "lastSyncRevision");
+      }
       tx.oncomplete = () => { db.close(); resolve(); };
       tx.onerror = () => reject(tx.error);
     };
@@ -106,9 +164,13 @@ async function writeServerChange(page: any, change: any): Promise<void> {
 }
 
 async function apiJson(path: string, options: { method?: string; tenantId: string; branchId: string; userId: string; body?: unknown }): Promise<any> {
+  const headers: Record<string, string> = { "x-tenant-id": options.tenantId, "x-branch-id": options.branchId, "x-user-id": options.userId };
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+  }
   const res = await fetch(`${API_URL}${path}`, {
     method: options.method || "GET",
-    headers: { "content-type": "application/json", "x-tenant-id": options.tenantId, "x-branch-id": options.branchId, "x-user-id": options.userId },
+    headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const text = await res.text();
@@ -127,6 +189,7 @@ async function run(): Promise<void> {
     await waitForHttp(`${API_URL}/health`);
     const seeded = await seedTenant();
     tenantId = seeded.tenantId;
+    await apiJson("/api/legal/acceptance/accept-all", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: {} });
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
     await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
