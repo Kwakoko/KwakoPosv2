@@ -86,7 +86,64 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
     return;
   }
 
-  const user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+  let user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+  if (!user && process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "production-certification") {
+    // In dev / non-prod mode, auto-provision user in Prisma so that subsequent logins permanently persist
+    try {
+      const baseSlug = (email.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 32);
+      let tenant = await prisma.tenant.findFirst({
+        where: { OR: [{ slug: baseSlug }, { name: `${email.split("@")[0]} Organization` }] },
+        include: { branches: true },
+      });
+      if (!tenant) {
+        const { randomUUID } = await import("crypto");
+        const newTenantId = randomUUID();
+        const newBranchId = randomUUID();
+        tenant = await prisma.tenant.create({
+          data: {
+            id: newTenantId,
+            name: `${email.split("@")[0]} Organization`,
+            slug: baseSlug + "-" + newTenantId.slice(0, 6),
+            status: "ACTIVE",
+            branches: {
+              create: {
+                id: newBranchId,
+                name: "Main Branch",
+                code: "MAIN-" + newTenantId.slice(0, 6).toUpperCase(),
+                isMain: true,
+              },
+            },
+          },
+          include: { branches: true },
+        });
+      }
+      const branchId = tenant.branches[0]?.id;
+      let role = await prisma.role.findFirst({ where: { tenantId: tenant.id, name: "ADMIN" } });
+      if (!role) {
+        role = await prisma.role.create({
+          data: { tenantId: tenant.id, name: "ADMIN", permissions: ["*"] },
+        });
+      }
+      const passwordHash = await hashPassword(password);
+      const { randomUUID } = await import("crypto");
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          email,
+          name: email.split("@")[0] || "Admin User",
+          passwordHash,
+          tenantId: tenant.id,
+          branchId,
+          roleId: role.id,
+          status: "ACTIVE",
+        },
+      });
+      user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+    } catch {
+      // ignore auto-provision failure, will fall through to standard 401
+    }
+  }
+
   const passwordValid = !!user && await comparePassword(password, user.passwordHash);
   if (!passwordValid) {
     await recordLoginFailure(keys);
@@ -159,6 +216,34 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
   const server = buildServer({ config, productionPersistence });
   supportOperationsRoutes(server);
   supportControlTowerRoutes(server);
+
+  server.post("/auth/super-admin/setup/start", async (req, reply) => {
+    const body = (req.body || {}) as SuperAdminSetupStartBody;
+    try {
+      const data = await beginSuperAdminSetup(String(body.setupToken || ""));
+      return reply.send({ success: true, data });
+    } catch {
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
+    }
+  });
+
+  server.post("/auth/super-admin/setup/complete", async (req, reply) => {
+    const body = (req.body || {}) as SuperAdminSetupBody;
+    const setupToken = String(body.setupToken || "");
+    const newPassword = String(body.newPassword || "");
+    const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
+    const totpCode = String(body.totpCode || "");
+    if (!setupToken || !newPassword || !totpSecret || !totpCode) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
+    }
+    try {
+      await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
+      return reply.send({ success: true, data: { completed: true } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
+      return reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
+    }
+  });
 
   let supportScheduler: { stop: () => void } | undefined;
   if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();

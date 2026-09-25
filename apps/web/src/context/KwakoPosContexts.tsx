@@ -1,10 +1,11 @@
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from "react";
-import { LocalIndexedDbStore } from "../indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb } from "../indexedDb.js";
 import { ClientSyncEngine, clientSyncEngine } from "../clientSyncEngine.js";
 import { PwaVersionManager } from "../versionManager.js";
 import {
+  apiFetch,
   getAccessToken,
   getStoredSession,
   login as apiLogin,
@@ -285,8 +286,8 @@ function tabExists(manifest: ModuleManifest, tab: string): boolean {
   return manifest.bottomNav.some((item) => item.tab.trim().toLowerCase() === target || item.label.trim().toLowerCase() === target);
 }
 
-export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [db] = useState(() => new LocalIndexedDbStore(4));
+export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?: LocalIndexedDbStore }> = ({ children, dbInstance }) => {
+  const [db] = useState(() => dbInstance || defaultDb);
   const [syncEngine] = useState(
     () => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db),
   );
@@ -448,7 +449,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const refreshCount = () => {
       void db.ready.then(() => {
         try {
-          setPendingOutboxCount(db.getPendingOutbox().length);
+          const tenantId = user?.tenantId || currentTenantId || "tenant-default";
+          const branchId = user?.branchId || currentBranchId || "branch-default";
+          setPendingOutboxCount(db.getPendingOutbox(tenantId, branchId).length);
         } catch { /* ignore */ }
       });
     };
@@ -475,11 +478,21 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       branchId: loggedIn.branchId,
     };
     setUser(authUser);
+    try {
+      await db.ready;
+      await db.refreshStoresFromNative();
+      setPendingOutboxCount(db.getPendingOutbox(authUser.tenantId, authUser.branchId).length);
+    } catch (err) {
+      console.warn("[Session] Post-login store alignment warned:", err);
+    }
     return authUser;
   };
 
   const logout = async () => {
     try {
+      // 1. Guarantee all microtask persistence writes are committed to IndexedDB before session teardown
+      await db.flushPersistence().catch((err) => console.warn("Flush persistence on logout:", err));
+      // 2. Clear remote session
       await apiLogout();
     } catch (err) {
       console.warn("apiLogout error:", err);
@@ -673,44 +686,30 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     clientSyncEngine.init({
       localDb: db,
       pushApiFn: async (request) => {
-        const token = getAccessToken();
-        const authHeaders: Record<string, string> = {
-          "x-tenant-id": targetTenantId,
-          "x-branch-id": targetBranchId,
-          "x-user-id": targetUserId,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        };
-        const response = await fetch("/sync/push", {
+        const body = await apiFetch<any>("/sync/push", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            ...authHeaders,
+            "x-tenant-id": targetTenantId,
+            "x-branch-id": targetBranchId,
+            "x-user-id": targetUserId,
           },
-          credentials: "include",
           body: JSON.stringify(request),
         });
-        if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
-        const body = await response.json();
         return body.data || body;
       },
       deltaApiFn: async (since) => {
-        const token = getAccessToken();
-        const authHeaders: Record<string, string> = {
-          "x-tenant-id": targetTenantId,
-          "x-branch-id": targetBranchId,
-          "x-user-id": targetUserId,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        };
         const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
-        const response = await fetch(url, {
-          headers: authHeaders,
-          credentials: "include",
+        const body = await apiFetch<any>(url, {
+          headers: {
+            "x-tenant-id": targetTenantId,
+            "x-branch-id": targetBranchId,
+            "x-user-id": targetUserId,
+          },
         });
-        if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
-        const body = await response.json();
         return body.data || body;
       },
       tenantId: targetTenantId,
+      branchId: targetBranchId,
     });
   }, [db, user, currentTenantId, currentBranchId]);
 
@@ -723,8 +722,13 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const targetBranchId = user?.branchId || currentBranchId || "branch-default";
     const targetUserId = user?.id || "user-default";
 
+    // Re-queue any previously failed outbox items so they are retried
+    try {
+      db.retryFailedOutbox(targetTenantId, targetBranchId);
+    } catch { /* ignore */ }
+
     // Only set visual isSyncing if not quiet, or if pending items actually exist, or if forced
-    const pendingCount = db.getPendingOutbox().length;
+    const pendingCount = db.getPendingOutbox(targetTenantId, targetBranchId).length;
     const shouldShowVisualSync = !options?.quiet || pendingCount > 0 || options?.force;
 
     if (shouldShowVisualSync) {
@@ -739,53 +743,45 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!hasBootReconciledRef.current || options?.force) {
         hasBootReconciledRef.current = true;
         try {
-          reconcileLocalInventoryToOutbox(db, targetTenantId, targetBranchId);
+          await reconcileLocalInventoryToOutbox(db, targetTenantId, targetBranchId);
         } catch (reconErr) {
           console.warn("[Sync] Local inventory reconciliation error:", reconErr);
         }
       }
 
-      const token = getAccessToken();
-      const authHeaders: Record<string, string> = {
-        "x-tenant-id": targetTenantId,
-        "x-branch-id": targetBranchId,
-        "x-user-id": targetUserId,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      };
-
       const result = await syncEngine.syncWithServer(
         async (request) => {
-          const response = await fetch("/sync/push", {
+          const body = await apiFetch<any>("/sync/push", {
             method: "POST",
             headers: {
-              "Content-Type": "application/json",
-              ...authHeaders,
+              "x-tenant-id": targetTenantId,
+              "x-branch-id": targetBranchId,
+              "x-user-id": targetUserId,
             },
-            credentials: "include",
             body: JSON.stringify(request),
           });
-          if (!response.ok) throw new Error(`Sync push failed: HTTP ${response.status}`);
-          const body = await response.json();
           return body.data || body;
         },
         async (since) => {
           const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
-          const response = await fetch(url, {
-            headers: authHeaders,
-            credentials: "include",
+          const body = await apiFetch<any>(url, {
+            headers: {
+              "x-tenant-id": targetTenantId,
+              "x-branch-id": targetBranchId,
+              "x-user-id": targetUserId,
+            },
           });
-          if (!response.ok) throw new Error(`Sync delta failed: HTTP ${response.status}`);
-          const body = await response.json();
           return body.data || body;
         },
         targetTenantId,
+        targetBranchId,
       );
 
       const now = Date.now();
       lastSyncTimeRef.current = now;
       consecutiveFailuresRef.current = 0;
       setLastSyncedAt(now);
-      setPendingOutboxCount(db.getPendingOutbox().length);
+      setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
 
       if (result && (result.pulled > 0 || result.pushed > 0)) {
         window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
@@ -821,23 +817,37 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const data = event.data;
       if (!data) return;
       if (data.type === "OUTBOX_MUTATION") {
-        if (isOnline && !isSyncInProgressRef.current) {
-          void syncOutbox({ quiet: true }).catch(() => {});
-        }
+        void db.refreshStoresFromNative([
+          "syncOutbox", "sales", "products", "productVariants", "stockLedger",
+          "stockAdjustments", "customers", "suppliers", "receipts", "configuration",
+        ]).then(() => {
+          setPendingOutboxCount(db.getPendingOutbox((user?.tenantId || currentTenantId) || undefined, (user?.branchId || currentBranchId) || undefined).length);
+          if (isOnline && !isSyncInProgressRef.current) {
+            void syncOutbox({ quiet: true }).catch(() => {});
+          }
+        }).catch(() => {});
       } else if (data.type === "SYNC_CONVERGED") {
-        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+        void db.refreshStoresFromNative().then(() => {
+          setPendingOutboxCount(db.getPendingOutbox((user?.tenantId || currentTenantId) || undefined, (user?.branchId || currentBranchId) || undefined).length);
+          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+        }).catch(() => {
+          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+        });
       }
     };
     return () => {
       bc.close();
     };
-  }, [isOnline, syncOutbox]);
+  }, [isOnline, syncOutbox, db, user, currentTenantId, currentBranchId]);
 
-  // 2. Debounced trigger on local outbox enqueue (400ms debounce batches rapid user actions)
+  // 2. Debounced trigger on local outbox enqueue (250ms debounce batches rapid user actions)
   useEffect(() => {
     const handleOutboxQueued = () => {
       if (!isOnline) return;
-      setPendingOutboxCount(db.getPendingOutbox().length);
+      const targetTenantId = (user?.tenantId || currentTenantId) || undefined;
+      const targetBranchId = (user?.branchId || currentBranchId) || undefined;
+      setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
       if (outboxDebounceTimerRef.current) {
         clearTimeout(outboxDebounceTimerRef.current);
       }
@@ -845,7 +855,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (!isSyncInProgressRef.current) {
           void syncOutbox({ quiet: false }).catch(() => {});
         }
-      }, 400);
+      }, 250);
     };
     window.addEventListener("kwakopos:outbox-enqueued", handleOutboxQueued);
     return () => {
@@ -854,7 +864,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         clearTimeout(outboxDebounceTimerRef.current);
       }
     };
-  }, [isOnline, db, syncOutbox]);
+  }, [isOnline, db, syncOutbox, user, currentTenantId, currentBranchId]);
 
   // 3. Multi-device background convergence heartbeat (30s active, 5m hidden, exponential backoff)
   useEffect(() => {

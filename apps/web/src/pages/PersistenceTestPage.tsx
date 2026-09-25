@@ -30,6 +30,7 @@ import { LocalIndexedDbStore } from "../indexedDb.js";
 import { hlcEngine } from "../services/hlcEngine.js";
 import { apiFetch } from "../services/apiClient.js";
 import { queueAddStock, recordPosSaleDeductions, getEffectiveStock } from "../services/inventoryStockService.js";
+import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
 
 interface TestCase {
   id: string;
@@ -179,13 +180,14 @@ export const PersistenceTestPage: React.FC = () => {
         appendLog(testId, "Written to local IndexedDB store.");
 
         appendLog(testId, "Enqueueing sync mutation operation...");
-        db.enqueueOutbox({
+        await commitLocalOutbox(db, {
           id: `op-${Date.now()}`,
           entityType: "Receipt",
           entityId: sampleReceiptId,
           operationType: "CREATE",
           payload: { id: sampleReceiptId, total: 15000 },
           clientCreatedAt: new Date().toISOString(),
+          tenantId: currentTenantId || undefined,
         });
 
         const pending = db.getPendingOutbox();
@@ -213,13 +215,14 @@ export const PersistenceTestPage: React.FC = () => {
         await db.ready;
         appendLog(testId, "Staging 5 offline POS transactions in outbox...");
         for (let i = 1; i <= 5; i++) {
-          db.enqueueOutbox({
+          await commitLocalOutbox(db, {
             id: `offline-op-${Date.now()}-${i}`,
             entityType: "Receipt",
             entityId: `rec-off-${i}`,
             operationType: "CREATE",
             payload: { amount: 5000 * i },
             clientCreatedAt: new Date().toISOString(),
+            tenantId: currentTenantId || undefined,
           });
         }
 

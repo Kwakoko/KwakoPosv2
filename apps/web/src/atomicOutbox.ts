@@ -1,4 +1,5 @@
 import { LocalIndexedDbStore, type OutboxItem, db as defaultDb } from "./indexedDb.js";
+import { apiFetch } from "./services/apiClient.js";
 
 export const db = defaultDb;
 
@@ -12,15 +13,22 @@ const STORE_BY_ENTITY: Record<string, string> = {
   ProductPriceHistory: "productPriceHistory",
   Customer: "customers",
   Supplier: "suppliers",
-  Sale: "receipts",
+  Sale: "sales",
   PurchaseReceipt: "receipts",
-  Payment: "receipts",
+  Payment: "payments",
   Receipt: "receipts",
+};
+
+type AtomicBatch = {
+  items: OutboxItem[];
+  scheduled: boolean;
 };
 
 type PatchedStore = LocalIndexedDbStore & {
   __kwakoAtomicOutboxInstalled?: boolean;
   __kwakoAtomicTail?: Promise<void>;
+  __kwakoAtomicPending?: Promise<void>;
+  __kwakoAtomicBatch?: AtomicBatch;
 };
 
 function makeId(): string {
@@ -39,6 +47,95 @@ function localUpdatedAt(db: LocalIndexedDbStore, entityType: string, entityId: s
   return typeof value === "string" ? value : value instanceof Date ? value.toISOString() : null;
 }
 
+function scheduleAtomicBatch(db: PatchedStore): void {
+  const batch = db.__kwakoAtomicBatch;
+  if (!batch || batch.scheduled) return;
+  batch.scheduled = true;
+  db.__kwakoAtomicPending = new Promise<void>((resolve, reject) => {
+    // Wait two microtask turns: this captures both save-before-enqueue and
+    // enqueue-before-save synchronous call orders without creating a split commit.
+    queueMicrotask(() => {
+      queueMicrotask(() => {
+        const pending = db.__kwakoAtomicBatch;
+        db.__kwakoAtomicBatch = undefined;
+        if (!pending?.items.length) {
+          resolve();
+          return;
+        }
+
+        db.__kwakoAtomicTail = (db.__kwakoAtomicTail || Promise.resolve()).catch(() => undefined).then(async () => {
+        const stagedWrites = db.drainPendingPersistenceWrites();
+        const businessWrites = pending.items.flatMap((item) => {
+          const targetStore = STORE_BY_ENTITY[item.entityType];
+          if (!targetStore) return [];
+          const alreadyStaged = stagedWrites.some((write) => write.store === targetStore && write.key === item.entityId);
+          if (alreadyStaged) return [];
+          return [{
+            store: targetStore as any,
+            key: item.entityId,
+            value: item.payload,
+            delete: item.operationType === "DELETE",
+          }];
+        });
+        const allWrites = [...stagedWrites, ...businessWrites];
+        const stores = [
+          "syncOutbox",
+          "syncMetadata",
+          ...allWrites.map((write) => write.store),
+        ];
+        const uniqueStores = [...new Set(stores)];
+
+        const commit = new Promise<void>((commitResolve, commitReject) => {
+          const request = indexedDB.open(DB_NAME);
+          request.onerror = () => commitReject(request.error || new Error("ATOMIC_OUTBOX_DB_OPEN_FAILED"));
+          request.onsuccess = () => {
+            const nativeDb = request.result;
+            try {
+              for (const store of uniqueStores) {
+                if (!nativeDb.objectStoreNames.contains(store)) throw new Error(`ATOMIC_OUTBOX_MISSING_STORE:${store}`);
+              }
+              const tx = nativeDb.transaction(uniqueStores, "readwrite");
+              for (const write of allWrites) {
+                if (write.delete) tx.objectStore(write.store).delete(write.key);
+                else tx.objectStore(write.store).put(write.value, write.key);
+              }
+              for (const item of pending.items) {
+                tx.objectStore("syncOutbox").put(item, item.id);
+                const marker = JSON.stringify({
+                  operationId: item.id,
+                  entityType: item.entityType,
+                  entityId: item.entityId,
+                  operationType: item.operationType,
+                  payload: item.payload,
+                  committedAt: new Date().toISOString(),
+                });
+                tx.objectStore("syncMetadata").put(marker, `${ATOMIC_MARKER_PREFIX}${item.id}`);
+              }
+              tx.oncomplete = () => { nativeDb.close(); commitResolve(); };
+              tx.onerror = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_FAILED"); nativeDb.close(); commitReject(error); };
+              tx.onabort = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_ABORTED"); nativeDb.close(); commitReject(error); };
+            } catch (error) {
+              nativeDb.close();
+              commitReject(error);
+            }
+          };
+        });
+
+        try {
+          await commit;
+        } catch (error) {
+          const rollbackStores = [...new Set(allWrites.map((write) => write.store).concat("syncOutbox"))] as any;
+          await db.refreshStoresFromNative(rollbackStores).catch(() => undefined);
+          throw error;
+        }
+      });
+
+      db.__kwakoAtomicTail.then(resolve, reject);
+      });
+    });
+  });
+}
+
 function patchInstance(db: PatchedStore): void {
   if (db.__kwakoAtomicOutboxInstalled) return;
   db.__kwakoAtomicOutboxInstalled = true;
@@ -46,6 +143,7 @@ function patchInstance(db: PatchedStore): void {
 
   const originalFlush = db.flushPersistence.bind(db);
   db.flushPersistence = async () => {
+    if (db.__kwakoAtomicPending) await db.__kwakoAtomicPending;
     await originalFlush();
     await db.__kwakoAtomicTail;
   };
@@ -69,53 +167,27 @@ function patchInstance(db: PatchedStore): void {
       clientCreatedAt: item.clientCreatedAt || new Date().toISOString(),
       idempotencyKey: item.idempotencyKey || opId,
       status: "PENDING",
+      tenantId: item.tenantId,
+      branchId: item.branchId,
     };
 
     db.syncOutbox.set(opId, outboxItem);
-    const targetStore = STORE_BY_ENTITY[entityType];
-    const deleting = operationType === "DELETE";
-    const map = targetStore === "products" ? db.products
-      : targetStore === "productVariants" ? db.productVariants
-      : targetStore === "stockAdjustments" ? db.stockAdjustments
-      : targetStore === "stockLedger" ? db.stockLedger
-      : targetStore === "productPriceHistory" ? db.productPriceHistory
-      : targetStore === "customers" ? db.customers
-      : targetStore === "suppliers" ? db.suppliers
-      : targetStore === "receipts" ? db.receipts
-      : null;
-    const hadPrevious = Boolean(map?.has(entityId));
-    const previousValue = map?.get(entityId);
-    if (map) deleting ? map.delete(entityId) : map.set(entityId, payload as any);
-
-    const restoreMemory = () => { if (!map) return; if (hadPrevious) map.set(entityId, previousValue as any); else map.delete(entityId); };
-
-    const marker = JSON.stringify({ operationId: opId, entityType, entityId, operationType, payload, committedAt: new Date().toISOString() });
-    db.__kwakoAtomicTail = db.__kwakoAtomicTail!.catch(() => undefined).then(() => new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME);
-      request.onerror = () => reject(request.error || new Error("ATOMIC_OUTBOX_DB_OPEN_FAILED"));
-      request.onsuccess = () => {
-        const nativeDb = request.result;
-        try {
-          const stores = ["syncOutbox", "syncMetadata", ...(targetStore ? [targetStore] : [])];
-          const uniqueStores = [...new Set(stores)];
-          const tx = nativeDb.transaction(uniqueStores, "readwrite");
-          // native IndexedDB transaction: business record + outbox + atomic marker commit or roll back together.
-          tx.objectStore("syncOutbox").put(outboxItem, opId);
-          tx.objectStore("syncMetadata").put(marker, `${ATOMIC_MARKER_PREFIX}${opId}`);
-          if (targetStore) {
-            if (deleting) tx.objectStore(targetStore).delete(entityId);
-            else tx.objectStore(targetStore).put(payload, entityId);
-          }
-          tx.oncomplete = () => { nativeDb.close(); resolve(); };
-          tx.onerror = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_FAILED"); restoreMemory(); nativeDb.close(); reject(error); };
-          tx.onabort = () => { const error = tx.error || new Error("ATOMIC_OUTBOX_TRANSACTION_ABORTED"); restoreMemory(); nativeDb.close(); reject(error); };
-        } catch (error) {
-          nativeDb.close();
-          reject(error);
+    const batch = db.__kwakoAtomicBatch || { items: [], scheduled: false };
+    batch.items.push(outboxItem);
+    db.__kwakoAtomicBatch = batch;
+    scheduleAtomicBatch(db);
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
+        if ("BroadcastChannel" in window) {
+          const bc = new BroadcastChannel("kwakopos_sync_channel");
+          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.close();
         }
-      };
-    }));
-
+      }
+    } catch {
+      /* ignore broadcast error */
+    }
     return outboxItem;
   }) as PatchedStore["enqueueOutbox"];
 }
@@ -156,6 +228,18 @@ export async function enqueueOutbox(tx: any, targetDb: LocalIndexedDbStore = def
       };
       await targetDb.outbox.add(outboxItem);
       item = outboxItem;
+      try {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
+          if ("BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("kwakopos_sync_channel");
+            bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+            bc.close();
+          }
+        }
+      } catch {
+        /* ignore broadcast error */
+      }
     }
     await targetDb.flushPersistence().catch(() => {});
     return item;
@@ -191,41 +275,57 @@ export async function retryWithBackoff(
 }
 
 async function defaultApiPush(item: OutboxItem): Promise<any> {
-  const endpoint = item.entityType === "Sale" ? "/api/v1/pos/sales" : "/sync/push";
-  const body =
-    item.entityType === "Sale"
-      ? item.payload
-      : {
-          deviceId: "pos-terminal",
-          operations: [
-            {
-              operationId: item.id,
-              entityType: item.entityType,
-              entityId: item.entityId,
-              operationType: item.operationType,
-              payload: item.payload,
-              clientCreatedAt: item.clientCreatedAt,
-              idempotencyKey: item.idempotencyKey,
-            },
-          ],
-        };
-  const token =
-    typeof window !== "undefined" && window.localStorage
-      ? localStorage.getItem("kwakopos_access_token")
-      : null;
-  const res = await fetch(endpoint, {
+  let normalizedPayload = item.payload;
+  if (item.entityType === "Sale" && normalizedPayload) {
+    const rawItems = Array.isArray(normalizedPayload.items)
+      ? normalizedPayload.items
+      : Array.isArray(normalizedPayload.cart)
+      ? normalizedPayload.cart
+      : [];
+    normalizedPayload = {
+      ...normalizedPayload,
+      id: item.entityId || normalizedPayload.id,
+      deviceId: "pos-terminal",
+      operationId: item.id,
+      idempotencyKey: item.idempotencyKey || item.id,
+      items: rawItems.map((it: any) => ({
+        productId: String(it.productId || it.product?.id || it.id || "prod_unknown"),
+        variantId: String(it.variantId || `${it.productId || it.product?.id || it.id || "prod"}-default`),
+        quantity: Number(it.quantity || it.qty || 1),
+        unitPrice: Number(it.unitPrice ?? it.price ?? it.product?.price ?? 0),
+        unitCost: Number(it.unitCost ?? it.costPrice ?? (it.product as any)?.costPrice ?? (it.product as any)?.buyingPrice ?? 0),
+        discountAmount: Number(it.discountAmount || 0),
+        taxAmount: Number(it.taxAmount || 0),
+      })),
+      payments: normalizedPayload.payments || [
+        {
+          amount: Number(normalizedPayload.grandTotal || normalizedPayload.totalAmount || normalizedPayload.total || 0),
+          paymentMethod: "CASH",
+        },
+      ],
+    };
+  }
+
+  const body = {
+    deviceId: "pos-terminal",
+    operations: [
+      {
+        operationId: item.id,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        operationType: item.operationType,
+        payload: normalizedPayload,
+        clientCreatedAt: item.clientCreatedAt,
+        idempotencyKey: item.idempotencyKey,
+      },
+    ],
+  };
+
+  const res = await apiFetch<any>("/sync/push", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`API push failed with HTTP ${res.status}`);
-  }
-  return res.json();
+  return res?.data || res;
 }
 
 export async function processOutbox(opts?: {

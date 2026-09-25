@@ -179,6 +179,8 @@ describe("Super-Strong Offline Sync", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: "protocol-key-1",
       status: "PENDING",
+      tenantId: "tenant-default",
+      branchId: "branch-default",
     });
     const client = new ClientSyncEngine("device-protocol", db);
     await expect(client.syncWithServer(

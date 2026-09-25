@@ -48,6 +48,7 @@ interface ApiErrorPayload {
 }
 
 const SESSION_KEY = "kwakopos:v2:session";
+const LEGACY_TOKEN_KEY = "kwakopos_access_token";
 
 export function getStoredSession(): StoredSession | null {
   if (typeof window === "undefined") return null;
@@ -83,18 +84,49 @@ export function setStoredSession(session: StoredSession | null): void {
   if (!session) {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    try { window.localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
   } else {
     const serialized = JSON.stringify(session);
     try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
     try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+    if (session.accessToken) {
+      try { window.localStorage.setItem(LEGACY_TOKEN_KEY, session.accessToken); } catch { /* ignore */ }
+    }
   }
 }
 
-let accessToken: string | null = typeof window !== "undefined" ? getStoredSession()?.accessToken || null : null;
+let accessToken: string | null = typeof window !== "undefined" ? getStoredSession()?.accessToken || window.localStorage.getItem(LEGACY_TOKEN_KEY) || null : null;
 let refreshInFlight: Promise<string | null> | null = null;
 
-export function getAccessToken(): string | null { return accessToken; }
-export function setAccessToken(token: string | null): void { accessToken = token; }
+export function getAccessToken(): string | null {
+  if (accessToken) return accessToken;
+  if (typeof window !== "undefined") {
+    const stored = getStoredSession();
+    if (stored?.accessToken) {
+      accessToken = stored.accessToken;
+      return accessToken;
+    }
+    const legacy = window.localStorage.getItem(LEGACY_TOKEN_KEY);
+    if (legacy) {
+      accessToken = legacy;
+      return accessToken;
+    }
+  }
+  return null;
+}
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+  if (typeof window !== "undefined") {
+    try {
+      if (token) {
+        window.localStorage.setItem(LEGACY_TOKEN_KEY, token);
+      } else {
+        window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+      }
+    } catch { /* ignore */ }
+  }
+}
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, allowRefresh = true): Promise<T> {
   const url = typeof input === "string" && input.startsWith("/") && typeof window === "undefined"

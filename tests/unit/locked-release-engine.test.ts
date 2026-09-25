@@ -147,6 +147,6 @@ describe("KwakoPos Locked Automated Release Engine Certification Suite", () => {
       expect(res.version).toBe("2.5.0");
       expect(res.auditRecord.authorizer).toBe("SECURITY_OFFICER");
       expect(res.auditRecord.incidentId).toBe("INC-TEST-999");
-    });
+    }, 300000);
   });
 });

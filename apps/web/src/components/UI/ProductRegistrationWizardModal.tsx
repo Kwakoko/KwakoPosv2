@@ -26,6 +26,7 @@ import { useToast } from "../../context/ToastContext.js";
 import { useAudioFeedback } from "../../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../../services/dataChangeEvent.js";
 import { STOCK_CHANGED_EVENT } from "../../services/inventoryStockService.js";
+import { NumberStepper } from "./NumberStepper.js";
 
 export type ProductType = "STANDARD" | "COMPOSITE" | "SERVICE" | "SERIALIZED";
 export type TrackingType = "TRACKED" | "BATCH_EXPIRY" | "SERIALIZED" | "NON_TRACKED";
@@ -500,88 +501,45 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           };
         });
 
-        // 1. Persist Product and Variants locally with initial stock
-        db.saveProductWithVariantsLocal(
-          productRecord as any,
-          variantsToSave as any,
-          scopedCtx
-        );
-
-        // 2. Enqueue Outbox CREATE for Product
-        db.enqueueOutbox({
-          entityType: "Product",
-          entityId: prodId,
-          operationType: "CREATE",
-          payload: {
-            ...productRecord,
-            variants: variantsToSave,
-          },
-          idempotencyKey: `PROD-CREATE-${prodId}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
+        const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+        const makeOutboxItem = (entityType: string, entityId: string, payload: Record<string, unknown>, idempotencyKey: string) => ({
+          id: idempotencyKey, entityType, entityId, operationType: "CREATE" as const, payload,
+          clientCreatedAt: now, idempotencyKey, status: "PENDING" as const,
+          tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
         });
 
-        // 3. Enqueue Outbox CREATE for each ProductVariant
+        const writes: Array<{ store: any; key: string; value?: any; delete?: boolean }> = [
+          { store: "products", key: prodId, value: productRecord },
+          ...variantsToSave.map((v) => ({ store: "productVariants", key: v.id, value: v })),
+        ];
+        const outboxItems: any[] = [
+          makeOutboxItem("Product", prodId, { ...productRecord, variants: variantsToSave }, "PROD-CREATE-" + prodId),
+          ...variantsToSave.map((v) => makeOutboxItem("ProductVariant", v.id, { ...v }, "VAR-CREATE-" + v.id)),
+        ];
         for (const v of variantsToSave) {
-          db.enqueueOutbox({
-            entityType: "ProductVariant",
-            entityId: v.id,
-            operationType: "CREATE",
-            payload: {
-              ...v,
-            },
-            idempotencyKey: `VAR-CREATE-${v.id}`,
-            tenantId: currentTenantId || undefined,
-            branchId: currentBranchId || undefined,
-          });
-
-          // 4. Record opening stock movement in StockLedger & Outbox StockAdjustment
           const vOpeningStock = Number(variants.find((item) => item.id === v.id)?.openingStock) || 0;
-          if (vOpeningStock > 0) {
-            db.saveStockLedgerLocal(
-              {
-                id: `led-${v.id}`,
-                productId: prodId,
-                variantId: v.id,
-                sku: v.sku,
-                name: v.name,
-                quantity: vOpeningStock,
-                quantityChange: vOpeningStock,
-                quantityBefore: 0,
-                quantityAfter: vOpeningStock,
-                balanceAfter: vOpeningStock,
-                reason: "OPENING_STOCK",
-                movementType: "OPENING_STOCK",
-                timestamp: now,
-                tenantId: currentTenantId || "default",
-                branchId: currentBranchId || undefined,
-              } as any,
-              scopedCtx
-            );
-
-            db.enqueueOutbox({
-              entityType: "StockAdjustment",
-              entityId: `adj-${v.id}`,
-              operationType: "CREATE",
-              payload: {
-                productId: prodId,
-                variantId: v.id,
-                sku: v.sku,
-                adjustmentType: "INCREASE",
-                movementType: "OPENING_STOCK",
-                quantityChange: vOpeningStock,
-                reason: "OPENING_STOCK",
-                deviceId: "web-client",
-                operationId: `adj-${v.id}`,
-                idempotencyKey: `ADJ-${v.id}`,
-              },
-              idempotencyKey: `ADJ-${v.id}`,
-              tenantId: currentTenantId || undefined,
-              branchId: currentBranchId || undefined,
-            });
-          }
+          if (vOpeningStock <= 0) continue;
+          const ledgerId = "led-" + v.id;
+          writes.push({
+            store: "stockLedger", key: ledgerId,
+            value: {
+              id: ledgerId, productId: prodId, variantId: v.id, sku: v.sku, name: v.name,
+              quantity: vOpeningStock, quantityChange: vOpeningStock, quantityBefore: 0, quantityAfter: vOpeningStock,
+              balanceAfter: vOpeningStock, reason: "OPENING_STOCK", movementType: "OPENING_STOCK",
+              timestamp: now, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+            },
+          });
+          outboxItems.push(makeOutboxItem(
+            "StockAdjustment", "adj-" + v.id,
+            {
+              productId: prodId, variantId: v.id, sku: v.sku, adjustmentType: "INCREASE",
+              movementType: "OPENING_STOCK", quantityChange: vOpeningStock, reason: "OPENING_STOCK",
+              deviceId: "web-client", operationId: "adj-" + v.id, idempotencyKey: "ADJ-" + v.id,
+            },
+            "ADJ-" + v.id,
+          ));
         }
-      } else {
+        await db.executeAtomicMutation({ writes, outboxItems, tenantContext });      } else {
         // --- Non-Variant Product Registration ---
         const numOpeningStock = Number(openingStock) || 0;
         productRecord.stock = numOpeningStock;
@@ -608,89 +566,42 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           updatedAt: now,
         };
 
-        // 1. Persist Product and Default Variant locally with initial stock
-        db.saveProductLocal(
-          productRecord as any,
-          scopedCtx
-        );
-        db.saveVariantLocal(
-          defaultVariant as any,
-          scopedCtx
-        );
-
-        // 2. Enqueue Outbox CREATE for Product
-        db.enqueueOutbox({
-          entityType: "Product",
-          entityId: prodId,
-          operationType: "CREATE",
-          payload: {
-            ...productRecord,
-            hasVariants: false,
-            variants: [defaultVariant],
-          },
-          idempotencyKey: `PROD-CREATE-${prodId}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
+        const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+        const makeOutboxItem = (entityType: string, entityId: string, payload: Record<string, unknown>, idempotencyKey: string) => ({
+          id: idempotencyKey, entityType, entityId, operationType: "CREATE" as const, payload,
+          clientCreatedAt: now, idempotencyKey, status: "PENDING" as const,
+          tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
         });
-
-        // 3. Enqueue Outbox CREATE for Default ProductVariant
-        db.enqueueOutbox({
-          entityType: "ProductVariant",
-          entityId: defaultVarId,
-          operationType: "CREATE",
-          payload: {
-            ...defaultVariant,
-          },
-          idempotencyKey: `VAR-CREATE-${defaultVarId}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
-        });
-
-        // 4. Record opening stock movement in StockLedger & Outbox StockAdjustment
+        const writes: Array<{ store: any; key: string; value?: any; delete?: boolean }> = [
+          { store: "products", key: prodId, value: productRecord },
+          { store: "productVariants", key: defaultVarId, value: defaultVariant },
+        ];
+        const outboxItems: any[] = [
+          makeOutboxItem("Product", prodId, { ...productRecord, hasVariants: false, variants: [defaultVariant] }, "PROD-CREATE-" + prodId),
+          makeOutboxItem("ProductVariant", defaultVarId, { ...defaultVariant }, "VAR-CREATE-" + defaultVarId),
+        ];
         if (numOpeningStock > 0) {
-          db.saveStockLedgerLocal(
-            {
-              id: `led-${defaultVarId}`,
-              productId: prodId,
-              variantId: defaultVarId,
-              sku: defaultVariant.sku,
-              name: productRecord.name,
-              quantity: numOpeningStock,
-              quantityChange: numOpeningStock,
-              quantityBefore: 0,
-              quantityAfter: numOpeningStock,
-              balanceAfter: numOpeningStock,
-              reason: "OPENING_STOCK",
-              movementType: "OPENING_STOCK",
-              timestamp: now,
-              tenantId: currentTenantId || "default",
-              branchId: currentBranchId || undefined,
-            } as any,
-            scopedCtx
-          );
-
-          db.enqueueOutbox({
-            entityType: "StockAdjustment",
-            entityId: `adj-${defaultVarId}`,
-            operationType: "CREATE",
-            payload: {
-              productId: prodId,
-              variantId: defaultVarId,
-              sku: defaultVariant.sku,
-              adjustmentType: "INCREASE",
-              movementType: "OPENING_STOCK",
-              quantityChange: numOpeningStock,
-              reason: "OPENING_STOCK",
-              deviceId: "web-client",
-              operationId: `adj-${defaultVarId}`,
-              idempotencyKey: `ADJ-${defaultVarId}`,
+          const ledgerId = "led-" + defaultVarId;
+          writes.push({
+            store: "stockLedger", key: ledgerId,
+            value: {
+              id: ledgerId, productId: prodId, variantId: defaultVarId, sku: defaultVariant.sku, name: productRecord.name,
+              quantity: numOpeningStock, quantityChange: numOpeningStock, quantityBefore: 0, quantityAfter: numOpeningStock,
+              balanceAfter: numOpeningStock, reason: "OPENING_STOCK", movementType: "OPENING_STOCK",
+              timestamp: now, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
             },
-            idempotencyKey: `ADJ-${defaultVarId}`,
-            tenantId: currentTenantId || undefined,
-            branchId: currentBranchId || undefined,
           });
+          outboxItems.push(makeOutboxItem(
+            "StockAdjustment", "adj-" + defaultVarId,
+            {
+              productId: prodId, variantId: defaultVarId, sku: defaultVariant.sku, adjustmentType: "INCREASE",
+              movementType: "OPENING_STOCK", quantityChange: numOpeningStock, reason: "OPENING_STOCK",
+              deviceId: "web-client", operationId: "adj-" + defaultVarId, idempotencyKey: "ADJ-" + defaultVarId,
+            },
+            "ADJ-" + defaultVarId,
+          ));
         }
-      }
+        await db.executeAtomicMutation({ writes, outboxItems, tenantContext });      }
 
       // Success workflow
       playSuccessChime();
@@ -1486,10 +1397,10 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                           <th>Variant Name</th>
                           <th>SKU Code</th>
                           <th>Barcode</th>
-                          <th>Cost (Tsh)</th>
-                          <th>Retail (Tsh)</th>
-                          <th>Opening Stock</th>
-                          <th></th>
+                          <th style={{ width: "105px" }}>Cost (Tsh)</th>
+                          <th style={{ width: "115px" }}>Retail (Tsh)</th>
+                          <th style={{ width: "95px" }}>Opening Stock</th>
+                          <th style={{ width: "36px" }}></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1546,13 +1457,14 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                                   />
                                 </td>
                                 <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    type="number"
+                                  <NumberStepper
+                                    size="xs"
                                     min={0}
+                                    step={1}
+                                    width="96px"
                                     value={v.buyingPrice}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
+                                    ariaLabel="Buying cost price"
+                                    onChange={(val) => {
                                       setVariants((prev) =>
                                         prev.map((item, idx) =>
                                           idx === vIdx
@@ -1561,18 +1473,18 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                                         )
                                       );
                                     }}
-                                    style={{ width: "70px" }}
                                   />
                                 </td>
                                 <td>
                                   <div className="v2-flex v2-items-center v2-gap-1">
-                                    <input
-                                      className="v2-input v2-input-xs v2-mono"
-                                      type="number"
+                                    <NumberStepper
+                                      size="xs"
                                       min={0}
+                                      step={1}
+                                      width="96px"
                                       value={v.sellingPrice}
-                                      onChange={(e) => {
-                                        const val = Number(e.target.value);
+                                      ariaLabel="Selling retail price"
+                                      onChange={(val) => {
                                         setVariants((prev) =>
                                           prev.map((item, idx) =>
                                             idx === vIdx
@@ -1581,7 +1493,6 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                                           )
                                         );
                                       }}
-                                      style={{ width: "70px" }}
                                     />
                                     {isOverridden && (
                                       <span
@@ -1595,18 +1506,18 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
                                   </div>
                                 </td>
                                 <td>
-                                  <input
-                                    className="v2-input v2-input-xs v2-mono"
-                                    type="number"
+                                  <NumberStepper
+                                    size="xs"
                                     min={0}
+                                    step={1}
+                                    width="86px"
                                     value={v.openingStock}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
+                                    ariaLabel="Opening stock"
+                                    onChange={(val) => {
                                       setVariants((prev) =>
                                         prev.map((item, idx) => (idx === vIdx ? { ...item, openingStock: val } : item))
                                       );
                                     }}
-                                    style={{ width: "55px" }}
                                   />
                                 </td>
                                 <td>

@@ -31,9 +31,11 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
+import { NumberStepper } from "../components/UI/NumberStepper.js";
 import { safeUUID } from "../services/apiClient.js";
 import { queueAddStock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -654,12 +656,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setInflowVariants(generated);
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing inventory."); return; }
     if (!newProd.name.trim()) return;
 
     const autoSku = `SKU-${newProd.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const prodId = safeUUID();
+
+    const pendingOutboxes: any[] = [];
 
     const isVariantProduct = hasVariantsToggle && inflowVariants.length > 0;
     const computedStock = isVariantProduct
@@ -721,7 +726,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
       db.saveProductWithVariantsLocal(newProductRecord as any, variantsToSave as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
-      db.enqueueOutbox({
+      pendingOutboxes.push({
         entityType: "Product",
         entityId: prodId,
         operationType: "CREATE",
@@ -756,7 +761,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       });
 
       for (const v of variantsToSave) {
-        db.enqueueOutbox({
+        pendingOutboxes.push({
           entityType: "ProductVariant",
           entityId: v.id,
           operationType: "CREATE",
@@ -794,7 +799,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             tenantId: currentTenantId || "default",
           } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
-          db.enqueueOutbox({
+          pendingOutboxes.push({
             entityType: "StockAdjustment",
             entityId: `adj-${v.id}`,
             operationType: "CREATE",
@@ -838,7 +843,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       db.saveProductLocal(newProductRecord as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
       db.saveVariantLocal(defaultVariant as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
-      db.enqueueOutbox({
+      pendingOutboxes.push({
         entityType: "Product",
         entityId: prodId,
         operationType: "CREATE",
@@ -860,7 +865,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         branchId: currentBranchId || undefined,
       });
 
-      db.enqueueOutbox({
+      pendingOutboxes.push({
         entityType: "ProductVariant",
         entityId: defaultVarId,
         operationType: "CREATE",
@@ -885,7 +890,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           tenantId: currentTenantId || "default",
         } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
 
-        db.enqueueOutbox({
+        pendingOutboxes.push({
           entityType: "StockAdjustment",
           entityId: `adj-${defaultVarId}`,
           operationType: "CREATE",
@@ -908,6 +913,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       }
     }
 
+    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     void loadInventory();
     setNewProd({ name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
     setHasVariantsToggle(false);
@@ -937,9 +943,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setEditProductModal(true);
   };
 
-  const handleSaveEditProduct = (e: React.FormEvent) => {
+  const handleSaveEditProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing inventory."); return; }
     if (!editingItem) return;
+    const pendingOutboxes: any[] = [];
     const prevItem = editingItem;
     const newStock = Number(editProd.stock);
     const newReorder = Number(editProd.reorderLevel);
@@ -980,7 +988,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
     db.saveProductLocal(updatedRecord as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
 
-    db.enqueueOutbox({
+    pendingOutboxes.push({
       entityType: "Product",
       entityId: prevItem.id,
       operationType: "UPDATE",
@@ -1027,7 +1035,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         tenantId: currentTenantId || "default",
       } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
 
-      db.enqueueOutbox({
+      pendingOutboxes.push({
         entityType: "StockAdjustment",
         entityId: adjOpId,
         operationType: "CREATE",
@@ -1048,6 +1056,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       });
     }
 
+    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     void loadInventory();
     setEditProductModal(false);
     setEditingItem(null);
@@ -1063,7 +1072,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteConfirmModal(true);
   };
 
-  const handleConfirmArchiveDelete = (softDelete = true) => {
+  const handleConfirmArchiveDelete = async (softDelete = true) => {
     if (!itemToDelete) return;
     const target = itemToDelete;
 
@@ -1086,7 +1095,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         updatedAt: new Date().toISOString(),
       };
       db.saveProductLocal(archived as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-      db.enqueueOutbox({
+      await commitLocalOutbox(db, {
         entityType: "Product",
         entityId: target.id,
         operationType: "UPDATE",
@@ -1103,8 +1112,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       });
     } else {
       // Direct hard deletion from active cache
-      db.products.delete(target.id);
-      db.enqueueOutbox({
+      db.deleteProductLocal(target.id);
+      await commitLocalOutbox(db, {
         entityType: "Product",
         entityId: target.id,
         operationType: "UPDATE",
@@ -1134,14 +1143,16 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setCategoryCascadeRename(true); setAddCategoryModal(true);
   };
 
-  const handleSaveCategory = (e: React.FormEvent) => {
+  const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault(); const name = newCategoryName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
+    const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingCategory?.id && isUuid(editingCategory.id) ? editingCategory.id : safeUUID();
     const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
     const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId }) : categoriesMeta;
     const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId }); setCategoriesMeta(next);
-    db.enqueueOutbox({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
-    if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     setAddCategoryModal(false); setEditingCategory(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
   };
   const handleOpenDeleteCategory = (name: string, assignedCount: number) => {
@@ -1151,24 +1162,29 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteCategorySafeguard({ category: cat.name, assignedCount, fallbackCategory: fallback?.name || "" });
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (!deleteCategorySafeguard || !currentTenantId || !currentBranchId) return;
+    const pendingOutboxes: any[] = [];
     const cat = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.category.toLowerCase()); const replacement = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.fallbackCategory.toLowerCase());
     const replacementId = deleteCategorySafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!cat || !isUuid(cat.id) || (replacementId && !isUuid(replacementId))) return;
     const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId });
-    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
-    db.enqueueOutbox({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); setDeleteCategorySafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
+    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    pendingOutboxes.push({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
+    setDeleteCategorySafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
   };
 
   const handleOpenEditBrand = (brand: BrandRecord) => { if (!isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; } setEditingBrand(brand); setNewBrandName(brand.name); setNewBrandOrigin(brand.origin || ""); setNewBrandNotes(brand.notes || ""); setBrandCascadeRename(true); setAddBrandModal(true); };
-  const handleSaveBrand = (e: React.FormEvent) => {
+  const handleSaveBrand = async (e: React.FormEvent) => {
     e.preventDefault(); const name = newBrandName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
+    const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingBrand?.id && isUuid(editingBrand.id) ? editingBrand.id : safeUUID();
     const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), origin: newBrandOrigin.trim() || undefined, notes: newBrandNotes.trim() || undefined, isActive: true, updatedAt: now, createdAt: (editingBrand as any)?.createdAt || now };
     const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId }) : brandsMeta;
     const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId }); setBrandsMeta(next);
-    db.enqueueOutbox({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    pendingOutboxes.push({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     setAddBrandModal(false); setEditingBrand(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
   };
 
@@ -1179,13 +1195,16 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteBrandSafeguard({ brand: brand.name, assignedCount, fallbackBrand: fallback?.name || "" });
   };
 
-  const handleConfirmDeleteBrand = () => {
+  const handleConfirmDeleteBrand = async () => {
     if (!deleteBrandSafeguard || !currentTenantId || !currentBranchId) return;
+    const pendingOutboxes: any[] = [];
     const brand = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.brand.toLowerCase()); const replacement = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.fallbackBrand.toLowerCase()); const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!brand || !isUuid(brand.id) || (replacementId && !isUuid(replacementId))) return;
     const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId });
-    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); db.enqueueOutbox({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
-    db.enqueueOutbox({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); setDeleteBrandSafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
+    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    pendingOutboxes.push({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
+    setDeleteBrandSafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
   };
 
   return (
@@ -1212,7 +1231,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
             <Upload size={13} /> Bulk CSV Import
           </button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => { setActiveTab("ledger"); setAdjSku(items[0]?.variants?.[0]?.sku || items[0]?.sku || ""); setStockAdjModal(true); }} type="button">
+          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={async () => { setActiveTab("ledger"); setAdjSku(items[0]?.variants?.[0]?.sku || items[0]?.sku || ""); setStockAdjModal(true); }} type="button">
             <PackageOpen size={13} /> Add Stock
           </button>
           <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
@@ -1307,7 +1326,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <button
                         type="button"
                         className="v2-btn v2-btn-primary v2-btn-sm"
-                        onClick={() => {
+                        onClick={async () => {
                           const lowItems = items.filter((i) => i.stock <= i.reorderLevel);
                           const poId = `PO-DRAFT-${Date.now().toString().slice(-6)}`;
                           const poLines = lowItems.map((item) => {
@@ -1497,7 +1516,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           </button>
                           <button
                             className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                            onClick={() => {
+                            onClick={async () => {
                               setSelectedBarcodeItem(item);
                               setBarcodeModal(true);
                             }}
@@ -1540,7 +1559,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             <div className="v2-flex v2-gap-2">
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setEditingCategory(null);
                   setNewCategoryName("");
                   setNewCategoryDesc("");
@@ -1553,7 +1572,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </button>
               <button
                 className="v2-btn v2-btn-secondary v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setEditingBrand(null);
                   setNewBrandName("");
                   setNewBrandOrigin("");
@@ -1613,7 +1632,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 </div>
                 <button
                   className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => {
+                  onClick={async () => {
                     setEditingCategory(null);
                     setNewCategoryName("");
                     setNewCategoryDesc("");
@@ -1706,7 +1725,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => {
+                                  onClick={async () => {
                                     setCategoryFilter(cat.name);
                                     setActiveTab("products");
                                     toast.info("Catalog Filtered", `Showing products in category "${cat.name}".`);
@@ -1756,7 +1775,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 </div>
                 <button
                   className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => {
+                  onClick={async () => {
                     setEditingBrand(null);
                     setNewBrandName("");
                     setNewBrandOrigin("");
@@ -1840,7 +1859,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => {
+                                  onClick={async () => {
                                     setSearchQuery(brand.name);
                                     setActiveTab("products");
                                     toast.info("Catalog Filtered", `Showing products for brand "${brand.name}".`);
@@ -1960,7 +1979,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       {l.qty > 0 ? `+${l.qty}` : l.qty}
                     </td>
                     <td className="v2-mono v2-text-xs">
-                      {l.qtyBefore} â†’ <span className="v2-font-bold">{l.balance}</span>
+                      {l.qtyBefore} → <span className="v2-font-bold">{l.balance}</span>
                     </td>
                     <td className="v2-mono">{money(l.unitCost || 0)}</td>
                     <td className="v2-mono v2-font-bold">{money(l.totalCost || 0)}</td>
@@ -2137,7 +2156,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   <button
                     type="button"
                     className="v2-btn v2-btn-ghost v2-btn-xs"
-                    onClick={() => {
+                    onClick={async () => {
                       setEditingBrand(null);
                       setNewBrandName("");
                       setNewBrandOrigin("");
@@ -2290,7 +2309,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             <div className="v2-flex v2-justify-end v2-gap-2">
               <button
                 className="v2-btn v2-btn-secondary v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setDeleteConfirmModal(false);
                   setItemToDelete(null);
                 }}
@@ -2325,7 +2344,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </div>
               <button
                 className="v2-btn v2-btn-ghost v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setAddCategoryModal(false);
                   setEditingCategory(null);
                 }}
@@ -2427,7 +2446,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
                 <button
                   className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => {
+                  onClick={async () => {
                     setAddCategoryModal(false);
                     setEditingCategory(null);
                   }}
@@ -2459,7 +2478,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </div>
               <button
                 className="v2-btn v2-btn-ghost v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   setAddBrandModal(false);
                   setEditingBrand(null);
                 }}
@@ -2520,7 +2539,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-2">
                 <button
                   className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => {
+                  onClick={async () => {
                     setAddBrandModal(false);
                     setEditingBrand(null);
                   }}
@@ -2855,7 +2874,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <button
                         className="v2-btn v2-btn-primary v2-btn-sm"
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setPriceAuditNewBuy(variantModalProduct.buyingPrice);
                           setPriceAuditNewSell(variantModalProduct.sellingPrice);
                           setPriceAuditReason("Supplier Cost Adjustment");
@@ -2924,7 +2943,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           <button
                             type="button"
                             className="v2-btn v2-btn-primary v2-btn-xs"
-                            onClick={() => {
+                            onClick={async () => {
                               const newBuy = Number(priceAuditNewBuy);
                               const newSell = Number(priceAuditNewSell);
                               if (isNaN(newBuy) || newBuy < 0 || isNaN(newSell) || newSell < 0) {
@@ -3027,7 +3046,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <button
                         className={`v2-btn v2-btn-sm ${variantStudioPanel === "add_single" ? "v2-btn-primary" : "v2-btn-secondary"}`}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (variantStudioPanel === "add_single") {
                             setVariantStudioPanel("none");
                           } else {
@@ -3048,7 +3067,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <button
                         className={`v2-btn v2-btn-sm ${variantStudioPanel === "generate_matrix" ? "v2-btn-primary" : "v2-btn-secondary"}`}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setVariantStudioPanel(variantStudioPanel === "generate_matrix" ? "none" : "generate_matrix");
                         }}
                       >
@@ -3058,7 +3077,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       <button
                         className={`v2-btn v2-btn-sm ${variantStudioPanel === "bulk_ops" ? "v2-btn-primary" : "v2-btn-ghost"}`}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setVariantStudioPanel(variantStudioPanel === "bulk_ops" ? "none" : "bulk_ops");
                         }}
                       >
@@ -3154,7 +3173,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                         <button
                           type="button"
                           className="v2-btn v2-btn-primary v2-btn-xs"
-                          onClick={() => {
+                          onClick={async () => {
+                            if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
+                            const pendingOutboxes: any[] = [];
                             if (!singleVarName.trim()) {
                               toast.warning("Name Required", "Please specify a variant name.");
                               return;
@@ -3203,7 +3224,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               currentTenantId ? { tenantId: currentTenantId } : undefined
                             );
 
-                            db.enqueueOutbox({
+                            pendingOutboxes.push({
                               entityType: "ProductVariant",
                               entityId: newVar.id,
                               operationType: "CREATE",
@@ -3228,7 +3249,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
                             if (Number(newVar.stock) > 0) {
                               const adjOpId = `adj-var-${Date.now()}-${newVar.id}`;
-                              db.enqueueOutbox({
+                              pendingOutboxes.push({
                                 entityType: "StockAdjustment",
                                 entityId: adjOpId,
                                 operationType: "CREATE",
@@ -3249,6 +3270,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               });
                             }
 
+                            await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                             setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                             setVariantModalProduct(updatedProduct);
                             setVariantStudioPanel("none");
@@ -3321,7 +3343,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                         <button
                           type="button"
                           className="v2-btn v2-btn-primary v2-btn-xs"
-                          onClick={() => {
+                          onClick={async () => {
+                            if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
+                            const pendingOutboxes: any[] = [];
                             const list1 = studioMatrixVals1.split(",").map((s) => s.trim()).filter(Boolean);
                             const list2 = studioMatrixOpt2.trim() && studioMatrixVals2.trim()
                               ? studioMatrixVals2.split(",").map((s) => s.trim()).filter(Boolean)
@@ -3384,7 +3408,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             );
 
                             for (const g of generated) {
-                              db.enqueueOutbox({
+                              pendingOutboxes.push({
                                 entityType: "ProductVariant",
                                 entityId: g.id,
                                 operationType: "CREATE",
@@ -3408,7 +3432,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               });
                               if (Number(g.stock) > 0) {
                                 const adjOpId = `adj-gen-${Date.now()}-${g.id}`;
-                                db.enqueueOutbox({
+                                pendingOutboxes.push({
                                   entityType: "StockAdjustment",
                                   entityId: adjOpId,
                                   operationType: "CREATE",
@@ -3430,6 +3454,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               }
                             }
 
+                            await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                             setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                             setVariantModalProduct(updatedProduct);
                             setVariantStudioPanel("none");
@@ -3467,7 +3492,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               type="button"
                               className="v2-btn v2-btn-secondary v2-btn-xs"
                               style={{ whiteSpace: "nowrap" }}
-                              onClick={() => {
+                              onClick={async () => {
+                                if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
+                                const pendingOutboxes: any[] = [];
                                 const pct = Number(studioBulkPricePct);
                                 if (isNaN(pct) || pct === 0) return;
                                 const updatedList = (variantModalProduct.variants || []).map((v) => ({
@@ -3505,7 +3532,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 );
 
                                 for (const v of updatedList) {
-                                  db.enqueueOutbox({
+                                  pendingOutboxes.push({
                                     entityType: "ProductVariant",
                                     entityId: v.id,
                                     operationType: "UPDATE",
@@ -3519,6 +3546,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                   });
                                 }
 
+                                await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                 setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
@@ -3546,7 +3574,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               type="button"
                               className="v2-btn v2-btn-secondary v2-btn-xs"
                               style={{ whiteSpace: "nowrap" }}
-                              onClick={() => {
+                              onClick={async () => {
+                                if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
+                                const pendingOutboxes: any[] = [];
                                 const addStock = Number(studioBulkStockAdd);
                                 if (isNaN(addStock) || addStock === 0) return;
                                 const updatedList = (variantModalProduct.variants || []).map((v) => ({
@@ -3585,7 +3615,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
                                 for (const v of updatedList) {
                                   const adjOpId = `adj-bulk-${Date.now()}-${v.id}`;
-                                  db.enqueueOutbox({
+                                  pendingOutboxes.push({
                                     entityType: "StockAdjustment",
                                     entityId: adjOpId,
                                     operationType: "CREATE",
@@ -3606,6 +3636,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                   });
                                 }
 
+                                await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                 setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
@@ -3672,39 +3703,47 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 />
                               </td>
                               <td>
-                                <input
-                                  className="v2-input v2-input-xs v2-mono"
-                                  type="number"
+                                <NumberStepper
+                                  size="xs"
+                                  min={0}
+                                  step={1}
+                                  width="94px"
                                   value={inlineVariantEdit.buyingPrice}
-                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, buyingPrice: Number(e.target.value) })}
-                                  style={{ width: "70px" }}
+                                  ariaLabel="Buying cost price"
+                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, buyingPrice: val })}
                                 />
                               </td>
                               <td>
-                                <input
-                                  className="v2-input v2-input-xs v2-mono"
-                                  type="number"
+                                <NumberStepper
+                                  size="xs"
+                                  min={0}
+                                  step={1}
+                                  width="94px"
                                   value={inlineVariantEdit.sellingPrice}
-                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, sellingPrice: Number(e.target.value) })}
-                                  style={{ width: "70px" }}
+                                  ariaLabel="Selling retail price"
+                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, sellingPrice: val })}
                                 />
                               </td>
                               <td>
-                                <input
-                                  className="v2-input v2-input-xs v2-mono"
-                                  type="number"
+                                <NumberStepper
+                                  size="xs"
+                                  min={0}
+                                  step={1}
+                                  width="80px"
                                   value={inlineVariantEdit.stock}
-                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, stock: Number(e.target.value) })}
-                                  style={{ width: "55px" }}
+                                  ariaLabel="Stock quantity"
+                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, stock: val })}
                                 />
                               </td>
                               <td>
-                                <input
-                                  className="v2-input v2-input-xs v2-mono"
-                                  type="number"
+                                <NumberStepper
+                                  size="xs"
+                                  min={0}
+                                  step={1}
+                                  width="75px"
                                   value={inlineVariantEdit.reorderLevel}
-                                  onChange={(e) => setInlineVariantEdit({ ...inlineVariantEdit, reorderLevel: Number(e.target.value) })}
-                                  style={{ width: "50px" }}
+                                  ariaLabel="Reorder level"
+                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, reorderLevel: val })}
                                 />
                               </td>
                               <td>
@@ -3713,7 +3752,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                     className="v2-btn v2-btn-primary v2-btn-icon-xs"
                                     type="button"
                                     title="Save changes"
-                                    onClick={() => {
+                                    onClick={async () => {
+                                      if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
+                                      const pendingOutboxes: any[] = [];
                                       const updatedList = (variantModalProduct.variants || []).map((item) =>
                                         item.id === v.id
                                           ? {
@@ -3760,7 +3801,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       setItems((prev) => prev.map((i) => i.id === variantModalProduct.id ? updatedProduct : i));
                                       setVariantModalProduct(updatedProduct);
                                       const existingVariant = db.productVariants.get(v.id) as any;
-                                      db.enqueueOutbox({ entityType: "ProductVariant", entityId: v.id, operationType: "UPDATE", payload: {
+                                      pendingOutboxes.push({ entityType: "ProductVariant", entityId: v.id, operationType: "UPDATE", payload: {
                                         id: v.id, name: inlineVariantEdit.name.trim(), sku: inlineVariantEdit.sku.trim(),
                                         barcode: inlineVariantEdit.barcode.trim() || undefined, price: Number(inlineVariantEdit.sellingPrice),
                                         costPrice: Number(inlineVariantEdit.buyingPrice), reorderLevel: Number(inlineVariantEdit.reorderLevel),
@@ -3775,12 +3816,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                           balanceAfter: Number(inlineVariantEdit.stock), reason: "VARIANT_INLINE_EDIT", movementType: "ADJUSTMENT",
                                           timestamp: new Date().toISOString(), tenantId: currentTenantId || "default", branchId: currentBranchId || "default" } as any,
                                           { tenantId: currentTenantId || "default", branchId: currentBranchId || "default" });
-                                        db.enqueueOutbox({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
+                                        pendingOutboxes.push({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
                                           payload: { productId: variantModalProduct.id, variantId: v.id, sku: inlineVariantEdit.sku.trim(),
                                             adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE", movementType: "ADJUSTMENT", quantityChange: stockDiff,
                                             reason: "VARIANT_INLINE_EDIT", deviceId: "web-client", operationId: adjOpId },
                                           idempotencyKey: adjOpId, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
                                       }
+                                      if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
                                       toast.success("Variant Updated", `Variant "${inlineVariantEdit.name}" saved.`);
@@ -3818,7 +3860,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                     className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                                     title="Edit Variant Details"
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
                                       setInlineVariantEdit({
                                         name: v.name,
                                         sku: v.sku,
@@ -3838,11 +3880,12 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                     style={{ color: "var(--danger)" }}
                                     title="Delete Variant"
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
+                                      if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing variants."); return; }
                                       if (!confirm(`Delete variant "${v.name}"? Parent stock will automatically adjust.`)) return;
+                                      const existingVariant = db.productVariants.get(v.id) as any;
                                       db.deleteVariantLocal(v.id);
-                                       const existingVariant = db.productVariants.get(v.id) as any;
-                                       db.enqueueOutbox({ entityType: "ProductVariant", entityId: v.id, operationType: "DELETE",
+                                       await commitLocalOutbox(db, { entityType: "ProductVariant", entityId: v.id, operationType: "DELETE",
                                          payload: { id: v.id, _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt },
                                          idempotencyKey: `VAR-DELETE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
                                       const updatedList = (variantModalProduct.variants || []).filter((x) => x.id !== v.id);

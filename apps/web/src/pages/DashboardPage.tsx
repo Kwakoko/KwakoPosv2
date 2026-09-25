@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPosv2 — Executive Analytics Dashboard
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete, 100% faithful port of legacy Tenant Dashboard UI/UX:
@@ -143,7 +143,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
             trend === 'up' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'
           }`}>
             {trend === 'up' ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
-            {trendLabel || (trend === 'up' ? '+Today' : 'âˆ’Today')}
+            {trendLabel || (trend === 'up' ? '+Today' : '−Today')}
           </span>
         )}
         <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{desc}</p>
@@ -194,7 +194,7 @@ interface LocalOrder {
   total: number;
   status: string;
   paymentMethod: string;
-  syncStatus: 'Synced' | 'Pending';
+  syncStatus: 'Synced' | 'Pending' | 'Failed';
   cashReceived?: number;
   changeDue?: number;
   module?: string;
@@ -421,10 +421,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             cashierName: s.cashierName || s.cashier || s.user || 'Cashier',
             module: s.module,
             branch_id: s.branchId || s.branch_id,
-            items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : []).map((it: any) => ({
+            items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : Array.isArray(s.lines) ? s.lines : []).map((it: any) => ({
               productId: it.productId || it.product?.id || it.id || 'prod_unknown',
               variantId: it.variantId,
-              name: it.name || it.product?.name || 'Product',
+              name: it.name || it.productName || it.product?.name || 'Product',
               price: Number(it.price || it.product?.price || it.unitPrice || 0),
               quantity: Number(it.quantity || it.qty || 1),
             })),
@@ -441,7 +441,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           const sId = sAny.id || sAny.saleNumber;
           if (!sId) continue;
           const existingIdx = parsedOrders.findIndex(o => o.id === sId);
-          const rawItems = Array.isArray(sAny.items) ? sAny.items : Array.isArray(sAny.cart) ? sAny.cart : [];
+          const rawItems = Array.isArray(sAny.items) ? sAny.items : Array.isArray(sAny.cart) ? sAny.cart : Array.isArray(sAny.lines) ? sAny.lines : [];
           const localOrder: LocalOrder = {
             id: sId,
             saleNumber: sAny.saleNumber || sAny.receiptNumber || sId,
@@ -459,7 +459,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             items: rawItems.map((it: any) => ({
               productId: it.productId || it.product?.id || it.id || 'prod_unknown',
               variantId: it.variantId,
-              name: it.name || it.product?.name || 'Product',
+              name: it.name || it.productName || it.product?.name || 'Product',
               price: Number(it.price || it.product?.price || it.unitPrice || 0),
               quantity: Number(it.quantity || it.qty || 1),
             })),
@@ -479,6 +479,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             const p = (item.payload || {}) as any;
             const pId = item.entityId || p.id || p.saleNumber;
             const existingIdx = parsedOrders.findIndex(o => o.id === pId);
+            const isSynced = item.status === 'SYNCED' || (existingIdx >= 0 && parsedOrders[existingIdx].syncStatus === 'Synced') || p.syncStatus === 'Synced';
             const rawItems = Array.isArray(p.items) ? p.items : Array.isArray(p.cart) ? p.cart : [];
             const outboxOrder: LocalOrder = {
               id: pId || item.id,
@@ -489,7 +490,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               total: Number(p.grandTotal || p.totalAmount || p.total || 0),
               status: p.status || 'Completed',
               paymentMethod: p.paymentMethod || p.method || 'Cash',
-              syncStatus: item.status === 'SYNCED' ? 'Synced' : 'Pending',
+              syncStatus: isSynced ? 'Synced' : item.status === 'FAILED' ? 'Failed' : 'Pending',
               cashReceived: Number(p.cashReceived || p.paidAmount || p.total || 0),
               changeDue: Number(p.changeDue || p.changeAmount || 0),
               module: p.module,
@@ -592,7 +593,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const salesTrendPct: string | undefined = (() => {
       if (yesterdaySales === 0) return totalSales > 0 ? 'New sales today' : undefined;
       const pct = Math.abs(((totalSales - yesterdaySales) / yesterdaySales) * 100).toFixed(1);
-      return `${salesTrend === 'up' ? '+' : 'âˆ’'}${pct}% vs yesterday`;
+      return `${salesTrend === 'up' ? '+' : '−'}${pct}% vs yesterday`;
     })();
 
     const completedOrders = validOrders.filter(o => o.status === 'Completed').length;
@@ -665,7 +666,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       : newCustomersThisMonth >= newCustomersLastMonth ? 'up' : 'down';
     const customerTrendPct = newCustomersLastMonth === 0
       ? (newCustomersThisMonth > 0 ? `+${newCustomersThisMonth} this month` : undefined)
-      : `${customerTrend === 'up' ? '+' : 'âˆ’'}${Math.abs(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100).toFixed(0)}% vs last month`;
+      : `${customerTrend === 'up' ? '+' : '−'}${Math.abs(((newCustomersThisMonth - newCustomersLastMonth) / newCustomersLastMonth) * 100).toFixed(0)}% vs last month`;
 
     const topProduct = (() => {
       const map: Record<string, { name: string; qty: number; rev: number }> = {};
@@ -1322,8 +1323,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Gross Sales (Today)', Number(stats.grossSales || 0), 'Revenue', 'Total gross transactions before promotional deductions'],
         ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
         ['Refunds & Returns (Today)', Number(stats.todayRefunds || 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
-        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales âˆ’ Discounts âˆ’ Refunds'],
-        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales âˆ’ Actual Cost of Goods Sold'],
+        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
+        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
         ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
         ['Gross Margin %', `${stats.todayMargin}%`, 'Profitability', 'Gross Profit / Net Sales'],
         ['Completed Orders Count', Number(stats.completedOrders || 0), 'Operations', 'Successful completed checkout sales receipts'],
@@ -1355,8 +1356,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Cash Sales Collected Today', Number(tillReconciliation.cashSalesToday || 0), 'Cash In (+)', 'Total cash payments received from customers'],
         ['Cash Transactions Count', Number(tillReconciliation.cashTransactionsCount || 0), 'Volume', 'Number of completed cash sales orders'],
         ['Cash Paid-In (Float Additions)', Number(tillReconciliation.cashIn || 0), 'Cash In (+)', 'Additional cash deposited into drawer during shift'],
-        ['Cash Paid-Out / Safe Drops', Number(tillReconciliation.totalPayouts || 0), 'Cash Out (âˆ’)', 'Cash payouts, petty cash, or drops to safe'],
-        ['Expected Cash in Drawer', Number(tillReconciliation.expectedCash || 0), 'Balance', 'Float + Cash Sales + Paid In âˆ’ Paid Out'],
+        ['Cash Paid-Out / Safe Drops', Number(tillReconciliation.totalPayouts || 0), 'Cash Out (−)', 'Cash payouts, petty cash, or drops to safe'],
+        ['Expected Cash in Drawer', Number(tillReconciliation.expectedCash || 0), 'Balance', 'Float + Cash Sales + Paid In − Paid Out'],
       ];
       const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
       ws2['!cols'] = [{ wch: 32 }, { wch: 24 }, { wch: 18 }, { wch: 46 }];
@@ -1438,7 +1439,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mx-auto mb-5 shadow-lg">
           <Sparkles className="h-7 w-7 text-white" />
         </div>
-        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! ðŸŽ‰</h3>
+        <h3 className="text-xl font-black text-slate-800 dark:text-white">Welcome to KwakoPos! 🎉</h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
           Your clean workspace is ready. Follow these quick steps to set up your business and start taking sales.
         </p>
@@ -1739,7 +1740,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>âˆ’</span>
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
 
           {/* Discounts */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1751,7 +1752,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>âˆ’</span>
+          <span style={{ color: "var(--muted)", fontWeight: 900, fontSize: "14px" }}>−</span>
 
           {/* Refunds & Returns */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1903,7 +1904,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           </div>
 
-          <span style={{ color: "var(--muted)", fontWeight: 800 }}>âˆ’</span>
+          <span style={{ color: "var(--muted)", fontWeight: 800 }}>−</span>
 
           {/* Payouts / Drops */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -3006,13 +3007,31 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                                 padding: "2px 8px",
                                 fontSize: "9.5px",
                                 fontWeight: 800,
-                                background: order.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                                color: order.syncStatus === 'Synced' ? '#10b981' : '#f59e0b',
-                                border: `1px solid ${order.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                                background:
+                                  order.syncStatus === 'Synced'
+                                    ? 'rgba(16, 185, 129, 0.1)'
+                                    : order.syncStatus === 'Failed'
+                                    ? 'rgba(239, 68, 68, 0.1)'
+                                    : 'rgba(245, 158, 11, 0.1)',
+                                color:
+                                  order.syncStatus === 'Synced'
+                                    ? '#10b981'
+                                    : order.syncStatus === 'Failed'
+                                    ? '#ef4444'
+                                    : '#f59e0b',
+                                border: `1px solid ${
+                                  order.syncStatus === 'Synced'
+                                    ? 'rgba(16, 185, 129, 0.25)'
+                                    : order.syncStatus === 'Failed'
+                                    ? 'rgba(239, 68, 68, 0.25)'
+                                    : 'rgba(245, 158, 11, 0.25)'
+                                }`,
                               }}
                             >
                               {order.syncStatus === 'Synced' ? (
                                 <CheckCircle size={10} />
+                              ) : order.syncStatus === 'Failed' ? (
+                                <AlertTriangle size={10} />
                               ) : (
                                 <RefreshCw size={10} className="animate-spin" />
                               )}
@@ -3156,15 +3175,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                     fontWeight: 700,
                     padding: '2px 8px',
                     borderRadius: '10px',
-                    background: selectedOrderForDrawer.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                    color: selectedOrderForDrawer.syncStatus === 'Synced' ? '#10b981' : '#f59e0b',
-                    border: `1px solid ${selectedOrderForDrawer.syncStatus === 'Synced' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
+                    background:
+                      selectedOrderForDrawer.syncStatus === 'Synced'
+                        ? 'rgba(16, 185, 129, 0.1)'
+                        : selectedOrderForDrawer.syncStatus === 'Failed'
+                        ? 'rgba(239, 68, 68, 0.1)'
+                        : 'rgba(245, 158, 11, 0.1)',
+                    color:
+                      selectedOrderForDrawer.syncStatus === 'Synced'
+                        ? '#10b981'
+                        : selectedOrderForDrawer.syncStatus === 'Failed'
+                        ? '#ef4444'
+                        : '#f59e0b',
+                    border: `1px solid ${
+                      selectedOrderForDrawer.syncStatus === 'Synced'
+                        ? 'rgba(16, 185, 129, 0.25)'
+                        : selectedOrderForDrawer.syncStatus === 'Failed'
+                        ? 'rgba(239, 68, 68, 0.25)'
+                        : 'rgba(245, 158, 11, 0.25)'
+                    }`,
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '4px',
                   }}
                 >
-                  {selectedOrderForDrawer.syncStatus === 'Synced' ? <CheckCircle size={10} /> : <RefreshCw size={10} className="animate-spin" />}
+                  {selectedOrderForDrawer.syncStatus === 'Synced' ? (
+                    <CheckCircle size={10} />
+                  ) : selectedOrderForDrawer.syncStatus === 'Failed' ? (
+                    <AlertTriangle size={10} />
+                  ) : (
+                    <RefreshCw size={10} className="animate-spin" />
+                  )}
                   {selectedOrderForDrawer.syncStatus}
                 </span>
               </div>

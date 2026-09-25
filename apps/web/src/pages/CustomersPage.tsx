@@ -3,10 +3,11 @@ import {
   Users, User, Phone, Mail, Award, DollarSign, Search, Coins, Edit2, Trash2,
   UserPlus, Sparkles, Plus, AlertCircle, CheckCircle, Wallet, Shield, RefreshCw
 } from "lucide-react";
-import { useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 
 export interface CustomerRecord {
   id: string;
@@ -30,6 +31,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
   const { activeModule } = useModule();
   const { isOnline, pendingOutboxCount, db } = useSync();
   const { currentTenantId } = useTenant();
+  const { currentBranchId } = useBranch();
   const toast = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -203,8 +205,12 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
         walletBalance: formWalletBalance || 0,
       };
       await apiFetch("/api/v1/customers", { method: "POST", body: JSON.stringify(newCust) }).catch(() => {});
-      db.enqueueOutbox({ entityType: "Customer", operationType: "CREATE", payload: { ...newCust } as Record<string, unknown> });
-      db.saveCustomerLocal(newCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
+      const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+      await commitLocalMutation({
+        db, tenantContext, entityType: "Customer", entityId: newCust.id, operationType: "CREATE",
+        payload: { ...newCust }, idempotencyKey: "CUSTOMER-CREATE-" + newCust.id,
+        writes: [{ store: "customers", key: newCust.id, value: newCust }],
+      });
       setCustomers((prev) => [newCust, ...prev]);
       window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
     } else if (selectedCust) {
@@ -218,8 +224,12 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
         walletBalance: formWalletBalance,
       };
       await apiFetch(`/api/v1/customers/${selectedCust.id}`, { method: "PUT", body: JSON.stringify(updatedCust) }).catch(() => {});
-      db.enqueueOutbox({ entityType: "Customer", operationType: "UPDATE", payload: { ...updatedCust } as Record<string, unknown> });
-      db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
+      const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+      await commitLocalMutation({
+        db, tenantContext, entityType: "Customer", entityId: updatedCust.id, operationType: "UPDATE",
+        payload: { ...updatedCust }, idempotencyKey: "CUSTOMER-UPDATE-" + updatedCust.id + "-" + Date.now(),
+        writes: [{ store: "customers", key: updatedCust.id, value: updatedCust }],
+      });
       setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
       window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_UPDATED", customer: updatedCust } }));
     }
@@ -262,8 +272,12 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     }
     if (confirm(`Permanently delete profile for ${c.name}?`)) {
       await apiFetch(`/api/v1/customers/${c.id}`, { method: "DELETE" }).catch(() => {});
-      db.enqueueOutbox({ entityType: "Customer", operationType: "DELETE", payload: { id: c.id } });
-      db.customers.delete(c.id);
+      const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+      await commitLocalMutation({
+        db, tenantContext, entityType: "Customer", entityId: c.id, operationType: "DELETE",
+        payload: { id: c.id }, idempotencyKey: "CUSTOMER-DELETE-" + c.id + "-" + Date.now(),
+        writes: [{ store: "customers", key: c.id, delete: true }],
+      });
       setCustomers((prev) => prev.filter((item) => item.id !== c.id));
       toast.success("Profile Deleted", `Customer ${c.name} was removed.`);
       window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DELETED", customerId: c.id } }));
@@ -287,8 +301,14 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     const updatedCust = { ...selectedCust, outstandingBalance: newDebt, walletBalance: updatedWallet };
 
     await apiFetch(`/api/v1/customers/${selectedCust.id}/payment`, { method: "POST", body: JSON.stringify({ amount: paymentVal, payUsingWallet }) }).catch(() => {});
-    db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, amount: paymentVal, payUsingWallet } });
-    db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
+    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const paymentId = "pay-" + selectedCust.id + "-" + Date.now();
+    await commitLocalMutation({
+      db, tenantContext, entityType: "Payment", entityId: paymentId, operationType: "CREATE",
+      payload: { id: paymentId, customerId: selectedCust.id, amount: paymentVal, payUsingWallet },
+      idempotencyKey: paymentId,
+      writes: [{ store: "customers", key: selectedCust.id, value: updatedCust }],
+    });
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
     window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DEBT_PAID", customer: updatedCust } }));
@@ -306,8 +326,14 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     const updatedCust = { ...selectedCust, walletBalance: selectedCust.walletBalance + walletVal };
 
     await apiFetch(`/api/v1/customers/${selectedCust.id}/wallet`, { method: "POST", body: JSON.stringify({ amount: walletVal }) }).catch(() => {});
-    db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: { customerId: selectedCust.id, walletDepositAmount: walletVal } });
-    db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId } : undefined);
+    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const paymentId = "wallet-" + selectedCust.id + "-" + Date.now();
+    await commitLocalMutation({
+      db, tenantContext, entityType: "Payment", entityId: paymentId, operationType: "CREATE",
+      payload: { id: paymentId, customerId: selectedCust.id, walletDepositAmount: walletVal },
+      idempotencyKey: paymentId,
+      writes: [{ store: "customers", key: selectedCust.id, value: updatedCust }],
+    });
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
     window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust } }));

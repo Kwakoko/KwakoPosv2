@@ -225,7 +225,7 @@ export const SyncTelemetryHUD: React.FC = () => {
               border: "1px solid var(--surface-border)",
               borderRadius: "var(--radius-xl)",
               width: "100%",
-              maxWidth: "520px",
+              maxWidth: "560px",
               boxShadow: "var(--shadow-xl)",
               overflow: "hidden",
               color: "var(--text)",
@@ -267,92 +267,167 @@ export const SyncTelemetryHUD: React.FC = () => {
             {/* Modal Body */}
             <div style={{ padding: "1.25rem 1.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
               {/* Telemetry Grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                {/* Connection State */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  gap: "0.85rem",
+                  width: "100%",
+                }}
+              >
+                {/* 1. Connection State */}
                 <div
                   style={{
-                    padding: "0.75rem",
-                    borderRadius: "var(--radius-md)",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "12px",
                     background: "var(--surface-2)",
                     border: "1px solid var(--surface-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    minWidth: 0,
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
-                    <Wifi size={13} />
-                    <span>Connection State</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <Wifi size={14} style={{ color: isOnline ? "var(--success, #10b981)" : "var(--warning, #f59e0b)" }} />
+                      <span style={{ fontWeight: 600 }}>Connection State</span>
+                    </div>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        backgroundColor: isOnline ? "#10b981" : "#f59e0b",
+                        boxShadow: isOnline ? "0 0 8px #10b981" : "0 0 8px #f59e0b",
+                      }}
+                    />
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: "0.88rem" }}>
-                    {isOnline ? "🟢 Connected (Online)" : isSimulatedOffline ? "🟠 Simulated Offline" : "🟠 Edge Mode (Offline)"}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <span
+                      style={{
+                        fontWeight: 800,
+                        fontSize: "0.92rem",
+                        color: isOnline ? "var(--text)" : "var(--warning, #f59e0b)",
+                        letterSpacing: "-0.01em",
+                      }}
+                    >
+                      {isOnline ? "Connected (Online)" : isSimulatedOffline ? "Simulated Offline" : "Edge Mode (Offline)"}
+                    </span>
                   </div>
                 </div>
 
-                {/* Outbox Queue */}
+                {/* 2. Outbox Queue */}
                 <div
                   style={{
-                    padding: "0.75rem",
-                    borderRadius: "var(--radius-md)",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "12px",
                     background: "var(--surface-2)",
                     border: "1px solid var(--surface-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    minWidth: 0,
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
-                    <HardDrive size={13} />
-                    <span>Outbox Queue</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <HardDrive size={14} style={{ color: effectiveOutboxCount === 0 ? "var(--success, #10b981)" : "var(--accent, #3b82f6)" }} />
+                      <span style={{ fontWeight: 600 }}>Outbox Queue</span>
+                    </div>
+                    <span
+                      className={`badge ${effectiveOutboxCount === 0 ? "v2-badge-success" : "v2-badge-warning"}`}
+                      style={{ fontSize: "0.68rem", padding: "0.15rem 0.45rem" }}
+                    >
+                      {effectiveOutboxCount === 0 ? "Synced" : "Pending"}
+                    </span>
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: "0.88rem" }}>
-                    {effectiveOutboxCount} Pending Mutation(s)
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "0.35rem" }}>
+                    <span style={{ fontWeight: 800, fontSize: "1.1rem", color: "var(--text)" }}>
+                      {effectiveOutboxCount}
+                    </span>
+                    <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 600 }}>
+                      Pending Mutation{effectiveOutboxCount === 1 ? "" : "s"}
+                    </span>
                   </div>
                 </div>
 
-                {/* HLC Clock */}
+                {/* 3. HLC Clock */}
                 <div
                   style={{
-                    padding: "0.75rem",
-                    borderRadius: "var(--radius-md)",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "12px",
                     background: "var(--surface-2)",
                     border: "1px solid var(--surface-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    minWidth: 0,
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
-                    <Clock size={13} />
-                    <span>Monotonic Clock (HLC)</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+                    <Clock size={14} style={{ color: "var(--accent, #3b82f6)" }} />
+                    <span style={{ fontWeight: 600 }}>Monotonic Clock (HLC)</span>
                   </div>
                   <div
                     style={{
-                      fontFamily: "var(--font-mono)",
+                      fontFamily: "var(--font-mono, monospace)",
                       fontSize: "0.72rem",
-                      color: "var(--accent)",
+                      color: "var(--accent, #3b82f6)",
+                      background: "var(--surface, rgba(0,0,0,0.03))",
+                      padding: "0.35rem 0.5rem",
+                      borderRadius: "6px",
+                      border: "1px solid var(--surface-border)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
+                      width: "100%",
+                      boxSizing: "border-box",
                     }}
                     title={metrics.currentHlc}
                   >
-                    {metrics.currentHlc}
+                    {metrics.currentHlc || "hlc:0:init"}
                   </div>
                 </div>
 
-                {/* Health Score */}
+                {/* 4. Health Score */}
                 <div
                   style={{
-                    padding: "0.75rem",
-                    borderRadius: "var(--radius-md)",
+                    padding: "0.85rem 1rem",
+                    borderRadius: "12px",
                     background: "var(--surface-2)",
                     border: "1px solid var(--surface-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    minWidth: 0,
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.25rem" }}>
-                    <Activity size={13} />
-                    <span>Edge Health Score</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--muted)", fontSize: "0.75rem", marginBottom: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <Activity size={14} style={{ color: metrics.healthScore >= 90 ? "var(--success, #10b981)" : metrics.healthScore >= 60 ? "var(--warning, #f59e0b)" : "var(--danger, #ef4444)" }} />
+                      <span style={{ fontWeight: 600 }}>Edge Health Score</span>
+                    </div>
                   </div>
-                  <div
-                    style={{
-                      fontWeight: 800,
-                      fontSize: "0.88rem",
-                      color: metrics.healthScore >= 90 ? "var(--success)" : metrics.healthScore >= 60 ? "var(--warning)" : "var(--danger)",
-                    }}
-                  >
-                    {metrics.healthScore}% Operational
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span
+                      style={{
+                        fontWeight: 800,
+                        fontSize: "1.1rem",
+                        color: metrics.healthScore >= 90 ? "var(--success, #10b981)" : metrics.healthScore >= 60 ? "var(--warning, #f59e0b)" : "var(--danger, #ef4444)",
+                        letterSpacing: "-0.01em",
+                      }}
+                    >
+                      {metrics.healthScore}%
+                    </span>
+                    <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 600 }}>
+                      Operational
+                    </span>
                   </div>
                 </div>
               </div>

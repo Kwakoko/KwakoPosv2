@@ -48,7 +48,7 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
 
     // 2. Perform offline POS sale of 2 units
     const saleId = "SALE-OFFLINE-TEST-1";
-    recordPosSaleDeductions(db, {
+    await recordPosSaleDeductions(db, {
       saleId,
       items: [{ productId, variantId, qty: 2, unitCost: 9000 }],
       tenantId: "tenant-001",
@@ -137,7 +137,7 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
     db.saveVariantLocal(variant);
 
     // Offline sale of 5 units
-    recordPosSaleDeductions(db, {
+    await recordPosSaleDeductions(db, {
       saleId: "SALE-OFFLINE-TEST-2",
       items: [{ productId, variantId, qty: 5, unitCost: 1800 }],
       tenantId: "tenant-001",

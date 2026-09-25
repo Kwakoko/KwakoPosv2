@@ -200,6 +200,13 @@ export class LocalIndexedDbStore {
   readonly dbName: string;
   private persistenceTail: Promise<void> = Promise.resolve();
   private persistenceError: unknown = null;
+  private pendingPersistenceWrites = new Map<string, { store: NativeStore; key: string; value?: unknown; delete?: boolean }>();
+  private persistenceFlushScheduled = false;
+
+  private scopedSyncKey(tenantId: string, branchId: string, key: string): string {
+    if (!tenantId || !branchId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId and branchId are required");
+    return "syncScope:" + tenantId + ":" + branchId + ":" + key;
+  }
 
   constructor(requestedSchemaVersion = AUTHORITATIVE_SCHEMA_VERSION, dbName = DB_NAME) {
     this.dbName = dbName;
@@ -301,8 +308,9 @@ export class LocalIndexedDbStore {
       // Historical/administrative stores are warmed progressively after the ready gate.
       if (this.nativeDb) {
         const startupStores: NativeStore[] = [
-          "products", "productVariants", "stockBalance", "sales", "payments",
-          "receipts", "customers", "suppliers", "syncOutbox", "syncMetadata",
+          "products", "productVariants", "stockBalance", "stockLedger", "stockAdjustments",
+          "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers",
+          "syncOutbox", "syncMetadata", "configuration",
         ];
         const activeStores = startupStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
         for (const store of activeStores) {
@@ -335,8 +343,9 @@ export class LocalIndexedDbStore {
       this.setSyncMetadata("schemaVersion", String(this.schemaVersion));
       await this.flushPersistence();
     } catch (error) {
-      console.warn("IndexedDB persistence unavailable, running in in-memory mode:", error);
       this.nativeDb = null;
+      this.persistenceError = error instanceof Error ? error : new Error(String(error));
+      console.error("[IndexedDB] Local persistence initialization failed; volatile in-memory mode is disabled.", this.persistenceError);
     }
   }
 
@@ -381,6 +390,18 @@ export class LocalIndexedDbStore {
     }
   }
 
+  async refreshStoresFromNative(stores: NativeStore[] = ALL_STORE_NAMES): Promise<void> {
+    await this.ready;
+    if (!this.nativeDb) return;
+    for (const store of stores) {
+      if (!this.nativeDb.objectStoreNames.contains(store)) continue;
+      const target = this.getTargetMap(store);
+      if (!target) continue;
+      target.clear();
+      await this.hydrateMap(store, target);
+    }
+  }
+
   private hydrateMap<T>(store: NativeStore, target: Map<string, T>): Promise<void> {
     if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return Promise.resolve();
     return new Promise((resolve, reject) => {
@@ -399,22 +420,62 @@ export class LocalIndexedDbStore {
   }
 
   public persist<T>(store: NativeStore, key: string, value: T): void {
-    if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return;
+    if (typeof indexedDB === "undefined") {
+      if (typeof window !== "undefined") throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: IndexedDB is required in the browser");
+      return;
+    }
+    if (this.persistenceError) throw this.persistenceError instanceof Error ? this.persistenceError : new Error(String(this.persistenceError));
+    if (!this.nativeDb) throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: IndexedDB is not ready");
+    if (!this.nativeDb.objectStoreNames.contains(store)) return;
+
+    // Stage synchronous saveXLocal() mutations for this turn. The atomic outbox boundary
+    // can consume these writes and commit them together with the outbox in one IDB transaction.
+    this.pendingPersistenceWrites.set(store + "\0" + key, { store, key, value, delete: false });
+    this.schedulePendingPersistenceFlush();
+  }
+
+  private schedulePendingPersistenceFlush(): void {
+    if (this.persistenceFlushScheduled) return;
+    this.persistenceFlushScheduled = true;
+    queueMicrotask(() => {
+      this.persistenceFlushScheduled = false;
+      // A same-turn enqueue or explicit atomic mutation drains these staged writes.
+      // Do not let the generic persistence microtask commit them separately first.
+      if ((this as any).__kwakoAtomicBatch || (this as any).__kwakoAtomicMutationInFlight) return;
+      void this.flushPendingPersistence();
+    });
+  }
+
+  public drainPendingPersistenceWrites(): Array<{ store: NativeStore; key: string; value?: unknown; delete?: boolean }> {
+    const writes = Array.from(this.pendingPersistenceWrites.values());
+    this.pendingPersistenceWrites.clear();
+    this.persistenceFlushScheduled = false;
+    return writes;
+  }
+
+  private flushPendingPersistence(): Promise<void> {
+    const writes = this.drainPendingPersistenceWrites();
+    if (!writes.length) return Promise.resolve();
     this.persistenceTail = this.persistenceTail
       .catch(() => undefined)
       .then(
         () =>
           new Promise<void>((resolve, reject) => {
             try {
-              if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) {
+              const active = writes.filter(({ store }) => this.nativeDb?.objectStoreNames.contains(store));
+              if (!this.nativeDb || !active.length) {
                 resolve();
                 return;
               }
-              const tx = this.nativeDb.transaction(store, "readwrite");
-              tx.objectStore(store).put(value, key);
+              const stores = [...new Set(active.map(({ store }) => store))];
+              const tx = this.nativeDb.transaction(stores, "readwrite");
+              for (const write of active) {
+                if (write.delete) tx.objectStore(write.store).delete(write.key);
+                else tx.objectStore(write.store).put(write.value, write.key);
+              }
               tx.oncomplete = () => resolve();
-              tx.onerror = () => reject(tx.error || new Error(`IndexedDB write failed: ${store}`));
-              tx.onabort = () => reject(tx.error || new Error(`IndexedDB write aborted: ${store}`));
+              tx.onerror = () => reject(tx.error || new Error("IndexedDB batched write failed"));
+              tx.onabort = () => reject(tx.error || new Error("IndexedDB batched write aborted"));
             } catch (error) {
               reject(error);
             }
@@ -424,9 +485,11 @@ export class LocalIndexedDbStore {
         this.persistenceError = error;
         throw error;
       });
+    return this.persistenceTail;
   }
 
   async flushPersistence(): Promise<void> {
+    await this.flushPendingPersistence();
     await this.persistenceTail;
     if (this.persistenceError) {
       throw this.persistenceError instanceof Error
@@ -550,13 +613,17 @@ export class LocalIndexedDbStore {
 
   deleteVariantLocal(variantId: string): void {
     const v = this.productVariants.get(variantId);
+    if (!v) return;
     this.productVariants.delete(variantId);
     if (this.nativeDb && this.nativeDb.objectStoreNames.contains("productVariants")) {
-      try {
-        this.nativeDb.transaction("productVariants", "readwrite").objectStore("productVariants").delete(variantId);
-      } catch {}
+      this.pendingPersistenceWrites.set("productVariants" + "\0" + variantId, {
+        store: "productVariants",
+        key: variantId,
+        delete: true,
+      });
+      this.schedulePendingPersistenceFlush();
     }
-    const productId = v?.productId;
+    const productId = v.productId;
     if (productId) {
       const p = this.products.get(productId);
       if (p) {
@@ -566,12 +633,27 @@ export class LocalIndexedDbStore {
             remainingVariants.push(varItem);
           }
         }
-        this.saveProductLocal({
-          ...p,
-          hasVariants: remainingVariants.length > 0,
-          variants: remainingVariants,
-        });
+        this.saveProductLocal(
+          {
+            ...p,
+            hasVariants: remainingVariants.length > 0,
+            variants: remainingVariants,
+          },
+          (p as any).tenantId ? { tenantId: (p as any).tenantId, branchId: (p as any).branchId } : undefined,
+        );
       }
+    }
+  }
+
+  deleteProductLocal(productId: string): void {
+    this.products.delete(productId);
+    if (this.nativeDb && this.nativeDb.objectStoreNames.contains("products")) {
+      this.pendingPersistenceWrites.set("products" + "\0" + productId, {
+        store: "products",
+        key: productId,
+        delete: true,
+      });
+      this.schedulePendingPersistenceFlush();
     }
   }
 
@@ -645,17 +727,18 @@ export class LocalIndexedDbStore {
   }
 
   saveConfigurationLocal(key: string, value: any, ctx?: TenantScopedContext): void {
-    const compoundKey = ctx?.tenantId ? `${ctx.tenantId}:${key}` : key;
-    const item = { key, value, tenantId: ctx?.tenantId, updatedAt: new Date().toISOString() };
+    const compoundKey = ctx?.tenantId ? (ctx.branchId ? `${ctx.tenantId}:${ctx.branchId}:${key}` : `${ctx.tenantId}:${key}`) : key;
+    const item = { key, value, tenantId: ctx?.tenantId, branchId: ctx?.branchId, updatedAt: new Date().toISOString() };
     this.configuration.set(compoundKey, item);
     this.persist("configuration", compoundKey, item);
   }
 
   getConfigurationLocal(key: string, ctx?: TenantScopedContext): any {
     if (ctx?.tenantId) {
-      const compoundKey = `${ctx.tenantId}:${key}`;
+      const compoundKey = ctx.branchId ? `${ctx.tenantId}:${ctx.branchId}:${key}` : `${ctx.tenantId}:${key}`;
       const item = this.configuration.get(compoundKey);
       if (item) return item.value;
+      if (ctx.branchId) return undefined;
     }
     const direct = this.configuration.get(key);
     if (direct !== undefined) {
@@ -736,6 +819,65 @@ export class LocalIndexedDbStore {
     this.persist("syncOutbox", item.id, item);
   }
 
+  async executeAtomicMutation(params: {
+    writes: Array<{ store: NativeStore; key: string; value?: any; delete?: boolean }>;
+    outboxItem?: OutboxItem;
+    outboxItems?: OutboxItem[];
+    tenantContext?: TenantScopedContext;
+  }): Promise<{ outbox: OutboxItem; outboxes: OutboxItem[] }> {
+    await this.ready;
+    globalStoragePressureMonitor.assertSafeForDestructiveOperation("executeAtomicMutation");
+    if (typeof indexedDB !== "undefined" && !this.nativeDb) {
+      throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: IndexedDB is not available for atomic mutation");
+    }
+    const outboxItems = [...(params.outboxItems || []), ...(params.outboxItem ? [params.outboxItem] : [])];
+    if (!outboxItems.length) throw new Error("ATOMIC_MUTATION_OUTBOX_REQUIRED");
+    const stagedWrites = this.drainPendingPersistenceWrites();
+    const explicitWrites = params.writes.map((write) => ({ ...write }));
+    const writeMap = new Map<string, { store: NativeStore; key: string; value?: any; delete?: boolean }>();
+    for (const write of stagedWrites) writeMap.set(write.store + "\0" + write.key, write);
+    for (const write of explicitWrites) writeMap.set(write.store + "\0" + write.key, write);
+    const writes = Array.from(writeMap.values());
+    if (params.tenantContext?.tenantId) {
+      for (const item of outboxItems) {
+        item.tenantId = params.tenantContext.tenantId;
+        if (params.tenantContext.branchId) item.branchId = params.tenantContext.branchId;
+      }
+      for (const write of writes) {
+        if (write.value && typeof write.value === "object") {
+          write.value = { ...write.value, tenantId: params.tenantContext.tenantId, ...(params.tenantContext.branchId ? { branchId: params.tenantContext.branchId } : {}) };
+        }
+      }
+    }
+    const stores = [...new Set([...writes.map((w) => w.store), "syncOutbox"])];
+    if (this.nativeDb) {
+      for (const store of stores) if (!this.nativeDb.objectStoreNames.contains(store)) throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: missing IndexedDB store " + store);
+      const tx = this.nativeDb.transaction(stores, "readwrite");
+      for (const write of writes) { if (write.delete) tx.objectStore(write.store).delete(write.key); else tx.objectStore(write.store).put(write.value, write.key); }
+      for (const item of outboxItems) tx.objectStore("syncOutbox").put(item, item.id);
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error("Atomic mutation failed"));
+        tx.onabort = () => reject(tx.error || new Error("Atomic mutation aborted"));
+      });
+    }
+    for (const write of writes) { const target = this.getTargetMap(write.store); if (!target) continue; if (write.delete) target.delete(write.key); else target.set(write.key, write.value); }
+    for (const item of outboxItems) this.syncOutbox.set(item.id, item);
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { items: outboxItems } }));
+        if ("BroadcastChannel" in window) {
+          const bc = new BroadcastChannel("kwakopos_sync_channel");
+          bc.postMessage({ type: "OUTBOX_MUTATION", items: outboxItems, timestamp: Date.now() });
+          bc.close();
+        }
+      }
+    } catch {
+      /* ignore broadcast error */
+    }
+    return { outbox: outboxItems[0], outboxes: outboxItems };
+  }
+
   async executeAtomicBusinessTransaction<T>(params: {
     targetStore: NativeStore;
     entityId: string;
@@ -743,6 +885,7 @@ export class LocalIndexedDbStore {
     outboxItem: OutboxItem;
     tenantContext?: TenantScopedContext;
   }): Promise<{ entity: T; outbox: OutboxItem }> {
+    await this.ready;
     globalStoragePressureMonitor.assertSafeForDestructiveOperation("executeAtomicBusinessTransaction");
     const { targetStore, entityId, outboxItem, tenantContext } = params;
     let entityData = params.entityData;
@@ -777,6 +920,18 @@ export class LocalIndexedDbStore {
     const targetMap = this.getTargetMap(targetStore);
     if (targetMap) targetMap.set(entityId, entityData);
     this.syncOutbox.set(outboxItem.id, outboxItem);
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
+        if ("BroadcastChannel" in window) {
+          const bc = new BroadcastChannel("kwakopos_sync_channel");
+          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.close();
+        }
+      }
+    } catch {
+      /* ignore broadcast error */
+    }
 
     return { entity: entityData, outbox: outboxItem };
   }
@@ -947,11 +1102,13 @@ export class LocalIndexedDbStore {
       for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
       if (categories.length) {
         const tenantId = String((categories[0] as any).tenantId || "");
-        this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : undefined);
+        const branchId = String((categories[0] as any).branchId || "");
+        this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
       }
       if (brands.length) {
         const tenantId = String((brands[0] as any).tenantId || "");
-        this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : undefined);
+        const branchId = String((brands[0] as any).branchId || "");
+        this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
       }
       await this.flushPersistence();
       this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
@@ -1069,7 +1226,6 @@ export class LocalIndexedDbStore {
     const serverTime = Date.parse(snapshot.snapshotTimestamp);
     if (!Number.isFinite(serverTime)) throw new Error("SYNC_PROTOCOL_INVALID: invalid snapshot timestamp");
 
-    let appliedCount = 0;
     const products = Array.isArray(snapshot.products) ? snapshot.products : [];
     const variants = Array.isArray(snapshot.variants) ? snapshot.variants : [];
     const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
@@ -1079,72 +1235,95 @@ export class LocalIndexedDbStore {
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
+    const sales = Array.isArray((snapshot as any).sales) ? (snapshot as any).sales : [];
+    const payments = Array.isArray((snapshot as any).payments) ? (snapshot as any).payments : [];
+    const purchaseReceipts = Array.isArray((snapshot as any).purchaseReceipts) ? (snapshot as any).purchaseReceipts : [];
 
-    for (const product of products) {
-      if (
-        this.protectServerRecord("Product", product.id) ||
-        (product.variants || []).some((v) => this.protectServerRecord("ProductVariant", v.id))
-      ) {
-        continue;
+    const tenantId = String(ctx?.tenantId || (snapshot as any).tenantId || products[0]?.tenantId || "");
+    const branchId = String(ctx?.branchId || (snapshot as any).branchId || products[0]?.branchId || "branch-default");
+    if (!tenantId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId is required for authoritative bootstrap");
+    const serverRevision = String((snapshot as any).serverRevision ?? "0");
+
+    const pending = this.getPendingOutbox(tenantId, branchId);
+    const protectedKeys = new Map<NativeStore, Set<string>>();
+    const pendingCatalogTypes = new Set<string>();
+    const protect = (store: NativeStore, id: string) => { const set = protectedKeys.get(store) || new Set<string>(); set.add(id); protectedKeys.set(store, set); };
+    for (const item of pending) {
+      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "Supplier" ? "suppliers" : null;
+      if (store) protect(store, item.entityId);
+      if (item.entityType === "Category" || item.entityType === "Brand") pendingCatalogTypes.add(item.entityType);
+      const payload: any = item.payload || {};
+      if (item.entityType === "Product") for (const v of Array.isArray(payload.variants) ? payload.variants : []) if (v?.id) protect("productVariants", String(v.id));
+      if (item.entityType === "StockAdjustment" && payload.variantId) protect("productVariants", String(payload.variantId));
+    }
+
+    const records: Record<NativeStore, any[]> = {
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+    };
+    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers"];
+    const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
+    const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
+    const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
+    const brandValue = { key: "inventory_brands_meta", value: brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
+
+    if (!this.nativeDb) {
+      for (const store of replaceStores) {
+        const target = this.getTargetMap(store); if (!target) continue;
+        const ids = new Set((records[store] || []).map((row: any) => String(row.id)));
+        for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !ids.has(String(key)) && !isProtected(store, String(key))) target.delete(key);
+        for (const row of records[store] || []) if (!isProtected(store, String(row.id))) target.set(row.id, row);
       }
-      this.saveProductLocal(product, ctx);
-      appliedCount += 1;
+      if (!pendingCatalogTypes.has("Category")) this.configuration.set(tenantId + ":" + branchId + ":inventory_categories_meta", categoryValue);
+      if (!pendingCatalogTypes.has("Brand")) this.configuration.set(tenantId + ":" + branchId + ":inventory_brands_meta", brandValue);
+      for (const prodId of this.products.keys()) this.recalculateProductStockLocal(prodId);
+      this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastSyncTime"), snapshot.snapshotTimestamp);
+      this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
+      this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastBootstrapChecksum"), snapshot.integrityChecksum);
+      this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastSyncRevision"), serverRevision);
+      await this.flushPersistence();
+      return { applied: Object.values(records).reduce((sum, rows) => sum + rows.length, 0) };
     }
 
-    for (const variant of variants) {
-      if (this.protectServerRecord("ProductVariant", variant.id)) continue;
-      const reconciled = this.mergeLocalDeltasIntoVariant(variant);
-      this.saveVariantLocal(reconciled, ctx);
-      appliedCount += 1;
+    const hydrateStores = replaceStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
+    await Promise.all(hydrateStores.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
+    const txStores = [...replaceStores, "configuration", "syncMetadata"].filter((store) => this.nativeDb!.objectStoreNames.contains(store));
+    const tx = this.nativeDb.transaction(txStores, "readwrite");
+    for (const store of replaceStores) {
+      const os = tx.objectStore(store);
+      const target = this.getTargetMap(store);
+      if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
+      for (const row of records[store] || []) if (!isProtected(store, String(row.id))) os.put(row, row.id);
     }
+    const configStore = tx.objectStore("configuration");
+    if (!pendingCatalogTypes.has("Category")) configStore.put(categoryValue, tenantId + ":" + branchId + ":inventory_categories_meta");
+    if (!pendingCatalogTypes.has("Brand")) configStore.put(brandValue, tenantId + ":" + branchId + ":inventory_brands_meta");
+    const md = tx.objectStore("syncMetadata");
+    md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastSyncTime"));
+    md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"));
+    md.put(String(snapshot.integrityChecksum || ""), this.scopedSyncKey(tenantId, branchId, "lastBootstrapChecksum"));
+    md.put(serverRevision, this.scopedSyncKey(tenantId, branchId, "lastSyncRevision"));
 
-    for (const entry of ledger) {
-      this.saveStockLedgerLocal(entry, ctx);
-      appliedCount += 1;
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error("IndexedDB authoritative bootstrap transaction failed"));
+      tx.onabort = () => reject(tx.error || new Error("IndexedDB authoritative bootstrap transaction aborted"));
+    });
+
+    for (const store of replaceStores) {
+      const target = this.getTargetMap(store);
+      if (target) { target.clear(); await this.hydrateMap(store, target); }
     }
-
-    for (const adjustment of adjustments) {
-      if (this.protectServerRecord("StockAdjustment", adjustment.id)) continue;
-      this.saveStockAdjustmentLocal(adjustment, ctx);
-      appliedCount += 1;
-    }
-
-    for (const customer of customers) {
-      if (this.protectServerRecord("Customer", customer.id)) continue;
-      this.saveCustomerLocal(customer, ctx);
-      appliedCount += 1;
-    }
-
-    for (const supplier of suppliers) {
-      if (this.protectServerRecord("Supplier", supplier.id)) continue;
-      this.saveSupplierLocal(supplier, ctx);
-      appliedCount += 1;
-    }
-
-    for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any, ctx); appliedCount += 1; }
-    if (categories.length) {
-      const tenantId = String((categories[0] as any).tenantId || ctx?.tenantId || "");
-      this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : ctx);
-    }
-    if (brands.length) {
-      const tenantId = String((brands[0] as any).tenantId || ctx?.tenantId || "");
-      this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : ctx);
-    }
-
-    // Ensure all parent products have deterministic stock derived from variants
-    for (const prodId of this.products.keys()) {
-      this.recalculateProductStockLocal(prodId);
-    }
-
-    this.setSyncMetadata("lastSyncTime", snapshot.snapshotTimestamp);
-    this.setSyncMetadata("lastBootstrapTime", snapshot.snapshotTimestamp);
-    this.setSyncMetadata("lastBootstrapChecksum", snapshot.integrityChecksum);
-    await this.flushPersistence();
-
-    return { applied: appliedCount };
+    const allConfig = this.configuration;
+    if (!pendingCatalogTypes.has("Category")) allConfig.set(tenantId + ":" + branchId + ":inventory_categories_meta", categoryValue);
+    if (!pendingCatalogTypes.has("Brand")) allConfig.set(tenantId + ":" + branchId + ":inventory_brands_meta", brandValue);
+    for (const prodId of this.products.keys()) this.recalculateProductStockLocal(prodId);
+    this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastSyncTime"), snapshot.snapshotTimestamp);
+    this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
+    this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapChecksum"), String(snapshot.integrityChecksum || ""));
+    this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastSyncRevision"), serverRevision);
+    return { applied: Object.values(records).reduce((sum, rows) => sum + rows.length, 0) };
   }
-
-  generateStateManifest(deviceId: string, tenantId?: string): SyncStateManifest {
+  generateStateManifest(deviceId: string, tenantId?: string, branchId?: string): SyncStateManifest {
     const products = this.getProductsLocal(tenantId);
     const variants = this.getProductVariantsLocal(tenantId);
     const ledger = this.getStockLedgerLocal(tenantId);
@@ -1159,7 +1338,7 @@ export class LocalIndexedDbStore {
 
     return {
       deviceId,
-      lastSyncTime: this.syncMetadata.get("lastSyncTime") || null,
+      lastSyncTime: tenantId && branchId ? this.syncMetadata.get(this.scopedSyncKey(tenantId, branchId, "lastSyncTime")) || null : this.syncMetadata.get("lastSyncTime") || null,
       schemaVersion: this.schemaVersion,
       storeCounts: {
         products: products.length,
@@ -1168,7 +1347,7 @@ export class LocalIndexedDbStore {
         stockAdjustments: adjustments.length,
         customers: customers.length,
         suppliers: suppliers.length,
-        syncOutbox: this.syncOutbox.size,
+        syncOutbox: this.getPendingOutbox(tenantId, branchId).length,
       },
       productIds: products.map((p) => p.id),
       variantIds: variants.map((v) => v.id),
@@ -1192,7 +1371,7 @@ export class LocalIndexedDbStore {
     return typeof value === "string" ? value : value instanceof Date ? value.toISOString() : null;
   }
 
-  enqueueOutbox(
+  createOutboxItem(
     item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>,
   ): OutboxItem {
     const opId =
@@ -1209,7 +1388,7 @@ export class LocalIndexedDbStore {
       (operationType === "UPDATE" || operationType === "DELETE") && baseUpdatedAt && !sourcePayload._baseUpdatedAt
         ? { ...sourcePayload, _baseUpdatedAt: baseUpdatedAt }
         : sourcePayload;
-    const outboxItem: OutboxItem = {
+    return {
       id: opId,
       entityType,
       entityId,
@@ -1221,6 +1400,12 @@ export class LocalIndexedDbStore {
       tenantId: item.tenantId || (sourcePayload.tenantId as string | undefined),
       branchId: item.branchId || (sourcePayload.branchId as string | undefined),
     };
+  }
+
+  enqueueOutbox(
+    item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>,
+  ): OutboxItem {
+    const outboxItem = this.createOutboxItem(item);
     this.recordOutboxMutation(outboxItem);
     try {
       if (typeof window !== "undefined") {
@@ -1237,20 +1422,35 @@ export class LocalIndexedDbStore {
     return outboxItem;
   }
 
-  getPendingOutbox(tenantId?: string): OutboxItem[] {
+  getPendingOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
     const all = [...this.syncOutbox.values()].filter((item) => item.status === "PENDING");
-    const filtered = tenantId ? all.filter((i) => i.tenantId === tenantId) : all;
+    const filtered = all.filter((i) => {
+      const matchTenant = !tenantId || !i.tenantId || i.tenantId === tenantId || i.tenantId === "tenant-default" || tenantId === "tenant-default";
+      const matchBranch = !branchId || !i.branchId || i.branchId === branchId || i.branchId === "branch-default" || branchId === "branch-default";
+      return matchTenant && matchBranch;
+    });
     return orderPendingOutbox(filtered);
   }
 
-  async getPendingOutboxCount(tenantId?: string): Promise<number> {
+  async getPendingOutboxCount(tenantId?: string, branchId?: string): Promise<number> {
     await this.ready;
-    return this.getPendingOutbox(tenantId).length;
+    return this.getPendingOutbox(tenantId, branchId).length;
   }
 
-  getFailedOutbox(tenantId?: string): OutboxItem[] {
+  getFailedOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
     const all = [...this.syncOutbox.values()].filter((item) => item.status === "FAILED");
-    return tenantId ? all.filter((i) => i.tenantId === tenantId) : all;
+    return all.filter((i) => (!tenantId || i.tenantId === tenantId) && (!branchId || i.branchId === branchId));
+  }
+
+  retryFailedOutbox(tenantId?: string, branchId?: string): number {
+    const failed = this.getFailedOutbox(tenantId, branchId);
+    for (const item of failed) {
+      item.status = "PENDING";
+      this.syncMetadata.delete(`error_${item.id}`);
+      this.persist("syncOutbox", item.id, item);
+      if (this.nativeDb) this.persistDelete("syncMetadata", `error_${item.id}`);
+    }
+    return failed.length;
   }
 
   retryOutbox(operationId: string): void {
@@ -1267,6 +1467,14 @@ export class LocalIndexedDbStore {
     if (!item) return;
     item.status = "SYNCED";
     this.persist("syncOutbox", operationId, item);
+    if (item.entityType === "Sale") {
+      const saleId = item.entityId || operationId;
+      const sale = this.sales.get(saleId);
+      if (sale) {
+        sale.syncStatus = "Synced";
+        this.persist("sales", saleId, sale);
+      }
+    }
   }
 
   markOutboxFailed(operationId: string, errorReason: string): void {
@@ -1317,6 +1525,7 @@ export class LocalIndexedDbStore {
     preservedOutboxCount: number;
     journalEntry?: MigrationJournalEntry;
   }> {
+    await this.ready;
     const previousVersion = this.schemaVersion;
     const preservedOutboxCount = this.getPendingOutbox().length;
 

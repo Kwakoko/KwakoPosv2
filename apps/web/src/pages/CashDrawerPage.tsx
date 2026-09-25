@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPosv2 — Cash Drawer & Shift Financial Control Command Center
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete, production-grade Cash Drawer & Shift Financial Control workspace:
@@ -27,6 +27,7 @@ import {
 import { useAuth, useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
+import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
@@ -87,8 +88,8 @@ export interface CashDrawerPageProps {
 }
 
 export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propActiveTab }) => {
-  const { currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
+  const { currentTenantName, currentTenantId } = useTenant();
+  const { currentBranchName, currentBranchId } = useBranch();
   const { user: currentUser } = useAuth();
   const { permissions, hasPermission } = useRbac();
   const { isOnline, db } = useSync();
@@ -458,7 +459,7 @@ Manager Sign-off:  _____________________
     }
   };
 
-  const handlePostCashMovement = (e: React.FormEvent) => {
+  const handlePostCashMovement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!modalType) return;
 
@@ -571,10 +572,19 @@ Manager Sign-off:  _____________________
       approvalStatus: "APPROVED",
     };
 
-    setLedger((prev) => [record, ...prev]);
-    if (db && typeof db.enqueueOutbox === "function") {
-      db.enqueueOutbox({ entityType: "Payment", operationType: "CREATE", payload: record as unknown as Record<string, unknown> });
+    if (!currentTenantId || !currentBranchId) {
+      toast.error("Cash Movement Not Saved", "An active tenant and branch are required.");
+      return;
     }
+    const paymentId = record.id;
+    const scopedRecord = { ...record, tenantId: currentTenantId, branchId: currentBranchId };
+    await commitLocalMutation({
+      db, tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      entityType: "Payment", entityId: paymentId, operationType: "CREATE",
+      payload: scopedRecord as unknown as Record<string, unknown>, idempotencyKey: paymentId,
+      writes: [{ store: "payments", key: paymentId, value: scopedRecord }],
+    });
+    setLedger((prev) => [record, ...prev]);
 
     setModalType(null);
     setAmountInput("");
@@ -641,7 +651,7 @@ Manager Sign-off:  _____________________
         <div className="kpi-card">
           <div className="kpi-card-label">Expected Drawer Cash</div>
           <div className="kpi-card-value" style={{ color: "var(--text)" }}>{money(expectedCash)}</div>
-          <div className="kpi-card-desc">Float + Sales âˆ’ Out âˆ’ Drops</div>
+          <div className="kpi-card-desc">Float + Sales − Out − Drops</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Reconciliation Discrepancy</div>
@@ -946,10 +956,10 @@ Manager Sign-off:  _____________________
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Opening Float:</span><span className="v2-mono">{money(openingFloat)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Total Cash Sales:</span><span className="v2-mono">{money(cashSales)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>(+) Manual Cash In:</span><span className="v2-mono">{money(cashIn)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Customer Cash Refunds:</span><span className="v2-mono">âˆ’{money(cashRefunds)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Petty Cash Expenses:</span><span className="v2-mono">âˆ’{money(cashExpenses)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Manual Cash Out:</span><span className="v2-mono">âˆ’{money(cashOut)}</span></div>
-                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(âˆ’) Safe & Bank Drops:</span><span className="v2-mono">âˆ’{money(safeDrops)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Customer Cash Refunds:</span><span className="v2-mono">−{money(cashRefunds)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Petty Cash Expenses:</span><span className="v2-mono">−{money(cashExpenses)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Manual Cash Out:</span><span className="v2-mono">−{money(cashOut)}</span></div>
+                <div className="v2-flex v2-justify-between v2-text-xs" style={{ color: "var(--danger)" }}><span>(−) Safe & Bank Drops:</span><span className="v2-mono">−{money(safeDrops)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-sm v2-font-black v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
                   <span>SYSTEM EXPECTED CASH:</span>
                   <span className="v2-mono" style={{ color: "var(--accent)" }}>{money(expectedCash)}</span>
@@ -966,7 +976,7 @@ Manager Sign-off:  _____________________
                 </div>
                 <div className="v2-p-3" style={{ background: isVarianceAccepted ? "var(--success-muted)" : "var(--danger-muted)", borderRadius: "var(--radius-md)" }}>
                   <div className="v2-font-bold v2-text-xs" style={{ color: isVarianceAccepted ? "var(--success)" : "var(--danger)" }}>
-                    {discrepancy === 0 ? "âœ… PERFECTLY BALANCED" : isVarianceAccepted ? "âš ï¸ VARIANCE ACCEPTED (WITHIN TZS 500 TOLERANCE)" : "ðŸš¨ LARGE VARIANCE — REQUIRES MANAGER APPROVAL"}
+                    {discrepancy === 0 ? "✅ PERFECTLY BALANCED" : isVarianceAccepted ? "⚠️ VARIANCE ACCEPTED (WITHIN TZS 500 TOLERANCE)" : "🚨 LARGE VARIANCE — REQUIRES MANAGER APPROVAL"}
                   </div>
                 </div>
               </div>
@@ -1426,8 +1436,8 @@ Manager Sign-off:  _____________________
               <div className="v2-flex v2-justify-between"><span>(+) Opening Float:</span><span>{money(activeReportSlip.openingFloat)}</span></div>
               <div className="v2-flex v2-justify-between"><span>(+) Cash Sales:</span><span>{money(activeReportSlip.cashSales)}</span></div>
               <div className="v2-flex v2-justify-between"><span>(+) Manual Cash In:</span><span>{money(activeReportSlip.cashIn)}</span></div>
-              <div className="v2-flex v2-justify-between"><span>(âˆ’) Manual Cash Out:</span><span>âˆ’{money(activeReportSlip.cashOut)}</span></div>
-              <div className="v2-flex v2-justify-between"><span>(âˆ’) Safe Transfers:</span><span>âˆ’{money(activeReportSlip.safeDrops)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(−) Manual Cash Out:</span><span>−{money(activeReportSlip.cashOut)}</span></div>
+              <div className="v2-flex v2-justify-between"><span>(−) Safe Transfers:</span><span>−{money(activeReportSlip.safeDrops)}</span></div>
               <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, paddingTop: "0.3rem", borderTop: "1px dotted #cbd5e1" }}>
                 <span>EXPECTED IN DRAWER:</span>
                 <span>{money(activeReportSlip.expectedCash)}</span>

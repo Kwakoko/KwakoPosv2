@@ -1,5 +1,6 @@
-import { LocalIndexedDbStore } from "../indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb } from "../indexedDb.js";
 import { apiFetch, getStoredSession, safeUUID } from "./apiClient.js";
+import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
 
 export interface MutationContext { tenantId: string; branchId: string; }
 
@@ -10,9 +11,8 @@ function sessionContext(): MutationContext {
 }
 
 async function localDb(): Promise<LocalIndexedDbStore> {
-  const db = new LocalIndexedDbStore();
-  await db.ready;
-  return db;
+  await defaultDb.ready;
+  return defaultDb;
 }
 
 async function enqueuePluginMutation(
@@ -23,7 +23,7 @@ async function enqueuePluginMutation(
   const db = await localDb();
   const ctx = sessionContext();
   const id = safeUUID();
-  db.enqueueOutbox({
+  await commitLocalOutbox(db, {
     id,
     entityType: `Plugin:${pluginId}`,
     entityId: id,

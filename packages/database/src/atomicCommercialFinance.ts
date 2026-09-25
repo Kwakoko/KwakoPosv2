@@ -72,8 +72,19 @@ export class PrismaAtomicCommercialFinanceService {
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
         const qtySold = Math.abs(l.quantity);
+        if (typeof (tx as any).$queryRawUnsafe === "function") {
+          const lockRows = await (tx as any).$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, l.variantId, ctx.tenantId, ctx.branchId) as Array<{ id: string }>;
+          if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
         const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
-        const qtyBefore = Number(variantBefore?.inventoryQuantity ?? 0);
+        if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        let qtyBefore = 0;
+        if (typeof (tx.stockLedger as any)?.aggregate === "function") {
+          const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
+          qtyBefore = Number(ledgerBefore._sum.quantityChange ?? (variantBefore as any).inventoryQuantity ?? 0);
+        } else {
+          qtyBefore = Number((variantBefore as any).inventoryQuantity ?? (variantBefore as any).stock ?? 0);
+        }
         const isOversell = qtyBefore < qtySold;
         const shortfall = isOversell ? qtySold - qtyBefore : 0;
         const qtyAfter = Math.max(0, qtyBefore - qtySold);
@@ -175,8 +186,10 @@ export class PrismaAtomicCommercialFinanceService {
         const i = req.items[idx];
         const item = receipt.items[idx];
         const qtyReceived = Math.abs(i.quantityReceived);
+        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, i.variantId, ctx.tenantId, ctx.branchId);
         const v = await tx.productVariant.findUnique({ where: { id: i.variantId } });
-        const qtyBefore = Number(v?.inventoryQuantity ?? 0);
+        const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: i.variantId } });
+        const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
         const qtyAfter = qtyBefore + qtyReceived;
         const prodId = v?.productId || item.variantId;
 

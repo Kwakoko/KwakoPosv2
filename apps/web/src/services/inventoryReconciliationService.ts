@@ -1,126 +1,57 @@
-﻿/** Production inventory reconciliation for offline catalog convergence. */
-import type { LocalIndexedDbStore } from "../indexedDb.js";
+/** Production inventory reconciliation for offline catalog convergence. */
+import type { LocalIndexedDbStore, OutboxItem } from "../indexedDb.js";
 
-export function reconcileLocalInventoryToOutbox(
+export async function reconcileLocalInventoryToOutbox(
   db: LocalIndexedDbStore,
   tenantId?: string,
   branchId?: string,
-): number {
+): Promise<number> {
   if (!db || !db.products) return 0;
   let reconciled = 0;
-
-  // 1. Check existing outbox to see which product IDs are already tracked
+  const tenant = tenantId || "tenant-default";
+  const branch = branchId || "branch-default";
   const trackedProductIds = new Set<string>();
   const syncOutboxMap = (db as any).syncOutbox as Map<string, any> | undefined;
-  if (syncOutboxMap) {
-    for (const item of syncOutboxMap.values()) {
-      if (item.entityType === "Product" && item.entityId) {
-        trackedProductIds.add(item.entityId);
-      }
-    }
-  }
+  if (syncOutboxMap) for (const item of syncOutboxMap.values()) if (item.tenantId === tenant && item.branchId === branch && item.entityType === "Product" && item.entityId) trackedProductIds.add(item.entityId);
 
-  // 2. For any product in db.products not in outbox, enqueue it
   for (const [prodId, prod] of db.products.entries()) {
     const pAny = prod as any;
+    if (pAny.tenantId && pAny.tenantId !== tenant) continue;
+    if (pAny.branchId && pAny.branchId !== branch) continue;
     if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive" || pAny.synced || pAny.reconciledToOutbox) continue;
-    if (!trackedProductIds.has(prodId)) {
-      // Find variants for this product
-      const variants: any[] = [];
-      if (db.productVariants) {
-        for (const v of db.productVariants.values()) {
-          const vAny = v as any;
-          if (vAny.productId === prodId) {
-            variants.push(vAny);
-          }
-        }
+    if (trackedProductIds.has(prodId)) continue;
+    const variants: any[] = [];
+    for (const v of db.productVariants.values()) { const va=v as any; if (va.productId===prodId && (!va.tenantId||va.tenantId===tenant) && (!va.branchId||va.branchId===branch)) variants.push(va); }
+    const defaultVarId = variants.length > 0 ? variants[0].id : `${prodId}-default`;
+    const effectiveVariants = variants.length > 0 ? variants : [{
+      id: defaultVarId, productId: prodId, name: "Standard", sku: `${pAny.sku || prodId}-STD`,
+      price: Number(pAny.sellingPrice || 0), costPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
+      stock: 0, inventoryQuantity: 0, isActive: true, tenantId: tenant, branchId: branch,
+    }];
+    const writes: any[] = [];
+    if (variants.length === 0) writes.push({ store: "productVariants", key: defaultVarId, value: effectiveVariants[0] });
+    const productPayload: Record<string, unknown> = {
+      id: prodId, name: pAny.name, sku: pAny.sku || `SKU-${prodId.slice(0,6).toUpperCase()}`, category: pAny.category || "", brand: pAny.brand || "",
+      buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0), sellingPrice: Number(pAny.sellingPrice || 0), hasVariants: effectiveVariants.length > 1, variants: effectiveVariants,
+    };
+    const makeOutbox = (entityType: string, entityId: string, payload: Record<string, unknown>, idempotencyKey: string): OutboxItem => ({
+      id: idempotencyKey, entityType: entityType as any, entityId, operationType: "CREATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey, status: "PENDING", tenantId: tenant, branchId: branch,
+    });
+    const outboxItems: OutboxItem[] = [makeOutbox("Product", prodId, productPayload, `PROD-RECON-${prodId}`)];
+    for (const v of effectiveVariants) {
+      outboxItems.push(makeOutbox("ProductVariant", v.id, { ...v }, `VAR-RECON-${v.id}`));
+      const vStock = Number(v.stock ?? v.inventoryQuantity ?? 0);
+      if (vStock > 0) {
+        const ledgerId = `led-recon-${v.id}`;
+        const adjustmentId = `adj-recon-${v.id}`;
+        writes.push({ store: "stockLedger", key: ledgerId, value: { id: ledgerId, tenantId: tenant, branchId: branch, productId: prodId, variantId: v.id, movementType: "OPENING_STOCK", referenceType: "ADJUSTMENT", referenceId: adjustmentId, quantityBefore: 0, quantityChange: vStock, quantity: vStock, quantityAfter: vStock, balanceAfter: vStock, unitCost: Number(v.costPrice || 0), totalCost: vStock * Number(v.costPrice || 0), occurredAt: new Date().toISOString(), createdAt: new Date().toISOString(), operationId: adjustmentId, idempotencyKey: `ADJ-RECON-${v.id}`, synced: false } });
+        outboxItems.push(makeOutbox("StockAdjustment", adjustmentId, { productId: prodId, variantId: v.id, sku: v.sku, adjustmentType: "INCREASE", movementType: "OPENING_STOCK", quantityChange: vStock, reason: "LOCAL_INVENTORY_RECONCILIATION", deviceId: "web-client", operationId: adjustmentId, idempotencyKey: `ADJ-RECON-${v.id}` }, `ADJ-RECON-${v.id}`));
       }
-
-      const defaultVarId = variants.length > 0 ? variants[0].id : `${prodId}-default`;
-      const effectiveVariants = variants.length > 0 ? variants : [
-        {
-          id: defaultVarId,
-          productId: prodId,
-          name: "Standard",
-          sku: `${pAny.sku || prodId}-STD`,
-          price: Number(pAny.sellingPrice || 0),
-          costPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
-          stock: Number(pAny.stock || pAny.availableStock || pAny.totalStock || 0),
-          inventoryQuantity: Number(pAny.stock || pAny.availableStock || pAny.totalStock || 0),
-          isActive: true,
-        },
-      ];
-
-      if (variants.length === 0) {
-        db.saveVariantLocal(effectiveVariants[0], tenantId ? { tenantId } : undefined);
-      }
-
-      db.enqueueOutbox({
-        entityType: "Product",
-        entityId: prodId,
-        operationType: "CREATE",
-        payload: {
-          id: prodId,
-          name: pAny.name,
-          sku: pAny.sku || `SKU-${prodId.slice(0, 6).toUpperCase()}`,
-          category: pAny.category || "",
-          brand: pAny.brand || "",
-          buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
-          sellingPrice: Number(pAny.sellingPrice || 0),
-          hasVariants: effectiveVariants.length > 1,
-          variants: effectiveVariants,
-        },
-        idempotencyKey: `PROD-RECON-${prodId}`,
-        tenantId: tenantId || pAny.tenantId || undefined,
-        branchId: branchId || pAny.branchId || undefined,
-      });
-
-      for (const v of effectiveVariants) {
-        db.enqueueOutbox({
-          entityType: "ProductVariant",
-          entityId: v.id,
-          operationType: "CREATE",
-          payload: v,
-          idempotencyKey: `VAR-RECON-${v.id}`,
-          tenantId: tenantId || pAny.tenantId || undefined,
-          branchId: branchId || pAny.branchId || undefined,
-        });
-
-        const vStock = Number(v.stock ?? v.inventoryQuantity ?? pAny.stock ?? 0);
-        if (vStock > 0) {
-          db.enqueueOutbox({
-            entityType: "StockAdjustment",
-            entityId: `adj-${v.id}`,
-            operationType: "CREATE",
-            payload: {
-              productId: prodId,
-              variantId: v.id,
-              sku: v.sku,
-              adjustmentType: "INCREASE",
-              quantityChange: vStock,
-              reason: "LOCAL_INVENTORY_RECONCILIATION",
-              deviceId: "web-client",
-              operationId: `adj-${v.id}`,
-              idempotencyKey: `ADJ-RECON-${v.id}`,
-            },
-            idempotencyKey: `ADJ-RECON-${v.id}`,
-            tenantId: tenantId || pAny.tenantId || undefined,
-            branchId: branchId || pAny.branchId || undefined,
-          });
-        }
-      }
-      pAny.reconciledToOutbox = true;
-      reconciled += 1;
     }
+    await db.executeAtomicMutation({ writes, outboxItems, tenantContext: { tenantId: tenant, branchId: branch } });
+    pAny.reconciledToOutbox = true;
+    reconciled += 1;
   }
-
-  // 3. Retry any failed outbox items
-  if (typeof (db as any).getFailedOutbox === "function" && typeof (db as any).retryOutbox === "function") {
-    const failed = (db as any).getFailedOutbox(tenantId);
-    for (const item of failed) {
-      (db as any).retryOutbox(item.id);
-    }
-  }
-
+  if (typeof (db as any).getFailedOutbox === "function" && typeof (db as any).retryOutbox === "function") { for (const item of (db as any).getFailedOutbox(tenant, branch)) (db as any).retryOutbox(item.id); }
   return reconciled;
 }

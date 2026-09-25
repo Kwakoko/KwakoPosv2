@@ -115,7 +115,19 @@ import {
   SyncBootstrapRequestSchema,
   SyncStateManifestSchema,
 } from "@kwakopos2/contracts";
-import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager } from "@kwakopos2/auth";
+import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager, comparePassword, hashPassword } from "@kwakopos2/auth";
+
+interface InMemoryAuthRecord {
+  userId: string;
+  tenantId: string;
+  branchId: string;
+  email: string;
+  name: string;
+  role: string;
+  passwordHash: string;
+}
+const inMemoryAuthRegistry = new Map<string, InMemoryAuthRecord>();
+
 import {
   ScopedProductRepository,
   ScopedStockRepository,
@@ -475,6 +487,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url === "/auth/login" ||
       url === "/auth/refresh" ||
       url === "/auth/logout" ||
+      url.startsWith("/auth/super-admin/setup/") ||
       url.startsWith("/telemetry") ||
       url.startsWith("/api/legal/documents") ||
       url === "/api/legal/subprocessors" ||
@@ -934,40 +947,144 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: ReleaseGovernancePolicy.getFeatureFlags() };
   });
 
-  // Login: ONLY allow the "auto-provision" test login when NOT in production.
+  // Login: Persistent authentication endpoint across logins and sessions
   // H-004: Strict rate limit on authentication endpoint to thwart brute-force attacks
   server.post("/auth/login", { config: { rateLimit: { max: 15, timeWindow: "15 minutes" } } }, async (req, reply) => {
     const { email, password, deviceId } = (req.body as any) || {};
     if (!email || !password) return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing required login parameters: email, password" } });
-    let tenantId: string = randomUUID();
-    let branchId: string = randomUUID();
-    const userId: string = randomUUID();
+    const normalizedEmail = String(email).trim().toLowerCase();
+    let tenantId: string;
+    let branchId: string;
+    let userId: string;
+    let userName = email.split("@")[0] || "Admin User";
+    let userRole = "ADMIN";
 
     if (productionPersistence) {
       const { prisma } = await import("@kwakopos2/database");
-      const slug = (email.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-") + "-" + randomUUID().slice(0, 8);
-      const tenant = await prisma.tenant.create({
-        data: {
-          id: tenantId,
-          name: `${email.split("@")[0]} Organization`,
-          slug,
-          status: "ACTIVE",
-          branches: {
-            create: {
-              id: branchId,
-              name: "Main Branch",
-              code: "MAIN-" + randomUUID().slice(0, 6),
-              isMain: true,
+      const existingUser = (await prisma.user.findMany({
+        where: { email: normalizedEmail, status: "ACTIVE" },
+        include: { tenant: true, branch: true, role: true },
+        take: 1,
+      }))[0];
+
+      if (existingUser) {
+        const passwordValid = await comparePassword(String(password), existingUser.passwordHash);
+        if (!passwordValid) {
+          return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
+        }
+        userId = existingUser.id;
+        tenantId = existingUser.tenantId;
+        branchId = existingUser.branchId;
+        userName = existingUser.name || userName;
+        userRole = String(existingUser.role?.name || "ADMIN");
+      } else {
+        // Auto-provision initial tenant and user deterministically so that data permanently persists
+        const baseSlug = (normalizedEmail.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 32);
+        let tenant = await prisma.tenant.findFirst({
+          where: { OR: [{ slug: baseSlug }, { name: `${normalizedEmail.split("@")[0]} Organization` }] },
+          include: { branches: true },
+        });
+
+        if (!tenant) {
+          const newTenantId = randomUUID();
+          const newBranchId = randomUUID();
+          tenant = await prisma.tenant.create({
+            data: {
+              id: newTenantId,
+              name: `${normalizedEmail.split("@")[0]} Organization`,
+              slug: baseSlug + "-" + newTenantId.slice(0, 6),
+              status: "ACTIVE",
+              branches: {
+                create: {
+                  id: newBranchId,
+                  name: "Main Branch",
+                  code: "MAIN-" + newTenantId.slice(0, 6).toUpperCase(),
+                  isMain: true,
+                },
+              },
             },
+            include: { branches: true },
+          });
+        }
+        tenantId = tenant.id;
+        branchId = tenant.branches[0]?.id || randomUUID();
+
+        let role = await prisma.role.findFirst({ where: { tenantId, name: "ADMIN" } });
+        if (!role) {
+          role = await prisma.role.create({
+            data: { tenantId, name: "ADMIN", permissions: ["*"] },
+          });
+        }
+
+        const passwordHash = await hashPassword(String(password));
+        userId = randomUUID();
+        const createdUser = await prisma.user.create({
+          data: {
+            id: userId,
+            email: normalizedEmail,
+            name: userName,
+            passwordHash,
+            tenantId,
+            branchId,
+            roleId: role.id,
+            status: "ACTIVE",
           },
-        },
-        include: { branches: true },
-      });
-      tenantId = tenant.id as string;
-      branchId = tenant.branches[0].id as string;
+        });
+        userId = createdUser.id;
+      }
+    } else {
+      // In-memory mode / non-production: look up or store in inMemoryAuthRegistry
+      let record = inMemoryAuthRegistry.get(normalizedEmail);
+      if (!record) {
+        // Check if a user already exists in globalInMemoryStore
+        const storeUser = Array.from(globalInMemoryStore.users.values()).find(
+          (u: any) => u.email?.toLowerCase().trim() === normalizedEmail
+        );
+        if (storeUser) {
+          record = {
+            userId: storeUser.id,
+            tenantId: storeUser.tenantId || "tnt-tz-01",
+            branchId: storeUser.branchId || "br-01",
+            email: normalizedEmail,
+            name: storeUser.name || userName,
+            role: storeUser.role || "ADMIN",
+            passwordHash: storeUser.passwordHash || (await hashPassword(String(password))),
+          };
+        } else {
+          const newTenantId = `tnt-${randomUUID().slice(0, 8)}`;
+          const newBranchId = `br-${randomUUID().slice(0, 8)}`;
+          const newUserId = `usr-${randomUUID().slice(0, 8)}`;
+          const passwordHash = await hashPassword(String(password));
+          record = {
+            userId: newUserId,
+            tenantId: newTenantId,
+            branchId: newBranchId,
+            email: normalizedEmail,
+            name: userName,
+            role: "ADMIN",
+            passwordHash,
+          };
+          globalInMemoryStore.tenants.set(newTenantId, { id: newTenantId, name: `${userName} Organization`, slug: normalizedEmail.split("@")[0], status: "ACTIVE" });
+          globalInMemoryStore.branches.set(newBranchId, { id: newBranchId, tenantId: newTenantId, name: "Main Branch", code: "MAIN-01", isMain: true });
+          globalInMemoryStore.users.set(newUserId, { id: newUserId, tenantId: newTenantId, branchId: newBranchId, email: normalizedEmail, name: userName, role: "ADMIN", passwordHash, status: "ACTIVE" });
+        }
+        inMemoryAuthRegistry.set(normalizedEmail, record);
+      }
+
+      // Verify password
+      const passwordValid = await comparePassword(String(password), record.passwordHash);
+      if (!passwordValid) {
+        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
+      }
+
+      userId = record.userId;
+      tenantId = record.tenantId;
+      branchId = record.branchId;
+      userName = record.name;
+      userRole = record.role;
     }
 
-    const tokenPayload = { sub: userId, tenantId, branchId, email, roles: ["ADMIN"], permissions: ["*"], deviceId: deviceId || "device-server-01" };
+    const tokenPayload = { sub: userId, tenantId, branchId, email: normalizedEmail, roles: [userRole], permissions: ["*"], deviceId: deviceId || "device-server-01" };
     const accessToken = generateAccessToken(tokenPayload);
     const session = await globalSessionManager.createSession(tenantId, userId, tokenPayload.deviceId);
 
@@ -977,7 +1094,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         accessToken,
         refreshToken: session.refreshToken,
         sessionId: session.sessionId,
-        user: { id: userId, tenantId, branchId, email, name: "Admin User", role: "ADMIN" },
+        user: { id: userId, tenantId, branchId, email: normalizedEmail, name: userName, role: userRole },
       },
     });
   });

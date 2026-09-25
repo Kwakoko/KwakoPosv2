@@ -59,6 +59,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: now,
       idempotencyKey: "DEV-A/OP-A-001",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     browserADb.recordOutboxMutation({
@@ -70,6 +72,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: now,
       idempotencyKey: "DEV-A/OP-A-002",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     browserADb.recordOutboxMutation({
@@ -89,6 +93,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: now,
       idempotencyKey: "DEV-A/OP-A-003",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     browserADb.recordOutboxMutation({
@@ -108,6 +114,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: now,
       idempotencyKey: "DEV-A/OP-A-004",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     // Browser A syncs initial batch to Server
@@ -127,6 +135,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: "DEV-A/OP-A-005",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     // Browser A reconnects & Syncs to Server
@@ -197,6 +207,8 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: "DEV-B/OP-B-001",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     // Browser B syncs to Server

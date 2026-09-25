@@ -28,6 +28,7 @@ import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 export interface ExpenseRecord {
   id: string;
+  tenantId?: string;
   category: string;
   amount: number;
   date: string;
@@ -62,8 +63,8 @@ export interface ExpensesPageProps {
 }
 
 export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
-  const { currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
+  const { currentTenantId, currentTenantName } = useTenant();
+  const { currentBranchId, currentBranchName } = useBranch();
   const { user } = useAuth();
   const { isOnline, db } = useSync();
   const { t } = useTranslation();
@@ -108,7 +109,10 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       setIsLoading(true);
       try {
         await db.ready;
-        const localExp = db.getConfigurationLocal?.("demo_expenses");
+        const localExp = db.getConfigurationLocal?.(
+          "demo_expenses",
+          currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined,
+        );
         if (Array.isArray(localExp)) {
           if (active) setExpenses(localExp as ExpenseRecord[]);
           return;
@@ -138,7 +142,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       active = false;
       window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
     };
-  }, [db, isOnline]);
+  }, [db, isOnline, currentTenantId, currentBranchId]);
 
   // Date Range Bounds
   const { fromTs, toTs } = useMemo(() => {
@@ -244,9 +248,16 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       return;
     }
 
+    if (!currentTenantId || !currentBranchId) {
+      setFormError("Tenant and branch context are required before recording an expense.");
+      return;
+    }
+
     const voucherId = `EXP-2026-${Math.floor(100 + Math.random() * 900)}`;
     const record: ExpenseRecord = {
       id: voucherId,
+      tenantId: currentTenantId,
+      branchId: currentBranchId,
       category: newCategory,
       amount: numAmt,
       date: newDate,
@@ -259,21 +270,32 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       createdAt: new Date().toISOString(),
     };
 
+    const updatedList = [record, ...expenses];
     if (isOnline) {
       await apiFetch("/api/v1/expenses", { method: "POST", body: JSON.stringify(record) }).catch(() => {});
+      db.saveConfigurationLocal("demo_expenses", updatedList, { tenantId: currentTenantId, branchId: currentBranchId });
     } else {
-      db.enqueueOutbox({
+      const outboxItem = {
+        id: voucherId,
         entityType: "Expense" as never,
         entityId: voucherId,
-        operationType: "CREATE",
+        operationType: "CREATE" as const,
         payload: record as unknown as Record<string, unknown>,
+        clientCreatedAt: new Date().toISOString(),
         idempotencyKey: voucherId,
+        status: "PENDING" as const,
+        tenantId: currentTenantId,
+        branchId: currentBranchId,
+      };
+      db.saveConfigurationLocal("demo_expenses", updatedList, { tenantId: currentTenantId, branchId: currentBranchId });
+      await db.executeAtomicMutation({
+        writes: [],
+        outboxItem,
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
       });
     }
 
-    const updatedList = [record, ...expenses];
     setExpenses(updatedList);
-    db.saveConfigurationLocal("demo_expenses", updatedList);
     setIsAddModalOpen(false);
 
     // Reset form

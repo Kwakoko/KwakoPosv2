@@ -78,10 +78,10 @@ const DEMO_BATCHES = [
 ];
 
 const DEMO_PRESCRIPTIONS = [
-  { id: "RX-2026-001", patient: "Grace Mwandani", doctor: "Dr. Kamau",  medicines: "Amlodipine 5mg Ã— 30",         date: "2026-08-28", status: "Dispensed" },
-  { id: "RX-2026-002", patient: "Said Hamisi",    doctor: "Dr. Ouma",   medicines: "Metformin 500mg Ã— 60, Glipizide 5mg Ã— 30", date: "2026-08-25", status: "Dispensed" },
-  { id: "RX-2026-003", patient: "Amina Juma",     doctor: "Dr. Kamau",  medicines: "Artemether 20mg Ã— 6, Paracetamol 500mg Ã— 12", date: "2026-08-30", status: "Pending" },
-  { id: "RX-2026-004", patient: "New Patient",    doctor: "Dr. Masoud", medicines: "Amoxicillin 500mg Ã— 21",      date: "2026-09-01", status: "Pending" },
+  { id: "RX-2026-001", patient: "Grace Mwandani", doctor: "Dr. Kamau",  medicines: "Amlodipine 5mg × 30",         date: "2026-08-28", status: "Dispensed" },
+  { id: "RX-2026-002", patient: "Said Hamisi",    doctor: "Dr. Ouma",   medicines: "Metformin 500mg × 60, Glipizide 5mg × 30", date: "2026-08-25", status: "Dispensed" },
+  { id: "RX-2026-003", patient: "Amina Juma",     doctor: "Dr. Kamau",  medicines: "Artemether 20mg × 6, Paracetamol 500mg × 12", date: "2026-08-30", status: "Pending" },
+  { id: "RX-2026-004", patient: "New Patient",    doctor: "Dr. Masoud", medicines: "Amoxicillin 500mg × 21",      date: "2026-09-01", status: "Pending" },
 ];
 
 const DEMO_CONTROLLED = [
@@ -192,7 +192,7 @@ const PatientsPage: React.FC = () => {
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patientsâ€¦" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search patients…" />
           </div>
         </div>
         <table className="v2-table">
@@ -239,7 +239,7 @@ const MedicinesPage: React.FC = () => {
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search medicinesâ€¦" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search medicines…" />
           </div>
         </div>
         <table className="v2-table">

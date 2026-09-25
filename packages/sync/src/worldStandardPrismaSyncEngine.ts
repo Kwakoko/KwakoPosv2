@@ -1,5 +1,5 @@
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, prisma } from "@kwakopos2/database";
+import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 
 const MAX_DELTA = 500;
@@ -29,7 +29,8 @@ export class WorldStandardPrismaSyncEngine {
     if (this.infrastructureReady) return this.infrastructureReady!;
     this.infrastructureReady = (async () => {
       await prisma.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq`);
-      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
       await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ)`);
@@ -37,10 +38,12 @@ export class WorldStandardPrismaSyncEngine {
     return this.infrastructureReady!;
   }
 
-  private async latestRevision(): Promise<string> {
-    const rows = await prisma.$queryRawUnsafe<Array<{ revision: bigint | number | string | null }>>(
-      `SELECT COALESCE(MAX(revision), 0) AS revision FROM sync_change_journal`,
-    );
+  private async latestRevision(ctx: TenantContext, db: any = prisma): Promise<string> {
+    const rows = await db.$queryRawUnsafe(
+      `SELECT COALESCE(MAX(revision), 0) AS revision FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2`,
+      ctx.tenantId,
+      ctx.branchId,
+    ) as Array<{ revision: bigint | number | string | null }>;
     return String(rows[0]?.revision ?? 0);
   }
 
@@ -194,7 +197,13 @@ export class WorldStandardPrismaSyncEngine {
             name: payload.name,
             description: payload.description ?? null,
             sku: payload.sku,
+            categoryId: payload.categoryId ?? null,
+            brandId: payload.brandId ?? payload.brand_id ?? null,
+            supplierId: payload.supplierId ?? null,
+            taxId: payload.taxId ?? null,
             category: payload.category ?? "General",
+            buyingPrice: payload.buyingPrice ?? 0,
+            sellingPrice: payload.sellingPrice ?? 0,
             isActive: payload.isActive ?? true,
             variants: {
               create: (payload.variants || []).map((v: any) => ({
@@ -222,7 +231,7 @@ export class WorldStandardPrismaSyncEngine {
       if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: product changed on server");
       const payload = stripSyncControlFields(op.payload as any);
-      await tx.product.update({ where: { id: op.entityId }, data: { name: payload.name, description: payload.description, sku: payload.sku, category: payload.category, isActive: payload.isActive } });
+      await tx.product.update({ where: { id: op.entityId }, data: { name: payload.name, description: payload.description, sku: payload.sku, categoryId: payload.categoryId, brandId: payload.brandId ?? payload.brand_id, supplierId: payload.supplierId, taxId: payload.taxId, category: payload.category, buyingPrice: payload.buyingPrice, sellingPrice: payload.sellingPrice, isActive: payload.isActive } });
       return;
     }
 
@@ -280,8 +289,9 @@ export class WorldStandardPrismaSyncEngine {
 
     if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") {
       const payload = op.payload as any;
-      const existing = await tx.stockAdjustment.findUnique({ where: { idempotencyKey: op.idempotencyKey } });
+      const existing = await tx.stockAdjustment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: op.idempotencyKey } });
       if (existing) return;
+      await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, payload.variantId, ctx.tenantId, ctx.branchId);
       const variant = await tx.productVariant.findUnique({ where: { id: payload.variantId } });
       if (!variant || variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       let changeQty = Number(payload.quantityChange ?? 0);
@@ -291,12 +301,15 @@ export class WorldStandardPrismaSyncEngine {
         const currentStock = ledger.reduce((sum: number, row: any) => sum + Number(row.quantityChange ?? row.quantity ?? 0), 0);
         changeQty = Number(payload.quantityChange) - currentStock;
       }
+      const beforeSum = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId } });
+      const quantityBefore = Number(beforeSum._sum.quantityChange ?? 0);
+      const quantityAfter = quantityBefore + changeQty;
+      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const unitCost = Number(payload.unitCost ?? variant.costPrice ?? 0);
       const adjustment = await tx.stockAdjustment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId, adjustmentType: payload.adjustmentType, quantityChange: changeQty, reason: payload.reason, referenceNote: payload.referenceNote ?? null, status: "COMPLETED", createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
-      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: "ADJUSTMENT", quantityChange: changeQty, quantity: changeQty, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt: new Date(), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
+      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt: new Date(), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
 
-      // Keep productVariant.inventoryQuantity consistent with ledger
-      const currentVariantQty = Number(variant.inventoryQuantity ?? 0);
-      const nextVariantQty = Math.max(0, currentVariantQty + changeQty);
+      const nextVariantQty = quantityAfter
       await tx.productVariant.update({
         where: { id: payload.variantId },
         data: { inventoryQuantity: nextVariantQty },
@@ -563,19 +576,32 @@ export class WorldStandardPrismaSyncEngine {
 
   async processBootstrap(ctx: TenantContext, req: any): Promise<any> {
     await this.ensureInfrastructure();
-    const snapshotTimestamp = new Date().toISOString();
-    const products = await this.productRepo.getProducts(ctx);
-    const variants = await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const stockLedger = await this.stockRepo.getLedger(ctx);
-    const adjustments = await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const customers = await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const suppliers = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const categories = await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const brands = await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands };
-    return { snapshotTimestamp, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, ...payload };
-  }
+    return prisma.$transaction(async (tx: any) => {
+      // One repeatable snapshot: the revision cursor and all bootstrap rows refer to the same committed state.
+      await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const snapshotRevision = await this.latestRevision(ctx, tx);
+      const snapshotTimestamp = new Date().toISOString();
 
+      const productRows = await tx.product.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { variants: true }, orderBy: { createdAt: "asc" } });
+      const products = productRows.map(productShape);
+      const parentPrices = new Map<string, { buyingPrice: number; sellingPrice: number }>(productRows.map((p: any) => [p.id, { buyingPrice: Number(p.buyingPrice ?? 0), sellingPrice: Number(p.sellingPrice ?? 0) }]));
+      const variantsRaw = await tx.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const variants = variantsRaw.map((v: any) => { const prices = parentPrices.get(v.productId) || { buyingPrice: 0, sellingPrice: 0 }; return variantShape(v, prices.buyingPrice, prices.sellingPrice); });
+      const stockLedger = (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { occurredAt: "asc" } })).map(ledgerShape);
+      const adjustments = await tx.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const customers = await tx.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const suppliers = await tx.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const categories = await tx.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const brands = await tx.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const sales = await tx.sale.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, payments: true }, orderBy: { soldAt: "asc" } });
+      const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
+      const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
+      const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories };
+      const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
+      return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
+    });
+  }
   async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
     await this.ensureInfrastructure();
     await this.reconcileJournal(ctx);

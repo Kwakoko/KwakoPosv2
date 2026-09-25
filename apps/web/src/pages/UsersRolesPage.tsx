@@ -25,6 +25,7 @@ import {
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
+import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
 
 type SubTab = "directory" | "employees" | "branches" | "roles_builder" | "matrix" | "sessions" | "audit" | "super_admin";
 
@@ -108,8 +109,8 @@ const SYSTEM_ROLES: CustomRoleRecord[] = [
 
 export const UsersRolesPage: React.FC = () => {
   const { user: currentUser } = useAuth();
-  const { currentTenantName } = useTenant();
-  const { currentBranchName, availableBranches } = useBranch();
+  const { currentTenantId, currentTenantName } = useTenant();
+  const { currentBranchId, currentBranchName, availableBranches } = useBranch();
   const { permissions: rbacPermissions, hasPermission, isSuperAdmin } = useRbac();
   const { isOnline, pendingOutboxCount, db } = useSync();
   const toast = useToast();
@@ -320,8 +321,29 @@ export const UsersRolesPage: React.FC = () => {
       password: formPassword,
       pin: formPin.trim(),
     };
-    await apiFetch("/api/v1/users", { method: "POST", body: JSON.stringify(newUserPayload) }).catch(() => {});
-    db.enqueueOutbox({ entityType: "User", operationType: "CREATE", payload: newUserPayload as unknown as Record<string, unknown> });
+    let serverCreated = false;
+    try {
+      const response = await apiFetch<{ success?: boolean }>("/api/v1/users", { method: "POST", body: JSON.stringify(newUserPayload) });
+      serverCreated = response?.success !== false;
+    } catch {
+      serverCreated = false;
+    }
+    if (!serverCreated) {
+      if (!currentTenantId || !currentBranchId) {
+        toast.error("Tenant Context Required", "A tenant and branch context are required to queue an offline user mutation.");
+        return;
+      }
+      await commitLocalOutbox(db, {
+        id: `USER-CREATE-${currentTenantId}-${currentBranchId}-${formEmail.trim().toLowerCase()}`,
+        entityType: "User",
+        entityId: `usr-${Date.now()}`,
+        operationType: "CREATE",
+        payload: { ...newUserPayload, tenantId: currentTenantId, branchId: currentBranchId } as unknown as Record<string, unknown>,
+        idempotencyKey: `USER-CREATE-${currentTenantId}-${currentBranchId}-${formEmail.trim().toLowerCase()}`,
+        tenantId: currentTenantId,
+        branchId: currentBranchId,
+      });
+    }
     const newUserRecord: UserRecord = {
       id: `usr-${Date.now()}`,
       firstName: formFirstName.trim(),
@@ -377,8 +399,25 @@ export const UsersRolesPage: React.FC = () => {
       return;
     }
     if (confirm(`Permanently delete user account for ${userRec.firstName} ${userRec.lastName}?`)) {
-      await apiFetch(`/api/v1/users/${userRec.id}`, { method: "DELETE" }).catch(() => {});
-      db.enqueueOutbox({ entityType: "User", operationType: "DELETE", payload: { id: userRec.id } });
+      let serverDeleted = false;
+      try {
+        const response = await apiFetch<{ success?: boolean }>(`/api/v1/users/${userRec.id}`, { method: "DELETE" });
+        serverDeleted = response?.success !== false;
+      } catch {
+        serverDeleted = false;
+      }
+      if (!serverDeleted && currentTenantId && currentBranchId) {
+        await commitLocalOutbox(db, {
+          id: `USER-DELETE-${currentTenantId}-${currentBranchId}-${userRec.id}`,
+          entityType: "User",
+          entityId: userRec.id,
+          operationType: "DELETE",
+          payload: { id: userRec.id, tenantId: currentTenantId, branchId: currentBranchId },
+          idempotencyKey: `USER-DELETE-${currentTenantId}-${currentBranchId}-${userRec.id}`,
+          tenantId: currentTenantId,
+          branchId: currentBranchId,
+        });
+      }
       setUsersList((prev) => prev.filter((u) => u.id !== userRec.id));
       toast.success("User Deleted", `Account for ${userRec.firstName} ${userRec.lastName} removed.`);
     }

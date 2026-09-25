@@ -12,11 +12,17 @@ import type {
 import { globalRumCollector } from "./rum/rumCollector.js";
 import { globalClientCoordination } from "./persistence/clientCoordination.js";
 import { syncDiagnosticService } from "./services/syncDiagnosticService.js";
+import { apiFetch } from "./services/apiClient.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
-const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "syncOutbox"] as const;
+const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
 type KnownStore = typeof KNOWN_STORES[number];
+
+function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
+  if (!tenantId || !branchId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId and branchId are required");
+  return "syncScope:" + tenantId + ":" + branchId + ":" + key;
+}
 
 type RevisionedChange = {
   revision: string;
@@ -28,40 +34,20 @@ type RevisionedChange = {
 };
 
 async function defaultPushApi(req: SyncPushRequest): Promise<SyncPushResponse> {
-  const token = typeof window !== "undefined" && window.localStorage ? localStorage.getItem("kwakopos_access_token") : null;
-  const res = await fetch("/sync/push", {
+  const body = await apiFetch<any>("/sync/push", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
     body: JSON.stringify(req),
   });
-  if (!res.ok) {
-    throw new Error(`Sync push failed: HTTP ${res.status}`);
-  }
-  const body = await res.json();
   return body.data || body;
 }
 
 async function defaultDeltaApi(since?: string): Promise<SyncDeltaResponse> {
-  const token = typeof window !== "undefined" && window.localStorage ? localStorage.getItem("kwakopos_access_token") : null;
   const url = since ? `/sync/delta?since=${encodeURIComponent(since)}` : "/sync/delta";
-  const res = await fetch(url, {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: "include",
-  });
-  if (!res.ok) {
-    throw new Error(`Sync delta failed: HTTP ${res.status}`);
-  }
-  const body = await res.json();
+  const body = await apiFetch<any>(url);
   return body.data || body;
 }
 
-async function applyRevisionedChanges(changes: RevisionedChange[], serverRevision: string, serverTimestamp: string): Promise<number> {
+async function applyRevisionedChanges(changes: RevisionedChange[], serverRevision: string, serverTimestamp: string, tenantId: string, branchId: string): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME);
@@ -70,7 +56,12 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   });
 
   const tx = db.transaction(KNOWN_STORES as unknown as string[], "readwrite");
+  const revisionKey = scopedSyncKey(tenantId, branchId, "lastSyncRevision");
+  const syncTimeKey = scopedSyncKey(tenantId, branchId, "lastSyncTime");
+  const categoryKey = tenantId + ":" + branchId + ":inventory_categories_meta";
+  const brandKey = tenantId + ":" + branchId + ":inventory_brands_meta";
   const metadata = tx.objectStore("syncMetadata");
+  const configuration = tx.objectStore("configuration");
   const outbox = tx.objectStore("syncOutbox");
   const pending = (await new Promise<any[]>((resolve, reject) => {
     const request = outbox.getAll();
@@ -80,7 +71,7 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
 
   let applied = 0;
   const initialRevisionRaw = await new Promise<any>((resolve) => {
-    const request = metadata.get("lastSyncRevision");
+    const request = metadata.get(revisionKey);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => resolve("0");
   });
@@ -95,6 +86,12 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
       case "StockAdjustment": return "stockAdjustments";
       case "Customer": return "customers";
       case "Supplier": return "suppliers";
+      case "ProductPriceHistory": return "productPriceHistory";
+      case "Sale": return "sales";
+      case "Payment": return "payments";
+      case "PurchaseReceipt": return "receipts";
+      case "Category": return "configuration";
+      case "Brand": return "configuration";
       default: return null;
     }
   };
@@ -104,28 +101,37 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
     request.onerror = () => reject(request.error || new Error("IndexedDB mutation failed"));
   });
 
+  const upsertCatalogConfig = async (entityType: "Category" | "Brand", change: RevisionedChange, deleted: boolean) => {
+    const key = entityType === "Category" ? categoryKey : brandKey;
+    const currentRecord = await new Promise<any>((resolve, reject) => {
+      const request = configuration.get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("Catalog configuration read failed"));
+    });
+    const existing = Array.isArray(currentRecord?.value) ? currentRecord.value : [];
+    const map = new Map(existing.map((item: any) => [String(item.id), item]));
+    if (deleted) map.delete(change.entityId);
+    else {
+      const record = change.record || {};
+      map.set(change.entityId, { id: change.entityId, name: record.name ?? "", isDefault: false, isActive: record.isActive !== false, updatedAt: record.updatedAt ?? serverTimestamp, ...(entityType === "Category" ? { description: record.description ?? undefined, color: record.color || "#10b981", parentId: record.parentId ?? null } : { origin: record.origin ?? undefined, notes: record.notes ?? undefined }) });
+    }
+    configuration.put({ key: entityType === "Category" ? "inventory_categories_meta" : "inventory_brands_meta", value: Array.from(map.values()).filter((item: any) => item.isActive !== false), tenantId, updatedAt: serverTimestamp }, key);
+  };
+
   for (const change of sorted) {
-    const pendingMutation = pending.find((item) => item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
+    const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation) {
-      metadata.put(JSON.stringify({
-        conflictId: `CONFLICT-${change.entityType}-${change.entityId}-${change.revision}`,
-        revision: change.revision,
-        entityType: change.entityType,
-        entityId: change.entityId,
-        operationId: pendingMutation.id,
-        localPayload: pendingMutation.payload,
-        remoteRecord: change.record,
-        detectedAt: new Date().toISOString(),
-        status: "OPEN",
-      }), `sync_conflict_${change.entityType}_${change.entityId}`);
+      metadata.put(JSON.stringify({ conflictId: "CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
       break;
     }
 
     const storeName = storeForEntity(change.entityType);
     const deleted = change.operationType === "DELETE" || Boolean(change.record?._deleted);
-    if (deleted) {
+    if (change.entityType === "Category" || change.entityType === "Brand") {
+      await upsertCatalogConfig(change.entityType, change, deleted);
+    } else if (deleted) {
       if (storeName) await waitRequest(tx.objectStore(storeName).delete(change.entityId));
-      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: new Date().toISOString() }), `tombstone:${change.entityType}:${change.entityId}`);
+      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + change.entityType + ":" + change.entityId);
     } else if (storeName) {
       const record = change.record;
       const recoveryPatch = Boolean(record?.__syncRecoveryPatch);
@@ -141,20 +147,18 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
       } else {
         await waitRequest(tx.objectStore(storeName).put(record, change.entityId));
       }
-    } else {
-      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, record: change.record }), `shadow:${change.entityType}:${change.entityId}`);
     }
 
     cursor = BigInt(change.revision);
-    metadata.put(String(change.revision), "lastSyncRevision");
+    metadata.put(String(change.revision), revisionKey);
     applied += 1;
   }
 
   if (changes.length === 0 || applied === changes.length) {
-    metadata.put(String(serverRevision), "lastSyncRevision");
-    metadata.put(serverTimestamp, "lastSyncTime");
+    metadata.put(String(serverRevision), revisionKey);
+    metadata.put(serverTimestamp, syncTimeKey);
   } else {
-    metadata.put(String(cursor), "lastSyncRevision");
+    metadata.put(String(cursor), revisionKey);
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -172,6 +176,7 @@ export class ClientSyncEngine {
   public pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>;
   public deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>;
   public defaultTenantId?: string;
+  public defaultBranchId?: string;
   private syncInFlight: Promise<{ pushed: number; pulled: number }> | null = null;
   private retryCount = 0;
   private lastReconciliationStatus: "IN_SYNC" | "DIVERGENT" | "UNKNOWN" = "UNKNOWN";
@@ -182,6 +187,7 @@ export class ClientSyncEngine {
     pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     defaultTenantId?: string,
+    defaultBranchId?: string,
   ) {
     if (!deviceId || deviceId.length > 128)
       throw new Error("SYNC_CONFIGURATION_INVALID: deviceId is required and must be <= 128 characters");
@@ -190,6 +196,7 @@ export class ClientSyncEngine {
     this.pushApiFn = pushApiFn;
     this.deltaApiFn = deltaApiFn;
     this.defaultTenantId = defaultTenantId;
+    this.defaultBranchId = defaultBranchId;
   }
 
   public init(config: {
@@ -198,12 +205,14 @@ export class ClientSyncEngine {
     pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>;
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>;
     tenantId?: string;
+    branchId?: string;
   }): void {
     if (config.deviceId) this.deviceId = config.deviceId;
     if (config.localDb) this.localDb = config.localDb;
     if (config.pushApiFn) this.pushApiFn = config.pushApiFn;
     if (config.deltaApiFn) this.deltaApiFn = config.deltaApiFn;
     if (config.tenantId) this.defaultTenantId = config.tenantId;
+    if (config.branchId) this.defaultBranchId = config.branchId;
   }
 
   async bootstrapWithServer(
@@ -222,7 +231,12 @@ export class ClientSyncEngine {
     if (!snapshot || typeof snapshot.snapshotTimestamp !== "string") {
       throw new Error("SYNC_PROTOCOL_VIOLATION: invalid bootstrap snapshot response");
     }
-    const result = await this.localDb.bootstrapFromAuthoritativeSnapshot(snapshot, { tenantId: tenantId || "", branchId });
+    const effectiveTenantId = tenantId || (snapshot as any).tenantId || "";
+    const effectiveBranchId = branchId || (snapshot as any).branchId || (Array.isArray((snapshot as any).products) ? (snapshot as any).products[0]?.branchId : undefined) || "branch-default";
+    if (!effectiveTenantId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId is required for bootstrap");
+    this.defaultTenantId = effectiveTenantId;
+    this.defaultBranchId = effectiveBranchId;
+    const result = await this.localDb.bootstrapFromAuthoritativeSnapshot(snapshot, { tenantId: effectiveTenantId, branchId: effectiveBranchId });
     return { applied: result.applied, snapshotTimestamp: snapshot.snapshotTimestamp };
   }
 
@@ -231,7 +245,8 @@ export class ClientSyncEngine {
     tenantId?: string,
   ): Promise<SyncReconciliationResponse> {
     await this.localDb.ready;
-    const manifest = this.localDb.generateStateManifest(this.deviceId, tenantId);
+    const branchId = this.defaultBranchId || "branch-default";
+    const manifest = this.localDb.generateStateManifest(this.deviceId, tenantId, branchId);
     const report = await reconcileApiFn(manifest);
     this.lastReconciliationStatus = report.inSync ? "IN_SYNC" : "DIVERGENT";
     this.localDb.setSyncMetadata("reconciliationStatus", this.lastReconciliationStatus);
@@ -240,10 +255,12 @@ export class ClientSyncEngine {
   }
 
   getObservabilityStatus(tenantId?: string): SyncObservabilityStatus {
-    const pendingOutbox = this.localDb.getPendingOutbox(tenantId);
-    const failedOutbox = this.localDb.getFailedOutbox(tenantId);
-    const lastSync = this.localDb.syncMetadata.get("lastSyncTime") || null;
-    const lastBootstrap = this.localDb.syncMetadata.get("lastBootstrapTime") || null;
+    const branch = this.defaultBranchId || "branch-default";
+    const pendingOutbox = this.localDb.getPendingOutbox(tenantId, branch);
+    const failedOutbox = this.localDb.getFailedOutbox(tenantId, branch);
+    const scopedTenant = tenantId || this.defaultTenantId || "tenant-default";
+    const lastSync = this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "lastSyncTime")) || null;
+    const lastBootstrap = this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "lastBootstrapTime")) || null;
     const isBootstrapped = Boolean(lastBootstrap || lastSync);
 
     return {
@@ -269,6 +286,7 @@ export class ClientSyncEngine {
     pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
+    branchId?: string,
   ): Promise<{ pushed: number; pulled: number }> {
     if (globalClientCoordination.isClientQuiesced()) {
       console.info("[SYNC] Client is quiesced for PWA migration; deferring synchronization cycle.");
@@ -276,7 +294,7 @@ export class ClientSyncEngine {
     }
 
     if (this.syncInFlight) return this.syncInFlight;
-    this.syncInFlight = this.runSync(pushApiFn, deltaApiFn, tenantId).finally(() => {
+    this.syncInFlight = this.runSync(pushApiFn, deltaApiFn, tenantId, branchId).finally(() => {
       this.syncInFlight = null;
     });
     return this.syncInFlight;
@@ -286,13 +304,21 @@ export class ClientSyncEngine {
     pushApiFn?: (req: SyncPushRequest) => Promise<SyncPushResponse>,
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
+    branchId?: string,
   ): Promise<{ pushed: number; pulled: number }> {
     const effectivePush = pushApiFn || this.pushApiFn || defaultPushApi;
     const effectiveDelta = deltaApiFn || this.deltaApiFn || defaultDeltaApi;
-    const effectiveTenantId = tenantId || this.defaultTenantId;
     const startTime = Date.now();
     await this.localDb.ready;
-    const pendingOps = this.localDb.getPendingOutbox(effectiveTenantId);
+    const allPending = this.localDb.getPendingOutbox();
+    const pendingTenants = [...new Set(allPending.map((item) => item.tenantId).filter((value): value is string => Boolean(value)))];
+    const effectiveTenantId = tenantId || this.defaultTenantId || (pendingTenants.length === 1 ? pendingTenants[0] : "tenant-default");
+    if (!tenantId && !this.defaultTenantId && pendingTenants.length > 1) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId is required when multiple tenant mutations are pending");
+    const tenantPending = this.localDb.getPendingOutbox(effectiveTenantId);
+    const pendingBranches = [...new Set(tenantPending.map((item) => item.branchId).filter((value): value is string => Boolean(value)))];
+    const effectiveBranchId = branchId || this.defaultBranchId || (pendingBranches.length === 1 ? pendingBranches[0] : "branch-default");
+    if (!branchId && !this.defaultBranchId && pendingBranches.length > 1) throw new Error("SYNC_CONTEXT_REQUIRED: branchId is required when multiple branch mutations are pending");
+    const pendingOps = this.localDb.getPendingOutbox(effectiveTenantId, effectiveBranchId);
     let pushedCount = 0;
     let hadServerRejections = false;
 
@@ -306,15 +332,47 @@ export class ClientSyncEngine {
         const batch = pendingOps.slice(offset, offset + MAX_SYNC_BATCH_SIZE);
         const pushPayload: SyncPushRequest = {
           deviceId: this.deviceId,
-          operations: batch.map((op) => ({
-            operationId: op.id,
-            entityType: op.entityType as any,
-            entityId: op.entityId,
-            operationType: op.operationType,
-            payload: op.payload,
-            clientCreatedAt: op.clientCreatedAt,
-            idempotencyKey: op.idempotencyKey,
-          })),
+          operations: batch.map((op) => {
+            let normalizedPayload = op.payload;
+            if (op.entityType === "Sale" && normalizedPayload) {
+              const rawItems = Array.isArray(normalizedPayload.items)
+                ? normalizedPayload.items
+                : Array.isArray(normalizedPayload.cart)
+                ? normalizedPayload.cart
+                : [];
+              normalizedPayload = {
+                ...normalizedPayload,
+                id: op.entityId || normalizedPayload.id,
+                deviceId: this.deviceId,
+                operationId: op.id,
+                idempotencyKey: op.idempotencyKey || op.id,
+                items: rawItems.map((it: any) => ({
+                  productId: String(it.productId || it.product?.id || it.id || "prod_unknown"),
+                  variantId: String(it.variantId || `${it.productId || it.product?.id || it.id || "prod"}-default`),
+                  quantity: Number(it.quantity || it.qty || 1),
+                  unitPrice: Number(it.unitPrice ?? it.price ?? it.product?.price ?? 0),
+                  unitCost: Number(it.unitCost ?? it.costPrice ?? (it.product as any)?.costPrice ?? (it.product as any)?.buyingPrice ?? 0),
+                  discountAmount: Number(it.discountAmount || 0),
+                  taxAmount: Number(it.taxAmount || 0),
+                })),
+                payments: normalizedPayload.payments || [
+                  {
+                    amount: Number(normalizedPayload.grandTotal || normalizedPayload.totalAmount || normalizedPayload.total || 0),
+                    paymentMethod: "CASH",
+                  },
+                ],
+              };
+            }
+            return {
+              operationId: op.id,
+              entityType: op.entityType as any,
+              entityId: op.entityId,
+              operationType: op.operationType,
+              payload: normalizedPayload,
+              clientCreatedAt: op.clientCreatedAt,
+              idempotencyKey: op.idempotencyKey,
+            };
+          }),
         };
         const pushRes = await effectivePush(pushPayload);
         const expectedIds = new Set(batch.map((op) => op.id));
@@ -347,7 +405,7 @@ export class ClientSyncEngine {
         await this.localDb.flushPersistence();
       }
 
-      const lastRevision = this.localDb.syncMetadata.get("lastSyncRevision") || "0";
+      const lastRevision = this.localDb.syncMetadata.get(scopedSyncKey(effectiveTenantId, effectiveBranchId, "lastSyncRevision")) || "0";
       const deltaRes = (await effectiveDelta(`rev:${lastRevision}`)) as any;
       if (!deltaRes || typeof deltaRes.serverTimestamp !== "string")
         throw new Error("SYNC_PROTOCOL_VIOLATION: delta response is missing serverTimestamp");
@@ -356,8 +414,14 @@ export class ClientSyncEngine {
         totalPulled = await applyRevisionedChanges(
           deltaRes.changes as RevisionedChange[],
           deltaRes.serverRevision,
-          deltaRes.serverTimestamp
+          deltaRes.serverTimestamp,
+          effectiveTenantId || "tenant-default",
+          effectiveBranchId
         );
+        await this.localDb.refreshStoresFromNative([
+          "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
+          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+        ]);
       } else {
         totalPulled = await this.localDb.applyServerDelta(deltaRes);
       }
@@ -367,7 +431,7 @@ export class ClientSyncEngine {
         pushedCount,
         deltaCount: totalPulled,
         success: !hadServerRejections,
-        outboxDepth: this.localDb.getPendingOutbox(effectiveTenantId).length,
+        outboxDepth: this.localDb.getPendingOutbox(effectiveTenantId, effectiveBranchId).length,
       });
       if (hadServerRejections) {
         globalRumCollector.recordError(
@@ -380,7 +444,7 @@ export class ClientSyncEngine {
         pushedCount,
         deltaCount: totalPulled,
         success: !hadServerRejections,
-        outboxDepth: this.localDb.getPendingOutbox().length,
+        outboxDepth: this.localDb.getPendingOutbox(effectiveTenantId, effectiveBranchId).length,
       });
       if (hadServerRejections) globalRumCollector.recordError("SYNC_PARTIAL_REJECTION: failed operations remain queued");
       return { pushed: pushedCount, pulled: totalPulled };

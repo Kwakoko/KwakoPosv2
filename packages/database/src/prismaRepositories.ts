@@ -19,7 +19,7 @@
 import { calculateAvailableStock, assertTenantIsolation } from "@kwakopos2/domain";
 import { prisma } from "./index.js";
 
-const productShape = (row: any): Product => {
+export const productShape = (row: any): Product => {
   const buyingPrice = Number(row.buyingPrice ?? 0);
   const sellingPrice = Number(row.sellingPrice ?? 0);
   const marginAmount = Number(row.currentMarginAmount ?? (sellingPrice - buyingPrice));
@@ -68,7 +68,7 @@ const productShape = (row: any): Product => {
   };
 };
 
-const variantShape = (row: any, parentBuyingPrice: number = 0, parentSellingPrice: number = 0): ProductVariant => {
+export const variantShape = (row: any, parentBuyingPrice: number = 0, parentSellingPrice: number = 0): ProductVariant => {
   const inheritBuying = row.inheritBuyingPrice ?? true;
   const inheritSelling = row.inheritSellingPrice ?? true;
   const costPrice = Number(row.costPrice ?? parentBuyingPrice);
@@ -109,7 +109,7 @@ const variantShape = (row: any, parentBuyingPrice: number = 0, parentSellingPric
   };
 };
 
-const ledgerShape = (row: any): StockLedger => ({
+export const ledgerShape = (row: any): StockLedger => ({
   id: row.id,
   tenantId: row.tenantId,
   branchId: row.branchId,
@@ -463,26 +463,25 @@ export class PrismaCatalogRepository {
 
 export class PrismaStockRepository {
   async recordMovement(ctx: TenantContext, req: any): Promise<StockLedger> {
-    const variant = await prisma.productVariant.findUnique({ where: { id: req.variantId } });
-    if (!variant) throw new Error(`Variant ${req.variantId} not found`);
-    const row = await prisma.stockLedger.create({
-      data: {
-        tenantId: ctx.tenantId,
-        branchId: ctx.branchId,
-        productId: variant.productId,
-        variantId: req.variantId,
-        movementType: req.movementType,
-        quantityChange: req.quantityChange ?? req.quantity ?? 0,
-        quantity: req.quantity,
-        referenceType: req.referenceType,
-        referenceId: req.referenceId ?? null,
-        occurredAt: new Date(),
-        deviceId: req.deviceId,
-        operationId: req.operationId,
-        idempotencyKey: req.idempotencyKey,
-      },
+    const result = await prisma.$transaction(async (tx: any) => {
+      const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
+      if (existing) return existing;
+      await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, req.variantId, ctx.tenantId, ctx.branchId);
+      const variant = await tx.productVariant.findUnique({ where: { id: req.variantId } });
+      if (!variant) throw new Error(`Variant ${req.variantId} not found`);
+      assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
+      const beforeRow = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId } });
+      const quantityBefore = Number(beforeRow._sum.quantityChange ?? 0);
+      const quantityChange = Number(req.quantityChange ?? req.quantity ?? 0);
+      const quantityAfter = quantityBefore + quantityChange;
+      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
+      const row = await tx.stockLedger.create({
+        data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
+      });
+      return row;
     });
-    return ledgerShape(row);
+    return ledgerShape(result);
   }
 
   async getProductBranchStockCache(ctx: TenantContext, variantId: string): Promise<any | null> {
@@ -508,9 +507,9 @@ export class PrismaStockRepository {
   }
 
   async recordStockAdjustment(ctx: TenantContext, req: CreateStockAdjustmentRequest): Promise<{ adjustment: StockAdjustment; ledger: StockLedger }> {
-    const existing = await prisma.stockAdjustment.findUnique({ where: { idempotencyKey: req.idempotencyKey } });
+    const existing = await prisma.stockAdjustment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
     if (existing) {
-      const ledger = await prisma.stockLedger.findUnique({ where: { idempotencyKey: req.idempotencyKey } });
+      const ledger = await prisma.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
       if (!ledger) throw new Error("Idempotent adjustment exists without its ledger entry");
       return { adjustment: adjustmentShape(existing), ledger: ledgerShape(ledger) };
     }
@@ -534,7 +533,8 @@ export class PrismaStockRepository {
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
     const result = await prisma.$transaction(async (tx: any) => {
-      const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId } });
+      await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, resolvedVariantId, ctx.tenantId, ctx.branchId);
+      const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
       const quantityBefore = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
       let changeQty = req.quantityChange;
       if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
@@ -599,15 +599,11 @@ export class PrismaStockRepository {
   }
 
   async getAvailableStock(ctx: TenantContext, variantId: string): Promise<number> {
-    const variant = await prisma.productVariant.findUnique({
-      where: { id: variantId },
-      select: { inventoryQuantity: true, reservedQuantity: true, tenantId: true, branchId: true },
-    });
-    if (variant && variant.tenantId === ctx.tenantId && variant.branchId === ctx.branchId) {
-      return Math.max(0, Number(variant.inventoryQuantity) - Number(variant.reservedQuantity || 0));
-    }
-    const rows = await prisma.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId } });
-    return calculateAvailableStock(rows.map(ledgerShape));
+    const variant = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { reservedQuantity: true, tenantId: true, branchId: true } });
+    if (variant && (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+    const rows = await prisma.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId }, orderBy: { occurredAt: "asc" } });
+    const ledgerBalance = calculateAvailableStock(rows.map(ledgerShape));
+    return Math.max(0, ledgerBalance - Number(variant?.reservedQuantity || 0));
   }
 
   async getLedger(ctx: TenantContext, variantId?: string): Promise<StockLedger[]> {

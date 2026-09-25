@@ -1,6 +1,6 @@
 {
   "name": "@kwakopos2/sync",
-  "version": "2.12.5",
+  "version": "2.13.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

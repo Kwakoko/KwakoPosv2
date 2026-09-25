@@ -101,7 +101,7 @@ const DEMO_DOCS = [
 ];
 
 const DEMO_BILLING = [
-  { id: "INV-2026-081", client: "John Mwangi",    description: "Substantive Hearing Attendance Ã— 2", amount: 2800000, hours: 6,   status: "UNPAID",    date: "2026-08-25" },
+  { id: "INV-2026-081", client: "John Mwangi",    description: "Substantive Hearing Attendance × 2", amount: 2800000, hours: 6,   status: "UNPAID",    date: "2026-08-25" },
   { id: "INV-2026-082", client: "Safaricom Ltd",  description: "Contract Advisory — 12 hrs",         amount: 7200000, hours: 12,  status: "PAID",      date: "2026-08-20" },
   { id: "INV-2026-083", client: "Hassan Mohamed", description: "Criminal Defence Retainer Draw",      amount: 1500000, hours: 4,   status: "UNPAID",    date: "2026-08-30" },
   { id: "INV-2026-084", client: "THA",            description: "Admin Law Matter — Research",         amount: 4800000, hours: 10,  status: "PARTIAL",   date: "2026-08-18" },
@@ -220,7 +220,7 @@ const LegalClients: React.FC = () => {
         <div className="v2-card-header">
           <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
             <Search size={13} style={{ color: "var(--muted)" }} />
-            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clientsâ€¦" />
+            <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients…" />
           </div>
           <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.223.export", "Export", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.223.export"><Download size={13} /> Export</button>
         </div>
@@ -393,7 +393,7 @@ const LegalDocuments: React.FC = () => (
       <div className="v2-card-header">
         <div className="v2-flex v2-items-center v2-gap-2" style={{ flex: 1 }}>
           <Search size={13} style={{ color: "var(--muted)" }} />
-          <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} placeholder="Search documentsâ€¦" />
+          <input className="v2-input" style={{ border: "none", padding: ".3rem .4rem", flex: 1 }} placeholder="Search documents…" />
         </div>
         <button className="v2-btn v2-btn-secondary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.LawFirmPage.396.filter-by-case", "Filter by Case", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.LawFirmPage.396.filter-by-case"><Filter size={13} /> Filter by Case</button>
       </div>

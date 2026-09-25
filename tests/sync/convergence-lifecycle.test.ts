@@ -83,6 +83,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "dev-a/kili-prod",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     deviceADb.recordOutboxMutation({
@@ -95,6 +96,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "dev-a/kili-var",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     deviceADb.recordOutboxMutation({
@@ -115,6 +117,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "dev-a/kili-stock",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     // Sync to server
@@ -188,6 +191,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "DEV-A/INTAKE-01",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     // Device B records a sale (-10) offline
@@ -209,6 +213,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "DEV-B/SALE-01",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     // Sync Device A to server
@@ -317,6 +322,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: idempKey,
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     // Simulate simulated network failure after server commits
@@ -376,6 +382,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "KEY-TENANT-A",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     // Device A pushes to Tenant A
@@ -506,6 +513,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
       idempotencyKey: "IDEMP-MIGRATE-001",
       status: "PENDING",
       tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
     });
 
     expect(deviceADb.getPendingOutbox(tenantA.tenantId)).toHaveLength(1);
@@ -535,6 +543,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
         sku: "HONEY-PARENT",
         hasVariants: true,
         tenantId: tenantA.tenantId,
+      branchId: tenantA.branchId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },

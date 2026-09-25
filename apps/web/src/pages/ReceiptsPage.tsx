@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPosv2 — Production-Grade Receipt Management OS
  * ─────────────────────────────────────────────────────────────────────────────
  * Centralized receipt engine interface for KwakoPos SaaS.
@@ -130,11 +130,11 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
         const grand = Number(sale.grandTotal || sale.totalAmount || (sub + tax));
         const paid = Number(sale.paidAmount || sale.cashReceived || grand);
         const change = Number(sale.changeAmount || sale.changeDue || (paid > grand ? paid - grand : 0));
-        const rawItems = Array.isArray(sale.items) ? sale.items : Array.isArray(sale.cart) ? sale.cart : [];
+        const rawItems = Array.isArray(sale.items) ? sale.items : Array.isArray(sale.cart) ? sale.cart : Array.isArray(sale.lines) ? sale.lines : [];
         const items = rawItems.map((it: any, idx: number) => ({
           id: it.id || `ITM-${idx + 1}`,
           sku: it.sku || it.barcode || it.product?.sku || `SKU-${idx + 1}`,
-          name: it.name || it.productName || it.product?.name || "Retail Item",
+          name: it.name || it.productName || it.product?.name || it.productTitle || "Retail Item",
           qty: Number(it.quantity ?? it.qty ?? 1),
           unitPrice: Number(it.price ?? it.unitPrice ?? it.product?.price ?? 0),
           discount: Number(it.discount || 0),

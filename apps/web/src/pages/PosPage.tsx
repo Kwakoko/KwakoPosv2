@@ -28,6 +28,7 @@ import { apiFetch, safeUUID } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
@@ -263,7 +264,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
   }, [db]);
 
-  const handleQuickAddCustomer = () => {
+  const handleQuickAddCustomer = async () => {
     const trimmed = newCustomerName.trim();
     if (!trimmed) {
       playWarningTone();
@@ -281,16 +282,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       outstandingBalance: 0,
       createdAt: new Date().toISOString(),
     };
-    db.saveCustomerLocal(newCust, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-    if (!isOnline) {
-      db.enqueueOutbox({
-        entityType: "Customer" as never,
-        entityId: customerId,
-        operationType: "CREATE",
-        payload: newCust,
-        idempotencyKey: customerId,
-      });
-    }
+    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    await commitLocalMutation({ db, tenantContext, entityType: "Customer", entityId: customerId, operationType: "CREATE", payload: newCust, idempotencyKey: customerId, writes: [{ store: "customers", key: customerId, value: newCust }] });
     setCustomerOptions((prev) => Array.from(new Set([...prev, trimmed])));
     setSelectedCustomer(trimmed);
     setNewCustomerName("");
@@ -951,13 +944,19 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
     const mappedItems = cart.map((i) => {
       const unitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
+      const variantId = i.variantId || `${i.product.id}-default`;
+      const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
       return {
         productId: i.product.id,
-        variantId: i.variantId,
+        variantId,
         name: i.variantName ? `${i.product.name} (${i.variantName})` : i.product.name,
         originalPrice: i.price,
         price: unitPrice,
+        unitPrice,
+        unitCost,
         discountPercent: i.discountPercent || 0,
+        discountAmount: i.discountPercent ? (i.price * (i.discountPercent / 100)) * i.qty : 0,
+        taxAmount: 0,
         quantity: i.qty,
         qty: i.qty,
         product: i.product,
@@ -968,17 +967,31 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       };
     });
 
+    const payments = [
+      {
+        id: `pay-${saleId}`,
+        amount: cartGrandTotal,
+        paymentMethod: paymentMethod.toUpperCase(),
+        status: "COMPLETED",
+        providerRef: paymentMethod === "M-Pesa" ? mpesaRef : paymentMethod === "Card" ? cardAuthRef : paymentMethod === "Bank" ? bankRef : undefined,
+      },
+    ];
+
     const saleRecord = {
       id: saleId,
       saleNumber: saleId,
       receiptNumber: saleId,
       tenantId: currentTenantId,
       branchId: currentBranchId,
+      deviceId: "pos-terminal",
+      operationId: saleId,
+      idempotencyKey: saleId,
       customer: selectedCustomer,
       customerName: selectedCustomer,
       cashierId: user?.id || "USER-01",
       cashierName: user?.name || "Cashier",
       items: mappedItems,
+      payments,
       cart: [...cart],
       subtotal: cartSubtotal,
       discount: discountAmount,
@@ -1002,58 +1015,45 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       rctv: `TRA-VFD-${Math.floor(1000000 + Math.random() * 9000000)}`,
       soldAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
-      syncStatus: isOnline ? "Synced" : "Pending",
+      syncStatus: "Pending",
     };
 
-    // 1. Persist completed sale to local IndexedDB
-    db.saveSaleLocal(saleRecord, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-
-    // 2. Persist formal receipt record for instant lookup in Receipts module
-    db.saveReceiptLocal({
-      id: saleId,
-      receiptNumber: saleId,
-      transactionId: saleId,
-      transactionType: "POS_SALE",
-      tenantId: currentTenantId || "default",
-      branchId: currentBranchId || "MAIN",
-      cashierId: user?.id || "USER-01",
-      cashierName: user?.name || "Cashier",
-      customerId: "CUST-WALKIN",
-      customerName: selectedCustomer,
-      subtotal: cartSubtotal,
-      discountTotal: discountAmount,
-      taxTotal: taxAmount,
-      selectedTaxRate,
-      taxRate: Math.round(selectedTaxRate * 100),
-      grandTotal: cartGrandTotal,
-      paidAmount: effectivePaid,
-      changeAmount: changeDue,
-      paymentMethod: paymentMethod.toUpperCase(),
-      currency: "TZS",
-      status: "COMPLETED",
-      items: mappedItems,
-      createdAt: saleRecord.createdAt,
-    } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-
-    // 3. Decrement inventory in db.products, db.productVariants, and db.stockLedger via unified stock service
-    recordPosSaleDeductions(db, {
+    // Atomic local sale boundary: sale + receipt + credit-customer projection + Sale outbox commit together.
+    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const receiptRecord = {
+      id: saleId, receiptNumber: saleId, transactionId: saleId, transactionType: "POS_SALE",
+      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "USER-01",
+      cashierName: user?.name || "Cashier", customerId: "CUST-WALKIN", customerName: selectedCustomer,
+      subtotal: cartSubtotal, discountTotal: discountAmount, taxTotal: taxAmount, selectedTaxRate,
+      taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
+      changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
+      items: mappedItems, createdAt: saleRecord.createdAt,
+    };
+    const localSaleOutbox: any = {
+      id: saleId, entityType: "Sale", entityId: saleId, operationType: "CREATE", payload: saleRecord,
+      clientCreatedAt: saleRecord.createdAt, idempotencyKey: saleId, status: "PENDING",
+      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+    };
+    const localWrites: any[] = [
+      { store: "sales", key: saleId, value: saleRecord },
+      { store: "receipts", key: saleId, value: receiptRecord },
+    ];
+    if (paymentMethod === "Credit" && selectedCustomer && selectedCustomer !== "Walk-In Customer") {
+      for (const cust of db.customers.values()) {
+        if (cust.name !== selectedCustomer) continue;
+        const currentDebt = Number(cust.outstandingBalance || cust.currentBalance || cust.debt || 0);
+        const newDebt = currentDebt + cartGrandTotal;
+        localWrites.push({ store: "customers", key: cust.id, value: { ...cust, outstandingBalance: newDebt, currentBalance: newDebt, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId } });
+        break;
+      }
+    }
+    const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, tenantContext });
+    const outboxItem = atomicResult.outbox;
+    await recordPosSaleDeductions(db, {
       saleId,
-      items: cart
-        .filter((item) => !item.isCustom)
-        .map((item) => ({
-          productId: item.product.id,
-          variantId: item.variantId,
-          qty: item.qty,
-          unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0),
-          name: item.product.name,
-          sku: item.product.sku,
-        })),
-      tenantId: currentTenantId || "tenant-default",
-      branchId: currentBranchId || "branch-default",
-      userId: user?.id,
-      deviceId: "pos-terminal",
+      items: cart.filter((item) => !item.isCustom).map((item) => ({ productId: item.product.id, variantId: item.variantId, qty: item.qty, unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0), name: item.product.name, sku: item.product.sku })),
+      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, userId: user?.id, deviceId: "pos-terminal",
     });
-
     // 4. Update local products state so POS counter stock displays decrease immediately
     setProducts((prev) =>
       prev.map((p) => {
@@ -1063,37 +1063,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       })
     );
 
-    // 5. Update Customer Debt in db.customers if paid on Credit
-    if (paymentMethod === "Credit" && selectedCustomer && selectedCustomer !== "Walk-In Customer") {
-      try {
-        for (const cust of db.customers.values()) {
-          if (cust.name === selectedCustomer) {
-            const currentDebt = Number(cust.outstandingBalance || cust.currentBalance || cust.debt || 0);
-            const newDebt = currentDebt + cartGrandTotal;
-            const updatedCust = {
-              ...cust,
-              outstandingBalance: newDebt,
-              currentBalance: newDebt,
-            };
-            db.saveCustomerLocal(updatedCust, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-            break;
-          }
-        }
-      } catch (err) {
-        console.warn("[POS] Failed to update customer credit debt", err);
-      }
-    }
-
-    // 6. Guarantee Outbox-First Persistence: unconditionally enqueue to syncOutbox first
-    const outboxItem = db.enqueueOutbox({
-      entityType: "Sale" as never,
-      entityId: saleId,
-      operationType: "CREATE",
-      payload: saleRecord,
-      idempotencyKey: saleId,
-      tenantId: currentTenantId || undefined,
-      branchId: currentBranchId || undefined,
-    });
+    // Customer credit projection was committed atomically with the sale above.
 
     if (isOnline) {
       void (async () => {
@@ -1105,19 +1075,22 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             });
             if (res) {
               db.markOutboxSynced(outboxItem.id);
+              const localSale = db.sales.get(saleId);
+              if (localSale) {
+                localSale.syncStatus = "Synced";
+                db.sales.set(saleId, localSale);
+              }
               await db.flushPersistence?.().catch(() => {});
+              window.dispatchEvent(new Event("kwakopos:data-changed"));
             }
           },
           {
-            retries: 5,
+            retries: 3,
             baseDelay: 500,
             factor: 2,
             onFailure: async (err: any) => {
-              console.error("Outbox push failed:", err);
-              const errMsg = err instanceof Error ? err.message : String(err);
-              db.markOutboxFailed(outboxItem.id, errMsg);
-              await db.flushPersistence?.().catch(() => {});
-              void syncOutbox?.().catch(() => {});
+              console.warn("Direct sale push failed, leaving in outbox for background syncEngine:", err);
+              void syncOutbox?.({ quiet: true }).catch(() => {});
             },
           }
         );
@@ -1307,7 +1280,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             type="button"
             title="Toggle Fast-Tap Favorites"
           >
-            â˜… Favorites
+            ★ Favorites
           </button>
           <button
             className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
@@ -1359,7 +1332,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             >
               <div className="v2-flex v2-items-center v2-justify-between v2-mb-2">
                 <div className="v2-flex v2-items-center v2-gap-2">
-                  <span style={{ color: "#f59e0b", fontSize: "14px" }}>â˜…</span>
+                  <span style={{ color: "#f59e0b", fontSize: "14px" }}>★</span>
                   <span className="v2-text-xs v2-font-black" style={{ letterSpacing: "0.03em", textTransform: "uppercase" }}>
                     Quick-Keys Fast Tap
                   </span>
@@ -1722,7 +1695,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               {discountPercent > 0 && (
                 <div className="v2-flex v2-justify-between" style={{ color: "var(--success)" }}>
                   <span>{t("pos.applyDiscount")} ({discountPercent}%)</span>
-                  <span className="v2-mono v2-font-bold">âˆ’{money(discountAmount)}</span>
+                  <span className="v2-mono v2-font-bold">−{money(discountAmount)}</span>
                 </div>
               )}
               <div className="v2-flex v2-justify-between v2-items-center">
@@ -1958,7 +1931,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         }}
                       >
                         <span className="v2-text-xs v2-font-bold">
-                          {remaining === 0 ? "Tender Balanced âœ“" : remaining > 0 ? "Remaining Due:" : "Overpaid:"}
+                          {remaining === 0 ? "Tender Balanced ✓" : remaining > 0 ? "Remaining Due:" : "Overpaid:"}
                         </span>
                         <span
                           className="v2-mono v2-font-black v2-text-sm"
@@ -3038,7 +3011,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         {money(denom)}
                       </span>
                       <div className="v2-flex v2-items-center v2-gap-1">
-                        <span className="v2-text-xs v2-text-muted">Ã—</span>
+                        <span className="v2-text-xs v2-text-muted">×</span>
                         <input
                           type="number"
                           min="0"
@@ -3101,7 +3074,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                         color: variance === 0 ? "var(--success)" : variance > 0 ? "var(--accent)" : "var(--danger)",
                       }}
                     >
-                      {variance > 0 ? `+${money(variance)} (Overage)` : variance < 0 ? `${money(variance)} (Shortage)` : "0 Tsh (Balanced âœ“)"}
+                      {variance > 0 ? `+${money(variance)} (Overage)` : variance < 0 ? `${money(variance)} (Shortage)` : "0 Tsh (Balanced ✓)"}
                     </span>
                   </div>
                 </div>

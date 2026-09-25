@@ -1,9 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { buildServer } from "../../apps/api/src/server";
 import { globalInMemoryStore } from "@kwakopos2/database";
+import { globalLegalGovernanceService } from "../../apps/api/src/services/legalGovernanceService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
+
+function ensureLegalCompliance(userId: string, tenantId: string) {
+  const status = globalLegalGovernanceService.checkUserAcceptanceStatus(userId, tenantId);
+  for (const doc of status.requiredDocuments) {
+    globalLegalGovernanceService.recordAcceptance(userId, tenantId, {
+      documentId: doc.documentId,
+      documentVersion: doc.requiredVersion,
+      language: "en",
+      acceptanceMethod: "CLICK_WRAP",
+    });
+  }
+}
 
 describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
   let server: FastifyInstance;
@@ -19,6 +32,10 @@ describe("KwakoPos 2.0 Fastify REST API Integration Suite", () => {
 
   beforeEach(() => {
     globalInMemoryStore.clear();
+    ensureLegalCompliance("user-http-001", "tenant-http-001");
+    ensureLegalCompliance("user-http-002", "tenant-http-002");
+    ensureLegalCompliance("user-A-uuid", "tenant-A-uuid");
+    ensureLegalCompliance("user-B-uuid", "tenant-B-uuid");
   });
 
   it("GET /health returns 200 OK with system status", async () => {

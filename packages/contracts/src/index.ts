@@ -896,13 +896,13 @@ export const SaleSchema = z.object({
 export type Sale = z.infer<typeof SaleSchema>;
 
 export const CreatePosSaleRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
-  cashSessionId: z.string().uuid().optional(),
+  id: z.string().optional(),
+  customerId: z.string().optional(),
+  cashSessionId: z.string().optional(),
   items: z.array(
     z.object({
-      productId: z.string().uuid(),
-      variantId: z.string().uuid(),
+      productId: z.string().min(1),
+      variantId: z.string().min(1),
       quantity: z.number().positive(),
       unitPrice: z.number().nonnegative(),
       unitCost: z.number().nonnegative().optional(),
@@ -956,8 +956,8 @@ export const ReturnSchema = z.object({
 export type Return = z.infer<typeof ReturnSchema>;
 
 export const CreateSaleReturnRequestSchema = z.object({
-  originalSaleId: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
+  originalSaleId: z.string().optional(),
+  customerId: z.string().optional(),
   reason: z.string().min(1),
   refundType: z.enum(["CASH", "STORE_CREDIT", "BANK", "MOBILE_MONEY"]).default("CASH"),
   deviceId: z.string().min(1),
@@ -1217,8 +1217,20 @@ export const SyncDeltaResponseSchema = z.object({
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
+  sales: z.array(z.record(z.unknown())).optional(),
+  payments: z.array(z.record(z.unknown())).optional(),
+  purchaseReceipts: z.array(z.record(z.unknown())).optional(),
   settings: z.array(z.record(z.unknown())).optional(),
   integrityChecksum: z.string().optional(),
+  serverRevision: z.string().optional(),
+  changes: z.array(z.object({
+    revision: z.string(),
+    entityType: z.string(),
+    entityId: z.string(),
+    operationType: z.string(),
+    record: z.unknown(),
+    source: z.string().optional(),
+  })).optional(),
 });
 export type SyncDeltaResponse = z.infer<typeof SyncDeltaResponseSchema>;
 
@@ -1231,7 +1243,10 @@ export const SyncBootstrapRequestSchema = z.object({
 export type SyncBootstrapRequest = z.infer<typeof SyncBootstrapRequestSchema>;
 
 export const SyncBootstrapResponseSchema = z.object({
+  tenantId: z.string().optional(),
+  branchId: z.string().optional(),
   snapshotTimestamp: z.string(),
+  serverRevision: z.string().optional(),
   integrityChecksum: z.string(),
   schemaVersion: z.number(),
   entityCounts: z.record(z.number()),

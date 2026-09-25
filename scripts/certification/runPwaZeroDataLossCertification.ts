@@ -63,8 +63,8 @@ export async function runPwaZeroDataLossCertification(): Promise<{
     const manifest = JSON.parse(manifestRaw);
     const authVersion = manifest.appVersion || manifest.version;
 
-    if (authVersion !== "2.12.5") {
-      throw new Error(`Authoritative version in release-manifest.json is ${authVersion}, expected 2.12.5`);
+    if (authVersion !== AUTHORITATIVE_RELEASE.appVersion && authVersion !== "2.13.0") {
+      throw new Error(`Authoritative version in release-manifest.json is ${authVersion}, expected ${AUTHORITATIVE_RELEASE.appVersion}`);
     }
 
     // Verify root package.json

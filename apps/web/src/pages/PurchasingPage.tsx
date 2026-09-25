@@ -31,17 +31,17 @@ const fmtDate = (d: string) =>
 
 // Tax Compliance Validators (Tanzania TRA)
 const validateTin = (tin?: string) => {
-  if (!tin) return { valid: false, text: "âš  Missing TIN", badgeClass: "v2-badge-warning" };
+  if (!tin) return { valid: false, text: "⚠ Missing TIN", badgeClass: "v2-badge-warning" };
   const clean = tin.replace(/-/g, "");
-  if (/^\d{9}$/.test(clean)) return { valid: true, text: "âœ“ TIN Valid", badgeClass: "v2-badge-success" };
-  return { valid: false, text: "âš  Invalid TIN (9 digits)", badgeClass: "v2-badge-danger" };
+  if (/^\d{9}$/.test(clean)) return { valid: true, text: "✓ TIN Valid", badgeClass: "v2-badge-success" };
+  return { valid: false, text: "⚠ Invalid TIN (9 digits)", badgeClass: "v2-badge-danger" };
 };
 
 const validateVrn = (vrn?: string) => {
-  if (!vrn) return { valid: false, text: "âš  Missing VRN", badgeClass: "v2-badge-muted" };
+  if (!vrn) return { valid: false, text: "⚠ Missing VRN", badgeClass: "v2-badge-muted" };
   const clean = vrn.replace(/-/g, "");
-  if (/^\d{8}[A-Z]$/i.test(clean)) return { valid: true, text: "âœ“ VRN Valid", badgeClass: "v2-badge-success" };
-  return { valid: false, text: "âš  Invalid VRN", badgeClass: "v2-badge-danger" };
+  if (/^\d{8}[A-Z]$/i.test(clean)) return { valid: true, text: "✓ VRN Valid", badgeClass: "v2-badge-success" };
+  return { valid: false, text: "⚠ Invalid VRN", badgeClass: "v2-badge-danger" };
 };
 
 export interface PurchasingPageProps {
@@ -373,16 +373,24 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   };
 
   // Confirm GRN Delivery Intake & Restock Inventory
-  const handleConfirmGrn = () => {
+  const handleConfirmGrn = async () => {
     if (!selectedPoForGrn) return;
-    const grnId = `GRN-2026-${Math.floor(100 + Math.random() * 900)}`;
-    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 16);
+    if (!currentTenantId || !currentBranchId) {
+      toast.error("GRN Not Saved", "An active tenant and branch are required.");
+      return;
+    }
+    const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
+    const grnId = `GRN-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const nowIso = new Date().toISOString();
+    const nowStr = nowIso.replace("T", " ").slice(0, 16);
+    const writes: Array<{ store: any; key: string; value?: any; delete?: boolean }> = [];
+    const receivedItems: Array<Record<string, unknown>> = [];
 
     let totalIntakeUnits = 0;
     let totalIntakeValue = 0;
 
     // 1. Update each product's stock in local DB & post Stock Ledger records
-    selectedPoForGrn.items.forEach((item) => {
+    for (const item of selectedPoForGrn.items) {
       const itemKey = item.sku || item.productId;
       const receivedCount = grnReceivedQtys[itemKey] || 0;
       if (receivedCount > 0) {
@@ -401,7 +409,16 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         }
 
         if (prod) {
-          const prevStock = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? 0);
+          const variant = [...db.productVariants.values()].find((v: any) =>
+            v.productId === prod.id && v.tenantId === currentTenantId && v.branchId === currentBranchId && (!item.sku || v.sku === item.sku)
+          );
+          if (!variant) {
+            toast.error("GRN Not Saved", `No branch-scoped variant was found for ${item.name || item.productId}.`);
+            return;
+          }
+          const prevStock = [...db.stockLedger.values()]
+            .filter((l: any) => l.tenantId === currentTenantId && l.branchId === currentBranchId && l.variantId === variant.id)
+            .reduce((sum: number, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
           const nextStock = prevStock + receivedCount;
           const updatedProd = {
             ...prod,
@@ -413,27 +430,49 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
             status: "Active",
             updatedAt: new Date().toISOString(),
           };
-          db.saveProductLocal(updatedProd, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+          writes.push({ store: "products", key: item.productId, value: updatedProd });
 
           // Post audit ledger entry
-          db.saveStockLedgerLocal({
-            id: `led-grn-${Date.now()}-${item.productId}`,
-            productId: item.productId,
-            sku: item.sku,
-            name: item.name,
-            quantity: receivedCount,
-            balanceAfter: nextStock,
+          const ledgerId = `led-grn-${grnId}-${variant.id}`;
+          writes.push({
+            store: "stockLedger",
+            key: ledgerId,
+            value: {
+              id: ledgerId,
+              productId: item.productId,
+              variantId: variant.id,
+              sku: item.sku,
+              name: item.name,
+              quantity: receivedCount,
+              quantityChange: receivedCount,
+              quantityBefore: prevStock,
+              quantityAfter: nextStock,
+              balanceAfter: nextStock,
+              unitCost: item.unitCost,
+              totalCost: receivedCount * item.unitCost,
+              reason: `INBOUND_GRN_RECEIPT - ${grnId} (PO: ${selectedPoForGrn.poNumber})`,
+              ref: grnId,
+              movementType: "PURCHASE",
+              referenceType: "PURCHASE_RECEIPT",
+              referenceId: grnId,
+              timestamp: nowIso,
+              occurredAt: nowIso,
+              tenantId: currentTenantId,
+              branchId: currentBranchId,
+            },
+          });
+          receivedItems.push({
+            variantId: variant.id,
+            quantityReceived: receivedCount,
             unitCost: item.unitCost,
-            totalCost: receivedCount * item.unitCost,
-            reason: `INBOUND_GRN_RECEIPT - ${grnId} (PO: ${selectedPoForGrn.poNumber})`,
-            ref: grnId,
-            movementType: "INBOUND_GRN",
-            timestamp: new Date().toISOString(),
-            tenantId: currentTenantId || "default",
-          } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
+            batchNumber: grnBatchNumber || undefined,
+            expiryDate: grnExpiryDate || undefined,
+          });
         }
       }
-    });
+    }
+
+    if (!receivedItems.length) return;
 
     // 2. Create GRN Record
     const newGrn: GrnRecord = {
@@ -450,8 +489,8 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     };
 
     const updatedGrns = [newGrn, ...grns];
-    setGrns(updatedGrns);
-    db.saveConfigurationLocal("procurement_grns", updatedGrns, currentTenantId ? { tenantId: currentTenantId } : undefined);
+    writes.push({ store: "receipts", key: grnId, value: { ...newGrn, tenantId: currentTenantId, branchId: currentBranchId } });
+    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_grns`, value: { key: "procurement_grns", value: updatedGrns, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
 
     // 3. Update PO status & received quantities
     const updatedOrders = orders.map((o) => {
@@ -471,19 +510,38 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       return o;
     });
 
-    setOrders(updatedOrders);
-    db.saveConfigurationLocal("procurement_purchase_orders", updatedOrders, currentTenantId ? { tenantId: currentTenantId } : undefined);
+    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_purchase_orders`, value: { key: "procurement_purchase_orders", value: updatedOrders, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
 
     // 4. Update supplier payable balance
     const supMatch = suppliers.find((s) => s.name === selectedPoForGrn.supplier);
-    if (supMatch) {
-      const updatedSups = suppliers.map((s) =>
-        s.id === supMatch.id ? { ...s, balance: s.balance + totalIntakeValue } : s
-      );
-      setSuppliers(updatedSups);
-      db.saveConfigurationLocal("procurement_suppliers", updatedSups, currentTenantId ? { tenantId: currentTenantId } : undefined);
-    }
+    const updatedSups = supMatch
+      ? suppliers.map((s) => s.id === supMatch.id ? { ...s, balance: s.balance + totalIntakeValue } : s)
+      : suppliers;
+    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_suppliers`, value: { key: "procurement_suppliers", value: updatedSups, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
 
+    const receiptOutbox = {
+      id: grnId,
+      entityType: "PurchaseReceipt" as const,
+      entityId: grnId,
+      operationType: "CREATE" as const,
+      payload: {
+        id: grnId,
+        purchaseOrderId: selectedPoForGrn.id,
+        supplierId: selectedPoForGrn.supplierId || supMatch?.id,
+        items: receivedItems,
+        notes: `GRN ${grnId} / ${selectedPoForGrn.poNumber}`,
+      },
+      clientCreatedAt: nowIso,
+      idempotencyKey: grnId,
+      status: "PENDING" as const,
+      tenantId: currentTenantId,
+      branchId: currentBranchId,
+    };
+    await db.executeAtomicMutation({ writes, outboxItem: receiptOutbox, tenantContext });
+
+    setGrns(updatedGrns);
+    setOrders(updatedOrders);
+    setSuppliers(updatedSups);
     setShowGrnModal(false);
     setSelectedPoForGrn(null);
     playSuccessChime();
@@ -609,7 +667,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                   border: `1px solid ${isProductionLocked ? "rgba(34, 197, 94, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
                 }}
               >
-                {isProductionLocked ? "ðŸ”’ Production Locked" : "âš¡ Sandbox Mode"}
+                {isProductionLocked ? "🔒 Production Locked" : "⚡ Sandbox Mode"}
               </span>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShowPillarsInfo(false)} type="button">
                 Close
@@ -1119,7 +1177,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                                 : "v2-badge-muted"
                             }`}
                           >
-                            {isMatched ? "3-Way Matched âœ“" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
+                            {isMatched ? "3-Way Matched ✓" : po.status === "Completed" ? "Pending Invoicing" : "Awaiting Intake"}
                           </span>
                         </td>
                         <td>

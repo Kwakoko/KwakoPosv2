@@ -96,7 +96,7 @@ export interface ShellLayoutProps {
 type SearchResult = { type: string; label: string; id: string; target: string };
 
 // ─── Icon Map ─────────────────────────────────────────────────────────────────
-// Map lucide icon names (as strings in the registry) â†’ actual components.
+// Map lucide icon names (as strings in the registry) → actual components.
 // Used for module cards and sidebar icons.
 const ICON_MAP: Record<string, React.ElementType> = {
   Activity, AlertTriangle, AlignLeft, BarChart2, BarChart, BarChart3, Bed: BedDouble, BedDouble, Bell,
@@ -790,7 +790,7 @@ function getSidebarIcon(name: string): string {
 
 
 // ─── Sidebar Icon Colour Map ───────────────────────────────────────────────────
-// Each key maps an exact tab/section name â†’ a CSS colour token (or hex).
+// Each key maps an exact tab/section name → a CSS colour token (or hex).
 // These colours intentionally match the legacy KwakoPOS icon palette.
 const SIDEBAR_ICON_COLOR_MAP: Record<string, string> = {
   // ── Universal ──────────────────────────────────────────────────────────────
@@ -1123,7 +1123,7 @@ export const Sidebar: React.FC<{
               }}
               type="button"
             >
-              Exit Inspection &amp; Return to CPanel â†’
+              Exit Inspection &amp; Return to CPanel →
             </button>
           </div>
         )}
@@ -1673,7 +1673,7 @@ const NotificationsPanel: React.FC<{
                     <span className="notif-time">{item.timeAgo}</span>
                     {item.actionLabel && (
                       <span className="notif-action-btn">
-                        {item.actionLabel} â†’
+                        {item.actionLabel} →
                       </span>
                     )}
                   </div>
@@ -1707,7 +1707,7 @@ const NotificationsPanel: React.FC<{
             onClose();
           }}
         >
-          {activeScope === "SUPER_ADMIN" ? "Support Tower â†’" : "Help & Docs â†’"}
+          {activeScope === "SUPER_ADMIN" ? "Support Tower →" : "Help & Docs →"}
         </button>
       </div>
     </div>

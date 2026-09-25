@@ -132,6 +132,8 @@ export class ClientCoordinationManager {
 
   releaseUpgradeCoordination(success: boolean): void {
     this.isCoordinator = false;
+    this.isQuiesced = false;
+    this.notifyQuiesceCallbacks(false);
     this.sendMessage({
       type: success ? "MIGRATION_COMPLETED" : "MIGRATION_FAILED",
       tabId: this.tabId,

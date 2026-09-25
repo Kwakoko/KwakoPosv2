@@ -327,7 +327,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                     </div>
                     <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".75rem", lineHeight: 1.4 }}>
                       {loc.code === "en" && "Official commercial and international trade terminology with global standard notation."}
-                      {loc.code === "fr" && "Terminologie commerciale conforme aux normes OHADA et au franÃ§ais d'affaires."}
+                      {loc.code === "fr" && "Terminologie commerciale conforme aux normes OHADA et au français d'affaires."}
                       {loc.code === "sw" && "Lugha ya kibiashara ya Afrika Mashariki iliyorahisishwa kwa wajasiriamali na wafanyabiashara."}
                     </div>
                   </div>

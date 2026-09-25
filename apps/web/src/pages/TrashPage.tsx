@@ -18,6 +18,7 @@ import {
   Filter, Clock, Receipt, Package, Users, Wallet, RefreshCw, X, ShieldAlert
 } from "lucide-react";
 import { useAuth, useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 
 type TrashCategory = "receipts" | "products" | "customers" | "expenses";
 
@@ -55,7 +56,7 @@ function saveDeletedTombstones(set: Set<string>): void {
 
 export const TrashPage: React.FC = () => {
   const { currentTenantId, currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
+  const { currentBranchName, currentBranchId } = useBranch();
   const { user: currentUser } = useAuth();
   const { permissions, hasPermission, isSuperAdmin } = useRbac();
   const { isOnline, db, syncOutbox } = useSync();
@@ -204,47 +205,26 @@ export const TrashPage: React.FC = () => {
   }, [refreshStorageItems]);
 
   // Actions: Restore
-  const handleRestore = (item: TrashedRecord) => {
+  const handleRestore = async (item: TrashedRecord) => {
     try {
-      // 1. Remove from tombstone set
-      const tombstones = getDeletedTombstones();
-      tombstones.delete(item.id);
-      saveDeletedTombstones(tombstones);
-
-      // 2. Update in DB if original data exists
-      if (item.originalData && db) {
-        const restored = {
-          ...item.originalData,
-          is_deleted: false,
-          deletedAt: null,
-          status: item.category === "receipts" ? "Completed" : "Active",
-          updatedAt: new Date().toISOString(),
-        };
-
-        const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
-        if (item.category === "receipts" && typeof db.saveReceiptLocal === "function") {
-          db.saveReceiptLocal(restored, ctx);
-        } else if (item.category === "products" && typeof db.saveProductLocal === "function") {
-          db.saveProductLocal(restored, ctx);
-        } else if (item.category === "customers" && typeof db.saveCustomerLocal === "function") {
-          db.saveCustomerLocal(restored, ctx);
-        }
-
-        if (typeof db.enqueueOutbox === "function") {
-          db.enqueueOutbox({
-            entityType: item.category === "products" ? "Product" : item.category === "customers" ? "Customer" : "Sale",
-            operationType: "UPDATE",
-            payload: restored,
-          });
-        }
-      }
-
-      // 3. Remove from UI list
+      if (!item.originalData || !db) return;
+      const restored = { ...item.originalData, is_deleted: false, deletedAt: null, status: item.category === "receipts" ? "Completed" : "Active", updatedAt: new Date().toISOString() };
+      const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+      const entityType = item.category === "products" ? "Product" : item.category === "customers" ? "Customer" : "Sale";
+      const mutationId = "TRASH-RESTORE-" + item.category + "-" + item.id + "-" + Date.now();
+      const store = item.category === "products" ? "products" : item.category === "customers" ? "customers" : item.category === "receipts" ? "receipts" : null;
+      if (!store) throw new Error("UNSUPPORTED_RESTORE_CATEGORY:" + item.category);
+      await db.executeAtomicMutation({
+        writes: [{ store, key: item.id, value: restored }],
+        outboxItem: { id: mutationId, entityType, entityId: item.id, operationType: "UPDATE", payload: restored, clientCreatedAt: restored.updatedAt, idempotencyKey: mutationId, status: "PENDING", tenantId: tenantContext.tenantId, branchId: tenantContext.branchId },
+        tenantContext,
+      });
+      const tombstones = getDeletedTombstones(); tombstones.delete(item.id); saveDeletedTombstones(tombstones);
       setTrashedItems((prev) => prev.filter((t) => t.id !== item.id));
-      setFeedback({ msg: `✓ Successfully restored "${item.name}" back to active records` });
+      setFeedback({ msg: "Successfully restored \"" + item.name + "\" back to active records" });
       setTimeout(() => setFeedback(null), 4000);
     } catch (err: any) {
-      setFeedback({ msg: `✗ Restoration failed: ${err?.message || "Storage error"}`, isError: true });
+      setFeedback({ msg: "Restoration failed: " + (err?.message || "Storage error"), isError: true });
       setTimeout(() => setFeedback(null), 4000);
     }
   };

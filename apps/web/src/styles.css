@@ -1414,6 +1414,17 @@ footer {
 .badge-muted, .v2-badge-muted { background: var(--surface-2); color: var(--muted); }
 
 /* ── Inputs & Forms ──────────────────────────────────────────────────────── */
+/* Strip away aggressive browser-default number spinner arrows */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+}
+input[type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
 .search-input, .v2-input {
   width: 100%;
   background: var(--bg);
@@ -1431,6 +1442,121 @@ footer {
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .search-input::placeholder, .v2-input::placeholder { color: var(--placeholder); }
+
+.v2-input-sm {
+  padding: .35rem .6rem;
+  font-size: .78rem;
+  border-radius: var(--radius-sm);
+}
+
+.v2-input-xs {
+  padding: .2rem .45rem;
+  font-size: .74rem;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Number Stepper Component ────────────────────────────────────────────── */
+.v2-number-stepper {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  overflow: hidden;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.v2-number-stepper:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.v2-number-stepper.is-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  background: var(--surface-2);
+}
+
+.v2-number-stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.v2-number-stepper-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.v2-number-stepper-btn:active:not(:disabled) {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.v2-number-stepper-btn:disabled {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
+
+.v2-number-stepper-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  text-align: center;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+/* Stepper Sizes */
+.v2-number-stepper-xs {
+  height: 26px;
+}
+.v2-number-stepper-xs .v2-number-stepper-btn {
+  width: 22px;
+  height: 24px;
+}
+.v2-number-stepper-xs .v2-number-stepper-input {
+  font-size: 11.5px;
+}
+
+.v2-number-stepper-sm {
+  height: 32px;
+}
+.v2-number-stepper-sm .v2-number-stepper-btn {
+  width: 26px;
+  height: 30px;
+}
+.v2-number-stepper-sm .v2-number-stepper-input {
+  font-size: 12.5px;
+}
+
+.v2-number-stepper-md {
+  height: 38px;
+}
+.v2-number-stepper-md .v2-number-stepper-btn {
+  width: 32px;
+  height: 36px;
+}
+.v2-number-stepper-md .v2-number-stepper-input {
+  font-size: 13.5px;
+}
+
 
 .v2-select {
   background: var(--bg);
