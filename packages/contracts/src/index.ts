@@ -679,6 +679,7 @@ export const CreateStockMovementRequestSchema = z.object({
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
   notes: z.string().optional(),
+  occurredAt: z.string().or(z.date()).optional(),
 });
 export type CreateStockMovementRequest = z.infer<typeof CreateStockMovementRequestSchema>;
 
@@ -697,6 +698,7 @@ export const StockAdjustmentSchema = z.object({
   deviceId: z.string(),
   operationId: z.string(),
   idempotencyKey: z.string(),
+  occurredAt: z.string().or(z.date()).optional(),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
@@ -718,6 +720,8 @@ export const CreateStockAdjustmentRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  occurredAt: z.string().or(z.date()).optional(),
+  isBackdated: z.boolean().optional(),
 });
 export type CreateStockAdjustmentRequest = z.infer<typeof CreateStockAdjustmentRequestSchema>;
 

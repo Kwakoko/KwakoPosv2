@@ -171,6 +171,9 @@ import {
   BillingInvoicingEngine,
   SaaSPaymentEngine,
   RevenueAnalyticsEngine,
+  assertBackdatingThreshold,
+  calculateBackdatedDiscrepancy,
+  validateRetroactiveTimeline,
 } from "@kwakopos2/domain";
 
 
@@ -1402,6 +1405,72 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreateStockAdjustmentRequestSchema.parse(req.body);
     const result = await stockRepo.recordStockAdjustment(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/inventory/stock-as-of/:variantId", async (req, reply) => {
+    const variantId = (req.params as any).variantId;
+    const asOfDate = (req.query as any).asOfDate;
+    if (!asOfDate) {
+      return reply.status(400).send({ success: false, error: "asOfDate query parameter is required" });
+    }
+    try {
+      const stockAsOfDate = await stockRepo.getStockAsOfDate(req.tenantContext!, variantId, asOfDate);
+      const currentStock = await stockRepo.getAvailableStock(req.tenantContext!, variantId);
+      return {
+        success: true,
+        data: {
+          variantId,
+          asOfDate: new Date(asOfDate).toISOString(),
+          stockAsOfDate,
+          currentStock,
+        },
+      };
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
+    }
+  });
+
+  server.post("/inventory/backdated-preview", async (req, reply) => {
+    const previewSchema = z.object({
+      variantId: z.string(),
+      adjustmentType: z.enum(["INCREASE", "DECREASE", "SET"]),
+      quantityChange: z.number(),
+      occurredAt: z.string().or(z.date()),
+    });
+    const body = previewSchema.parse(req.body);
+    try {
+      const occurredAtDate = new Date(body.occurredAt);
+      assertBackdatingThreshold(occurredAtDate);
+      const historicalStock = await stockRepo.getStockAsOfDate(req.tenantContext!, body.variantId, occurredAtDate);
+      const currentStock = await stockRepo.getAvailableStock(req.tenantContext!, body.variantId);
+      let discrepancyDelta = body.quantityChange;
+      if (body.adjustmentType === "DECREASE") {
+        discrepancyDelta = -Math.abs(body.quantityChange);
+      } else if (body.adjustmentType === "SET") {
+        discrepancyDelta = calculateBackdatedDiscrepancy(body.quantityChange, historicalStock);
+      }
+      const allLedgers = await stockRepo.getLedger(req.tenantContext!, body.variantId);
+      const timelineValidation = validateRetroactiveTimeline(allLedgers, occurredAtDate, discrepancyDelta);
+      const projectedStock = currentStock + discrepancyDelta;
+
+      return {
+        success: true,
+        data: {
+          variantId: body.variantId,
+          occurredAt: occurredAtDate.toISOString(),
+          adjustmentType: body.adjustmentType,
+          historicalStock,
+          discrepancyDelta,
+          currentStock,
+          projectedStock,
+          timelineValid: timelineValidation.valid,
+          lowestIntermediateBalance: timelineValidation.lowestIntermediateBalance,
+          violationDate: timelineValidation.violationDate,
+        },
+      };
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
+    }
   });
 
   server.get("/inventory/stock/:variantId", async (req) => {

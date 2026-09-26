@@ -33,7 +33,7 @@ import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { NumberStepper } from "../components/UI/NumberStepper.js";
 import { safeUUID } from "../services/apiClient.js";
-import { queueAddStock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
@@ -70,6 +70,16 @@ export const CATEGORY_COLORS = [
 ];
 
 export const DEFAULT_CATEGORY_RECORDS: CategoryRecord[] = []; const DEFAULT_BRAND_RECORDS: BrandRecord[] = [];
+
+export function toLocalDatetimeString(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
 
 export interface ProductVariantData {
   id: string;
@@ -262,10 +272,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [ledgerSearchQuery, setLedgerSearchQuery] = useState("");
   const [stockAdjModal, setStockAdjModal] = useState(false);
   const [adjSku, setAdjSku] = useState("SKU-AZM-FLR-01");
+  const [adjAdjustmentType, setAdjAdjustmentType] = useState<"INCREASE" | "DECREASE" | "SET">("INCREASE");
   const [adjType, setAdjType] = useState<"ADJUSTMENT_GAIN" | "ADJUSTMENT_LOSS" | "OPENING_STOCK" | "WASTAGE_SPILL">("ADJUSTMENT_GAIN");
-  const [adjReasonCode, setAdjReasonCode] = useState("PHYSICAL_COUNT_VARIANCE");
+  const [adjReasonCode, setAdjReasonCode] = useState("PURCHASE_RECEIVED");
   const [adjQty, setAdjQty] = useState(1);
   const [adjNotes, setAdjNotes] = useState("");
+  const [isBackdated, setIsBackdated] = useState(false);
+  const [adjOccurredAt, setAdjOccurredAt] = useState(() => toLocalDatetimeString());
 
   // Branch Stock Transfer State
   const [transfers, setTransfers] = useState<any[]>([]);
@@ -1231,7 +1244,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setCsvImportModal(true)} type="button">
             <Upload size={13} /> Bulk CSV Import
           </button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={async () => { setActiveTab("ledger"); setAdjSku(items[0]?.variants?.[0]?.sku || items[0]?.sku || ""); setStockAdjModal(true); }} type="button">
+          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={async () => {
+            setActiveTab("ledger");
+            const firstSku = items[0]?.variants?.[0]?.sku || items[0]?.sku || "";
+            if (!adjSku || !items.some((i) => i.sku === adjSku || i.variants?.some((v) => v.sku === adjSku))) {
+              setAdjSku(firstSku);
+            }
+            setAdjOccurredAt(toLocalDatetimeString());
+            setStockAdjModal(true);
+          }} type="button">
             <PackageOpen size={13} /> Add Stock
           </button>
           <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setAddProductModal(true)} type="button">
@@ -1937,7 +1958,18 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 <option value="OPENING_STOCK">Opening Stock</option>
               </select>
             </div>
-            <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setStockAdjModal(true)} type="button">
+            <button
+              className="v2-btn v2-btn-primary v2-btn-sm"
+              onClick={() => {
+                const firstSku = items[0]?.variants?.[0]?.sku || items[0]?.sku || "";
+                if (!adjSku || !items.some((i) => i.sku === adjSku || i.variants?.some((v) => v.sku === adjSku))) {
+                  setAdjSku(firstSku);
+                }
+                setAdjOccurredAt(toLocalDatetimeString());
+                setStockAdjModal(true);
+              }}
+              type="button"
+            >
               <PackageOpen size={13} /> Add Stock
             </button>
           </div>
@@ -4012,112 +4044,318 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           </div>
         </div>
       )}
-      {/* --- Add Stock Modal --- */}
-      {stockAdjModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 520, maxWidth: "calc(100vw - 2rem)", padding: "1.5rem" }}>
-            <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
-              <div>
-                <h2 className="v2-text-base v2-font-black">Add Stock</h2>
-                <div className="v2-text-xs v2-text-muted">Create one durable stock movement and queue it for server synchronization.</div>
-              </div>
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">✕</button>
-            </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const targetItem = items.find((i) => i.sku === adjSku) || items.find((i) => i.variants?.some((v) => v.sku === adjSku)) || items[0];
-                const targetVariant = targetItem?.variants?.find((v) => v.sku === adjSku) || targetItem?.variants?.[0];
-                if (!targetItem || !targetVariant || !currentTenantId || !currentBranchId) {
-                  toast.warning("Stock Target Required", "Select a valid product variant and tenant branch context before adding stock.");
-                  return;
-                }
-                const quantity = Number(adjQty);
-                const unitCost = Number(targetVariant.buyingPrice ?? targetItem.buyingPrice ?? 0);
-                if (!Number.isFinite(quantity) || quantity <= 0) {
-                  toast.warning("Invalid Quantity", "Enter a stock quantity greater than zero.");
-                  return;
-                }
-                if (!adjReasonCode) {
-                  toast.warning("Reason Required", "Select a stock-in reason before posting.");
-                  return;
-                }
-                try {
-                  const result = await queueAddStock(db, {
-                    tenantId: currentTenantId,
-                    branchId: currentBranchId,
-                    productId: targetItem.id,
-                    variantId: targetVariant.id,
-                    sku: targetVariant.sku,
-                    productName: targetItem.name,
-                    quantity,
-                    unitCost,
-                    reason: adjReasonCode,
-                    notes: adjNotes,
-                    movementType: adjType === "OPENING_STOCK" ? "OPENING_STOCK" : "ADJUSTMENT_GAIN",
-                    deviceId: syncEngine.deviceId,
-                  });
-                  await loadInventory();
-                  playSuccessChime();
-                  toast.success("Stock Added", String(quantity) + " " + (targetVariant.name || targetItem.name) + " added. New local ledger balance: " + String(result.quantityAfter) + ".");
-                  window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
-                  void syncOutbox().catch(() => {});
-                  setStockAdjModal(false);
-                  setAdjNotes("");
-                  setAdjQty(1);
-                } catch (error) {
-                  toast.warning("Stock Not Posted", error instanceof Error ? error.message : "Unable to queue stock movement.");
-                }
-              }}
-              className="v2-space-y-3"
-            >
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT / VARIANT *</label>
-                <select className="v2-input" value={adjSku} onChange={(e) => setAdjSku(e.target.value)}>
-                  {items.flatMap((item) => (item.variants && item.variants.length > 0 ? item.variants.map((variant) => (
-                    <option key={variant.id} value={variant.sku}>{item.name} — {variant.name} ({variant.sku})</option>
-                  )) : [<option key={item.id} value={item.sku}>{item.name} ({item.sku})</option>]))}
-                </select>
-              </div>
-              <div className="v2-grid v2-grid-2 v2-gap-2">
+      {/* --- Stock Movement & Backdated Inventory Modal --- */}
+      {stockAdjModal && (() => {
+        const targetItem =
+          items.find((i) => i.sku === adjSku || i.variants?.some((v) => v.sku === adjSku)) ||
+          items[0] ||
+          null;
+        const targetVariant =
+          targetItem?.variants?.find((v) => v.sku === adjSku) ||
+          targetItem?.variants?.[0] ||
+          null;
+
+        const targetVariantId = targetVariant?.id || (targetItem ? `${targetItem.id}-default` : "");
+        const targetVariantSku = targetVariant?.sku || targetItem?.sku || adjSku || "SKU-DEFAULT";
+        const targetVariantName = targetVariant?.name || targetItem?.name || "Standard";
+        const targetUnitCost = Number(targetVariant?.buyingPrice ?? targetItem?.buyingPrice ?? 0);
+
+        const ledgerEntries = db?.stockLedger ? Array.from(db.stockLedger.values()) : [];
+        const entries = ledgerEntries.filter(
+          (entry: any) =>
+            (!currentTenantId || entry.tenantId === currentTenantId) &&
+            (!currentBranchId || entry.branchId === currentBranchId) &&
+            ((targetVariantId && entry.variantId === targetVariantId) ||
+             (targetItem && entry.productId === targetItem.id && (!entry.variantId || entry.variantId === `${targetItem.id}-default`))),
+        );
+        const currentBalance = entries.reduce(
+          (sum, e: any) => sum + Number(e.quantityChange ?? e.quantity ?? 0),
+          0,
+        );
+
+        let historicalBalance = currentBalance;
+        if (isBackdated && adjOccurredAt && targetVariantId) {
+          try {
+            historicalBalance = calculateLocalStockAsOfDate(
+              db,
+              targetVariantId,
+              adjOccurredAt,
+              currentTenantId || undefined,
+              currentBranchId || undefined,
+            );
+          } catch {
+            historicalBalance = currentBalance;
+          }
+        }
+
+        const q = Number(adjQty) || 0;
+        let delta = 0;
+        if (adjAdjustmentType === "INCREASE") delta = q;
+        else if (adjAdjustmentType === "DECREASE") delta = -q;
+        else if (adjAdjustmentType === "SET") delta = isBackdated ? (q - historicalBalance) : (q - currentBalance);
+
+        const projectedToday = currentBalance + delta;
+        const minBackdate = toLocalDatetimeString(new Date(Date.now() - 730 * 24 * 3600 * 1000));
+        const maxBackdate = toLocalDatetimeString(new Date(Date.now() + 5 * 60 * 1000));
+
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+            <div className="v2-card" style={{ width: 560, maxWidth: "calc(100vw - 2rem)", maxHeight: "90vh", overflowY: "auto", padding: "1.5rem" }}>
+              <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">STOCK-IN TYPE</label>
-                  <select className="v2-input" value={adjType} onChange={(e) => setAdjType(e.target.value as any)}>
-                    <option value="ADJUSTMENT_GAIN">Stock Addition</option>
-                    <option value="OPENING_STOCK">Opening Stock</option>
+                  <h2 className="v2-text-base v2-font-black">Stock Movement & Adjustment</h2>
+                  <div className="v2-text-xs v2-text-muted">Real-time and backdated stock adjustments with 2-year threshold enforcement.</div>
+                </div>
+                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">✕</button>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!targetItem || !currentTenantId || !currentBranchId) {
+                    toast.warning("Stock Target Required", "Select a valid product and branch context.");
+                    return;
+                  }
+                  const quantity = Number(adjQty);
+                  const unitCost = targetUnitCost;
+                  if (!Number.isFinite(quantity) || (adjAdjustmentType !== "SET" && quantity <= 0) || (adjAdjustmentType === "SET" && quantity < 0)) {
+                    toast.warning("Invalid Quantity", "Enter a valid stock quantity.");
+                    return;
+                  }
+                  if (!adjReasonCode) {
+                    toast.warning("Reason Required", "Select a reason before posting.");
+                    return;
+                  }
+                  if (projectedToday < 0) {
+                    toast.warning("Negative Stock Disallowed", "This adjustment would result in a negative stock balance.");
+                    return;
+                  }
+                  try {
+                    const result = await queueStockAdjustment(db, {
+                      tenantId: currentTenantId,
+                      branchId: currentBranchId,
+                      productId: targetItem.id,
+                      variantId: targetVariantId,
+                      sku: targetVariantSku,
+                      productName: targetItem.name,
+                      adjustmentType: adjAdjustmentType,
+                      quantity,
+                      unitCost,
+                      reason: adjReasonCode,
+                      notes: adjNotes,
+                      movementType: (adjType === "WASTAGE_SPILL" ? "DAMAGE" : adjType) as any,
+                      deviceId: syncEngine?.deviceId || "pos-terminal",
+                      occurredAt: isBackdated && adjOccurredAt ? new Date(adjOccurredAt).toISOString() : undefined,
+                    });
+                    await loadInventory();
+                    playSuccessChime();
+                    const actionLabel = isBackdated ? "Backdated Adjustment" : "Stock Movement";
+                    const deltaLabel = delta >= 0 ? `+${delta}` : `${delta}`;
+                    toast.success(actionLabel, `${targetVariantName}: ${deltaLabel} applied. Local balance: ${result.quantityAfter}.`);
+                    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                    void syncOutbox().catch(() => {});
+                    setStockAdjModal(false);
+                    setAdjNotes("");
+                    setAdjQty(1);
+                    setIsBackdated(false);
+                  } catch (error) {
+                    toast.warning("Stock Not Posted", error instanceof Error ? error.message : "Unable to queue stock movement.");
+                  }
+                }}
+                className="v2-space-y-3"
+              >
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">PRODUCT / VARIANT *</label>
+                  <select className="v2-input" value={adjSku} onChange={(e) => setAdjSku(e.target.value)}>
+                    {items.length === 0 ? (
+                      <option value="">No products available</option>
+                    ) : (
+                      items.flatMap((item) => (item.variants && item.variants.length > 0 ? item.variants.map((variant) => (
+                        <option key={variant.id} value={variant.sku}>{item.name} — {variant.name} ({variant.sku})</option>
+                      )) : [<option key={item.id} value={item.sku}>{item.name} ({item.sku})</option>]))
+                    )}
                   </select>
                 </div>
+
+                {/* Adjustment Mode Selector */}
                 <div>
-                  <label className="v2-text-xs v2-font-bold v2-text-muted">QUANTITY *</label>
-                  <input className="v2-input" type="number" min="1" step="any" value={adjQty} onChange={(e) => setAdjQty(Number(e.target.value))} required />
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">ADJUSTMENT ACTION *</label>
+                  <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-1">
+                    <button
+                      type="button"
+                      className={`v2-btn v2-btn-sm ${adjAdjustmentType === "INCREASE" ? "v2-btn-primary" : "v2-btn-secondary"}`}
+                      onClick={() => {
+                        setAdjAdjustmentType("INCREASE");
+                        setAdjType("ADJUSTMENT_GAIN");
+                        setAdjReasonCode("PURCHASE_RECEIVED");
+                      }}
+                    >
+                      + Add Stock
+                    </button>
+                    <button
+                      type="button"
+                      className={`v2-btn v2-btn-sm ${adjAdjustmentType === "DECREASE" ? "v2-btn-primary" : "v2-btn-secondary"}`}
+                      onClick={() => {
+                        setAdjAdjustmentType("DECREASE");
+                        setAdjType("ADJUSTMENT_LOSS");
+                        setAdjReasonCode("WASTAGE_SPILL");
+                      }}
+                    >
+                      - Deduct / Loss
+                    </button>
+                    <button
+                      type="button"
+                      className={`v2-btn v2-btn-sm ${adjAdjustmentType === "SET" ? "v2-btn-primary" : "v2-btn-secondary"}`}
+                      onClick={() => {
+                        setAdjAdjustmentType("SET");
+                        setAdjType("ADJUSTMENT_GAIN");
+                        setAdjReasonCode("PHYSICAL_COUNT_VARIANCE");
+                      }}
+                    >
+                      = Physical Count
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">STOCK-IN REASON *</label>
-                <select className="v2-input" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
-                  <option value="PURCHASE_RECEIVED">Purchase / Supplier Receipt</option>
-                  <option value="PHYSICAL_COUNT_GAIN">Physical Count Gain</option>
-                  <option value="OPENING_RECONCILIATION">Opening Balance Reconciliation</option>
-                  <option value="CUSTOMER_RETURN">Customer Return</option>
-                  <option value="INTERNAL_TRANSFER_RECEIVED">Internal Transfer Received</option>
-                  <option value="OTHER">Other Approved Stock-In</option>
-                </select>
-              </div>
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT NOTES</label>
-                <input className="v2-input" placeholder="Reference, supplier document, count sheet, etc." value={adjNotes} onChange={(e) => setAdjNotes(e.target.value)} />
-              </div>
-              <div className="v2-flex v2-items-center v2-justify-between v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
-                <div className="v2-text-xs v2-text-muted">Local ledger is committed before sync; server uses the same ledger identity for idempotent convergence.</div>
-                <div className="v2-flex v2-gap-2">
-                  <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">Cancel</button>
-                  <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit"><PackageOpen size={13} /> Add Stock</button>
+
+                <div className="v2-grid v2-grid-2 v2-gap-2">
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">
+                      {adjAdjustmentType === "SET" ? "ACTUAL PHYSICAL COUNT *" : "QUANTITY *"}
+                    </label>
+                    <input
+                      className="v2-input"
+                      type="number"
+                      min={adjAdjustmentType === "SET" ? "0" : "1"}
+                      step="any"
+                      value={adjQty}
+                      onChange={(e) => setAdjQty(Number(e.target.value))}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">REASON CODE *</label>
+                    <select className="v2-input" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
+                      {adjAdjustmentType === "INCREASE" && (
+                        <>
+                          <option value="PURCHASE_RECEIVED">Purchase / Supplier Receipt</option>
+                          <option value="PHYSICAL_COUNT_GAIN">Physical Count Gain</option>
+                          <option value="OPENING_RECONCILIATION">Opening Balance Reconciliation</option>
+                          <option value="CUSTOMER_RETURN">Customer Return</option>
+                          <option value="INTERNAL_TRANSFER_RECEIVED">Internal Transfer Received</option>
+                          <option value="OTHER">Other Approved Stock-In</option>
+                        </>
+                      )}
+                      {adjAdjustmentType === "DECREASE" && (
+                        <>
+                          <option value="WASTAGE_SPILL">Wastage / Spoilage</option>
+                          <option value="SHRINKAGE_THEFT">Shrinkage / Theft</option>
+                          <option value="DAMAGED_EXPIRED">Damaged / Expired</option>
+                          <option value="AUDIT_DISCREPANCY">Audit Deduction</option>
+                          <option value="TRANSFER_OUT">Transfer Out</option>
+                          <option value="OTHER">Other Approved Stock-Out</option>
+                        </>
+                      )}
+                      {adjAdjustmentType === "SET" && (
+                        <>
+                          <option value="PHYSICAL_COUNT_VARIANCE">Physical Count Audit</option>
+                          <option value="PERIODIC_STOCK_COUNT">Periodic Stock Reconciliation</option>
+                          <option value="ANNUAL_AUDIT">Annual Inventory Count</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
                 </div>
-              </div>
-            </form>
+
+                {/* Backdating Toggle & Point-in-Time Controls */}
+                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--surface-border)", borderRadius: "8px", padding: "10px" }}>
+                  <div className="v2-flex v2-items-center v2-justify-between">
+                    <label className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-font-bold" style={{ cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={isBackdated}
+                        onChange={(e) => setIsBackdated(e.target.checked)}
+                      />
+                      <span>Backdate Stock Movement</span>
+                    </label>
+                    <span className="v2-badge v2-badge-sm" style={{ fontSize: "10px", opacity: 0.8 }}>
+                      Limit: 2 Years Max
+                    </span>
+                  </div>
+
+                  {isBackdated && (
+                    <div className="v2-mt-2 v2-space-y-2">
+                      <div>
+                        <label className="v2-text-xs v2-font-bold v2-text-muted">HISTORICAL OCCURRED AT (MAX 2 YEARS)</label>
+                        <input
+                          className="v2-input"
+                          type="datetime-local"
+                          min={minBackdate}
+                          max={maxBackdate}
+                          value={adjOccurredAt}
+                          onChange={(e) => setAdjOccurredAt(e.target.value)}
+                          required={isBackdated}
+                        />
+                      </div>
+
+                      {/* Point-in-Time Live Impact Preview */}
+                      <div className="v2-card" style={{ background: "rgba(0,0,0,0.3)", padding: "8px", border: "1px solid var(--surface-border)" }}>
+                        <div className="v2-text-xs v2-font-bold v2-mb-1" style={{ color: "var(--color-primary, #6366f1)" }}>
+                          Point-in-Time Impact Preview
+                        </div>
+                        <div className="v2-grid v2-grid-3 v2-gap-1 v2-text-xs">
+                          <div>
+                            <span className="v2-text-muted">Stock on Date:</span>{" "}
+                            <span className="v2-font-bold">{historicalBalance}</span>
+                          </div>
+                          <div>
+                            <span className="v2-text-muted">Discrepancy:</span>{" "}
+                            <span className="v2-font-bold" style={{ color: delta >= 0 ? "#10b981" : "#ef4444" }}>
+                              {delta >= 0 ? `+${delta}` : delta}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="v2-text-muted">Today's Stock:</span>{" "}
+                            <span className="v2-font-bold" style={{ color: projectedToday < 0 ? "#ef4444" : "inherit" }}>
+                              {currentBalance} → {projectedToday}
+                            </span>
+                          </div>
+                        </div>
+                        {projectedToday < 0 && (
+                          <div className="v2-text-xs v2-mt-1" style={{ color: "#ef4444" }}>
+                            Warning: Adjustment would cause running inventory to dip below zero!
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">AUDIT NOTES</label>
+                  <input
+                    className="v2-input"
+                    placeholder="Reference, supplier document, count sheet, reason for backdating..."
+                    value={adjNotes}
+                    onChange={(e) => setAdjNotes(e.target.value)}
+                  />
+                </div>
+
+                <div className="v2-flex v2-items-center v2-justify-between v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
+                  <div className="v2-text-xs v2-text-muted">
+                    {isBackdated ? "Retroactive entry recalculates intermediate ledger balances safely." : "Local ledger committed atomically before sync."}
+                  </div>
+                  <div className="v2-flex v2-gap-2">
+                    <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setStockAdjModal(false)} type="button">Cancel</button>
+                    <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit" disabled={projectedToday < 0}>
+                      <PackageOpen size={13} /> {isBackdated ? "Post Backdated Stock" : "Post Stock Movement"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* --- Barcode Label Sheet Generator Modal (40x30mm & A4 24-Up) --- */}
       <BarcodeLabelGeneratorModal
         isOpen={isBarcodeModalOpen}

@@ -24,6 +24,10 @@ import type {
 } from "@kwakopos2/contracts";
 import {
   calculateAvailableStock,
+  calculateStockAsOfDate,
+  calculateBackdatedDiscrepancy,
+  assertBackdatingThreshold,
+  validateRetroactiveTimeline,
   calculateMargin,
   assertProductVariantImmutability,
   assertVariantIdentityPersistence,
@@ -614,9 +618,14 @@ export class ScopedStockRepository {
     if (!variant) throw new Error(`Variant ${req.variantId} not found`);
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
+    if (req.occurredAt) {
+      assertBackdatingThreshold(req.occurredAt);
+    }
+
     const now = new Date().toISOString();
     const movementId = req.id || randomUUID();
     const warehouseId = req.warehouseId || null;
+    const movementTime = req.occurredAt ? new Date(req.occurredAt).toISOString() : now;
 
     // 3. Compute Stock Lineage: quantityBefore -> quantityChange -> quantityAfter
     const quantityBefore = this.getAvailableStock(ctx, req.variantId);
@@ -650,7 +659,7 @@ export class ScopedStockRepository {
       idempotencyKey: req.idempotencyKey,
       notes: req.notes || null,
       synced: true,
-      occurredAt: now,
+      occurredAt: movementTime,
       createdAt: now,
     };
 
@@ -721,12 +730,35 @@ export class ScopedStockRepository {
     const resolvedVariantId = variant.id;
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
+    if (req.occurredAt) {
+      assertBackdatingThreshold(req.occurredAt);
+    }
+
     const now = new Date().toISOString();
     const adjustmentId = req.id || randomUUID();
     let changeQty = req.quantityChange;
 
-    if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
-    else if (req.adjustmentType === "SET") changeQty = req.quantityChange - this.getAvailableStock(ctx, resolvedVariantId);
+    if (req.adjustmentType === "DECREASE") {
+      changeQty = -Math.abs(req.quantityChange);
+    } else if (req.adjustmentType === "SET") {
+      if (req.occurredAt) {
+        const historicalStock = this.getStockAsOfDate(ctx, resolvedVariantId, req.occurredAt);
+        changeQty = calculateBackdatedDiscrepancy(req.quantityChange, historicalStock);
+      } else {
+        changeQty = req.quantityChange - this.getAvailableStock(ctx, resolvedVariantId);
+      }
+    }
+
+    // Validate retroactive timeline if backdated to prevent negative intermediate stock
+    if (req.occurredAt) {
+      const allLedgers = this.getLedger(ctx, resolvedVariantId);
+      const validation = validateRetroactiveTimeline(allLedgers, req.occurredAt, changeQty);
+      if (!validation.valid) {
+        throw new Error(
+          `INSUFFICIENT_STOCK: Retroactive adjustment would cause historical balance to drop below 0 on ${validation.violationDate} (lowest balance: ${validation.lowestIntermediateBalance}).`
+        );
+      }
+    }
 
     const movementType = req.movementType || (changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS");
 
@@ -744,6 +776,7 @@ export class ScopedStockRepository {
       deviceId: req.deviceId,
       operationId: req.operationId,
       idempotencyKey: req.idempotencyKey,
+      occurredAt: req.occurredAt ? new Date(req.occurredAt).toISOString() : now,
       createdAt: now,
       updatedAt: now,
     };
@@ -761,10 +794,17 @@ export class ScopedStockRepository {
       operationId: req.operationId,
       idempotencyKey: req.idempotencyKey,
       notes: `${req.reason} ${req.referenceNote || ""}`.trim(),
+      occurredAt: req.occurredAt,
     });
 
     this.store.stockAdjustments.set(adjustmentId, adjustment);
     return { adjustment, ledger };
+  }
+
+  getStockAsOfDate(ctx: TenantContext, variantId: string, asOfDate: string | Date): number {
+    assertBackdatingThreshold(asOfDate);
+    const ledgers = this.getLedger(ctx, variantId);
+    return calculateStockAsOfDate(ledgers, asOfDate);
   }
 
   getAvailableStock(ctx: TenantContext, variantId: string): number {

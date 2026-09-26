@@ -11,6 +11,7 @@ import type {
 import { CoreEngineRegistry } from "../engineRegistry/coreEngineRegistry.js";
 import { DomainEventBusEngine } from "../foundation/eventBusEngine.js";
 import { AuditComplianceEngine } from "../foundation/auditComplianceEngine.js";
+import { assertBackdatingThreshold } from "../index.js";
 
 export interface RecordMovementParams {
   tenantId: string;
@@ -28,6 +29,7 @@ export interface RecordMovementParams {
   deviceId?: string;
   allowNegativeStock?: boolean;
   notes?: string;
+  occurredAt?: string;
 }
 
 export interface StockBalanceInfo {
@@ -156,8 +158,13 @@ export class StockLedgerEngine {
       );
     }
 
+    if (params.occurredAt) {
+      assertBackdatingThreshold(params.occurredAt);
+    }
+
     const now = new Date().toISOString();
     const id = randomUUID();
+    const clientCreatedAt = params.occurredAt ? new Date(params.occurredAt).toISOString() : now;
     const totalCostValue = Number((params.quantityDelta * params.unitCost).toFixed(2));
 
     const record: UniversalStockMovementRecord = {
@@ -176,7 +183,7 @@ export class StockLedgerEngine {
       referenceId: params.referenceId,
       actorId: params.actorId || ctx.userId || "system",
       deviceId: params.deviceId || "system",
-      clientCreatedAt: now,
+      clientCreatedAt,
       serverRecordedAt: now,
       runningBalanceAfter,
       notes: params.notes || "",
@@ -247,6 +254,27 @@ export class StockLedgerEngine {
     this.assertIsolation(ctx, tenantId);
     const balanceKey = this.buildBalanceKey(tenantId, branchId, productId, variantId);
     return this.balanceCache.get(balanceKey) || 0;
+  }
+
+  public getStockAsOfDate(
+    ctx: TenantContext,
+    tenantId: string,
+    branchId: string,
+    productId: string,
+    variantId: string | null | undefined,
+    asOfDate: string | Date
+  ): number {
+    this.assertIsolation(ctx, tenantId);
+    const targetTime = new Date(asOfDate).getTime();
+    const vId = variantId || "base";
+    const matching = this.ledgerEntries.filter((e) => {
+      if (e.tenantId !== tenantId || e.branchId !== branchId || e.productId !== productId || (e.variantId || "base") !== vId) {
+        return false;
+      }
+      const entryTime = new Date(e.clientCreatedAt || e.serverRecordedAt).getTime();
+      return entryTime <= targetTime;
+    });
+    return matching.reduce((sum, e) => sum + e.quantityDelta, 0);
   }
 
   public getMovementHistory(

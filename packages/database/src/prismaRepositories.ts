@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   TenantContext,
   Product,
   ProductVariant,
@@ -16,7 +16,14 @@
   CreateBrandRequest,
   UpdateBrandRequest,
 } from "@kwakopos2/contracts";
-import { calculateAvailableStock, assertTenantIsolation } from "@kwakopos2/domain";
+import {
+  calculateAvailableStock,
+  calculateStockAsOfDate,
+  calculateBackdatedDiscrepancy,
+  assertBackdatingThreshold,
+  validateRetroactiveTimeline,
+  assertTenantIsolation,
+} from "@kwakopos2/domain";
 import { prisma } from "./index.js";
 
 export const productShape = (row: any): Product => {
@@ -463,6 +470,9 @@ export class PrismaCatalogRepository {
 
 export class PrismaStockRepository {
   async recordMovement(ctx: TenantContext, req: any): Promise<StockLedger> {
+    if (req.occurredAt) {
+      assertBackdatingThreshold(req.occurredAt);
+    }
     const result = await prisma.$transaction(async (tx: any) => {
       const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
       if (existing) return existing;
@@ -476,8 +486,9 @@ export class PrismaStockRepository {
       const quantityAfter = quantityBefore + quantityChange;
       if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
       const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
+      const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
       const row = await tx.stockLedger.create({
-        data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
+        data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
       return row;
     });
@@ -532,15 +543,58 @@ export class PrismaStockRepository {
     const resolvedVariantId = variant.id;
     assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
 
+    if (req.occurredAt) {
+      assertBackdatingThreshold(req.occurredAt);
+    }
+
     const result = await prisma.$transaction(async (tx: any) => {
       await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, resolvedVariantId, ctx.tenantId, ctx.branchId);
       const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
-      const quantityBefore = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
+      const currentStock = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
+      const quantityBefore = currentStock;
       let changeQty = req.quantityChange;
-      if (req.adjustmentType === "DECREASE") changeQty = -Math.abs(req.quantityChange);
-      if (req.adjustmentType === "SET") changeQty = req.quantityChange - quantityBefore;
+
+      if (req.adjustmentType === "DECREASE") {
+        changeQty = -Math.abs(req.quantityChange);
+      } else if (req.adjustmentType === "SET") {
+        if (req.occurredAt) {
+          const historicalRows = ledgerRowsBefore.filter(
+            (r: any) => new Date(r.occurredAt || r.createdAt).getTime() <= new Date(req.occurredAt!).getTime()
+          );
+          const historicalStock = calculateAvailableStock(historicalRows.map(ledgerShape));
+          changeQty = calculateBackdatedDiscrepancy(req.quantityChange, historicalStock);
+        } else {
+          changeQty = req.quantityChange - quantityBefore;
+        }
+      }
+
+      // Validate retroactive timeline if backdated to prevent negative intermediate stock
+      if (req.occurredAt) {
+        const validation = validateRetroactiveTimeline(ledgerRowsBefore.map(ledgerShape), req.occurredAt, changeQty);
+        if (!validation.valid) {
+          throw new Error(
+            `INSUFFICIENT_STOCK: Retroactive adjustment would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
+          );
+        }
+
+        const occurredDate = new Date(req.occurredAt);
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            startDate: { lte: occurredDate },
+            endDate: { gte: occurredDate },
+            status: { in: ["CLOSED", "LOCKED"] },
+          },
+        });
+        if (closedPeriod && closedPeriod.status === "LOCKED") {
+          throw new Error(`ACCOUNTING_PERIOD_LOCKED: Cannot backdate inventory adjustment into locked accounting period "${closedPeriod.name}".`);
+        }
+      }
+
       const quantityAfter = quantityBefore + changeQty;
       if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+
+      const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
 
       const adjustment = await tx.stockAdjustment.create({
         data: {
@@ -577,7 +631,8 @@ export class PrismaStockRepository {
           unitCost: req.unitCost ?? 0,
           totalCost: Math.abs(changeQty) * (req.unitCost ?? 0),
           userId: req.userId ?? ctx.userId,
-          occurredAt: new Date(),
+          occurredAt: movementTime,
+          createdAt: new Date(),
           deviceId: req.deviceId,
           operationId: req.operationId,
           idempotencyKey: req.idempotencyKey,
@@ -598,20 +653,39 @@ export class PrismaStockRepository {
     return { adjustment: adjustmentShape(result.adjustment), ledger: ledgerShape(result.ledger) };
   }
 
+  async getStockAsOfDate(ctx: TenantContext, variantId: string, asOfDate: string | Date): Promise<number> {
+    assertBackdatingThreshold(asOfDate);
+    const targetDate = new Date(asOfDate);
+    const rows = await prisma.stockLedger.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        variantId,
+        occurredAt: { lte: targetDate },
+      },
+      orderBy: { occurredAt: "asc" },
+    });
+    return calculateAvailableStock(rows.map(ledgerShape));
+  }
+
+  async getLedger(ctx: TenantContext, variantId?: string): Promise<StockLedger[]> {
+    const rows = await prisma.stockLedger.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        ...(variantId ? { variantId } : {}),
+      },
+      orderBy: { occurredAt: "asc" },
+    });
+    return rows.map(ledgerShape);
+  }
+
   async getAvailableStock(ctx: TenantContext, variantId: string): Promise<number> {
     const variant = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { reservedQuantity: true, tenantId: true, branchId: true } });
     if (variant && (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
     const rows = await prisma.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId }, orderBy: { occurredAt: "asc" } });
     const ledgerBalance = calculateAvailableStock(rows.map(ledgerShape));
     return Math.max(0, ledgerBalance - Number(variant?.reservedQuantity || 0));
-  }
-
-  async getLedger(ctx: TenantContext, variantId?: string): Promise<StockLedger[]> {
-    const rows = await prisma.stockLedger.findMany({
-      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, ...(variantId ? { variantId } : {}) },
-      orderBy: { occurredAt: "asc" },
-    });
-    return rows.map(ledgerShape);
   }
 }
 

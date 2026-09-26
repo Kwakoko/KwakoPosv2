@@ -68,6 +68,166 @@ export function assertStockLedgerImmutability(existingLedgerId?: string): void {
 }
 
 /**
+ * Backdating threshold limit: maximum 2 years (730 days) allowed.
+ */
+export const BACKDATING_MAX_THRESHOLD_DAYS = 730;
+
+/**
+ * Validates that a backdated inventory movement timestamp is within legal operational boundaries:
+ * 1. Must be a valid date.
+ * 2. Must not be in the future (allowing up to 5 minutes for clock skew).
+ * 3. Must not be older than 2 years (default 730 days).
+ */
+export function assertBackdatingThreshold(
+  occurredAt: Date | string | number,
+  maxDays: number = BACKDATING_MAX_THRESHOLD_DAYS
+): void {
+  const d = new Date(occurredAt);
+  const time = d.getTime();
+  if (Number.isNaN(time)) {
+    throw new Error("INVALID_DATE: Provided occurredAt timestamp is not a valid date.");
+  }
+  const now = Date.now();
+  const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
+  if (time > now + CLOCK_SKEW_TOLERANCE_MS) {
+    throw new Error("FUTURE_STOCK_MOVEMENT_PROHIBITED: Cannot record stock movements with a future date.");
+  }
+  const maxAgeMs = maxDays * 24 * 60 * 60 * 1000;
+  if (now - time > maxAgeMs) {
+    throw new Error(
+      `BACKDATING_THRESHOLD_EXCEEDED: Cannot backdate inventory movements older than 2 years (${maxDays} days max).`
+    );
+  }
+}
+
+/**
+ * Calculates stock balance as of a specific point in historical time.
+ * Filters ledger entries where occurredAt <= asOfDate (falling back to createdAt if occurredAt is missing).
+ */
+export function calculateStockAsOfDate(
+  ledgerEntries: StockLedger[],
+  asOfDate: Date | string | number
+): number {
+  const targetTime = new Date(asOfDate).getTime();
+  if (Number.isNaN(targetTime)) {
+    throw new Error("INVALID_DATE: Provided asOfDate timestamp is not a valid date.");
+  }
+  const historicalEntries = ledgerEntries.filter((entry) => {
+    const entryTime = new Date((entry as any).occurredAt || (entry as any).createdAt).getTime();
+    return !Number.isNaN(entryTime) && entryTime <= targetTime;
+  });
+  return calculateAvailableStock(historicalEntries);
+}
+
+/**
+ * Computes backdated discrepancy delta for physical count (SET adjustment).
+ * discrepancy = targetPhysicalCount - historicalStockAtCountDate
+ */
+export function calculateBackdatedDiscrepancy(
+  targetPhysicalCount: number,
+  historicalStock: number
+): number {
+  return targetPhysicalCount - historicalStock;
+}
+
+export interface RetroactiveTimelineValidationResult {
+  valid: boolean;
+  lowestIntermediateBalance: number;
+  violationDate?: string;
+  violationBalance?: number;
+}
+
+/**
+ * Validates that adding a retroactive delta at historicalTime does not cause
+ * the cumulative running balance to drop below zero at any point between occurredAt and NOW.
+ */
+export function validateRetroactiveTimeline(
+  ledgerEntries: StockLedger[],
+  occurredAt: Date | string | number,
+  delta: number
+): RetroactiveTimelineValidationResult {
+  // Positive delta cannot cause intermediate balance to become negative
+  if (delta >= 0) {
+    return { valid: true, lowestIntermediateBalance: 0 };
+  }
+
+  const targetTime = new Date(occurredAt).getTime();
+  const sorted = [...ledgerEntries].sort((a, b) => {
+    const timeA = new Date((a as any).occurredAt || (a as any).createdAt).getTime();
+    const timeB = new Date((b as any).occurredAt || (b as any).createdAt).getTime();
+    return timeA - timeB;
+  });
+
+  let running = 0;
+  let lowestAfterTarget = Infinity;
+  let violationDate: string | undefined;
+  let violationBalance: number | undefined;
+
+  for (const entry of sorted) {
+    const qty = Number(entry.quantityChange !== undefined ? entry.quantityChange : entry.quantity);
+    let effectiveChange = qty;
+    switch (entry.movementType) {
+      case "OPENING_STOCK":
+      case "OPENING":
+      case "PURCHASE_RECEIVE":
+      case "PURCHASE":
+      case "TRANSFER_IN":
+      case "CUSTOMER_RETURN":
+      case "RETURN":
+      case "ADJUSTMENT_GAIN":
+      case "PRODUCTION_OUTPUT":
+        effectiveChange = Math.abs(qty);
+        break;
+      case "SALE":
+      case "SUPPLIER_RETURN":
+      case "TRANSFER_OUT":
+      case "DAMAGE":
+      case "EXPIRY":
+      case "ADJUSTMENT_LOSS":
+      case "PRODUCTION_USAGE":
+        effectiveChange = -Math.abs(qty);
+        break;
+      default:
+        effectiveChange = qty;
+        break;
+    }
+    running += effectiveChange;
+
+    const entryTime = new Date((entry as any).occurredAt || (entry as any).createdAt).getTime();
+    if (entryTime >= targetTime) {
+      const projected = running + delta;
+      if (projected < lowestAfterTarget) {
+        lowestAfterTarget = projected;
+      }
+      if (projected < 0 && !violationDate) {
+        violationDate = new Date(entryTime).toISOString();
+        violationBalance = projected;
+      }
+    }
+  }
+
+  // Also check end-of-timeline projected balance
+  if (running + delta < 0 && !violationDate) {
+    violationDate = new Date().toISOString();
+    violationBalance = running + delta;
+  }
+
+  if (violationDate) {
+    return {
+      valid: false,
+      lowestIntermediateBalance: violationBalance ?? lowestAfterTarget,
+      violationDate,
+      violationBalance,
+    };
+  }
+
+  return {
+    valid: true,
+    lowestIntermediateBalance: lowestAfterTarget === Infinity ? running + delta : lowestAfterTarget,
+  };
+}
+
+/**
  * Calculates profit margin amount and profit margin percentage.
  */
 export function calculateMargin(

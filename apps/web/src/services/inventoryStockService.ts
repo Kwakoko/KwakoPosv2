@@ -1,4 +1,10 @@
 import type { StockLedger, StockMovementType } from "@kwakopos2/contracts";
+import {
+  assertBackdatingThreshold,
+  calculateStockAsOfDate,
+  calculateBackdatedDiscrepancy,
+  validateRetroactiveTimeline,
+} from "@kwakopos2/domain";
 import type { LocalIndexedDbStore, OutboxItem } from "../indexedDb.js";
 import { safeUUID } from "./apiClient.js";
 import { DATA_CHANGED_EVENT } from "./dataChangeEvent.js";
@@ -19,6 +25,25 @@ export interface AddStockCommand {
   movementType?: "ADJUSTMENT_GAIN" | "OPENING_STOCK";
   userId?: string;
   deviceId: string;
+  occurredAt?: string;
+}
+
+export interface StockAdjustmentCommand {
+  tenantId: string;
+  branchId: string;
+  productId: string;
+  variantId: string;
+  sku: string;
+  productName: string;
+  adjustmentType: "INCREASE" | "DECREASE" | "SET";
+  quantity: number;
+  unitCost?: number;
+  reason: string;
+  notes?: string;
+  movementType?: StockMovementType;
+  userId?: string;
+  deviceId: string;
+  occurredAt?: string;
 }
 
 export interface QueuedStockMovement {
@@ -61,31 +86,33 @@ export interface PosRefundStockParams {
  * Derives the authoritative stock for a variant or product in local IndexedDB.
  */
 export function getEffectiveStock(
-  db: LocalIndexedDbStore,
-  variantId?: string,
-  productId?: string,
-  tenantId?: string,
-  branchId?: string,
+  db?: LocalIndexedDbStore | null,
+  variantId?: string | null,
+  productId?: string | null,
+  tenantId?: string | null,
+  branchId?: string | null,
 ): { stock: number; inventoryQuantity: number; ledgerBalance: number } {
   let ledgerBalance = 0;
-  for (const entry of db.stockLedger.values()) {
-    const l = entry as any;
-    if (tenantId && l.tenantId && l.tenantId !== tenantId) continue;
-    if (branchId && l.branchId && l.branchId !== branchId) continue;
-    if (variantId && l.variantId === variantId) {
-      ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
-    } else if (!variantId && productId && l.productId === productId) {
-      ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
+  if (db?.stockLedger) {
+    for (const entry of db.stockLedger.values()) {
+      const l = entry as any;
+      if (tenantId && l.tenantId && l.tenantId !== tenantId) continue;
+      if (branchId && l.branchId && l.branchId !== branchId) continue;
+      if (variantId && l.variantId === variantId) {
+        ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
+      } else if (!variantId && productId && l.productId === productId) {
+        ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
+      }
     }
   }
 
   let inventoryQuantity = 0;
-  if (variantId && db.productVariants) {
+  if (variantId && db?.productVariants) {
     const variant = db.productVariants.get(variantId) as any;
     if (variant) {
       inventoryQuantity = Number(variant.inventoryQuantity ?? variant.stock ?? 0);
     }
-  } else if (productId && db.products) {
+  } else if (productId && db?.products) {
     const prod = db.products.get(productId) as any;
     if (prod) {
       inventoryQuantity = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? 0);
@@ -98,29 +125,119 @@ export function getEffectiveStock(
 }
 
 /**
- * Adds stock to a specific product variant, materializing it across
- * db.stockLedger, db.productVariants, db.products, and the sync outbox.
+ * Calculates stock balance for a variant at a historical point-in-time from local ledger.
+ * Completely guarded against null/undefined stores, invalid date strings, and throwing during render passes.
  */
-export async function queueAddStock(
+export function calculateLocalStockAsOfDate(
+  db?: LocalIndexedDbStore | null,
+  variantId?: string | null,
+  asOfDate?: string | Date | null,
+  tenantId?: string | null,
+  branchId?: string | null,
+): number {
+  if (!db?.stockLedger || !variantId || !asOfDate) {
+    return 0;
+  }
+  const dateObj = new Date(asOfDate);
+  if (Number.isNaN(dateObj.getTime())) {
+    return 0;
+  }
+  try {
+    const entries: any[] = [];
+    for (const entry of db.stockLedger.values()) {
+      const l = entry as any;
+      if (tenantId && l.tenantId && l.tenantId !== tenantId) continue;
+      if (branchId && l.branchId && l.branchId !== branchId) continue;
+      if (l.variantId === variantId) {
+        entries.push(l);
+      }
+    }
+    return calculateStockAsOfDate(entries, dateObj);
+  } catch (err) {
+    console.warn("[inventoryStockService] calculateLocalStockAsOfDate non-fatal error:", err);
+    return 0;
+  }
+}
+
+/**
+ * Queues a full stock adjustment (INCREASE, DECREASE, or SET count) with optional backdating.
+ * Enforces the 2-year threshold limit and validates retroactive timelines to prevent negative balances.
+ */
+export async function queueStockAdjustment(
   db: LocalIndexedDbStore,
-  command: AddStockCommand,
+  command: StockAdjustmentCommand,
 ): Promise<QueuedStockMovement> {
-  const quantity = Number(command.quantity);
-  const unitCost = Number(command.unitCost);
-  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Stock quantity must be greater than zero");
-  if (!Number.isFinite(unitCost) || unitCost < 0) throw new Error("Unit cost cannot be negative");
   if (!command.tenantId || !command.branchId || !command.productId || !command.variantId) {
     throw new Error("Tenant, branch, product, and variant are required");
   }
 
-  const movementType: StockMovementType = command.movementType === "OPENING_STOCK" ? "OPENING_STOCK" : "ADJUSTMENT_GAIN";
-  const adjustmentId = safeUUID();
-  const ledgerId = safeUUID();
-  const operationId = safeUUID();
-  const idempotencyKey = `STOCK-IN-${operationId}`;
-  const occurredAt = new Date().toISOString();
+  const occurredAt = command.occurredAt || new Date().toISOString();
+  // Enforce threshold (up to 2 years / 730 days max, clock skew allowed, no far future)
+  assertBackdatingThreshold(occurredAt);
 
-  // Find existing variant
+  const isBackdated = Math.abs(Date.now() - new Date(occurredAt).getTime()) > 5 * 60 * 1000;
+
+  // Retrieve existing ledger entries for this variant
+  const existingLedger = [...db.stockLedger.values()].filter(
+    (entry: any) =>
+      entry.tenantId === command.tenantId &&
+      entry.branchId === command.branchId &&
+      entry.variantId === command.variantId,
+  );
+
+  const currentLedgerBalance = existingLedger.reduce(
+    (sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0),
+    0,
+  );
+
+  let delta = 0;
+  let movementType: StockMovementType = command.movementType || "ADJUSTMENT_GAIN";
+  const rawQty = Number(command.quantity);
+  if (!Number.isFinite(rawQty)) {
+    throw new Error("Invalid quantity specified");
+  }
+
+  if (command.adjustmentType === "INCREASE") {
+    if (rawQty <= 0) throw new Error("Increase quantity must be positive");
+    delta = rawQty;
+    movementType = command.movementType || "ADJUSTMENT_GAIN";
+  } else if (command.adjustmentType === "DECREASE") {
+    if (rawQty <= 0) throw new Error("Decrease quantity must be positive");
+    delta = -rawQty;
+    movementType = command.movementType || "ADJUSTMENT_LOSS";
+  } else if (command.adjustmentType === "SET") {
+    if (rawQty < 0) throw new Error("Target count cannot be negative");
+    if (isBackdated) {
+      const historicalStock = calculateStockAsOfDate(existingLedger, occurredAt);
+      delta = calculateBackdatedDiscrepancy(rawQty, historicalStock);
+    } else {
+      delta = rawQty - currentLedgerBalance;
+    }
+    movementType = command.movementType || (delta >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS");
+  }
+
+  if (delta === 0) {
+    return {
+      adjustmentId: `adj-noop-${safeUUID()}`,
+      ledgerId: `led-noop-${safeUUID()}`,
+      operationId: `op-noop-${safeUUID()}`,
+      idempotencyKey: `NOOP-${safeUUID()}`,
+      quantityBefore: currentLedgerBalance,
+      quantityAfter: currentLedgerBalance,
+    };
+  }
+
+  // Validate retroactive timeline if deducting stock
+  if (delta < 0) {
+    validateRetroactiveTimeline(existingLedger, occurredAt, delta);
+  }
+
+  const quantityBefore = currentLedgerBalance;
+  const quantityAfter = currentLedgerBalance + delta;
+  if (quantityAfter < 0) {
+    throw new Error(`INSUFFICIENT_STOCK: Adjustment would result in negative stock balance (${quantityAfter})`);
+  }
+
   let variant = db.productVariants.get(command.variantId) as any;
   if (!variant) {
     for (const v of db.productVariants.values()) {
@@ -131,13 +248,11 @@ export async function queueAddStock(
     }
   }
 
-  // Determine prior quantity
-  const priorLedger = [...db.stockLedger.values()].filter((entry: any) =>
-    entry.tenantId === command.tenantId && entry.branchId === command.branchId && entry.variantId === command.variantId,
-  );
-  const ledgerSum = priorLedger.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
-  const quantityBefore = variant ? Number(variant.inventoryQuantity ?? variant.stock ?? ledgerSum) : ledgerSum;
-  const quantityAfter = quantityBefore + quantity;
+  const unitCost = Number(command.unitCost ?? variant?.costPrice ?? variant?.price ?? 0);
+  const adjustmentId = safeUUID();
+  const ledgerId = safeUUID();
+  const operationId = `op-stock-${adjustmentId}`;
+  const idempotencyKey = `ADJ-${command.tenantId}-${command.branchId}-${command.variantId}-${Date.parse(occurredAt)}-${delta}`;
   const referenceNote = command.notes?.trim() || command.reason.trim();
 
   const ledger: StockLedger = {
@@ -150,11 +265,11 @@ export async function queueAddStock(
     referenceType: "ADJUSTMENT",
     referenceId: adjustmentId,
     quantityBefore,
-    quantityChange: quantity,
-    quantity,
+    quantityChange: delta,
+    quantity: delta,
     quantityAfter,
     unitCost,
-    totalCost: quantity * unitCost,
+    totalCost: Math.abs(delta) * unitCost,
     userId: command.userId || undefined,
     deviceId: command.deviceId,
     operationId,
@@ -174,9 +289,10 @@ export async function queueAddStock(
       id: adjustmentId,
       productId: command.productId,
       variantId: command.variantId,
-      adjustmentType: "INCREASE",
+      adjustmentType: command.adjustmentType,
       movementType,
-      quantityChange: quantity,
+      quantityChange: delta,
+      quantity: rawQty,
       reason: command.reason.trim(),
       referenceNote,
       unitCost,
@@ -185,6 +301,8 @@ export async function queueAddStock(
       deviceId: command.deviceId,
       operationId,
       idempotencyKey,
+      occurredAt,
+      isBackdated,
     },
     clientCreatedAt: occurredAt,
     idempotencyKey,
@@ -208,7 +326,7 @@ export async function queueAddStock(
     stock: quantityAfter,
     tenantId: command.tenantId,
     branchId: command.branchId,
-    updatedAt: occurredAt,
+    updatedAt: new Date().toISOString(),
   };
 
   const prod = db.products.get(command.productId) as any;
@@ -216,15 +334,18 @@ export async function queueAddStock(
   if (prod) {
     const siblingVariants = Array.from(db.productVariants.values()).filter((v: any) => v.productId === command.productId);
     const sumStock = siblingVariants.length > 0
-      ? siblingVariants.reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity ?? v.stock ?? 0), 0)
-      : Math.max(0, Number(prod.totalStock ?? prod.stock ?? 0) + quantity);
+      ? siblingVariants.reduce((sum: number, v: any) => {
+          if (v.id === command.variantId) return sum + quantityAfter;
+          return sum + Number(v.inventoryQuantity ?? v.stock ?? 0);
+        }, 0)
+      : Math.max(0, Number(prod.totalStock ?? prod.stock ?? 0) + delta);
 
     updatedProd = {
       ...prod,
       availableStock: sumStock,
       totalStock: sumStock,
       stock: sumStock,
-      updatedAt: occurredAt,
+      updatedAt: new Date().toISOString(),
     };
   }
 
@@ -238,7 +359,6 @@ export async function queueAddStock(
     tenantContext: { tenantId: command.tenantId, branchId: command.branchId },
   });
 
-  // 2. Notify UI subscribers across modules
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: command.productId, variantId: command.variantId, quantityAfter } }));
     window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
@@ -246,6 +366,33 @@ export async function queueAddStock(
   }
 
   return { adjustmentId, ledgerId, operationId, idempotencyKey, quantityBefore, quantityAfter };
+}
+
+/**
+ * Adds stock to a specific product variant, materializing it across
+ * db.stockLedger, db.productVariants, db.products, and the sync outbox.
+ */
+export async function queueAddStock(
+  db: LocalIndexedDbStore,
+  command: AddStockCommand,
+): Promise<QueuedStockMovement> {
+  return queueStockAdjustment(db, {
+    tenantId: command.tenantId,
+    branchId: command.branchId,
+    productId: command.productId,
+    variantId: command.variantId,
+    sku: command.sku,
+    productName: command.productName,
+    adjustmentType: "INCREASE",
+    quantity: command.quantity,
+    unitCost: command.unitCost,
+    reason: command.reason,
+    notes: command.notes,
+    movementType: command.movementType === "OPENING_STOCK" ? "OPENING_STOCK" : "ADJUSTMENT_GAIN",
+    userId: command.userId,
+    deviceId: command.deviceId,
+    occurredAt: command.occurredAt,
+  });
 }
 
 /**

@@ -35,6 +35,7 @@ interface State {
   hasError: boolean;
   errorId: string;
   errorMessage?: string;
+  errorStack?: string;
 }
 
 export class ProductionErrorBoundary extends Component<Props, State> {
@@ -44,10 +45,23 @@ export class ProductionErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          "kwakopos_last_error",
+          JSON.stringify({
+            message: error?.message,
+            stack: error?.stack,
+            timestamp: new Date().toISOString(),
+          })
+        );
+      } catch {}
+    }
     return {
       hasError: true,
       errorId: generateCorrelationId(),
       errorMessage: error?.message,
+      errorStack: error?.stack,
     };
   }
 
@@ -204,6 +218,49 @@ export class ProductionErrorBoundary extends Component<Props, State> {
                 {this.state.errorId || "corr-prod-system-active"}
               </div>
             </div>
+
+            {/* Diagnostic Error Details */}
+            {this.state.errorMessage && (
+              <div
+                style={{
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "var(--radius-md, 0.55rem)",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  color: "#fca5a5",
+                  fontSize: "0.78rem",
+                  fontFamily: "var(--font-mono, monospace)",
+                  lineHeight: 1.4,
+                  wordBreak: "break-word",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: "0.25rem", color: "#f87171" }}>
+                  Diagnostic Exception:
+                </div>
+                <div>{this.state.errorMessage}</div>
+                {this.state.errorStack && (
+                  <details style={{ marginTop: "0.4rem", cursor: "pointer" }}>
+                    <summary style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
+                      Show Stack Trace
+                    </summary>
+                    <pre
+                      style={{
+                        marginTop: "0.35rem",
+                        padding: "0.4rem",
+                        background: "rgba(0,0,0,0.4)",
+                        borderRadius: "4px",
+                        fontSize: "0.68rem",
+                        maxHeight: "150px",
+                        overflowY: "auto",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {this.state.errorStack}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
