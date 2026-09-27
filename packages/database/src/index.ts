@@ -1434,3 +1434,11 @@ export * from "./syntheticVariantReconciliation.js";
 
 
 export { PrismaCatalogRepository, PrismaProductRepository, PrismaStockRepository } from "./prismaRepositories.js";
+
+export {
+  PrismaCommercialRepository,
+  PrismaWorkforceRepository,
+  PrismaPluginRepository,
+  PrismaTelecomRepository,
+  PrismaMonetizationRepository,
+} from "./prismaProductionRepositories.js";

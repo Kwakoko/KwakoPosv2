@@ -2787,6 +2787,31 @@ model TenantLegalDocument {
   @@map("tenant_legal_documents")
 }
 
+// ============================================================================
+// P0: Durable SaaS/Monetization record envelope.
+// Used only for billing records that are not yet represented by first-class
+// relational domain models. PostgreSQL remains the sole server authority.
+// ============================================================================
+model SaasDataRecord {
+  id        String   @id @default(uuid())
+  scopeKey  String
+  entityType String
+  recordKey String
+  status    String   @default("ACTIVE")
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  @@unique([scopeKey, entityType, recordKey])
+  @@index([scopeKey, entityType, status])
+  @@map("saas_data_records")
+}
 
+model SyncControlState {
+  id        Int      @id @default(1)
+  syncEpoch String   @map("sync_epoch")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
+  @@map("sync_control_state")
+}
