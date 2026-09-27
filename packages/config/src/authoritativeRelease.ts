@@ -81,11 +81,27 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   },
 };
 
+function isNodeRuntime(): boolean {
+  return (
+    typeof window === "undefined" &&
+    typeof process !== "undefined" &&
+    Boolean(process?.versions?.node) &&
+    typeof path?.join === "function" &&
+    typeof fs?.existsSync === "function"
+  );
+}
+
 export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIdentity {
-  const root = cwd || process.cwd();
+  if (!isNodeRuntime()) {
+    return FALLBACK_AUTHORITATIVE_RELEASE;
+  }
+  const root = cwd || (typeof process?.cwd === "function" ? process.cwd() : "/");
   // Traverse upwards looking for release-manifest.json
   let currentDir = root;
   for (let i = 0; i < 4; i++) {
+    if (typeof path?.join !== "function" || typeof fs?.existsSync !== "function") {
+      break;
+    }
     const candidate = path.join(currentDir, "release-manifest.json");
     if (fs.existsSync(candidate)) {
       try {
@@ -103,9 +119,13 @@ export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIden
         /* ignore parse error */
       }
     }
+    if (typeof path?.dirname !== "function") break;
     const parent = path.dirname(currentDir);
     if (parent === currentDir) break;
     currentDir = parent;
+  }
+  if (typeof path?.join !== "function" || typeof fs?.existsSync !== "function") {
+    return FALLBACK_AUTHORITATIVE_RELEASE;
   }
   const packagePath = path.join(root, "package.json");
   let version = FALLBACK_AUTHORITATIVE_RELEASE.version;
@@ -135,7 +155,14 @@ export interface VersionDriftReport {
 }
 
 export function detectVersionDrift(cwd?: string): VersionDriftReport {
-  const root = cwd || process.cwd();
+  if (!isNodeRuntime()) {
+    return {
+      hasDrift: false,
+      authoritativeVersion: FALLBACK_AUTHORITATIVE_RELEASE.appVersion,
+      mismatches: [],
+    };
+  }
+  const root = cwd || (typeof process?.cwd === "function" ? process.cwd() : "/");
   const release = loadAuthoritativeRelease(root);
   const expected = release.appVersion;
   const mismatches: VersionDriftReport["mismatches"] = [];

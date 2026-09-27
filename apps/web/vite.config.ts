@@ -1,4 +1,10 @@
 import { defineConfig } from "vite";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const browserCryptoPath = path.resolve(__dirname, "src/utils/browserCrypto.ts");
 
 const configureProxy = (proxy: any) => {
   proxy.on("error", (_err: any, _req: any, res: any) => {
@@ -42,6 +48,15 @@ const webPort = process.env.WEB_PORT
     : 5173;
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "node:crypto": browserCryptoPath,
+      "crypto": browserCryptoPath,
+    },
+  },
+  define: {
+    "process.env": {},
+  },
   build: {
     // Keep Vite's warning threshold aligned with the enforced production
     // bundle budget. Chunks above 750 KB remain a release-blocking failure

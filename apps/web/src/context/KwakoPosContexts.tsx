@@ -12,6 +12,7 @@ import {
   logout as apiLogout,
   restoreSession,
   switchContext as apiSwitchContext,
+  safeUUID,
 } from "../services/apiClient.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import {
@@ -289,7 +290,7 @@ function tabExists(manifest: ModuleManifest, tab: string): boolean {
 export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?: LocalIndexedDbStore }> = ({ children, dbInstance }) => {
   const [db] = useState(() => dbInstance || defaultDb);
   const [syncEngine] = useState(
-    () => new ClientSyncEngine(`web-${crypto.randomUUID?.() || Date.now()}`, db),
+    () => new ClientSyncEngine(`web-${safeUUID()}`, db),
   );
   const [pwaVersionManager] = useState(() => new PwaVersionManager("2.12.5", 4, db));
 

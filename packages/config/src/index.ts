@@ -30,21 +30,34 @@ function normalizeDatabaseUrlValue(raw: string): string {
 // Normalize deployment-provided Secret Manager values before downstream modules
 // (including Prisma) are evaluated. This safely fixes whitespace or one pair of
 // accidental surrounding quotes without changing connection credentials.
-if (process.env.DATABASE_URL) {
+if (typeof process !== "undefined" && process?.env?.DATABASE_URL) {
   process.env.DATABASE_URL = normalizeDatabaseUrlValue(process.env.DATABASE_URL);
 }
 
 function resolvePackageVersion(): string {
+  if (
+    typeof window !== "undefined" ||
+    typeof process === "undefined" ||
+    !process ||
+    !process.versions?.node ||
+    typeof path?.resolve !== "function" ||
+    typeof fs?.readFileSync !== "function" ||
+    typeof process.cwd !== "function"
+  ) {
+    return "2.13.0";
+  }
   try {
     const pkgPath = path.resolve(process.cwd(), "package.json");
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+    if (fs.existsSync && fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+      if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
+    }
   } catch {
     // Runtime may not include repository metadata; APP_VERSION can provide the value explicitly.
   }
-  return "2.12.5";
+  return "2.13.0";
 }
-if (typeof (process as any).loadEnvFile === "function") {
+if (typeof process !== "undefined" && typeof (process as any)?.loadEnvFile === "function") {
   try {
     (process as any).loadEnvFile();
   } catch {
@@ -52,7 +65,7 @@ if (typeof (process as any).loadEnvFile === "function") {
   }
 }
 
-const developmentJwtSecret = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
+const developmentJwtSecret = (typeof process !== "undefined" && process?.env?.JWT_SECRET) || (typeof crypto !== "undefined" && typeof crypto.randomBytes === "function" ? crypto.randomBytes(48).toString("hex") : "dev-jwt-secret-placeholder");
 
 export const ConfigSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production-certification", "production"]).default("development"),
@@ -72,6 +85,7 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function resolveRealBuildNumber(): number {
+  if (typeof window !== "undefined" || typeof execSync !== "function") return 584;
   const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
   if (envBuild && /^\d+$/.test(envBuild)) return parseInt(envBuild, 10);
   try {
@@ -84,6 +98,7 @@ export function resolveRealBuildNumber(): number {
 }
 
 export function resolveRealGitSha(): string {
+  if (typeof window !== "undefined" || typeof execSync !== "function") return "";
   const envSha = process.env.GIT_SHA || process.env.COMMIT_SHA || process.env.CONTAINER_SOURCE_SHA || process.env.GITHUB_SHA || process.env.GIT_COMMIT;
   if (envSha && /^[0-9a-f]{40}$/i.test(envSha)) return envSha;
   try {

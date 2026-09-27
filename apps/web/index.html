@@ -7,6 +7,12 @@
     <meta name="description" content="Kwakoko Business Operating System — Enterprise Multi-Tenant Platform with Offline-First KwakoPos Capability" />
     <link rel="manifest" href="/manifest.json" />
     <title>Kwakoko Business Operating System</title>
+    <script>
+      if (typeof window !== "undefined") {
+        window.process = window.process || { env: { NODE_ENV: "development" }, platform: "browser" };
+        window.global = window.global || window;
+      }
+    </script>
     <!-- Inter & JetBrains Mono Fonts (Adopted from Legacy - Self-Hosted & Precached) -->
     <link rel="preload" href="/fonts/inter-regular.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/inter-semibold.woff2" as="font" type="font/woff2" crossorigin />

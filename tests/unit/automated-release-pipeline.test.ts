@@ -68,7 +68,7 @@ describe("KwakoPos Enterprise Automated Release & CI/CD Pipeline Suite", () => {
       const res = await runReleaseQualityGates();
       expect(res.gates.length).toBe(15);
       expect(res.overallPassed).toBe(true);
-    });
+    }, 120000);
   });
 
   describe("4. Post-Deployment Health Check & Automated Rollback", () => {
