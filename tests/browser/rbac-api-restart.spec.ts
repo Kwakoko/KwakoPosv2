@@ -65,6 +65,33 @@ async function api(page: any, method: string, pathname: string, body?: unknown, 
   }, { method, pathname, body, token, apiBase });
 }
 
+async function readPrivilegedOutboxItems(page: any, tenantId: string) {
+  return page.evaluate(async (tenantId) => {
+    return new Promise<any[]>((resolve, reject) => {
+      const request = indexedDB.open("kwakopos-v2");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("syncOutbox")) {
+          db.close();
+          resolve([]);
+          return;
+        }
+        const tx = db.transaction("syncOutbox", "readonly");
+        const getAll = tx.objectStore("syncOutbox").getAll();
+        getAll.onerror = () => reject(getAll.error);
+        getAll.onsuccess = () => {
+          const items = (getAll.result || []).filter((item: any) =>
+            item?.tenantId === tenantId && (item?.entityType === "User" || item?.entityType === "Role")
+          );
+          db.close();
+          resolve(items);
+        };
+      };
+    });
+  }, tenantId);
+}
+
 test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async ({ browser }) => {
   test.setTimeout(180_000);
   let apiProcess: ChildProcess | null = null;
@@ -98,8 +125,7 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
     expect(tenantId).toMatch(/^.+$/);
     expect(branchId).toMatch(/^.+$/);
 
-    // This is intentionally executed from a real Chromium page. The production Users/Roles UI
-    // uses these same endpoints rather than syncOutbox for identity mutations.
+    // Execute the same HTTP mutation boundary used by UsersRolesPage, from a real Chromium page.
     const roleCreate = await api(page, "POST", "/api/v1/roles", {
       name: roleName,
       description: "Real Chromium RBAC restart proof",
@@ -140,17 +166,13 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
     expect(auditUserBefore).not.toBeNull();
     expect(auditRoleBefore).not.toBeNull();
 
-    // Privileged User/Role mutations must never enter the ordinary sync outbox.
-    const forbiddenOutbox = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
-      `SELECT COUNT(*)::bigint AS count FROM "syncOutbox" WHERE "tenantId" = $1 AND "entityType" IN ('User','Role')`,
-      tenantId,
-    );
-    expect(Number(forbiddenOutbox[0]?.count || 0)).toBe(0);
+    // User/Role identity mutations must never be materialized as ordinary browser outbox work.
+    expect(await readPrivilegedOutboxItems(page, tenantId)).toHaveLength(0);
 
     // Kill the exact API process that served the mutations, then start a fresh process on the same port.
     await stopProcess(apiProcess);
     apiProcess = null;
-    await waitForHttp(`${webBase}/`);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
 
     apiProcess = startProcess(npmCommand(), ["run", "dev:api"], {
       PORT: "3000",
@@ -178,6 +200,7 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
     expect(dbRoleAfter?.id).toBe(roleId);
     expect(auditUserAfter?.entityId).toBe(userId);
     expect(auditRoleAfter?.entityId).toBe(roleId);
+    expect(await readPrivilegedOutboxItems(page, tenantId)).toHaveLength(0);
 
     const evidence = {
       test: "RBAC real Chromium -> API -> PostgreSQL survives exact API restart",
@@ -202,7 +225,10 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
       finalStatus: "PASS",
       timestamp: new Date().toISOString(),
     };
-    process.env.RBAC_CERT_EVIDENCE_JSON && await import("node:fs/promises").then(({ writeFile }) => writeFile(process.env.RBAC_CERT_EVIDENCE_JSON!, JSON.stringify(evidence, null, 2), "utf8"));
+    if (process.env.RBAC_CERT_EVIDENCE_JSON) {
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(process.env.RBAC_CERT_EVIDENCE_JSON, JSON.stringify(evidence, null, 2), "utf8");
+    }
 
     await context.close();
   } finally {
