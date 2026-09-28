@@ -382,7 +382,7 @@ const ALLOWED_SUPER_ADMIN_PATHS = new Set([
 
 const AuthenticatedApp: React.FC = () => {
   const { user, isAuthenticated, isInitializing, dismissLoading, impersonatedTenant } = useAuth();
-  const { activeTab, setActiveTab } = useModule();
+  const { activeTab, setActiveTab, manifest } = useModule();
   const [currentPath, setCurrentPath] = useState(() =>
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
@@ -460,7 +460,13 @@ const AuthenticatedApp: React.FC = () => {
       explicitNavigationPathRef.current = null;
       return;
     }
-    const mappedPath = TAB_TO_PATH[activeTab];
+    const mappedPath = TAB_TO_PATH[activeTab] || (
+      manifest.sidebar.some(
+        (item) => typeof item !== "string" && Boolean(item.subItems?.includes(activeTab)),
+      )
+        ? currentPath
+        : null
+    );
     if (!mappedPath) return;
     const path = mappedPath;
     if (currentPath !== path) {
@@ -469,7 +475,7 @@ const AuthenticatedApp: React.FC = () => {
         window.history.pushState({}, "", path);
       }
     }
-  }, [activeTab, isSuperAdmin, impersonatedTenant]);
+  }, [activeTab, isSuperAdmin, impersonatedTenant, manifest, currentPath]);
 
   const handleNavigate = (path: string) => {
     explicitNavigationPathRef.current = path;

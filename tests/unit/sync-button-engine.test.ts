@@ -22,8 +22,11 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
   let mockPushApi: ReturnType<typeof vi.fn>;
   let mockDeltaApi: ReturnType<typeof vi.fn>;
 
-  beforeEach(() => {
-    localDb = new LocalIndexedDbStore(4);
+  beforeEach(async () => {
+    localDb = new LocalIndexedDbStore(5);
+
+    await localDb.ready;
+    localDb.clear({ allowDestructiveReset: true });
 
     mockPushApi = vi.fn(async (req: SyncPushRequest): Promise<SyncPushResponse> => {
       return {
@@ -170,7 +173,9 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
   });
 
   it("4. Ensures outbox count drops accurately with custom ClientSyncEngine instance", async () => {
-    const customDb = new LocalIndexedDbStore(4);
+    const customDb = new LocalIndexedDbStore(5);
+    await customDb.ready;
+    customDb.clear({ allowDestructiveReset: true });
     const customEngine = new ClientSyncEngine("custom-dev", customDb, mockPushApi, mockDeltaApi, "tenant-test-01");
 
     customDb.enqueueOutbox({

@@ -641,7 +641,17 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                       <td className="v2-mono">{money(gross)}</td>
                       <td className="v2-mono v2-text-warning">{money(tax)}</td>
                       <td className="v2-mono v2-font-bold">{money(gross - tax)}</td>
-                      <td><span className="badge v2-badge-success">{s.efdStatus || "VERIFIED"}</span></td>
+                      <td>
+                        <span className={
+                          ["TRA_VERIFIED", "TRA_ACCEPTED"].includes(String(s.fiscalizationState))
+                            ? "badge v2-badge-success"
+                            : String(s.fiscalizationState) === "TRA_REJECTED"
+                            ? "badge v2-badge-danger"
+                            : "badge v2-badge-warning"
+                        }>
+                          {s.fiscalizationState || s.efdStatus || "NOT_SUBMITTED"}
+                        </span>
+                      </td>
                     </tr>
                   );
                 })}

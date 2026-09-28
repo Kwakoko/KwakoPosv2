@@ -21,9 +21,11 @@ import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 describe("SyncDiagnosticService & Operator Failure Panel", () => {
   let localDb: LocalIndexedDbStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     syncDiagnosticService.clearErrors();
-    localDb = new LocalIndexedDbStore(4);
+    localDb = new LocalIndexedDbStore(5);
+    await localDb.ready;
+    localDb.clear({ allowDestructiveReset: true });
   });
 
   it("1. Parses HTTP 403 Forbidden into AUTH_FORBIDDEN with actionable operator remediation", () => {

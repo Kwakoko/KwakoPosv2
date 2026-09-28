@@ -215,8 +215,9 @@ describe("Phase 3 Workforce Management Acceptance Suite (P3-001 to P3-010)", () 
   });
 
   // P3-009 Offline sync
-  it("P3-009: Offline field worker attendance mutations are durably queued and synchronized", () => {
-    const localDb = new LocalIndexedDbStore();
+  it("P3-009: Offline field worker attendance mutations are durably queued and synchronized", async () => {
+    const localDb = new LocalIndexedDbStore(5);
+    await localDb.ready;
 
     localDb.recordOutboxMutation({
       id: "OP-ATT-01",
@@ -236,8 +237,9 @@ describe("Phase 3 Workforce Management Acceptance Suite (P3-001 to P3-010)", () 
   });
 
   // P3-010 Cross-browser reconciliation
-  it("P3-010: Field attendance sync converges to HQ Browser B view with identical counts", () => {
-    const browserBDb = new LocalIndexedDbStore();
+  it("P3-010: Field attendance sync converges to HQ Browser B view with identical counts", async () => {
+    const browserBDb = new LocalIndexedDbStore(5);
+    await browserBDb.ready;
     browserBDb.saveProductLocal({
       id: randomUUID(),
       tenantId: ctx.tenantId,

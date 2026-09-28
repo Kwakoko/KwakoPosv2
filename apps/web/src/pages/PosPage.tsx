@@ -10,7 +10,7 @@
  *   6. Hold & Resume Cart Ledger
  *   7. Cashier Shift Management (Opening Float, Safe Drops, Reconciliation)
  *   8. Supervisor PIN Verification Gate
- *   9. 80mm Thermal Receipt Generation with TRA VFD Fiscal QR Code
+ *   9. 80mm Thermal Receipt Generation with state-backed TRA VFD fiscal output
  *
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
@@ -549,6 +549,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       broadcastCustomerDisplay("COMPLETED", {
         receiptNumber: lastSale.saleNumber || lastSale.id,
         rctv: lastSale.rctv,
+        fiscalizationState: lastSale.fiscalizationState,
         grandTotal: lastSale.grandTotal,
         cashReceived: lastSale.cashReceived || lastSale.paidAmount,
         changeDue: lastSale.changeDue || lastSale.changeAmount,
@@ -2062,11 +2063,19 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             </div>
 
             <div className="v2-text-center" style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px dashed #000" }}>
-              <div style={{ fontSize: ".7rem" }}>{t("pos.traVfdReceipt")}</div>
-              <div style={{ fontSize: ".75rem", fontWeight: 800 }}>{lastSale.rctv}</div>
-              <div className="v2-flex v2-justify-center" style={{ marginTop: ".5rem" }}>
-                <QrCode size={48} />
-              </div>
+              {["TRA_ACCEPTED", "TRA_VERIFIED"].includes(String(lastSale.fiscalizationState)) && lastSale.rctv ? (
+                <>
+                  <div style={{ fontSize: ".7rem" }}>{t("pos.traVfdReceipt")}</div>
+                  <div style={{ fontSize: ".75rem", fontWeight: 800 }}>{lastSale.rctv}</div>
+                  <div className="v2-flex v2-justify-center" style={{ marginTop: ".5rem" }}>
+                    <QrCode size={48} />
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: ".72rem", fontWeight: 800 }}>
+                  TRA VFD STATUS: {lastSale.fiscalizationState || "NOT_SUBMITTED"}
+                </div>
+              )}
             </div>
 
             <button className="v2-btn v2-btn-primary" style={{ width: "100%", marginTop: "1rem" }} onClick={() => setReceiptModal(false)} type="button">

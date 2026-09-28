@@ -610,7 +610,11 @@ export function detectActiveProcesses(cwd: string): { active: boolean; processes
   const processes: string[] = [];
   try {
     if (process.platform === "win32") {
-      const output = execSync("tasklist /FO CSV /NH", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      const output = execSync("tasklist /FO CSV /NH", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 3000,
+      });
       const lines = output.split("\n");
       const targetTools = ["vitest.exe", "playwright.exe"];
       for (const line of lines) {

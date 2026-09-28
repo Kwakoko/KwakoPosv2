@@ -40,7 +40,7 @@ describe("5-Step Product Registration Wizard Invariants Suite", () => {
   let localDb2: LocalIndexedDbStore;
   let syncEngine2: ClientSyncEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenant1Ctx = {
@@ -63,10 +63,12 @@ describe("5-Step Product Registration Wizard Invariants Suite", () => {
     serverStockRepo = new ScopedStockRepository(globalInMemoryStore);
     syncEngine = new SyncEngine(serverProductRepo, serverStockRepo, globalInMemoryStore);
 
-    localDb1 = new LocalIndexedDbStore();
+    localDb1 = new LocalIndexedDbStore(5);
+    await localDb1.ready;
     syncEngine1 = new ClientSyncEngine("device-browser-1", localDb1);
 
-    localDb2 = new LocalIndexedDbStore();
+    localDb2 = new LocalIndexedDbStore(5);
+    await localDb2.ready;
     syncEngine2 = new ClientSyncEngine("device-browser-2", localDb2);
   });
 

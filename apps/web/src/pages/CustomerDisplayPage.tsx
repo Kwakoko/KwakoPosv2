@@ -30,6 +30,7 @@ export interface CustomerDisplayPayload {
   cashReceived?: number;
   changeDue?: number;
   rctv?: string;
+  fiscalizationState?: "LOCAL_FISCAL_PENDING" | "SUBMITTING" | "TRA_ACCEPTED" | "TRA_REJECTED" | "TRA_RETRY" | "TRA_VERIFIED";
   receiptNumber?: string;
   timestamp: string;
 }
@@ -274,7 +275,7 @@ export const CustomerDisplayPage: React.FC = () => {
               </div>
             </div>
 
-            {data.rctv && (
+            {data.rctv && ["TRA_ACCEPTED", "TRA_VERIFIED"].includes(String((data as any).fiscalizationState)) && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", color: "#94a3b8", fontSize: "0.85rem" }}>
                 <ShieldCheck size={18} style={{ color: "#22c55e" }} />
                 <span>TRA VFD Fiscal Code: <strong style={{ color: "#f8fafc" }}>{data.rctv}</strong></span>

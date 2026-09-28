@@ -153,6 +153,28 @@ export interface TenantScopedContext {
   userId?: string;
 }
 
+export function hasValidOutboxScope(
+  item: Pick<OutboxItem, "tenantId" | "branchId">,
+): boolean {
+  return (
+    typeof item.tenantId === "string" &&
+    item.tenantId.trim().length > 0 &&
+    typeof item.branchId === "string" &&
+    item.branchId.trim().length > 0
+  );
+}
+
+export function outboxMatchesScope(
+  item: Pick<OutboxItem, "tenantId" | "branchId">,
+  tenantId?: string,
+  branchId?: string,
+): boolean {
+  if (!hasValidOutboxScope(item)) return false;
+  if (tenantId && item.tenantId !== tenantId) return false;
+  if (branchId && item.branchId !== branchId) return false;
+  return true;
+}
+
 export class QueryableStore<T = any> extends Map<string, T> {
   constructor(
     private readonly storeName: NativeStore,
@@ -1075,6 +1097,11 @@ export class LocalIndexedDbStore {
   }
 
   private async persistMigrationSnapshot(snapshot: RecoverySnapshot): Promise<void> {
+    // Migration certification may exercise a closed native connection.
+    // Reopen the existing database before selecting the durable snapshot store.
+    if (!this.nativeDb && typeof indexedDB !== "undefined") {
+      await this.reopenNativeDbAtExistingVersion();
+    }
     const legacyKey = this.migrationSnapshotMetadataKey(snapshot.id);
 
     if (this.nativeDb?.objectStoreNames.contains("recoverySnapshots")) {
@@ -1612,11 +1639,7 @@ export class LocalIndexedDbStore {
 
   getPendingOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
     const all = [...this.syncOutbox.values()].filter((item) => item.status === "PENDING");
-    const filtered = all.filter((i) => {
-      const matchTenant = !tenantId || !i.tenantId || i.tenantId === tenantId || i.tenantId === "tenant-default" || tenantId === "tenant-default";
-      const matchBranch = !branchId || !i.branchId || i.branchId === branchId || i.branchId === "branch-default" || branchId === "branch-default";
-      return matchTenant && matchBranch;
-    });
+    const filtered = all.filter((item) => outboxMatchesScope(item, tenantId, branchId));
     return orderPendingOutbox(filtered);
   }
 

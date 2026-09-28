@@ -14,7 +14,8 @@
  *  - Real Estate & Property NOI (renderRealEstateCommandCenterDashboard)
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React from "react";
+import React, { useMemo } from "react";
+import { useModule } from "../context/KwakoPosContexts.js";
 import {
   Utensils, Cpu, Hammer, Coins, Landmark, Wrench, Building,
   Package, Wine, Building2, Layers
@@ -44,6 +45,7 @@ export type VerticalModuleType =
 
 export interface VerticalCommandCenterPageProps {
   moduleType: VerticalModuleType;
+  activeTab?: string;
   onNavigate?: (path: string) => void;
 }
 
@@ -112,9 +114,20 @@ const MODULE_META: Record<VerticalModuleType, { title: string; subtitle: string;
 
 export const VerticalCommandCenterPage: React.FC<VerticalCommandCenterPageProps> = ({
   moduleType,
+  activeTab,
   onNavigate,
 }) => {
+  const { manifest, setActiveTab } = useModule();
   const meta = MODULE_META[moduleType] || MODULE_META.restaurant;
+  const activeSubmenu = useMemo(() => {
+    if (!activeTab) return null;
+    return manifest.sidebar.find(
+      (item) => typeof item !== "string" && Boolean(item.subItems?.includes(activeTab)),
+    );
+  }, [manifest, activeTab]);
+  const horizontalTabs = activeSubmenu && typeof activeSubmenu !== "string"
+    ? activeSubmenu.subItems || []
+    : [];
 
   const getDashboardHtml = (): string => {
     switch (moduleType) {
@@ -236,6 +249,29 @@ export const VerticalCommandCenterPage: React.FC<VerticalCommandCenterPageProps>
           </button>
         </div>
       </div>
+
+      {/* Shared sidebar <-> horizontal submenu navigation */}
+      {horizontalTabs.length > 0 && (
+        <div className="v2-card v2-p-2">
+          <div className="v2-flex v2-items-center v2-gap-2" style={{ overflowX: "auto", paddingBottom: "2px" }}>
+            {horizontalTabs.map((tab) => {
+              const isActive = tab === activeTab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  className={`v2-btn v2-btn-sm ${isActive ? "v2-btn-primary" : "v2-btn-ghost"}`}
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => setActiveTab(tab)}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  {tab}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Rendered Live Dashboard Content */}
       <div

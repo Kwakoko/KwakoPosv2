@@ -31,10 +31,10 @@ import {
   useTranslation, useFormatters,
 } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/apiClient.js";
-import { clientSyncEngine } from "../clientSyncEngine.js";
 import { Button } from "../components/UI/Button.js";
 import { SyncErrorsPanel } from "../components/SyncErrorsPanel.js";
 import type { PersistenceState } from "../persistence/persistenceStatus.js";
+import { useAuthoritativeSyncStatus, syncStatusLabel } from "../services/syncStatusService.js";
 
 type Sale = { id: string; saleNumber: string; grandTotal: number; soldAt: string; paymentStatus: string };
 
@@ -158,31 +158,21 @@ export { UsersPage };
 
 export const DiagnosticsPage: React.FC = () => {
   const { t } = useTranslation();
-  const { db, syncError, isOnline, pendingOutboxCount: contextPendingCount, persistenceStatus } = useSync();
-  const [syncStatus, setSyncStatus] = useState<"IDLE" | "RUNNING" | "SUCCESS" | "FAILED">("IDLE");
-  const [outboxCount, setOutboxCount] = useState<number>(contextPendingCount || 0);
-  const outbox = db.getPendingOutbox();
-
-  const refreshOutboxCount = async () => {
-    const count = await clientSyncEngine.localDb.getPendingOutboxCount();
-    setOutboxCount(count);
-  };
-
-  useEffect(() => {
-    void refreshOutboxCount();
-  }, []);
+  const { db, syncError, isOnline, syncOutbox, persistenceStatus } = useSync();
+  const { user } = useAuth();
+  const syncStatus = useAuthoritativeSyncStatus({
+    tenantId: user?.tenantId || null,
+    branchId: user?.branchId || null,
+  });
+  const outbox = db.getPendingOutbox(syncStatus.tenantId || undefined, syncStatus.branchId || undefined);
+  const outboxCount = syncStatus.pendingOutboxCount;
+  const authoritativeSyncError = syncStatus.lastError;
 
   const handleSyncNow = async () => {
     try {
-      setSyncStatus("RUNNING"); // update UI state
-      const result = await clientSyncEngine.runSync(); // run sync
-      console.log("Sync result:", result);
-      setSyncStatus("SUCCESS");
+      await syncOutbox({ force: true });
     } catch (err) {
       console.error("Sync failed:", err);
-      setSyncStatus("FAILED");
-    } finally {
-      await refreshOutboxCount();
     }
   };
 
@@ -204,25 +194,26 @@ export const DiagnosticsPage: React.FC = () => {
           <Button
             variant="primary"
             onClick={handleSyncNow}
-            disabled={syncStatus === "RUNNING"}
+            disabled={syncStatus.state === "SYNCING" || !isOnline}
           >
-            {syncStatus === "RUNNING" && <RefreshCw size={13} className="v2-animate-spin v2-mr-1" />}
+            {syncStatus.state === "SYNCING" && <RefreshCw size={13} className="v2-animate-spin v2-mr-1" />}
             Sync Now
           </Button>
         </div>
       </div>
       <div className="v2-mb-3">
-        {syncStatus === "RUNNING" && <p className="v2-text-info">Syncing…</p>}
-        {syncStatus === "SUCCESS" && <p className="v2-text-success">Sync completed!</p>}
-        {syncStatus === "FAILED" && <p className="v2-text-danger">Sync failed. Check logs.</p>}
+        {syncStatus.state === "SYNCING" && <p className="v2-text-info">Syncing…</p>}
+        {syncStatus.state === "SUCCESS" && <p className="v2-text-success">Sync completed.</p>}
+        {(syncStatus.state === "ERROR" || syncStatus.failedOutboxCount > 0) && <p className="v2-text-danger">Sync requires attention.</p>}
+        {syncStatus.state === "OFFLINE" && <p className="v2-text-info">Offline: local changes remain queued.</p>}
       </div>
       <div className="metrics-grid kpi-grid-4 v2-mb-4">
         <KpiCard label="Network Status"    value={isOnline ? t("sync.networkOnline") : t("sync.networkOffline")} icon={isOnline ? <Wifi size={18} /> : <WifiOff size={18} />} accent={isOnline ? "#4ade80" : "#fbbf24"} />
         <KpiCard label={t("sync.syncOutbox")} value={outboxCount} desc={t("sync.pendingTransactions")}        icon={<Upload size={18} />}    accent="#38bdf8" />
         <KpiCard label="Stock Ledger"      value={db.stockLedger.size} desc="Local IDB entries"        icon={<Activity size={18} />}  accent="#818cf8" />
-        <KpiCard label="Sync Status"       value={syncError ? t("sync.syncError") : t("sync.syncSuccess")} icon={<AlertTriangle size={18} />} accent={syncError ? "#f87171" : "#4ade80"} />
+        <KpiCard label="Sync Status"       value={syncStatus.state} desc={syncStatusLabel(syncStatus)} icon={<AlertTriangle size={18} />} accent={(syncStatus.state === "ERROR" || syncStatus.failedOutboxCount > 0) ? "#f87171" : "#4ade80"} />
       </div>
-      {syncError && <div className="badge v2-badge-danger v2-mb-4">{syncError}</div>}
+      {authoritativeSyncError && <div className="badge v2-badge-danger v2-mb-4">{authoritativeSyncError}</div>}
       <SyncErrorsPanel onRetry={handleSyncNow} className="v2-mb-4" />
 
       <div className="v2-card v2-mb-4">

@@ -19,6 +19,7 @@ import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
 import type { PersistenceStatusSnapshot } from "../persistence/persistenceStatus.js";
+import { syncStatusService, type SyncStatusSnapshot } from "../services/syncStatusService.js";
 import {
   type IndustryModule,
   type ModuleManifest,
@@ -220,6 +221,7 @@ interface SyncContextType {
   toggleOfflineSimulation: () => void;
   isSyncing: boolean;
   pendingOutboxCount: number;
+  syncStatus: SyncStatusSnapshot;
   syncOutbox: (options?: { quiet?: boolean; force?: boolean }) => Promise<any>;
   db: LocalIndexedDbStore;
   syncEngine: ClientSyncEngine;
@@ -234,6 +236,7 @@ const DEFAULT_SYNC_CONTEXT: SyncContextType = {
   toggleOfflineSimulation: () => {},
   isSyncing: false,
   pendingOutboxCount: 0,
+  syncStatus: syncStatusService.getSnapshot(),
   syncOutbox: async () => {},
   db: null as any,
   syncEngine: null as any,
@@ -365,6 +368,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusSnapshot>(() => syncStatusService.getSnapshot());
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatusSnapshot>(() =>
     db.getPersistenceStatusSnapshot(),
   );
@@ -551,6 +555,21 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       .then(() => setPersistenceStatus(db.getPersistenceStatusSnapshot(tenantId, branchId)))
       .catch(() => {});
   }, [db, currentTenantId, currentBranchId, user?.tenantId, user?.branchId]);
+
+  const refreshSyncStatus = useCallback(() => {
+    const tenantId = currentTenantId || user?.tenantId || null;
+    const branchId = currentBranchId || user?.branchId || null;
+    syncStatusService.setScope({ tenantId, branchId });
+    syncStatusService.setNetworkStatus(isOnline);
+    void syncStatusService.refreshCounts({ tenantId, branchId });
+  }, [currentTenantId, currentBranchId, user?.tenantId, user?.branchId, isOnline]);
+
+  useEffect(() => {
+    syncStatusService.registerStore(db);
+    const unsubscribe = syncStatusService.subscribe(setSyncStatus);
+    refreshSyncStatus();
+    return unsubscribe;
+  }, [db, refreshSyncStatus]);
 
   useEffect(() => {
     refreshPersistenceStatus();
@@ -767,6 +786,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
     const targetBranchId = user?.branchId || currentBranchId || "branch-default";
     const targetUserId = user?.id || "user-default";
+    const syncScope = { tenantId: targetTenantId, branchId: targetBranchId };
+    syncStatusService.setScope(syncScope);
+    syncStatusService.startSync(syncScope);
+    setSyncStatus(syncStatusService.getSnapshot(syncScope));
 
     // Re-queue any previously failed outbox items so they are retried
     try {
@@ -828,6 +851,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       consecutiveFailuresRef.current = 0;
       setLastSyncedAt(now);
       setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
+      syncStatusService.completeSync(result, true);
+      setSyncStatus(syncStatusService.getSnapshot(syncScope));
 
       if (result && (result.pulled > 0 || result.pushed > 0)) {
         window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
@@ -846,6 +871,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     } catch (error) {
       consecutiveFailuresRef.current += 1;
       setSyncError(error instanceof Error ? error.message : "Synchronization failed");
+      syncStatusService.failSync(error);
+      setSyncStatus(syncStatusService.getSnapshot(syncScope));
       throw error;
     } finally {
       isSyncInProgressRef.current = false;
@@ -1115,6 +1142,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     toggleOfflineSimulation,
     isSyncing,
     pendingOutboxCount,
+    syncStatus,
     syncOutbox,
     db,
     syncEngine,

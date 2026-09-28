@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import {
   calculateAvailableStock,
@@ -218,6 +219,7 @@ async function runProductionCertification() {
   const browserAEngine = new ClientSyncEngine("device-A", browserADb);
   const browserBDb = new LocalIndexedDbStore();
   const browserBEngine = new ClientSyncEngine("device-B", browserBDb);
+  await Promise.all([browserADb.ready, browserBDb.ready]);
 
   const prodId = randomUUID();
   const varId = randomUUID();
@@ -233,6 +235,8 @@ async function runProductionCertification() {
     clientCreatedAt: now,
     idempotencyKey: "KEY-A1",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
   browserADb.recordOutboxMutation({
     id: "OP-CERT-A2",
@@ -243,6 +247,8 @@ async function runProductionCertification() {
     clientCreatedAt: now,
     idempotencyKey: "KEY-A2",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
   browserADb.recordOutboxMutation({
     id: "OP-CERT-A3",
@@ -261,6 +267,8 @@ async function runProductionCertification() {
     clientCreatedAt: now,
     idempotencyKey: "KEY-A3",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
 
   // Sync Browser A to Server

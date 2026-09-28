@@ -141,7 +141,12 @@ export class WorldStandardPrismaSyncEngine {
               so."operationType" AS "operationType", so.payload
          FROM sync_operations so
         WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
-          AND NOT EXISTS (SELECT 1 FROM sync_change_journal cj WHERE cj.operation_id = so."operationId")
+          AND NOT EXISTS (
+            SELECT 1 FROM sync_change_journal cj
+             WHERE cj.tenant_id = so."tenantId"
+               AND cj.branch_id = so."branchId"
+               AND cj.operation_id = so."operationId"
+          )
         ORDER BY so."createdAt" ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
     );

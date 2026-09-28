@@ -115,7 +115,8 @@ export async function runDisasterRecoverySimulationSuite(): Promise<{
   // 3. NETWORK FAILURE
   {
     const startRto = Date.now();
-    const db = new LocalIndexedDbStore();
+    const db = new LocalIndexedDbStore(5);
+    await db.ready;
     const clientEngine = new ClientSyncEngine("dev-dr-net", db);
     db.recordOutboxMutation({
       id: "OP-NET-1",

@@ -2817,10 +2817,20 @@ model TraVfdConfig {
   id        String   @id @default(uuid())
   tenantId  String
   branchId  String
-  enabled   Boolean  @default(false)
-  endpoint  String   @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  enabled         Boolean  @default(false)
+  endpoint        String   @default("")
+  environment     String   @default("TEST")
+  tin             String?
+  certSerial      String?
+  registrationId  String?
+  efdSerial       String?
+  receiptCode     String?
+  routingKey      String?
+  globalCounter   Int      @default(0)
+  dailyCounter    Int      @default(0)
+  counterDate     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
@@ -2849,7 +2859,10 @@ model TraVfdFiscalization {
   acceptedAt          DateTime?
   rejectedAt          DateTime?
   verifiedAt          DateTime?
-  createdAt           DateTime       @default(now())
+  reconciliationStatus String         @default("PENDING")
+  reconciledAt         DateTime?
+  reconciliationError  String?
+  createdAt            DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   tenant              Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch              Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)

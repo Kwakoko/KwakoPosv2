@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
 import { KokoCompanion } from '../components/KokoCompanion.js';
-import { getTraVfdConfig } from '../services/traVfdOutboxService.js';
+import type { TraVfdIntegrationStatus } from '@kwakopos2/contracts';
+import { useAuthoritativeSyncStatus } from '../services/syncStatusService.js';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -241,16 +242,50 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const { currentBranchId, currentBranchName } = useBranch();
   const { currentTenantId, currentTenantName } = useTenant();
-  const { db, isOnline, pendingOutboxCount } = useSync();
+  const { db, isOnline } = useSync();
 
   const role = user?.role || 'Admin';
-  const tenantId = currentTenantId || '';
-  const branchId = currentBranchId || '';
-  const traVfdConfig = getTraVfdConfig(db, { tenantId, branchId });
-  const traVfdQueuedCount = [...db.traVfdOutbox.values()].filter((item: any) =>
-    item.tenantId === tenantId && item.branchId === branchId && item.status !== 'SENT' &&
-    ['LOCAL_FISCAL_PENDING', 'SUBMITTING', 'TRA_RETRY'].includes(item.fiscalState)
-  ).length;
+  const tenantId = currentTenantId || user?.tenantId || '';
+  const branchId = currentBranchId || user?.branchId || '';
+  const syncStatus = useAuthoritativeSyncStatus({ tenantId: tenantId || null, branchId: branchId || null });
+  const [traVfdStatus, setTraVfdStatus] = useState<TraVfdIntegrationStatus | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (!tenantId || !branchId) {
+      setTraVfdStatus(null);
+      return () => { active = false; };
+    }
+    if (!isOnline) return () => { active = false; };
+    void apiFetch<any>('/v1/tra-vfd/status', {
+      headers: { 'x-tenant-id': tenantId, 'x-branch-id': branchId, 'x-user-id': user?.id || '' },
+    }).then((body) => {
+      if (active) setTraVfdStatus((body?.data || body) as TraVfdIntegrationStatus);
+    }).catch(() => {
+      if (active) setTraVfdStatus(null);
+    });
+    return () => { active = false; };
+  }, [tenantId, branchId, isOnline, user?.id]);
+
+  const traVfdVerifiedCount = traVfdStatus?.stateCounts.TRA_VERIFIED ?? 0;
+  const traVfdRejectedCount = traVfdStatus?.stateCounts.TRA_REJECTED ?? 0;
+  const traVfdQueuedCount = traVfdStatus
+    ? (traVfdStatus.stateCounts.LOCAL_FISCAL_PENDING
+      + traVfdStatus.stateCounts.SUBMITTING
+      + traVfdStatus.stateCounts.TRA_RETRY
+      + traVfdStatus.stateCounts.TRA_ACCEPTED)
+    : 0;
+  const traVfdFiscalizationState = !traVfdStatus
+    ? (isOnline ? 'STATE_UNAVAILABLE' : 'OFFLINE')
+    : traVfdStatus.status === 'DISABLED'
+      ? 'OFF'
+      : traVfdQueuedCount > 0
+        ? `PENDING (${traVfdQueuedCount})`
+        : traVfdRejectedCount > 0
+          ? `REJECTED (${traVfdRejectedCount})`
+          : traVfdVerifiedCount > 0
+            ? `VERIFIED (${traVfdVerifiedCount})`
+            : 'NO TRA STATE RECORDED';
 
   const handleNav = (tab: string) => {
     if (setActiveTab) setActiveTab(tab as any);
@@ -659,8 +694,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
     const totalSavings  = products.filter(p => p.category === 'Savings').reduce((sum, p) => sum + (p.stock * p.price), 0) / 10;
     const totalLoans    = customers.reduce((sum, c) => sum + (c.outstandingBalance || 0), 0);
-    const pendingOutboxCount = db.syncOutbox ? Array.from(db.syncOutbox.values()).filter(i => i.status !== 'SYNCED').length : 0;
-    const unsyncedCount = Math.max(validOrders.filter(o => o.syncStatus !== 'Synced').length, pendingOutboxCount);
+    const unsyncedCount = syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount;
 
     // SACCO: member growth vs last month
     const lastMonthStart = new Date(now); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1); lastMonthStart.setDate(1); lastMonthStart.setHours(0,0,0,0);
@@ -718,7 +752,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       unsyncedCount, topProduct,
       todayOrderCount: todayOrders.length,
     };
-  }, [products, productVariants, validOrders, customers, suppliers, costLookup]);
+  }, [products, productVariants, validOrders, customers, suppliers, costLookup, syncStatus.pendingOutboxCount, syncStatus.failedOutboxCount]);
 
   // ── Chart Data ─────────────────────────────────────────────────────────────
 
@@ -1294,7 +1328,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Operating Branch', currentBranchName || 'Main Branch'],
         ['Auditing Operator', `${role} (${user?.name || 'Authorized Staff'})`],
         ['Business Module', activeModule],
-        ['Fiscal Device Status', !traVfdConfig.enabled ? 'TRA VFD: OFF' : !isOnline ? 'TRA VFD: Offline Queue' : traVfdQueuedCount > 0 ? `TRA VFD: ${traVfdQueuedCount} Queued` : 'TRA VFD: Ready'],
+        ['Fiscalization State', traVfdFiscalizationState],
         ['', ''],
         ['EXECUTIVE ACCRUAL SUMMARY', 'VALUE (TSH) / COUNT'],
         ['Gross Sales Turnover (Today)', Number(stats.grossSales || 0)],
@@ -1587,37 +1621,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Status Badge 1: TRA VFD Fiscal Sync Health */}
+          {/* Status Badge 1: authoritative TRA VFD integration state */}
           <span
             className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 ${
-              !traVfdConfig.enabled
+              !isOnline || !traVfdStatus
                 ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50'
-                : !isOnline
-                ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
-                : traVfdQueuedCount > 0
-                ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
-                : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50'
+                : traVfdStatus.status === 'VERIFIED'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50'
+                : traVfdStatus.status === 'DISABLED'
+                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50'
+                : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
             }`}
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title={
-              !traVfdConfig.enabled
-                ? 'TRA VFD fiscalization is disabled for this branch'
-                : !isOnline
-                ? 'Offline mode: TRA VFD requests remain in the dedicated fiscal queue'
-                : traVfdQueuedCount > 0
-                ? `${traVfdQueuedCount} fiscal receipts queued in the dedicated TRA VFD outbox`
-                : 'TRA VFD fiscal queue is clear'
-            }
+            title={!isOnline ? 'Offline: last server state is retained' : traVfdStatus ? `Server-authoritative TRA VFD state: ${traVfdStatus.status}` : 'TRA VFD server state unavailable'}
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>
-              {!traVfdConfig.enabled
-                ? 'TRA VFD: OFF'
-                : !isOnline
-                ? 'TRA VFD: Offline Queue'
-                : traVfdQueuedCount > 0
-                ? `TRA VFD: ${traVfdQueuedCount} Queued`
-                : 'TRA VFD: Ready'}
+              {!isOnline ? 'TRA VFD: Offline' : traVfdStatus ? `TRA VFD: ${traVfdStatus.status}` : 'TRA VFD: State Unavailable'}
             </span>
           </span>
 
@@ -3595,9 +3615,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
               {/* Fiscal Authentication & Signatures */}
               <div style={{ fontSize: '10px', textAlign: 'center', marginTop: '10px' }}>
-                <div style={{ fontWeight: 800 }}>TRA VFD FISCAL RECEIPT VERIFICATION</div>
-                <div style={{ color: '#475569', margin: '2px 0' }}>FISCAL CODE: TRA-VFD-TZ-2026-X89B21</div>
-                <div style={{ color: '#475569' }}>STATUS: ELECTRONICALLY CERTIFIED</div>
+                <div style={{ fontWeight: 800 }}>TRA VFD FISCALIZATION STATUS</div>
+                <div style={{ color: '#475569', margin: '2px 0' }}>
+                  TRA VERIFIED RECEIPTS: {traVfdVerifiedCount}
+                </div>
+                <div style={{ color: '#475569', margin: '2px 0' }}>
+                  PENDING FISCALIZATION: {traVfdQueuedCount}
+                </div>
+                <div style={{ color: '#475569' }}>
+                  REJECTED FISCALIZATIONS: {traVfdRejectedCount}
+                </div>
 
                 {/* Sign-off lines */}
                 <div style={{ marginTop: '24px', textAlign: 'left' }}>

@@ -270,7 +270,7 @@ export const BarcodeLabelGeneratorModal: React.FC<BarcodeLabelGeneratorModalProp
 
                   {includeDate && (
                     <div style={{ fontSize: "0.55rem", color: "#64748b", marginTop: "0.15rem" }}>
-                      TRA EFD • {new Date().toISOString().slice(0, 10)}
+                      LABEL • {new Date().toISOString().slice(0, 10)}
                     </div>
                   )}
                 </div>

@@ -8,6 +8,8 @@ import { prisma } from "@kwakopos2/database";
 const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
 const API_PORT = 3011;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
+const STARTUP_TIMEOUT_MS = 15_000;
+const TEST_TIMEOUT_MS = 60_000;
 
 describe("session revoke survives API restart", () => {
   const tenantId = randomUUID();
@@ -19,8 +21,9 @@ describe("session revoke survives API restart", () => {
   let api: ChildProcess | null = null;
   let apiPidBeforeRestart: number | null = null;
 
-  const startApi = async (): Promise<void> => {    const tsxCli = `${ROOT}\\node_modules\\tsx\\dist\\cli.mjs`;
-    api = spawn(process.execPath, [tsxCli, "apps/api/src/serverFixed.ts"], {
+  const startApi = async (): Promise<void> => {
+    const tsxCli = `${ROOT}\\node_modules\\tsx\\dist\\cli.mjs`;
+    api = spawn(process.execPath, [tsxCli, "apps/api/src/testServerFixed.ts"], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -41,7 +44,7 @@ describe("session revoke survives API restart", () => {
     api.stdout?.on("data", capture);
     api.stderr?.on("data", capture);
 
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (api.exitCode !== null) {
         throw new Error(`API exited during startup with code ${api.exitCode}. Output: ${output}`);
@@ -49,9 +52,12 @@ describe("session revoke survives API restart", () => {
       try {
         const response = await fetch(`${API_URL}/health`);
         if (response.ok) return;
-      } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }    throw new Error(`API did not become healthy within 30 seconds. Output: ${output}`);
+      } catch {
+        // Server is still starting.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`API did not become healthy within ${STARTUP_TIMEOUT_MS}ms. Output: ${output}`);
   };
 
   const stopApi = async (): Promise<void> => {
@@ -84,7 +90,8 @@ describe("session revoke survives API restart", () => {
           create: { id: roleId, name: "ADMIN", permissions: ["users.manage", "roles.manage"] },
         },
       },
-    });    await prisma.user.create({
+    });
+    await prisma.user.create({
       data: {
         id: userId,
         tenantId,
@@ -98,19 +105,20 @@ describe("session revoke survives API restart", () => {
     });
     await startApi();
     apiPidBeforeRestart = api?.pid ?? null;
-  }, 60000);
+  }, 60_000);
 
   afterAll(async () => {
     await stopApi();
     await prisma.tenant.delete({ where: { id: tenantId } });
-  }, 60000);
+  }, 60_000);
 
   it("persists revocation in PostgreSQL and rejects the same token after a fresh API process starts", async () => {
     const loginResponse = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email, password, deviceId: "SESSION-RESTART-PROOF" }),
-    });    expect(loginResponse.ok).toBe(true);
+    });
+    expect(loginResponse.ok).toBe(true);
     const login = await loginResponse.json() as any;
     const accessToken = String(login?.data?.accessToken || "");
     const sessionId = String(login?.data?.sessionId || "");
@@ -145,7 +153,8 @@ describe("session revoke survives API restart", () => {
 
     await stopApi();
     await startApi();
-    const apiPidAfterRestart = api?.pid ?? null;    expect(apiPidBeforeRestart).toBeTruthy();
+    const apiPidAfterRestart = api?.pid ?? null;
+    expect(apiPidBeforeRestart).toBeTruthy();
     expect(apiPidAfterRestart).toBeTruthy();
     expect(apiPidAfterRestart).not.toBe(apiPidBeforeRestart);
 
@@ -163,5 +172,5 @@ describe("session revoke survives API restart", () => {
       body: JSON.stringify({ sessionId, refreshToken: "intentionally-invalid" }),
     });
     expect(refreshed.status).toBe(401);
-  });
+  }, TEST_TIMEOUT_MS);
 });

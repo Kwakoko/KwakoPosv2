@@ -1,12 +1,78 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
+import { resolve as resolvePath } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "@playwright/test";
 import { prisma } from "@kwakopos2/database";
 
-const WEB_URL = process.env.E2E_WEB_URL || "http://127.0.0.1:4175";
+const DEFAULT_WEB_PORT = 4175;
 const API_URL = process.env.E2E_API_URL || "http://127.0.0.1:18080";
+
+async function findFreeLoopbackPort(preferredPort: number): Promise<number> {
+  for (let port = preferredPort; port < preferredPort + 20; port += 1) {
+    const available = await new Promise<boolean>((resolve) => {
+      const server = createServer();
+      server.once("error", () => resolve(false));
+      server.listen({ host: "127.0.0.1", port }, () => {
+        server.close(() => resolve(true));
+      });
+    });
+    if (available) return port;
+  }
+  throw new Error("E2E_WEB_PORT_UNAVAILABLE");
+}
+
+function childLabel(child: ChildProcess): string {
+  return child.exitCode === null ? "running" : "exited:" + String(child.exitCode ?? "signal");
+}
+
+async function waitForHttp(url: string, child?: ChildProcess, label = "web"): Promise<void> {
+  let childError = "";
+  const onError = (error: Error) => {
+    childError = error.message;
+  };
+  child?.on("error", onError);
+  try {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (child?.exitCode !== null || child?.signalCode) {
+        throw new Error(
+          "E2E_" + label.toUpperCase() + "_PROCESS_EXITED:" + childLabel(child) +
+          (childError ? ":" + childError : ""),
+        );
+      }
+      try {
+        const res = await fetch(url);
+        if (res.ok) return;
+      } catch {}
+      await sleep(500);
+    }
+  } finally {
+    child?.off("error", onError);
+  }
+  throw new Error("E2E_" + label.toUpperCase() + "_UNAVAILABLE: " + url);
+}
+
+async function stopChild(child: ChildProcess | undefined): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
+  if (process.platform === "win32" && child.pid) {
+    await Promise.race([exited, sleep(2000)]);
+    if (child.exitCode === null && !child.signalCode) {
+      try {
+        execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+        /* Process may have exited between the check and taskkill. */
+      }
+    }
+  } else {
+    await Promise.race([exited, sleep(2000)]);
+    if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL");
+  }
+  await Promise.race([exited, sleep(2000)]);
+}
 
 type Proof = {
   status: "PASS";
@@ -15,23 +81,36 @@ type Proof = {
   server: { atomicMutationSyncOperationJournal: boolean; duplicateReplayIdempotent: boolean; revisionReplay: boolean; tenantScoped: boolean };
 };
 
-async function waitForHttp(url: string): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {}
-    await sleep(500);
-  }
-  throw new Error(`E2E_WEB_UNAVAILABLE: ${url}`);
-}
-
-function spawnWeb(): ChildProcess {
-  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", "4175"], { cwd: "apps/web", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: process.env });
+function spawnWeb(port: number): ChildProcess {
+  return spawn(
+    process.execPath,
+    [resolvePath("node_modules/vite/bin/vite.js"), "preview", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    {
+      cwd: resolvePath("apps/web"),
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      env: process.env,
+    },
+  );
 }
 
 function spawnApi(): ChildProcess {
-  return spawn("npx", ["tsx", "apps/api/src/server.ts"], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", env: { ...process.env, NODE_ENV: "development", START_SERVER: "true", SYNC_CERTIFICATION_PRISMA: "true", PORT: "18080", HOST: "127.0.0.1" } });
+  return spawn(
+    process.execPath,
+    [resolvePath("node_modules/tsx/dist/cli.mjs"), "apps/api/src/server.ts"],
+    {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+    env: {
+      ...process.env,
+      NODE_ENV: "development",
+      START_SERVER: "true",
+      SYNC_CERTIFICATION_PRISMA: "true",
+      PORT: "18080",
+      HOST: "127.0.0.1",
+    },
+  });
 }
 
 async function seedTenant(): Promise<{ tenantId: string; branchId: string; userId: string; variantId: string }> {
@@ -180,19 +259,24 @@ async function apiJson(path: string, options: { method?: string; tenantId: strin
 }
 
 async function run(): Promise<void> {
-  const web = spawnWeb();
+  const configuredWebUrl = process.env.E2E_WEB_URL;
+  const webPort = configuredWebUrl
+    ? Number(new URL(configuredWebUrl).port || DEFAULT_WEB_PORT)
+    : await findFreeLoopbackPort(Number(process.env.E2E_WEB_PORT || DEFAULT_WEB_PORT));
+  const webUrl = configuredWebUrl || "http://127.0.0.1:" + webPort;
+  const web = spawnWeb(webPort);
   const api = spawnApi();
   let tenantId = "";
   const browser = await chromium.launch({ headless: true });
   try {
-    await waitForHttp(`${WEB_URL}/manifest.json`);
-    await waitForHttp(`${API_URL}/health`);
+    await waitForHttp(webUrl + "/manifest.json", web, "web");
+    await waitForHttp(API_URL + "/health", api, "api");
     const seeded = await seedTenant();
     tenantId = seeded.tenantId;
     await apiJson("/api/legal/acceptance/accept-all", { method: "POST", tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId, body: {} });
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
-    await pageA.goto(WEB_URL, { waitUntil: "domcontentloaded" });
+    await pageA.goto(webUrl, { waitUntil: "domcontentloaded" });
 
     const swReady = await pageA.evaluate(async () => {
       if (!navigator.serviceWorker) return false;
@@ -213,10 +297,18 @@ async function run(): Promise<void> {
     if (!sw) throw new Error("PWA_SERVICE_WORKER_NOT_REGISTERED");
     const beforeUpgrade = await browserRead(pageA);
     await pageA.evaluate(() => new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open("kwakopos-v2", 4);
-      req.onupgradeneeded = () => { req.transaction?.objectStore("syncMetadata").put("4", "e2eNativeUpgradeVersion"); };
-      req.onsuccess = () => { req.result.close(); resolve(); };
-      req.onerror = () => reject(req.error);
+      const versionReq = indexedDB.open("kwakopos-v2");
+      versionReq.onerror = () => reject(versionReq.error);
+      versionReq.onsuccess = () => {
+        const currentVersion = versionReq.result.version;
+        versionReq.result.close();
+        const req = indexedDB.open("kwakopos-v2", currentVersion + 1);
+        req.onupgradeneeded = () => {
+          req.transaction?.objectStore("syncMetadata").put(String(currentVersion + 1), "e2eNativeUpgradeVersion");
+        };
+        req.onsuccess = () => { req.result.close(); resolve(); };
+        req.onerror = () => reject(req.error);
+      };
     }));
     await pageA.reload({ waitUntil: "domcontentloaded" });
     const afterUpgrade = await browserRead(pageA);
@@ -231,7 +323,7 @@ async function run(): Promise<void> {
 
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
-    await pageB.goto(WEB_URL, { waitUntil: "domcontentloaded" });
+    await pageB.goto(webUrl, { waitUntil: "domcontentloaded" });
     const delta = await apiJson(`/sync/delta?since=${encodeURIComponent("rev:0")}`, { tenantId: seeded.tenantId, branchId: seeded.branchId, userId: seeded.userId });
     const change = (delta.data?.changes || []).find((x: any) => x.entityId === "E2E-PRODUCT");
     if (!change) throw new Error("HTTP_REVISION_REPLAY_FAILED");
@@ -251,7 +343,8 @@ async function run(): Promise<void> {
     await ctxB.close(); await ctxA.close();
   } finally {
     if (tenantId) await cleanup(tenantId).catch(() => undefined);
-    await browser.close(); web.kill("SIGTERM"); api.kill("SIGTERM");
+    await browser.close();
+    await Promise.all([stopChild(web), stopChild(api)]);
   }
 }
 run().catch((error) => {

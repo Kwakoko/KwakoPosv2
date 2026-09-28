@@ -8,6 +8,7 @@ import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { traVfdRoutes } from "./routes/traVfdRoutes.js";
+import { startTraVfdReconciliationWorker } from "./services/traVfdService.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
 import { globalLegalGovernanceService } from "./services/legalGovernanceService.js";
@@ -5287,6 +5288,7 @@ if (process.env.START_SERVER === "true") {
     const host = process.env.HOST || config.HOST || "0.0.0.0";
     try {
       await server.listen({ port, host });
+      startTraVfdReconciliationWorker();
       console.log(`KwakoPos 2.0 API listening on ${host}:${port}`);
     } catch (err) {
       console.error("FAILED_TO_START_SERVER:", err);

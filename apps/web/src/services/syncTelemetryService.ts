@@ -7,6 +7,7 @@
  */
 import { hlcEngine } from "./hlcEngine.js";
 import { type LocalIndexedDbStore } from "../indexedDb.js";
+import { syncStatusService } from "./syncStatusService.js";
 
 export interface SyncTelemetryMetrics {
   pendingOutboxCount: number;

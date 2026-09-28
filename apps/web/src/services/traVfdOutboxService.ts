@@ -124,5 +124,47 @@ export async function processTraVfdOutbox(
       failed++;
     }
   }
+
+  // Reconcile server-side accepted receipts even after the local dispatch item is SENT.
+  // The server remains authoritative for TRA fiscal state and verification.
+  try {
+    const pendingResponse = await apiFetch<any>("/api/v1/tra-vfd/pending", {
+      headers: { "x-tenant-id": ctx.tenantId, "x-branch-id": ctx.branchId },
+    });
+    const pendingFiscalizations = Array.isArray(pendingResponse?.data || pendingResponse)
+      ? (pendingResponse.data || pendingResponse)
+      : [];
+    for (const fiscal of pendingFiscalizations.slice(0, 10)) {
+      const endpoint = fiscal.state === "TRA_ACCEPTED"
+        ? `/api/v1/tra-vfd/reconcile/${encodeURIComponent(fiscal.id)}`
+        : `/api/v1/tra-vfd/submit/${encodeURIComponent(fiscal.id)}`;
+      try {
+        const response = await apiFetch<any>(endpoint, {
+          method: "POST",
+          headers: { "x-tenant-id": ctx.tenantId, "x-branch-id": ctx.branchId },
+        });
+        const result = response.data || response;
+        const local = [...db.traVfdOutbox.values()].find(
+          item => item.fiscalizationId === result.id || item.transactionId === result.transactionId,
+        );
+        if (local) {
+          local.fiscalizationId = result.id;
+          local.fiscalState = result.state;
+          local.status = result.state === "TRA_VERIFIED" ? "SENT" : "PENDING";
+          local.lastError = result.lastError || result.reconciliationError || undefined;
+          local.nextAttemptAt = result.nextAttemptAt || null;
+          saveItem(db, local);
+          applyFiscalResult(db, local, result);
+        }
+        processed++;
+        if (result.state === "TRA_VERIFIED") accepted++;
+      } catch {
+        // Reconciliation remains durable on the server and will be retried later.
+      }
+    }
+  } catch {
+    // Offline/provider unavailability must not destroy the dedicated fiscal queue.
+  }
+
   return { processed, accepted, failed };
 }

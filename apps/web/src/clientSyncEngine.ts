@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore, db as defaultDb } from "./indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope } from "./indexedDb.js";
 import type {
   SyncPushRequest,
   SyncPushResponse,
@@ -83,7 +83,7 @@ async function applyRevisionedChanges(
     const request = outbox.getAll();
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error || new Error("Outbox read failed"));
-  })).filter((item) => item?.status === "PENDING");
+  })).filter((item) => item?.status === "PENDING" && outboxMatchesScope(item, tenantId, branchId));
 
   let applied = 0;
   const persistenceStatusEvents: PersistenceStatusRecord[] = [];

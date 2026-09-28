@@ -48,6 +48,27 @@ export function traVfdRoutes(server: FastifyInstance) {
     } catch (error: any) { return reply.status(409).send({ success: false, error: error.message }); }
   });
 
+  server.post("/api/v1/tra-vfd/reconcile/:id", async (req, reply) => {
+    try {
+      const ctx = ctxOf(req);
+      return reply.send({ success: true, data: await globalTraVfdService.reconcile(ctx, String((req.params as any).id)) });
+    } catch (error: any) { return reply.status(409).send({ success: false, error: error.message }); }
+  });
+
+  server.get("/api/v1/tra-vfd/status", async (req, reply) => {
+    try {
+      const ctx = ctxOf(req);
+      return reply.send({ success: true, data: await globalTraVfdService.getStatus(ctx) });
+    } catch (error: any) { return reply.status(400).send({ success: false, error: error.message }); }
+  });
+
+  server.get("/api/v1/tra-vfd/pending", async (req, reply) => {
+    try {
+      const ctx = ctxOf(req);
+      return reply.send({ success: true, data: await globalTraVfdService.listPending(ctx) });
+    } catch (error: any) { return reply.status(400).send({ success: false, error: error.message }); }
+  });
+
   server.get("/api/v1/tra-vfd/:id", async (req, reply) => {
     try {
       const fiscalization = await globalTraVfdService.get(ctxOf(req), String((req.params as any).id));
