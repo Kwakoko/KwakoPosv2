@@ -209,7 +209,11 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/auth/") ||
+    url.pathname.startsWith("/sync/") ||
     url.pathname.startsWith("/telemetry/") ||
+    url.pathname === "/health" ||
+    url.pathname === "/readiness" ||
+    url.pathname === "/version" ||
     request.method !== "GET"
   ) {
     return;

@@ -47,6 +47,17 @@ export class WorldStandardPrismaSyncEngine {
     return String(rows[0]?.revision ?? 0);
   }
 
+  private async currentSyncEpoch(db: any = prisma): Promise<string> {
+    const rows = await db.$queryRawUnsafe(
+      `SELECT sync_epoch::text AS sync_epoch FROM sync_control_state WHERE id = 1`,
+    ) as Array<{ sync_epoch: string | null }>;
+    const syncEpoch = String(rows[0]?.sync_epoch ?? "").trim();
+    if (!syncEpoch) {
+      throw new Error("SYNC_EPOCH_PERSISTENCE_UNAVAILABLE");
+    }
+    return syncEpoch;
+  }
+
   private async snapshot(ctx: TenantContext, op: SyncPushRequest["operations"][number], db: any = prisma): Promise<unknown> {
     try {
       switch (op.entityType) {
@@ -580,6 +591,7 @@ export class WorldStandardPrismaSyncEngine {
       // One repeatable snapshot: the revision cursor and all bootstrap rows refer to the same committed state.
       await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
       const snapshotRevision = await this.latestRevision(ctx, tx);
+      const syncEpoch = await this.currentSyncEpoch(tx);
       const snapshotTimestamp = new Date().toISOString();
 
       const productRows = await tx.product.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { variants: true }, orderBy: { createdAt: "asc" } });
@@ -599,12 +611,13 @@ export class WorldStandardPrismaSyncEngine {
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
       const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
-      return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
+      return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
   }
   async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
     await this.ensureInfrastructure();
     await this.reconcileJournal(ctx);
+    const syncEpoch = await this.currentSyncEpoch();
     const rawSince = req.since || "rev:0";
     const revisionMode = rawSince.startsWith("rev:");
     const afterRevision = revisionMode ? BigInt(rawSince.slice(4) || "0") : 0n;
@@ -620,7 +633,7 @@ export class WorldStandardPrismaSyncEngine {
     const lastDeliveredRevision = changes.length ? changes[changes.length - 1].revision : afterRevision;
     const normalizedChanges = changes.map((change: any) => ({ revision: String(change.revision), entityType: change.entity_type, entityId: change.entity_id, operationType: change.operation_type, record: change.record, source: change.source }));
     if (revisionMode) {
-      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
+      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
     }
     const since = new Date(rawSince);
     if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid sync cursor");

@@ -1675,25 +1675,33 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // Sync
-  server.post("/sync/push", async (req) => {
+  server.post("/sync/push", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     const payload = SyncPushRequestSchema.parse(req.body);
     const result = await syncEngine.processPush(req.tenantContext!, payload as any);
     return { success: true, data: result };
   });
 
-  server.get("/sync/delta", async (req) => {
+  server.get("/sync/delta", async (req, reply) => {
+    // Sync cursors and change pages are authoritative live state. Never allow
+    // HTTP/browser caches to replay an older page for a newer cursor.
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    reply.header("Pragma", "no-cache");
+    reply.header("Expires", "0");
     const query = SyncDeltaRequestSchema.parse(req.query || {});
     const result = await syncEngine.processDelta(req.tenantContext!, query as any);
     return { success: true, data: result };
   });
 
-  server.post("/sync/bootstrap", async (req) => {
+  server.post("/sync/bootstrap", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     const payload = SyncBootstrapRequestSchema.parse(req.body || {});
     const result = await (syncEngine as any).processBootstrap(req.tenantContext!, payload as any);
     return { success: true, data: result };
   });
 
-  server.post("/sync/reconcile", async (req) => {
+  server.post("/sync/reconcile", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     const manifest = SyncStateManifestSchema.parse(req.body || {});
     const result = await (syncEngine as any).reconcileState(req.tenantContext!, manifest as any);
     return { success: true, data: result };
