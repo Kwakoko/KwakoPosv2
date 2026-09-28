@@ -23,7 +23,7 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
   let browserBDb: LocalIndexedDbStore;
   let browserBEngine: ClientSyncEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenantCtx = {
@@ -43,6 +43,7 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
 
     browserBDb = new LocalIndexedDbStore();
     browserBEngine = new ClientSyncEngine("device-browser-B", browserBDb);
+    await Promise.all([browserADb.ready, browserBDb.ready]);
   });
 
   it("Executes full Browser A -> Server -> Browser B convergence cycle", async () => {

@@ -17,7 +17,7 @@ describe("Pillar 4 — Idempotency Scope: Device Reset Integration Drill", () =>
   let serverSyncEngine: SyncEngine;
   let clientDb: LocalIndexedDbStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenantCtx = {
@@ -33,6 +33,7 @@ describe("Pillar 4 — Idempotency Scope: Device Reset Integration Drill", () =>
     serverSyncEngine = new SyncEngine(serverProductRepo, serverStockRepo, globalInMemoryStore);
 
     clientDb = new LocalIndexedDbStore();
+    await clientDb.ready;
   });
 
   it("prevents operations from getting stranded when client deviceId regenerates after browser reset", async () => {

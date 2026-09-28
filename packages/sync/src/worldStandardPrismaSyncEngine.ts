@@ -96,6 +96,44 @@ export class WorldStandardPrismaSyncEngine {
     return String((rows as Array<{ revision: bigint }>)[0].revision);
   }
 
+  private async journalGeneratedStockLedgers(
+    ctx: TenantContext,
+    op: SyncPushRequest["operations"][number],
+    source: string,
+    db: any,
+  ): Promise<void> {
+    if (op.operationType !== "CREATE") return;
+
+    // These business commands can atomically create one or more immutable
+    // StockLedger rows. The ledger rows are inventory truth, so every row must be
+    // independently replayable by downstream replicas.
+    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction"]);
+    if (!generatedLedgerTypes.has(op.entityType)) return;
+
+    const operationIdFilter = op.entityType === "UnitConversionTransaction"
+      ? { startsWith: `${op.operationId}-` }
+      : op.operationId;
+    const ledgers = await db.stockLedger.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        operationId: operationIdFilter,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    for (const ledger of ledgers) {
+      const ledgerOp = {
+        ...op,
+        operationId: `${op.operationId}:ledger:${ledger.id}`,
+        idempotencyKey: `${op.idempotencyKey}:ledger:${ledger.id}`,
+        entityType: "StockLedger",
+        entityId: ledger.id,
+        operationType: "CREATE",
+      } as SyncPushRequest["operations"][number];
+      await this.journal(ctx, ledgerOp, ledgerShape(ledger), source, db);
+    }
+  }
+
   private async reconcileJournal(ctx: TenantContext): Promise<void> {
     await this.ensureInfrastructure();
     const rows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
@@ -108,7 +146,7 @@ export class WorldStandardPrismaSyncEngine {
       ctx.tenantId, ctx.branchId,
     );
     for (const row of rows) {
-      await this.journal(ctx, {
+      const recoveredOp = {
         operationId: row.operationId,
         entityType: row.entityType as any,
         entityId: row.entityId,
@@ -116,7 +154,37 @@ export class WorldStandardPrismaSyncEngine {
         payload: { ...(row.payload as any), __syncRecoveryPatch: true },
         clientCreatedAt: new Date(0).toISOString(),
         idempotencyKey: row.operationId,
-      } as any, row.payload, "recovery");
+      } as any;
+      await this.journal(ctx, recoveredOp, row.payload, "recovery");
+      await this.journalGeneratedStockLedgers(ctx, recoveredOp, "recovery", prisma);
+    }
+
+    const generatedLedgerRows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
+      `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
+              so."operationType" AS "operationType", so.payload
+         FROM sync_operations so
+        WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
+          AND so."operationType" = 'CREATE'
+          AND so."entityType" IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
+          AND NOT EXISTS (
+            SELECT 1 FROM sync_change_journal cj
+             WHERE cj.tenant_id = so."tenantId"
+               AND cj.branch_id = so."branchId"
+               AND cj.operation_id LIKE so."operationId" || ':ledger:%'
+          )
+        ORDER BY so."createdAt" ASC LIMIT 1000`,
+      ctx.tenantId, ctx.branchId,
+    );
+    for (const row of generatedLedgerRows) {
+      await this.journalGeneratedStockLedgers(ctx, {
+        operationId: row.operationId,
+        entityType: row.entityType as any,
+        entityId: row.entityId,
+        operationType: row.operationType as any,
+        payload: row.payload as any,
+        clientCreatedAt: new Date(0).toISOString(),
+        idempotencyKey: row.operationId,
+      } as any, "recovery", prisma);
     }
   }
 
@@ -504,6 +572,7 @@ export class WorldStandardPrismaSyncEngine {
             if (fingerprint !== operationFingerprint(op)) return { status: "IDEMPOTENCY_CONFLICT" as const };
             const snapshot = await this.snapshot(ctx, op, tx);
             await this.journal(ctx, op, snapshot, "replay", tx);
+            await this.journalGeneratedStockLedgers(ctx, op, "replay", tx);
             return { status: "ALREADY_PROCESSED" as const };
           }
 
@@ -518,6 +587,7 @@ export class WorldStandardPrismaSyncEngine {
             },
           });
           const revision = await this.journal(ctx, op, snapshot, "push", tx);
+          await this.journalGeneratedStockLedgers(ctx, op, "push", tx);
           return { status: "SUCCESS" as const, revision };
         });
 

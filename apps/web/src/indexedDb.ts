@@ -270,9 +270,13 @@ export class LocalIndexedDbStore {
     try {
       const openDb = (ver?: number): Promise<IDBDatabase> => {
         return new Promise((resolve, reject) => {
+          // IndexedDB upgrades can legitimately take several seconds when multiple
+          // fresh browser contexts initialize concurrently. A short timeout here
+          // incorrectly forced a fail-closed persistence state during normal startup.
+          const IDB_OPEN_TIMEOUT_MS = 15_000;
           const timeoutTimer = setTimeout(() => {
-            reject(new Error("IndexedDB open timed out after 3000ms"));
-          }, 3000);
+            reject(new Error(`IndexedDB open timed out after ${IDB_OPEN_TIMEOUT_MS}ms`));
+          }, IDB_OPEN_TIMEOUT_MS);
 
           let request: IDBOpenDBRequest;
           try {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>): React.ComponentType<any> =>
   lazy(loader) as React.ComponentType<any>;
 import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts.js";
@@ -365,6 +365,7 @@ const AuthenticatedApp: React.FC = () => {
   const [currentPath, setCurrentPath] = useState(() =>
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
+  const initialRouteSyncRef = useRef(true);
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() =>
     Boolean(getStoredSession()?.user)
   );
@@ -424,6 +425,15 @@ const AuthenticatedApp: React.FC = () => {
     if (STANDALONE_PATHS.has(currentPath)) {
       return;
     }
+    // Preserve a directly opened canonical route only during the initial
+    // path -> tab synchronization. Once the first render has settled, every
+    // user-initiated activeTab change must be allowed to update the URL.
+    const canonicalTab = PATH_TO_CANONICAL_TAB[currentPath];
+    if (initialRouteSyncRef.current) {
+      initialRouteSyncRef.current = false;
+      if (canonicalTab && canonicalTab !== activeTab) return;
+    }
+
     const defaultPath = isSuperAdmin && !impersonatedTenant ? "/super-admin" : "/";
     const path = TAB_TO_PATH[activeTab] || defaultPath;
     if (currentPath !== path) {

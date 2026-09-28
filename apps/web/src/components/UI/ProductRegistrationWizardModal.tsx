@@ -527,6 +527,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
               quantity: vOpeningStock, quantityChange: vOpeningStock, quantityBefore: 0, quantityAfter: vOpeningStock,
               balanceAfter: vOpeningStock, reason: "OPENING_STOCK", movementType: "OPENING_STOCK",
               timestamp: now, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+              operationId: "adj-" + v.id, idempotencyKey: "ADJ-" + v.id,
             },
           });
           outboxItems.push(makeOutboxItem(
@@ -589,6 +590,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
               quantity: numOpeningStock, quantityChange: numOpeningStock, quantityBefore: 0, quantityAfter: numOpeningStock,
               balanceAfter: numOpeningStock, reason: "OPENING_STOCK", movementType: "OPENING_STOCK",
               timestamp: now, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+              operationId: "adj-" + defaultVarId, idempotencyKey: "ADJ-" + defaultVarId,
             },
           });
           outboxItems.push(makeOutboxItem(

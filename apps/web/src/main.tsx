@@ -1,8 +1,6 @@
 import "./styles.css";
-import "./atomicOutbox.js";
-import React, { Component, ErrorInfo, ReactNode } from "react";
+import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.js";
 import { fontPersistenceEngine } from "./persistence/fontPersistenceEngine.js";
 
 // Enforce and persist system-wide typography adopted from legacy app
@@ -91,6 +89,36 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 
+const DeferredApp: React.FC = () => {
+  const [AppComponent, setAppComponent] = useState<React.ComponentType | null>(null);
+  const [bootError, setBootError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      import("./App.js"),
+      import("./atomicOutbox.js"),
+    ])
+      .then(([appModule]) => {
+        if (active) setAppComponent(() => appModule.default);
+      })
+      .catch((error) => {
+        if (active) setBootError(error instanceof Error ? error : new Error(String(error)));
+      });
+    return () => { active = false; };
+  }, []);
+
+  if (bootError) throw bootError;
+  if (!AppComponent) {
+    return (
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1.5rem", fontFamily: "var(--font-sans, Inter, sans-serif)" }}>
+        <div className="v2-card" style={{ padding: "1.5rem", textAlign: "center" }}>Loading KwakoPos…</div>
+      </main>
+    );
+  }
+  return <AppComponent />;
+};
+
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
@@ -100,7 +128,7 @@ if (!rootElement) {
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <RootErrorBoundary>
-      <App />
+      <DeferredApp />
     </RootErrorBoundary>
   </React.StrictMode>
 );

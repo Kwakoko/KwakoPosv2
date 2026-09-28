@@ -170,6 +170,7 @@ describe("Super-Strong Offline Sync", () => {
 
   it("does not lose an outbox operation when the server violates the one-result-per-operation protocol", async () => {
     const db = new LocalIndexedDbStore();
+    await db.ready;
     db.recordOutboxMutation({
       id: "protocol-op-1",
       entityType: "Product",

@@ -20,7 +20,7 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
   let secondClientDb: LocalIndexedDbStore;
   let secondClientEngine: ClientSyncEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenantCtx = {
@@ -40,6 +40,7 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
 
     secondClientDb = new LocalIndexedDbStore();
     secondClientEngine = new ClientSyncEngine("pos-terminal-B", secondClientDb);
+    await Promise.all([clientDb.ready, secondClientDb.ready]);
   });
 
   it("handles offline sale of product without variants by synthesizing fallback variant and propagating via delta sync", async () => {

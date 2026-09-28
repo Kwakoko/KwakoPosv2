@@ -18,7 +18,7 @@ describe("Pillar 1 — Outbox Guarantees: Flaky Network Integration Drill", () =
   let clientDb: LocalIndexedDbStore;
   let clientEngine: ClientSyncEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenantCtx = {
@@ -35,6 +35,7 @@ describe("Pillar 1 — Outbox Guarantees: Flaky Network Integration Drill", () =
 
     clientDb = new LocalIndexedDbStore();
     clientEngine = new ClientSyncEngine("pos-terminal-01", clientDb);
+    await clientDb.ready;
   });
 
   it("ensures outbox queue length never decreases without verified server ACK during network drops", async () => {

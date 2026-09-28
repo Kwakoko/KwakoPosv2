@@ -28,7 +28,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
   let deviceBDb: LocalIndexedDbStore;
   let deviceBEngine: ClientSyncEngine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalInMemoryStore.clear();
 
     tenantA = {
@@ -65,6 +65,7 @@ describe("KwakoPos v2 — Comprehensive Convergence Lifecycle Test Suite", () =>
 
     deviceBDb = new LocalIndexedDbStore();
     deviceBEngine = new ClientSyncEngine("device-pos-beta", deviceBDb);
+    await Promise.all([deviceADb.ready, deviceBDb.ready]);
   });
 
   // 1. Single device: create -> sync -> reload -> bootstrap -> verify

@@ -205,17 +205,35 @@ async function applyRevisionedChanges(
     } else if (storeName) {
       const record = change.record;
       const recoveryPatch = Boolean(record?.__syncRecoveryPatch);
+      const targetStore = tx.objectStore(storeName);
+
+      // A locally committed StockLedger row can be echoed back by the server's
+      // canonical journal event. Reconcile by durable idempotency key so the
+      // replica replaces the local row instead of double-counting inventory.
+      if (change.entityType === "StockLedger" && record?.idempotencyKey) {
+        const existingRows = await new Promise<any[]>((resolve, reject) => {
+          const request = targetStore.getAll();
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error || new Error("IndexedDB ledger read failed"));
+        });
+        for (const existingRow of existingRows) {
+          if (existingRow?.idempotencyKey === record.idempotencyKey && String(existingRow.id) !== String(change.entityId)) {
+            await waitRequest(targetStore.delete(existingRow.id));
+          }
+        }
+      }
+
       if (recoveryPatch) {
         const existing = await new Promise<any>((resolve, reject) => {
-          const request = tx.objectStore(storeName).get(change.entityId);
+          const request = targetStore.get(change.entityId);
           request.onsuccess = () => resolve(request.result || {});
           request.onerror = () => reject(request.error || new Error("IndexedDB read failed"));
         });
         const merged = { ...existing, ...record };
         delete merged.__syncRecoveryPatch;
-        await waitRequest(tx.objectStore(storeName).put(merged, change.entityId));
+        await waitRequest(targetStore.put(merged, change.entityId));
       } else {
-        await waitRequest(tx.objectStore(storeName).put(record, change.entityId));
+        await waitRequest(targetStore.put(record, change.entityId));
       }
     }
 
