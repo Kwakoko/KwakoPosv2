@@ -1,3 +1,4 @@
+import { AUTHORITATIVE_COMPATIBILITY_MATRIX } from "./persistence/releaseCompatibility.js";
 import type {
   Product,
   ProductVariant,
@@ -81,6 +82,7 @@ export type NativeStore =
   | "customers"
   | "suppliers"
   | "syncOutbox"
+  | "traVfdOutbox"
   | "syncMetadata"
   | "configuration"
   | "auditState"
@@ -101,6 +103,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
   "customers",
   "suppliers",
   "syncOutbox",
+  "traVfdOutbox",
   "syncMetadata",
   "configuration",
   "auditState",
@@ -110,7 +113,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 ];
 
 const DB_NAME = "kwakopos-v2";
-export const AUTHORITATIVE_SCHEMA_VERSION = 4;
+export const AUTHORITATIVE_SCHEMA_VERSION = 5;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
@@ -196,6 +199,12 @@ export class QueryableStore<T = any> extends Map<string, T> {
   }
 }
 
+function toIndexedDbCloneable<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (_key, nested) => {
+    if (typeof nested === "bigint") return nested.toString();
+    return nested;
+  })) as T;
+}
 export class LocalIndexedDbStore {
   schemaVersion: number;
   products: QueryableStore<Product>;
@@ -210,6 +219,7 @@ export class LocalIndexedDbStore {
   customers: QueryableStore<any>;
   suppliers: QueryableStore<any>;
   syncOutbox: QueryableStore<OutboxItem>;
+  traVfdOutbox: QueryableStore<any>;
   syncMetadata: QueryableStore<string>;
   configuration: QueryableStore<any>;
   auditState: QueryableStore<any>;
@@ -254,6 +264,7 @@ export class LocalIndexedDbStore {
     this.customers = new QueryableStore<any>("customers", p);
     this.suppliers = new QueryableStore<any>("suppliers", p);
     this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
+    this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
     this.syncMetadata = new QueryableStore<string>("syncMetadata", p);
     this.configuration = new QueryableStore<any>("configuration", p);
     this.auditState = new QueryableStore<any>("auditState", p);
@@ -340,7 +351,7 @@ export class LocalIndexedDbStore {
         const startupStores: NativeStore[] = [
           "products", "productVariants", "stockBalance", "stockLedger", "stockAdjustments",
           "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers",
-          "syncOutbox", "syncMetadata", "configuration",
+          "syncOutbox", "traVfdOutbox", "syncMetadata", "configuration",
         ];
         const activeStores = startupStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
         for (const store of activeStores) {
@@ -405,6 +416,8 @@ export class LocalIndexedDbStore {
         return this.suppliers;
       case "syncOutbox":
         return this.syncOutbox;
+      case "traVfdOutbox":
+        return this.traVfdOutbox;
       case "syncMetadata":
         return this.syncMetadata;
       case "configuration":
@@ -432,21 +445,51 @@ export class LocalIndexedDbStore {
     }
   }
 
-  private hydrateMap<T>(store: NativeStore, target: Map<string, T>): Promise<void> {
-    if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const tx = this.nativeDb!.transaction(store, "readonly");
-      const request = tx.objectStore(store).openCursor();
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) return;
-        target.set(String(cursor.primaryKey), cursor.value as T);
-        cursor.continue();
+  private async reopenNativeConnection(): Promise<void> {
+    if (typeof indexedDB === "undefined") return;
+    await new Promise<void>((resolve, reject) => {
+      let request: IDBOpenDBRequest;
+      try { request = indexedDB.open(this.dbName, this.schemaVersion); } catch (error) { reject(error); return; }
+      request.onupgradeneeded = (event) => {
+        const db = request.result;
+        const transaction = request.transaction!;
+        globalMigrationEngine.applySchemaUpgrade(db, transaction, event.oldVersion || 0, event.newVersion || this.schemaVersion);
       };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error(`IndexedDB read failed: ${store}`));
-      tx.onabort = () => reject(tx.error || new Error(`IndexedDB read aborted: ${store}`));
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => { try { db.close(); } catch { /* ignore */ } };
+        this.nativeDb = db;
+        resolve();
+      };
+      request.onerror = () => reject(request.error || new Error("IndexedDB reopen failed"));
+      request.onblocked = () => reject(new Error("IndexedDB reopen blocked by another connection"));
     });
+  }
+
+  private async hydrateMap<T>(store: NativeStore, target: Map<string, T>): Promise<void> {
+    if (!this.nativeDb || !this.nativeDb.objectStoreNames.contains(store)) return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = this.nativeDb!.transaction(store, "readonly");
+          const request = tx.objectStore(store).openCursor();
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) return;
+            target.set(String(cursor.primaryKey), cursor.value as T);
+            cursor.continue();
+          };
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error(`IndexedDB read failed: ${store}`));
+          tx.onabort = () => reject(tx.error || new Error(`IndexedDB read aborted: ${store}`));
+        });
+        return;
+      } catch (error) {
+        const invalidState = error instanceof DOMException && error.name === "InvalidStateError";
+        if (!invalidState || attempt === 1) throw error;
+        await this.reopenNativeConnection();
+      }
+    }
   }
 
   public persist<T>(store: NativeStore, key: string, value: T): void {
@@ -546,6 +589,7 @@ export class LocalIndexedDbStore {
     this.customers.clear();
     this.suppliers.clear();
     this.syncOutbox.clear();
+    this.traVfdOutbox.clear();
     this.syncMetadata.clear();
     this.configuration.clear();
     this.auditState.clear();
@@ -597,6 +641,7 @@ export class LocalIndexedDbStore {
     filterTenant(this.customers, "customers");
     filterTenant(this.suppliers, "suppliers");
     filterTenant(this.syncOutbox, "syncOutbox");
+    filterTenant(this.traVfdOutbox, "traVfdOutbox");
     filterTenant(this.configuration, "configuration");
     filterTenant(this.auditState, "auditState");
   }
@@ -1051,7 +1096,7 @@ export class LocalIndexedDbStore {
     await this.flushPersistence();
   }
 
-  async createVerifiedSnapshot(reason: string, appVersion = "2.12.5"): Promise<RecoverySnapshot> {
+  async createVerifiedSnapshot(reason: string, appVersion = AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion): Promise<RecoverySnapshot> {
     const storesData: Record<string, SnapshotStoreItem[]> = {};
 
     for (const storeName of ALL_STORE_NAMES) {
@@ -1274,13 +1319,13 @@ export class LocalIndexedDbStore {
         (product.variants || []).some((v) => this.pendingFor("ProductVariant", v.id))
       )
         continue;
-      productsStore.put(product, product.id);
+      productsStore.put(toIndexedDbCloneable(product), product.id);
       this.products.set(product.id, product);
       appliedCount += 1;
       for (const variant of product.variants || []) {
         if (this.protectServerRecord("ProductVariant", variant.id)) continue;
         const reconciled = this.mergeLocalDeltasIntoVariant(variant);
-        variantsStore.put(reconciled, reconciled.id);
+        variantsStore.put(toIndexedDbCloneable(reconciled), reconciled.id);
         this.productVariants.set(reconciled.id, reconciled);
         appliedCount += 1;
       }
@@ -1288,30 +1333,30 @@ export class LocalIndexedDbStore {
     for (const variant of variants) {
       if (this.protectServerRecord("ProductVariant", variant.id)) continue;
       const reconciled = this.mergeLocalDeltasIntoVariant(variant);
-      variantsStore.put(reconciled, reconciled.id);
+      variantsStore.put(toIndexedDbCloneable(reconciled), reconciled.id);
       this.productVariants.set(reconciled.id, reconciled);
       appliedCount += 1;
     }
     for (const entry of ledger) {
-      ledgerStore.put(entry, entry.id);
+      ledgerStore.put(toIndexedDbCloneable(entry), entry.id);
       this.stockLedger.set(entry.id, entry);
       appliedCount += 1;
     }
     for (const adjustment of adjustments) {
       if (this.protectServerRecord("StockAdjustment", adjustment.id)) continue;
-      adjustmentsStore.put(adjustment, adjustment.id);
+      adjustmentsStore.put(toIndexedDbCloneable(adjustment), adjustment.id);
       this.stockAdjustments.set(adjustment.id, adjustment);
       appliedCount += 1;
     }
     for (const customer of customers) {
       if (this.protectServerRecord("Customer", customer.id)) continue;
-      customersStore.put(customer, customer.id);
+      customersStore.put(toIndexedDbCloneable(customer), customer.id);
       this.customers.set(customer.id, customer);
       appliedCount += 1;
     }
     for (const supplier of suppliers) {
       if (this.protectServerRecord("Supplier", supplier.id)) continue;
-      suppliersStore.put(supplier, supplier.id);
+      suppliersStore.put(toIndexedDbCloneable(supplier), supplier.id);
       this.suppliers.set(supplier.id, supplier);
       appliedCount += 1;
     }
@@ -1399,7 +1444,7 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], traVfdOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
     const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
@@ -1433,11 +1478,11 @@ export class LocalIndexedDbStore {
       const os = tx.objectStore(store);
       const target = this.getTargetMap(store);
       if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
-      for (const row of records[store] || []) if (!isProtected(store, String(row.id))) os.put(row, row.id);
+      for (const row of records[store] || []) if (!isProtected(store, String(row.id))) os.put(toIndexedDbCloneable(row), row.id);
     }
     const configStore = tx.objectStore("configuration");
-    if (!pendingCatalogTypes.has("Category")) configStore.put(categoryValue, tenantId + ":" + branchId + ":inventory_categories_meta");
-    if (!pendingCatalogTypes.has("Brand")) configStore.put(brandValue, tenantId + ":" + branchId + ":inventory_brands_meta");
+    if (!pendingCatalogTypes.has("Category")) configStore.put(toIndexedDbCloneable(categoryValue), tenantId + ":" + branchId + ":inventory_categories_meta");
+    if (!pendingCatalogTypes.has("Brand")) configStore.put(toIndexedDbCloneable(brandValue), tenantId + ":" + branchId + ":inventory_brands_meta");
     const md = tx.objectStore("syncMetadata");
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastSyncTime"));
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"));
@@ -1856,4 +1901,4 @@ export class LocalIndexedDbStore {
   }
 }
 
-export const db = new LocalIndexedDbStore(4);
+export const db = new LocalIndexedDbStore(AUTHORITATIVE_SCHEMA_VERSION);

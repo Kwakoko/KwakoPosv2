@@ -27,6 +27,7 @@ import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
 import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
+import { apiFetch } from "../services/apiClient.js";
 
 
 type SettingsTab =
@@ -39,7 +40,7 @@ export interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantId, currentTenantName } = useTenant();
-  const { currentBranchName } = useBranch();
+  const { currentBranchName, currentBranchId } = useBranch();
   const { db } = useSync();
   const toast = useToast();
   const { t } = useTranslation();
@@ -123,10 +124,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         vatRatePercent: Number(saved.vatRatePercent ?? 0),
         currencySymbol: saved.currencySymbol || prev.currencySymbol,
         currencyCode: saved.currencyCode || prev.currencyCode,
+        traVfdEnabled: saved.traVfdEnabled ?? prev.traVfdEnabled,
         traVfdEndpoint: saved.traVfdEndpoint || prev.traVfdEndpoint,
       }));
     }
   }, [db]);
+
+  useEffect(() => {
+    if (!currentTenantId || !currentBranchId || typeof navigator === "undefined" || !navigator.onLine) return;
+    void apiFetch<any>("/api/v1/tra-vfd/config")
+      .then((res) => {
+        const config = res?.data || res;
+        if (!config || typeof config.enabled !== "boolean") return;
+        const next = { enabled: config.enabled, endpoint: String(config.endpoint || "") };
+        setTaxConfig((prev) => ({ ...prev, traVfdEnabled: next.enabled, traVfdEndpoint: next.endpoint }));
+        db.saveConfigurationLocal?.("tra_vfd_config", next, { tenantId: currentTenantId, branchId: currentBranchId });
+      })
+      .catch(() => {
+        // Local configuration remains authoritative while the server is unreachable.
+      });
+  }, [currentTenantId, currentBranchId, db]);
 
   const [posConfig, setPosConfig] = useState({
     autoPrintReceipt: true,
@@ -145,7 +162,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
           vatRatePercent: Number(saved.vatRatePercent ?? 0),
           currencySymbol: saved.currencySymbol || "Tsh",
           currencyCode: saved.currencyCode || "TZS",
-          traVfdEndpoint: saved.traVfdEndpoint || "https://vfd.tra.go.tz/api/v1/receipts",
+          traVfdEnabled: saved.traVfdEnabled ?? false,
+          traVfdEndpoint: saved.traVfdEndpoint || "",
         };
       }
     } catch {}
@@ -154,7 +172,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       vatRatePercent: 0,
       currencySymbol: "Tsh",
       currencyCode: "TZS",
-      traVfdEndpoint: "https://vfd.tra.go.tz/api/v1/receipts",
+      traVfdEnabled: false,
+      traVfdEndpoint: "",
     };
   });
 
@@ -165,12 +184,31 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     barcodePrefix: "200",
   });
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     db.saveConfigurationLocal?.("store_profile", profile);
     db.saveConfigurationLocal?.("pos_config", posConfig);
     db.saveConfigurationLocal?.("tax_config", taxConfig);
+    db.saveConfigurationLocal?.("tra_vfd_config", {
+      enabled: Boolean(taxConfig.traVfdEnabled),
+      endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
+    }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
     db.saveConfigurationLocal?.("inv_config", invConfig);
+    if (currentTenantId && currentBranchId && typeof navigator !== "undefined" && navigator.onLine) {
+      try {
+        await apiFetch("/api/v1/tra-vfd/config", {
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: Boolean(taxConfig.traVfdEnabled),
+            endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
+          }),
+        });
+      } catch (error: any) {
+        setSavedSuccess(false);
+        toast.error("TRA VFD Configuration Failed", error?.message || "The server did not accept the VFD configuration.");
+        return;
+      }
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -433,7 +471,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             </div>
             <div>
               <label className="v2-text-xs v2-font-bold v2-text-muted">TRA VFD Fiscal Signing Server Endpoint</label>
-              <input className="v2-input" value={taxConfig.traVfdEndpoint} onChange={(e) => setTaxConfig({ ...taxConfig, traVfdEndpoint: e.target.value })} />
+              <input className="v2-input" value={taxConfig.traVfdEndpoint} onChange={(e) => setTaxConfig({ ...taxConfig, traVfdEndpoint: e.target.value })} placeholder="https://your-vfd-gateway.example/api" />
+            </div>
+            <div className="v2-flex v2-items-center v2-justify-between v2-p-3" style={{ border: "1px solid var(--surface-border)", borderRadius: "var(--radius-md, .55rem)", background: "var(--surface-2)" }}>
+              <div>
+                <div className="v2-font-bold v2-text-sm">TRA VFD Fiscalization</div>
+                <div className="v2-text-xs v2-text-muted" style={{ maxWidth: "44rem", marginTop: ".2rem" }}>
+                  ON sends completed receipts to the separate durable TRA VFD fiscal queue. OFF prevents new fiscal requests; existing queued fiscal work remains preserved for recovery.
+                </div>
+              </div>
+              <label className="v2-flex v2-items-center v2-gap-2" style={{ cursor: "pointer", flexShrink: 0 }}>
+                <span className="v2-text-xs v2-font-black">{taxConfig.traVfdEnabled ? "ON" : "OFF"}</span>
+                <input
+                  type="checkbox"
+                  aria-label="TRA VFD Fiscalization On Off"
+                  checked={Boolean(taxConfig.traVfdEnabled)}
+                  onChange={(e) => setTaxConfig({ ...taxConfig, traVfdEnabled: e.target.checked })}
+                />
+              </label>
             </div>
           </div>
         </div>

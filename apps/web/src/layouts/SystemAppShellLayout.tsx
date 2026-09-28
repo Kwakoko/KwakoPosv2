@@ -90,6 +90,7 @@ function translateNavTab(tab: string, t: (k: string) => string): string {
 export interface ShellLayoutProps {
   currentPath: string;
   onNavigate: (path: string) => void;
+  resolveTabPath?: (tab: string, parentName?: string) => string | undefined;
   children: React.ReactNode;
 }
 
@@ -460,7 +461,7 @@ const SidebarAccordion: React.FC<{
   name: string;
   subItems: string[];
   activeTab: string;
-  onSelectTab: (tab: string) => void;
+  onSelectTab: (tab: string, parentName?: string) => void;
   expanded: boolean;
   onToggle: () => void;
   iconName?: string;
@@ -488,7 +489,7 @@ const SidebarAccordion: React.FC<{
             key={sub}
             aria-label={translateNavTab(sub, t)}
             className={`sidebar-subitem${activeTab === sub ? " active" : ""}`}
-            onClick={() => onSelectTab(sub)}
+            onClick={() => onSelectTab(sub, name)}
             type="button"
           >
             {translateNavTab(sub, t)}
@@ -887,13 +888,14 @@ function getSidebarIconColor(name: string): string {
 export const Sidebar: React.FC<{
   currentPath: string;
   onNavigate: (path: string) => void;
+  resolveTabPath?: (tab: string, parentName?: string) => string | undefined;
   user: { name?: string; role?: string; email?: string } | null;
   canAdminister: boolean;
   isMobile?: boolean;
   onCloseMobile?: () => void;
   onOpenInspectModal?: () => void;
-}> = ({ currentPath, onNavigate, user, isMobile = false, onCloseMobile, onOpenInspectModal }) => {
-  const { sidebarItems, activeTab, setActiveTab, activeModule, manifest } = useModule();
+}> = ({ currentPath, onNavigate, user, isMobile = false, onCloseMobile, onOpenInspectModal, resolveTabPath }) => {
+  const { sidebarItems, activeTab, setActiveTab, canAccessTab, activeModule, manifest } = useModule();
   const { isSuperAdmin } = useRbac();
   const { impersonatedTenant, stopImpersonation } = useAuth();
   const { t } = useTranslation();
@@ -919,11 +921,16 @@ export const Sidebar: React.FC<{
   }, []);
 
   const handleTabSelect = useCallback(
-    (tab: string) => {
+    (tab: string, parentName?: string) => {
+      if (!canAccessTab(tab)) return;
+      const route = resolveTabPath?.(tab, parentName) || currentPath;
+      if (route !== currentPath) onNavigate(route);
+      // Apply the clicked sub-item last because handleNavigate() may canonicalize
+      // the destination route back to its parent workspace tab.
       setActiveTab(tab);
       if (isMobile) onCloseMobile?.();
     },
-    [setActiveTab, isMobile, onCloseMobile],
+    [setActiveTab, canAccessTab, resolveTabPath, onNavigate, currentPath, isMobile, onCloseMobile],
   );
 
   return (
@@ -1230,7 +1237,7 @@ export const AppVersionFooter: React.FC<{
       <div className="app-version-footer-inner">
         <span className="app-version-brand">Kwakoko BOS</span>
         <span className="footer-dot">·</span>
-        <span>KwakoPos {appVersion || "v2.12.5"}</span>
+        <span>KwakoPos {appVersion || "v2.13.0"}</span>
         {gitSha && (
           <>
             <span className="footer-dot">·</span>
@@ -2354,7 +2361,7 @@ export const EmptySearch: React.FC<{ message: string }> = ({ message }) => (
 // ─── SystemAppShellLayout ──────────────────────────────────────────────────────
 
 export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
-  currentPath, onNavigate, children,
+  currentPath, onNavigate, resolveTabPath, children,
 }) => {
   const { user, logout, impersonatedTenant, stopImpersonation } = useAuth();
   const { currentTenantId, currentTenantName, availableTenants, switchTenant } = useTenant();
@@ -2485,6 +2492,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         <Sidebar
           currentPath={currentPath}
           onNavigate={onNavigate}
+          resolveTabPath={resolveTabPath}
           user={user ? { name: user.name, role: user.role, email: user.email } : null}
           canAdminister={canAdminister}
         />
@@ -2504,6 +2512,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
           <Sidebar
             currentPath={currentPath}
             onNavigate={onNavigate}
+            resolveTabPath={resolveTabPath}
             user={user ? { name: user.name, role: user.role, email: user.email } : null}
             canAdminister={canAdminister}
             isMobile

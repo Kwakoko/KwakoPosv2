@@ -80,6 +80,27 @@ const HelpPage = lazyWorkspacePage("HelpPage");
 const VerticalCommandCenterPage = lazyWorkspacePage("VerticalCommandCenterPage");
 const CustomerDisplayPage = lazyPage(() => import("./pages/CustomerDisplayPage.js").then((m) => ({ default: m.CustomerDisplayPage })));
 
+const SIDEBAR_CROSS_WORKSPACE_ROUTES: Record<string, string> = {
+  "Users & Roles": "/users",
+  "Trash Can & Recovery": "/trash",
+  "Help & Manuals": "/help",
+};
+
+const CORE_WORKSPACE_PARENT_ROUTES = new Set([
+  "POS",
+  "Cash Drawer",
+  "Inventory",
+  "Receipts",
+  "Customers",
+  "Purchasing",
+  "Expenses",
+  "Reports",
+  "Employees",
+  "AI Insights Engine",
+  "Settings",
+  "Finance",
+]);
+
 const TAB_TO_PATH: Record<string, string> = {
   Dashboard: "/",
   // POS
@@ -366,6 +387,7 @@ const AuthenticatedApp: React.FC = () => {
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
   const initialRouteSyncRef = useRef(true);
+  const explicitNavigationPathRef = useRef<string | null>(null);
   const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() =>
     Boolean(getStoredSession()?.user)
   );
@@ -434,8 +456,13 @@ const AuthenticatedApp: React.FC = () => {
       if (canonicalTab && canonicalTab !== activeTab) return;
     }
 
-    const defaultPath = isSuperAdmin && !impersonatedTenant ? "/super-admin" : "/";
-    const path = TAB_TO_PATH[activeTab] || defaultPath;
+    if (explicitNavigationPathRef.current === currentPath) {
+      explicitNavigationPathRef.current = null;
+      return;
+    }
+    const mappedPath = TAB_TO_PATH[activeTab];
+    if (!mappedPath) return;
+    const path = mappedPath;
     if (currentPath !== path) {
       setCurrentPath(path);
       if (typeof window !== "undefined" && window.location.pathname !== path) {
@@ -445,6 +472,7 @@ const AuthenticatedApp: React.FC = () => {
   }, [activeTab, isSuperAdmin, impersonatedTenant]);
 
   const handleNavigate = (path: string) => {
+    explicitNavigationPathRef.current = path;
     setCurrentPath(path);
     if (typeof window !== "undefined" && window.location.pathname !== path) {
       window.history.pushState({}, "", path);
@@ -565,25 +593,25 @@ const AuthenticatedApp: React.FC = () => {
       case "/super-admin/certification":
         return <SuperAdminPage onNavigate={handleNavigate} initialTab="certification" />;
       case "/restaurant":
-        return <VerticalCommandCenterPage moduleType="restaurant" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="restaurant" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/electronics":
-        return <VerticalCommandCenterPage moduleType="electronics" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="electronics" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/hardware":
-        return <VerticalCommandCenterPage moduleType="hardware" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="hardware" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/microfinance":
-        return <VerticalCommandCenterPage moduleType="microfinance" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="microfinance" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/sacco":
-        return <VerticalCommandCenterPage moduleType="sacco" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="sacco" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/garage":
-        return <VerticalCommandCenterPage moduleType="garage" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="garage" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/construction":
-        return <VerticalCommandCenterPage moduleType="construction" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="construction" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/wholesale":
-        return <VerticalCommandCenterPage moduleType="wholesale" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="wholesale" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/bar":
-        return <VerticalCommandCenterPage moduleType="bar" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="bar" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/real-estate":
-        return <VerticalCommandCenterPage moduleType="real-estate" onNavigate={handleNavigate} />;
+        return <VerticalCommandCenterPage moduleType="real-estate" activeTab={activeTab} onNavigate={handleNavigate} />;
       case "/":
       case "/dashboard":
         return <DashboardPage onNavigate={handleNavigate} />;
@@ -624,17 +652,17 @@ const AuthenticatedApp: React.FC = () => {
       case "/consulting":
         return <BusinessConsultingPage />;
       case "/law-firm":
-        return <LawFirmPage />;
+        return <LawFirmPage activeTab={activeTab} />;
       case "/pharmacy":
-        return <PharmacyPage />;
+        return <PharmacyPage activeTab={activeTab} />;
       case "/poultry-livestock":
-        return <PoultryLivestockPage />;
+        return <PoultryLivestockPage activeTab={activeTab} />;
       case "/fleet":
-        return <FleetPage />;
+        return <FleetPage activeTab={activeTab} />;
       case "/workforce":
-        return <WorkforcePage />;
+        return <WorkforcePage activeTab={activeTab} />;
       case "/telecom":
-        return <TelecomPage />;
+        return <TelecomPage activeTab={activeTab} />;
       case "/help":
         return <HelpPage />;
       case "/support":
@@ -653,7 +681,18 @@ const AuthenticatedApp: React.FC = () => {
           </div>
         }
       >
-        <SystemAppShellLayout currentPath={currentPath} onNavigate={handleNavigate}>
+        <SystemAppShellLayout
+          currentPath={currentPath}
+          onNavigate={handleNavigate}
+          resolveTabPath={(tab: string, parentName?: string) => {
+            const crossWorkspaceRoute = SIDEBAR_CROSS_WORKSPACE_ROUTES[tab];
+            if (crossWorkspaceRoute) return crossWorkspaceRoute;
+            if (parentName && CORE_WORKSPACE_PARENT_ROUTES.has(parentName)) {
+              return TAB_TO_PATH[parentName];
+            }
+            return currentPath;
+          }}
+        >
           <ProductionErrorBoundary>
           <Suspense
             fallback={

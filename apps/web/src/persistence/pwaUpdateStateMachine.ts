@@ -71,7 +71,7 @@ export class PwaUpdateStateMachine {
   private record: DurableUpdateRecord;
   private listeners: Array<(state: PwaUpdateState, record: DurableUpdateRecord) => void> = [];
 
-  constructor(initialVersion = "2.12.5", initialSchema = 4) {
+  constructor(initialVersion = "2.13.0", initialSchema = 4) {
     this.record = this.loadDurableState(initialVersion, initialSchema);
   }
 

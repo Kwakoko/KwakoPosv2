@@ -4,7 +4,7 @@
  * Documents, Billing & Retainers, Reports, Settings
  * CSS: V2 design system only. No static inline styles.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   Scale, Users, Calendar, AlertCircle, DollarSign, ShieldAlert, Clock,
@@ -27,6 +27,10 @@ const LAW_TABS = [
   "Legal Tasks", "Documents", "Billing & Retainers", "Legal Reports", "Legal Settings",
 ] as const;
 type LawTab = typeof LAW_TABS[number];
+
+export interface LawFirmPageProps {
+  activeTab?: string;
+}
 
 // ─── Shared components ────────────────────────────────────────────────────────
 const KpiCard: React.FC<{
@@ -534,8 +538,24 @@ const LegalSettings: React.FC = () => (
 );
 
 // ─── Law Firm Module Entry Point ──────────────────────────────────────────────
-export const LawFirmPage: React.FC = () => {
+export const LawFirmPage: React.FC<LawFirmPageProps> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<LawTab>("Legal Dashboard");
+
+  useEffect(() => {
+    if (!externalActiveTab) return;
+    const tab = externalActiveTab.toLowerCase();
+    let next: LawTab = "Legal Dashboard";
+    if (tab.includes("client")) next = "Clients";
+    else if (tab.includes("case") || tab.includes("matter")) next = "Cases";
+    else if (tab.includes("hearing") || tab.includes("court") || tab.includes("calendar")) next = "Court Calendar";
+    else if (tab.includes("task") || tab.includes("deadline")) next = "Legal Tasks";
+    else if (tab.includes("document") || tab.includes("file") || tab.includes("contract")) next = "Documents";
+    else if (tab.includes("billing") || tab.includes("invoice") || tab.includes("payment") || tab.includes("retainer")) next = "Billing & Retainers";
+    else if (tab.includes("report") || tab.includes("performance") || tab.includes("financial")) next = "Legal Reports";
+    else if (tab.includes("setting") || tab.includes("user role") || tab.includes("workflow") || tab.includes("integration")) next = "Legal Settings";
+    else if (LAW_TABS.includes(externalActiveTab as LawTab)) next = externalActiveTab as LawTab;
+    setActiveTab(next);
+  }, [externalActiveTab]);
 
   const renderTab = () => {
     switch (activeTab) {

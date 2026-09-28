@@ -163,6 +163,8 @@ export function productionCleanlinessRoutes(server: FastifyInstance): void {
             await (prisma as any).product?.deleteMany?.({ where: { tenantId } }).catch(() => {});
           }
           if (scope === "sales" || scope === "all") {
+            await (prisma as any).traVfdOutbox?.deleteMany?.({ where: { tenantId } }).catch(() => {});
+            await (prisma as any).traVfdFiscalization?.deleteMany?.({ where: { tenantId } }).catch(() => {});
             await (prisma as any).payment?.deleteMany?.({ where: { tenantId } }).catch(() => {});
             await (prisma as any).saleItem?.deleteMany?.({ where: { tenantId } }).catch(() => {});
             await (prisma as any).sale?.deleteMany?.({ where: { tenantId } }).catch(() => {});

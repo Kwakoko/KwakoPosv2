@@ -168,4 +168,3 @@ export function generateFormattedReleaseNotes(version, baselineTag, commits) {
     notes += `*Baseline Tag*: \`${baselineTag}\`\n`;
     return notes.trim();
 }
-//# sourceMappingURL=semverEngine.js.map

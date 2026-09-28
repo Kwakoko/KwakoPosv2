@@ -182,6 +182,11 @@ export const tenantStoreCleanupService = {
           }
         }
       }
+      if (db.traVfdOutbox) {
+        for (const [id, item] of Array.from(db.traVfdOutbox.entries())) {
+          if (item?.tenantId === tenantId || item?.tenant_id === tenantId) db.traVfdOutbox.delete(id);
+        }
+      }
 
       if (typeof db.flushPersistence === "function") {
         await db.flushPersistence().catch(() => {});

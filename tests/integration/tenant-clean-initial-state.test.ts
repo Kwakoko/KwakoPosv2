@@ -63,14 +63,14 @@ describe("Production tenant clean initialization", () => {
     const categoryUpsert = vi.spyOn((PrismaCatalogRepository as any).prototype, "ensureDefaults");
     const catalog = new PrismaCatalogRepository();
 
-    await catalog.ensureDefaults({
+    const defaultsResult = await catalog.ensureDefaults({
       tenantId: actor.tenantId,
       branchId: "33333333-3333-4333-8333-333333333333",
       userId: actor.userId,
     } as any);
 
     expect(categoryUpsert).toHaveBeenCalledTimes(1);
-    expect(categoryUpsert).toHaveReturnedWith(undefined);
+    expect(defaultsResult).toBeUndefined();
     categoryUpsert.mockRestore();
   });
 });

@@ -3,7 +3,7 @@
  * Poultry & Livestock, Fleet Management, Workforce & Payroll, Telecom
  * CSS: V2 design system classes only.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import { persistFleetFueling } from "../services/verticalMutationService.js";
 import {
@@ -43,6 +43,22 @@ const Empty: React.FC<{ icon?: React.ReactNode; message: string; action?: React.
     {action && <div style={{ marginTop: ".75rem" }}>{action}</div>}
   </div>
 );
+
+function resolveSidebarTab<T extends string>(
+  externalTab: string | undefined,
+  tabs: readonly T[],
+  rules: Array<[string[], T]>,
+  fallback: T,
+): T {
+  if (!externalTab) return fallback;
+  const direct = tabs.find((tab) => tab === externalTab);
+  if (direct) return direct;
+  const value = externalTab.toLowerCase();
+  for (const [terms, target] of rules) {
+    if (terms.some((term) => value.includes(term))) return target;
+  }
+  return fallback;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // POULTRY & LIVESTOCK MODULE
@@ -135,8 +151,18 @@ const PoultryStub: React.FC<{ title: string }> = ({ title }) => (
   </div>
 );
 
-export const PoultryLivestockPage: React.FC = () => {
+export const PoultryLivestockPage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<PoultryTab>("Flock Dashboard");
+  useEffect(() => {
+    setActiveTab(resolveSidebarTab(externalActiveTab, POULTRY_TABS, [
+      [["batch", "flock"], "Flock Batches"],
+      [["daily", "production", "egg", "milk", "weight"], "Daily Production"],
+      [["feed"], "Feed Management"],
+      [["mortality", "health", "disease", "vet", "quarantine"], "Mortality & Health"],
+      [["sales", "revenue", "invoice", "pos", "livestock"], "Sales & Revenue"],
+      [["report", "fcr", "cost", "profit"], "Poultry Reports"],
+    ], "Flock Dashboard") as PoultryTab);
+  }, [externalActiveTab]);
   return (
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
@@ -283,8 +309,19 @@ const FleetStub: React.FC<{ title: string }> = ({ title }) => (
   </div>
 );
 
-export const FleetPage: React.FC = () => {
+export const FleetPage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<FleetTab>("Fleet Dashboard");
+  useEffect(() => {
+    setActiveTab(resolveSidebarTab(externalActiveTab, FLEET_TABS, [
+      [["vehicle", "plate", "group"], "Vehicles"],
+      [["trip", "dispatch", "assign", "route", "odometer", "mileage"], "Trip Dispatch"],
+      [["fuel", "station", "consumption"], "Fuel Records"],
+      [["maintenance", "repair", "service", "workshop", "parts"], "Maintenance"],
+      [["driver", "license"], "Drivers"],
+      [["report", "compliance", "expense", "profit", "cost"], "Fleet Reports"],
+      [["dashboard", "overview", "health", "utilization"], "Fleet Dashboard"],
+    ], "Fleet Dashboard") as FleetTab);
+  }, [externalActiveTab]);
   return (
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
@@ -396,8 +433,18 @@ const WorkforceStub: React.FC<{ title: string }> = ({ title }) => (
   </div>
 );
 
-export const WorkforcePage: React.FC = () => {
+export const WorkforcePage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<WorkforceTab>("HR Dashboard");
+  useEffect(() => {
+    setActiveTab(resolveSidebarTab(externalActiveTab, WORKFORCE_TABS, [
+      [["employee", "staff"], "Employees"],
+      [["attendance", "leave"], "Attendance & Leave"],
+      [["payroll", "salary"], "Payroll Run"],
+      [["shift", "schedule", "roster"], "Shifts & Scheduling"],
+      [["performance", "review"], "Performance"],
+      [["report", "dashboard", "kpi"], externalActiveTab?.toLowerCase().includes("report") ? "HR Reports" : "HR Dashboard"],
+    ], "HR Dashboard") as WorkforceTab);
+  }, [externalActiveTab]);
   return (
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
@@ -517,8 +564,18 @@ const TelecomStub: React.FC<{ title: string }> = ({ title }) => (
   </div>
 );
 
-export const TelecomPage: React.FC = () => {
+export const TelecomPage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<TelecomTab>("Telecom Dashboard");
+  useEffect(() => {
+    setActiveTab(resolveSidebarTab(externalActiveTab, TELECOM_TABS, [
+      [["airtime"], "Airtime Sales"],
+      [["bundle", "data"], "Data Bundles"],
+      [["agent"], "Agent Network"],
+      [["float"], "Float Management"],
+      [["m-pesa", "mpesa", "tigo"], "M-Pesa / Tigo"],
+      [["report", "sales report"], "Telecom Reports"],
+    ], "Telecom Dashboard") as TelecomTab);
+  }, [externalActiveTab]);
   return (
     <div className="v2-animate-page-enter">
       <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>

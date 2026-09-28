@@ -14,6 +14,7 @@ import { globalClientCoordination } from "./persistence/clientCoordination.js";
 import { syncDiagnosticService } from "./services/syncDiagnosticService.js";
 import { getEffectiveStock } from "./services/inventoryStockService.js";
 import { apiFetch } from "./services/apiClient.js";
+import { AUTHORITATIVE_COMPATIBILITY_MATRIX } from "./persistence/releaseCompatibility.js";
 import {
   type PersistenceStatusRecord,
   createPersistenceStatus,
@@ -315,7 +316,7 @@ export class ClientSyncEngine {
     await this.localDb.ready;
     const req: SyncBootstrapRequest = {
       deviceId: this.deviceId,
-      clientVersion: "2.12.5",
+      clientVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
       schemaVersion: this.localDb.schemaVersion,
       branchId,
     };
@@ -362,10 +363,10 @@ export class ClientSyncEngine {
       failedOperationsCount: failedOutbox.length,
       retryCount: this.retryCount,
       syncCursor: lastSync,
-      serverVersion: "2.12.5",
-      clientVersion: "2.12.5",
+      serverVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
+      clientVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
       schemaVersion: this.localDb.schemaVersion,
-      serviceWorkerVersion: "2.12.5",
+      serviceWorkerVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.pwaVersion,
       conflictCount: Array.from(this.localDb.syncMetadata.keys()).filter((k) => k.startsWith("sync_conflict_")).length,
       reconciliationStatus: this.lastReconciliationStatus,
       bootstrapStatus: isBootstrapped ? "BOOTSTRAPPED" : "NOT_BOOTSTRAPPED",
@@ -600,7 +601,7 @@ export class ClientSyncEngine {
 
 export const clientSyncEngine = new ClientSyncEngine(
   typeof crypto !== "undefined" && crypto.randomUUID ? `web-${crypto.randomUUID()}` : `web-client-default`,
-  new LocalIndexedDbStore(4),
+  new LocalIndexedDbStore(AUTHORITATIVE_COMPATIBILITY_MATRIX.schemaVersion),
 );
 
 export async function reconcileInventory(

@@ -21,16 +21,16 @@ export interface ReleaseCompatibilityMatrix {
 }
 
 export const AUTHORITATIVE_COMPATIBILITY_MATRIX: ReleaseCompatibilityMatrix = {
-  applicationVersion: "2.12.5",
-  pwaVersion: "2.12.5",
-  schemaVersion: 4,
+  applicationVersion: "2.13.0",
+  pwaVersion: "2.13.0",
+  schemaVersion: 5,
   syncProtocolVersion: 2,
-  releaseId: "kwakopos-rel-2.12.5-c3bdddf",
-  databaseCompatibilityRange: ">=1 <=4",
+  releaseId: "kwakopos-rel-2.13.0-7cd1d44",
+  databaseCompatibilityRange: ">=1 <=5",
   minimumSupportedClientVersion: "2.0.0",
   maximumSupportedClientVersion: "3.0.0",
   migrationSet: {
-    supportedForward: ["1->2", "2->3", "3->4", "1->3", "1->4", "2->4"],
+    supportedForward: ["1->2", "2->3", "3->4", "4->5", "1->3", "1->4", "1->5", "2->4", "2->5", "3->5"],
     supportedBackward: ["4->3", "4->2", "4->1", "3->2", "3->1", "2->1"],
   },
 };
@@ -84,7 +84,7 @@ export function validateReleaseCompatibility(
   }
 
   // Check schema version range
-  if (schemaVer < 1 || schemaVer > 4) {
+  if (schemaVer < 1 || schemaVer > 5) {
     return {
       compatible: false,
       reason: `SCHEMA_INCOMPATIBLE: schema version ${schemaVer} is outside supported range ${matrix.databaseCompatibilityRange}`,

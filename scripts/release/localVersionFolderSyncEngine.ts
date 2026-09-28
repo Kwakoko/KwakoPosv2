@@ -218,7 +218,7 @@ export async function resolvePeeledCommitSha(
 
   // Strategy 3: Local HEAD fallback if on target commit
   try {
-    const headSha = execSync("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
+    const headSha = execSync("git rev-parse HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (isValid40CharGitSha(headSha)) {
       return headSha;
     }
@@ -329,21 +329,21 @@ export function inspectLocalRepository(targetCwd?: string): LocalRepoState {
 
   let gitRoot = cwd;
   try {
-    gitRoot = execSync("git rev-parse --show-toplevel", { cwd, encoding: "utf8" }).trim();
+    gitRoot = execSync("git rev-parse --show-toplevel", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     gitRoot = cwd;
   }
 
   let branch = "unknown";
   try {
-    branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8" }).trim();
+    branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     branch = "detached";
   }
 
   let commitSha = "0000000000000000000000000000000000000000";
   try {
-    commitSha = execSync("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
+    commitSha = execSync("git rev-parse HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   } catch {
     // Empty commit
   }
@@ -361,7 +361,7 @@ export function inspectLocalRepository(targetCwd?: string): LocalRepoState {
 
   let isDirty = false;
   try {
-    const statusOut = execSync("git status --porcelain", { cwd, encoding: "utf8" }).trim();
+    const statusOut = execSync("git status --porcelain", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     isDirty = statusOut.length > 0;
   } catch {
     isDirty = false;

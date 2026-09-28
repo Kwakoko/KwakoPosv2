@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
 import { KokoCompanion } from '../components/KokoCompanion.js';
+import { getTraVfdConfig } from '../services/traVfdOutboxService.js';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -245,6 +246,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const role = user?.role || 'Admin';
   const tenantId = currentTenantId || '';
   const branchId = currentBranchId || '';
+  const traVfdConfig = getTraVfdConfig(db, { tenantId, branchId });
+  const traVfdQueuedCount = [...db.traVfdOutbox.values()].filter((item: any) =>
+    item.tenantId === tenantId && item.branchId === branchId && item.status !== 'SENT' &&
+    ['LOCAL_FISCAL_PENDING', 'SUBMITTING', 'TRA_RETRY'].includes(item.fiscalState)
+  ).length;
 
   const handleNav = (tab: string) => {
     if (setActiveTab) setActiveTab(tab as any);
@@ -1288,7 +1294,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Operating Branch', currentBranchName || 'Main Branch'],
         ['Auditing Operator', `${role} (${user?.name || 'Authorized Staff'})`],
         ['Business Module', activeModule],
-        ['Fiscal Device Status', !isOnline ? 'TRA VFD: Offline Queue' : stats.unsyncedCount > 0 ? `TRA VFD: ${stats.unsyncedCount} Queued` : 'TRA VFD: Certified (Electronic)'],
+        ['Fiscal Device Status', !traVfdConfig.enabled ? 'TRA VFD: OFF' : !isOnline ? 'TRA VFD: Offline Queue' : traVfdQueuedCount > 0 ? `TRA VFD: ${traVfdQueuedCount} Queued` : 'TRA VFD: Ready'],
         ['', ''],
         ['EXECUTIVE ACCRUAL SUMMARY', 'VALUE (TSH) / COUNT'],
         ['Gross Sales Turnover (Today)', Number(stats.grossSales || 0)],
@@ -1584,28 +1590,34 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           {/* Status Badge 1: TRA VFD Fiscal Sync Health */}
           <span
             className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 ${
-              !isOnline
+              !traVfdConfig.enabled
+                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50'
+                : !isOnline
                 ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
-                : stats.unsyncedCount > 0
+                : traVfdQueuedCount > 0
                 ? 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
                 : 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50'
             }`}
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
             title={
-              !isOnline
-                ? 'Offline mode: Receipts queued in local IndexedDB outbox'
-                : stats.unsyncedCount > 0
-                ? `${stats.unsyncedCount} fiscal receipts queued in local outbox`
-                : 'All transactions electronically stamped & fiscalized with TRA VFD'
+              !traVfdConfig.enabled
+                ? 'TRA VFD fiscalization is disabled for this branch'
+                : !isOnline
+                ? 'Offline mode: TRA VFD requests remain in the dedicated fiscal queue'
+                : traVfdQueuedCount > 0
+                ? `${traVfdQueuedCount} fiscal receipts queued in the dedicated TRA VFD outbox`
+                : 'TRA VFD fiscal queue is clear'
             }
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>
-              {!isOnline
+              {!traVfdConfig.enabled
+                ? 'TRA VFD: OFF'
+                : !isOnline
                 ? 'TRA VFD: Offline Queue'
-                : stats.unsyncedCount > 0
-                ? `TRA VFD: ${stats.unsyncedCount} Queued`
-                : 'TRA VFD: Certified'}
+                : traVfdQueuedCount > 0
+                ? `TRA VFD: ${traVfdQueuedCount} Queued`
+                : 'TRA VFD: Ready'}
             </span>
           </span>
 

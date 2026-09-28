@@ -1,7 +1,7 @@
 /**
  * KwakoPos Transactional IndexedDB Migration Engine
  *
- * Deterministic forward migrations (V1->V2, V2->V3, V3->V4) and
+ * Deterministic forward migrations (V1->V2, V2->V3, V3->V4, V4->V5) and
  * backward/downgrade strategies (V4->V3, V4->V2).
  * Executes inside safe IndexedDB upgrade transactions with resumable
  * migration journals, checkpoints, and pre/post verification assertions.
@@ -134,6 +134,26 @@ export class MigrationEngine {
 
       // Add indices on stores if transaction is active
       this.ensureStoreIndices(transaction);
+    }
+
+    // V4 -> V5: Dedicated TRA VFD fiscal transport. This store is intentionally
+    // outside syncOutbox so fiscal retries/lifecycle can never be mistaken for
+    // ordinary business-data synchronization.
+    if (toVersion === 5) {
+      if (!db.objectStoreNames.contains("traVfdOutbox")) {
+        db.createObjectStore("traVfdOutbox");
+      }
+      try {
+        const store = transaction.objectStore("traVfdOutbox");
+        if (!store.indexNames.contains("by_tenant")) {
+          store.createIndex("by_tenant", "tenantId", { unique: false });
+        }
+        if (!store.indexNames.contains("by_status")) {
+          store.createIndex("by_status", "status", { unique: false });
+        }
+      } catch {
+        // Index creation is best-effort in mocked IndexedDB implementations.
+      }
     }
   }
 

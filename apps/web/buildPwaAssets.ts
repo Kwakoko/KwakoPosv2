@@ -28,7 +28,7 @@ if (!fs.existsSync(releaseManifestPath)) {
 }
 
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
-const version = String(releaseManifest.version || "2.12.5");
+const version = String(releaseManifest.version || "2.13.0");
 const gitSha = String(releaseManifest.gitSha || "unknown");
 const rawBuildNumber = releaseManifest.buildNumber || 584;
 const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -55,7 +55,7 @@ safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify(
     syncProtocolVersion: releaseManifest.compatibility?.syncProtocolVersion || 2,
     pwaSchemaVersion,
     minSupportedClientVersion: releaseManifest.compatibility?.minSupportedClientVersion || "2.0.0",
-    recommendedClientVersion: releaseManifest.compatibility?.recommendedClientVersion || "2.12.5",
+    recommendedClientVersion: releaseManifest.compatibility?.recommendedClientVersion || "2.13.0",
   },
   brand: {
     parentBrand: "Kwakoko",

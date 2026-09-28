@@ -321,7 +321,7 @@ export class WorldStandardPrismaSyncEngine {
       if (product.tenantId !== ctx.tenantId || product.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       const existing = await tx.productVariant.findUnique({ where: { id: op.entityId } });
       if (!existing) {
-        await tx.productVariant.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: payload.productId, name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, isActive: payload.isActive ?? true } });
+        await tx.productVariant.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: payload.productId, name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, inventoryQuantity: payload.inventoryQuantity ?? payload.stock ?? 0, reservedQuantity: payload.reservedQuantity ?? 0, reorderLevel: payload.reorderLevel ?? 0, attributes: payload.attributes ?? {}, isActive: payload.isActive ?? true } });
       }
       return;
     }
@@ -339,7 +339,7 @@ export class WorldStandardPrismaSyncEngine {
         await tx.productVariant.update({ where: { id: op.entityId }, data: { isActive: false } });
       } else {
         const payload = stripSyncControlFields(op.payload as any);
-        await tx.productVariant.update({ where: { id: op.entityId }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode, price: payload.price, costPrice: payload.costPrice, isActive: payload.isActive } });
+        await tx.productVariant.update({ where: { id: op.entityId }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode, price: payload.price, costPrice: payload.costPrice, inventoryQuantity: payload.inventoryQuantity ?? payload.stock, reservedQuantity: payload.reservedQuantity, reorderLevel: payload.reorderLevel, attributes: payload.attributes, isActive: payload.isActive } });
       }
       return;
     }
@@ -641,7 +641,7 @@ export class WorldStandardPrismaSyncEngine {
       const operationId = "conflict-resolution:" + conflictId;
       switch (conflict.entity_type) {
         case "Product": await tx.product.update({ where: { id: conflict.entity_id }, data: { name: payload.name, description: payload.description ?? null, sku: payload.sku, category: payload.category ?? "General", isActive: payload.isActive ?? true } }); break;
-        case "ProductVariant": await tx.productVariant.update({ where: { id: conflict.entity_id }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, isActive: payload.isActive ?? true } }); break;
+        case "ProductVariant": await tx.productVariant.update({ where: { id: conflict.entity_id }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, inventoryQuantity: payload.inventoryQuantity ?? payload.stock ?? 0, reservedQuantity: payload.reservedQuantity ?? 0, reorderLevel: payload.reorderLevel ?? 0, attributes: payload.attributes ?? {}, isActive: payload.isActive ?? true } }); break;
         case "Customer": await tx.customer.update({ where: { id: conflict.entity_id }, data: { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } }); break;
         case "Supplier": await tx.supplier.update({ where: { id: conflict.entity_id }, data: { supplierCode: payload.supplierCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, taxPin: payload.taxPin ?? null, status: payload.status ?? "ACTIVE" } }); break;
         default: throw new Error("SYNC_CONFLICT_RESOLUTION_UNSUPPORTED:" + conflict.entity_type);
@@ -718,6 +718,7 @@ export class WorldStandardPrismaSyncEngine {
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
   }

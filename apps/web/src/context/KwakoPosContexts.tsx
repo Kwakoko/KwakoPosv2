@@ -1,3 +1,4 @@
+import { AUTHORITATIVE_COMPATIBILITY_MATRIX } from "../persistence/releaseCompatibility.js";
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from "react";
@@ -16,6 +17,7 @@ import {
 } from "../services/apiClient.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
+import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
 import type { PersistenceStatusSnapshot } from "../persistence/persistenceStatus.js";
 import {
   type IndustryModule,
@@ -310,7 +312,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const [syncEngine] = useState(
     () => new ClientSyncEngine(`web-${safeUUID()}`, db),
   );
-  const [pwaVersionManager] = useState(() => new PwaVersionManager("2.12.5", 4, db));
+  const [pwaVersionManager] = useState(() => new PwaVersionManager(AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion, AUTHORITATIVE_COMPATIBILITY_MATRIX.schemaVersion, db));
 
   // Safe Shutdown and Storage Persistence Flush Handlers
   useEffect(() => {
@@ -1017,6 +1019,26 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       }
     };
   }, [isOnline, syncOutbox]);
+
+  // TRA VFD has its own fiscal worker and durable queue. It never calls syncOutbox.
+  useEffect(() => {
+    if (!isOnline || !user?.tenantId || !user?.branchId) return;
+    const ctx = { tenantId: user.tenantId, branchId: user.branchId };
+    const runTraVfd = () => {
+      void processTraVfdOutbox(db, ctx).catch((error) => {
+        console.warn("[TRA VFD] Fiscal queue processing failed:", error);
+      });
+    };
+    runTraVfd();
+    const timer = window.setInterval(runTraVfd, 30000);
+    window.addEventListener("online", runTraVfd);
+    window.addEventListener("focus", runTraVfd);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("online", runTraVfd);
+      window.removeEventListener("focus", runTraVfd);
+    };
+  }, [isOnline, db, user?.tenantId, user?.branchId]);
 
   const availableTenantsList = useMemo(() => {
     if (impersonatedTenant) return [{ id: impersonatedTenant.tenantId, name: `${impersonatedTenant.tenantName} (Audit)` }];

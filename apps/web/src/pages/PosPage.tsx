@@ -31,6 +31,7 @@ import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
 
@@ -977,6 +978,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       },
     ];
 
+    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
+
     const saleRecord = {
       id: saleId,
       saleNumber: saleId,
@@ -1012,14 +1016,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       cardAuthRef: paymentMethod === "Card" ? cardAuthRef : undefined,
       bankRef: paymentMethod === "Bank" ? bankRef : undefined,
       splitAmounts: paymentMethod === "Split" ? splitAmounts : undefined,
-      rctv: `TRA-VFD-${Math.floor(1000000 + Math.random() * 9000000)}`,
+      fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
       soldAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       syncStatus: "Pending",
     };
 
     // Atomic local sale boundary: sale + receipt + credit-customer projection + Sale outbox commit together.
-    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
     const receiptRecord = {
       id: saleId, receiptNumber: saleId, transactionId: saleId, transactionType: "POS_SALE",
       tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "USER-01",
@@ -1028,6 +1031,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
       changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
       items: mappedItems, createdAt: saleRecord.createdAt,
+      fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
     };
     const localSaleOutbox: any = {
       id: saleId, entityType: "Sale", entityId: saleId, operationType: "CREATE", payload: saleRecord,
@@ -1049,6 +1053,15 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }
     const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, tenantContext });
     const outboxItem = atomicResult.outbox;
+    const traVfdItem = enqueueTraVfdOutbox(db, tenantContext, {
+      receiptId: saleId,
+      transactionId: saleId,
+      deviceId: "pos-terminal",
+      payload: receiptRecord,
+    });
+    if (traVfdItem && isOnline) {
+      void processTraVfdOutbox(db, tenantContext).catch(() => {});
+    }
     await recordPosSaleDeductions(db, {
       saleId,
       items: cart.filter((item) => !item.isCustom).map((item) => ({ productId: item.product.id, variantId: item.variantId, qty: item.qty, unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0), name: item.product.name, sku: item.product.sku })),

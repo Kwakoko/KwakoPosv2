@@ -100,7 +100,8 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
   });
 
   it("TEST 8 & 9: Create offline mutation into durable outbox and synchronize on reconnect", async () => {
-    const browserDb = new LocalIndexedDbStore();
+    const browserDb = new LocalIndexedDbStore(4, `test-pwa-offline-${randomUUID()}`);
+    await browserDb.ready;
     const browserEngine = new ClientSyncEngine("device-browser-offline-1", browserDb);
 
     const productId = randomUUID();
@@ -132,10 +133,12 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
   });
 
   it("TEST 10: Multi-device Browser A -> API -> Browser B convergence under Web UI routing", async () => {
-    const browserADb = new LocalIndexedDbStore();
+    const browserADb = new LocalIndexedDbStore(4, `test-pwa-browser-a-${randomUUID()}`);
+    await browserADb.ready;
     const browserAEngine = new ClientSyncEngine("device-web-A", browserADb);
 
-    const browserBDb = new LocalIndexedDbStore();
+    const browserBDb = new LocalIndexedDbStore(4, `test-pwa-browser-b-${randomUUID()}`);
+    await browserBDb.ready;
     const browserBEngine = new ClientSyncEngine("device-web-B", browserBDb);
 
     const prodId = randomUUID();

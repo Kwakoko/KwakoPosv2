@@ -5,7 +5,7 @@
  * Controlled Drugs, Reports, Settings
  * CSS: V2 design system only.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import { dispensePharmacyMedicine, persistPharmacyBatchAction } from "../services/verticalMutationService.js";
 import {
@@ -28,6 +28,10 @@ const PHARM_TABS = [
   "Controlled Drugs", "Pharmacy Reports", "Pharmacy Settings",
 ] as const;
 type PharmTab = typeof PHARM_TABS[number];
+
+export interface PharmacyPageProps {
+  activeTab?: string;
+}
 
 const KpiCard: React.FC<{
   label: string; value: string | number; desc?: string;
@@ -409,8 +413,27 @@ const PharmStub: React.FC<{ title: string }> = ({ title }) => (
 );
 
 // ─── Pharmacy Module Entry Point ──────────────────────────────────────────────
-export const PharmacyPage: React.FC = () => {
+export const PharmacyPage: React.FC<PharmacyPageProps> = ({ activeTab: externalActiveTab }) => {
   const [activeTab, setActiveTab] = useState<PharmTab>("Pharmacy Dashboard");
+
+  useEffect(() => {
+    if (!externalActiveTab) return;
+    const tab = externalActiveTab.toLowerCase();
+    let next: PharmTab = "Pharmacy Dashboard";
+    if (tab.includes("patient")) next = "Patients";
+    else if (tab.includes("prescription")) next = "Prescriptions";
+    else if (tab.includes("doctor")) next = "Doctors";
+    else if (tab.includes("medicine") || tab.includes("price list") || tab.includes("barcode")) next = "Medicines";
+    else if (tab.includes("batch") || tab.includes("expiry") || tab.includes("recall") || tab.includes("disposal")) next = "Batch & Expiry";
+    else if (tab.includes("drug") || tab.includes("controlled")) next = "Drug Safety";
+    else if (tab.includes("stock") || tab.includes("inventory") || tab.includes("reorder")) next = "Pharmacy Inventory";
+    else if (tab.includes("insurance") || tab.includes("nhif") || tab.includes("claim") || tab.includes("corporate")) next = "Insurance & NHIF";
+    else if (tab.includes("report") || tab.includes("sales report")) next = "Pharmacy Reports";
+    else if (tab.includes("setting") || tab.includes("general")) next = "Pharmacy Settings";
+    else if (tab.includes("pos") || tab.includes("receipt") || tab.includes("supplier") || tab.includes("purchase") || tab.includes("goods received")) next = "Pharmacy POS";
+    else if (PHARM_TABS.includes(externalActiveTab as PharmTab)) next = externalActiveTab as PharmTab;
+    setActiveTab(next);
+  }, [externalActiveTab]);
   const [mutationNotice, setMutationNotice] = useState<string>("");
 
   const renderTab = () => {

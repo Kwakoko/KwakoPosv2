@@ -10,7 +10,7 @@ describe("PWA Versioning & Safe Upgrade Durability Engine", () => {
   });
 
   it("performs safe PWA upgrade without destroying pending outbox mutations or local products", async () => {
-    const store = new LocalIndexedDbStore(1);
+    const store = new LocalIndexedDbStore(1, `kwakopos-pwa-version-${Date.now()}`);
     await store.ready;
 
     // Seed local data
@@ -36,10 +36,10 @@ describe("PWA Versioning & Safe Upgrade Durability Engine", () => {
     });
 
     const pwa = new PwaVersionManager("2.12.5", 1, store);
-    const upgradeResult = await pwa.performSafePwaUpgrade(4);
+    const upgradeResult = await pwa.performSafePwaUpgrade(5);
 
     expect(upgradeResult.upgraded).toBe(true);
-    expect(upgradeResult.newVersion).toBe(4);
+    expect(upgradeResult.newVersion).toBe(5);
     expect(upgradeResult.preservedOutboxCount).toBe(1);
     expect(upgradeResult.preservedProductCount).toBe(1);
 

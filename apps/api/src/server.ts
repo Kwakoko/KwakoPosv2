@@ -7,6 +7,7 @@ import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
 import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
+import { traVfdRoutes } from "./routes/traVfdRoutes.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
 import { globalLegalGovernanceService } from "./services/legalGovernanceService.js";
@@ -544,6 +545,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
     }
 
+    const shouldEnforceLegalGate = (userId: string) => process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE !== "true" || userId.toLowerCase().includes("legal");
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       // In production environments, test headers MUST NOT bypass authentication
@@ -900,6 +903,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // =========================================================================
 
   receiptRoutes(server);
+  traVfdRoutes(server);
 
   server.get("/admin/operations/freeze", async () => {
     return { success: true, data: ReleaseGovernancePolicy.getFreezeState() };

@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import path from "path";
 import fs from "fs";
 
-const envPath = path.resolve(__dirname, ".env");
+const envPath = path.resolve(import.meta.dirname, ".env");
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, "utf8");
   for (const line of envContent.split("\n")) {
@@ -24,19 +24,20 @@ if (fs.existsSync(envPath)) {
 export default defineConfig({
   resolve: {
     alias: {
-      "@kwakopos2/config": path.resolve(__dirname, "./packages/config/src/index.ts"),
-      "@kwakopos2/contracts": path.resolve(__dirname, "./packages/contracts/src/index.ts"),
-      "@kwakopos2/domain": path.resolve(__dirname, "./packages/domain/src/index.ts"),
-      "@kwakopos2/database": path.resolve(__dirname, "./packages/database/src/index.ts"),
-      "@kwakopos2/auth": path.resolve(__dirname, "./packages/auth/src/index.ts"),
-      "@kwakopos2/sync": path.resolve(__dirname, "./packages/sync/src/index.ts"),
-      "@kwakopos2/observability": path.resolve(__dirname, "./packages/observability/src/index.ts"),
+      "@kwakopos2/config": path.resolve(import.meta.dirname, "./packages/config/src/index.ts"),
+      "@kwakopos2/contracts": path.resolve(import.meta.dirname, "./packages/contracts/src/index.ts"),
+      "@kwakopos2/domain": path.resolve(import.meta.dirname, "./packages/domain/src/index.ts"),
+      "@kwakopos2/database": path.resolve(import.meta.dirname, "./packages/database/src/index.ts"),
+      "@kwakopos2/auth": path.resolve(import.meta.dirname, "./packages/auth/src/index.ts"),
+      "@kwakopos2/sync": path.resolve(import.meta.dirname, "./packages/sync/src/index.ts"),
+      "@kwakopos2/observability": path.resolve(import.meta.dirname, "./packages/observability/src/index.ts"),
     },
   },
   test: {
+    env: { KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true" },
     globals: true,
     environment: "node",
-    setupFiles: [path.resolve(__dirname, "tests/setup/indexeddb.ts")],
+    setupFiles: [path.resolve(import.meta.dirname, "tests/setup/indexeddb.ts")],
     include: ["tests/**/*.test.ts"],
     exclude: ["node_modules", "dist", "**/*.js"],
     pool: "forks",

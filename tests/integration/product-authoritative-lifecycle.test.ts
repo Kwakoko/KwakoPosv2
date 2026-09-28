@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { prisma, PrismaProductRepository, PrismaStockRepository } from "@kwakopos2/database";
 import { PrismaSyncEngine } from "@kwakopos2/sync";
@@ -9,7 +9,7 @@ describe("Product authoritative persistence lifecycle", () => {
     const tenantId = randomUUID(); const branchId = randomUUID(); const productId = randomUUID(); const v1 = randomUUID(); const v2 = randomUUID();
     const ctx = { tenantId, branchId, userId: randomUUID(), roles: ["ADMIN"], permissions: ["*"] };
     const repo = new PrismaProductRepository(); const stock = new PrismaStockRepository(); const sync = new PrismaSyncEngine(repo, stock);
-    const client = new LocalIndexedDbStore(); await client.ready;
+    const client = new LocalIndexedDbStore(4, `test-product-lifecycle-${tenantId}`); await client.ready;
     try {
       await prisma.tenant.create({ data: { id: tenantId, name: "Product Lifecycle", slug: `prod-${tenantId.slice(0,8)}` } });
       await prisma.branch.create({ data: { id: branchId, tenantId, name: "Main", code: `P-${branchId.slice(0,6)}` } });
