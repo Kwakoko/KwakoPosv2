@@ -124,12 +124,28 @@ export interface InventoryPageProps {
 export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantId, currentTenantName } = useTenant();
   const { currentBranchId, currentBranchName, availableBranches } = useBranch();
-  const { activeModule } = useModule();
+  const { activeModule, setActiveTab: setGlobalActiveTab } = useModule();
   const { db, syncOutbox, syncEngine } = useSync();
   const toast = useToast();
   const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
   const [activeTab, setActiveTab] = useState<InventoryTab>("dashboard");
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
+
+  const selectInventoryTab = (tab: InventoryTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<InventoryTab, string> = {
+      "dashboard": "Inventory Overview",
+      "products": "Products",
+      "categories": "Categories & Brands",
+      "ledger": "Stock Adjustment",
+      "transfers": "Stock Transfer",
+      "count": "Stock Count",
+      "recipes": "Product Bundles & Kits",
+      "wastage": "Wastage & Spillage",
+      "reports": "Inventory Reports",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -1302,7 +1318,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         ].map((t) => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id as InventoryTab)}
+            onClick={() => selectInventoryTab(t.id as InventoryTab)}
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === t.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
             style={{ whiteSpace: "nowrap" }}

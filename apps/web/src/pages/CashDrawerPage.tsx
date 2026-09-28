@@ -18,13 +18,12 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Wallet, DollarSign, Clock, ArrowDownRight, ArrowUpRight, Lock, Unlock,
+import { Wallet, DollarSign, Clock, ArrowDownRight, ArrowUpRight, Lock, Unlock,
   CheckCircle, AlertTriangle, RefreshCw, Plus, FileText, Shield, Eye, EyeOff,
   Printer, Key, ShieldAlert, Cpu, Calculator, Send, Building, Activity, X,
   RotateCcw, Copy, Check, Sparkles
 } from "lucide-react";
-import { useAuth, useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useAuth, useBranch, useRbac, useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
@@ -96,8 +95,26 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   const toast = useToast();
   const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
 
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<DrawerTab>("active");
   const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
+
+  const selectCashDrawerTab = (tab: DrawerTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<DrawerTab, string> = {
+      "active": "Shift & Active Register",
+      "denominations": "Denomination Calculator",
+      "blind": "Cash Drawer",
+      "reconciliation": "Reconciliation & Variances",
+      "reports": "15 Financial Reports",
+      "safe": "Safe & Bank Deposits",
+      "nosale": "No Sale & Event Logs",
+      "ledger": "Cash Movement Ledger",
+      "history": "Cash Drawer",
+      "hardware": "Security & RBAC Rules",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -680,7 +697,7 @@ Manager Sign-off:  _____________________
         ].map((t) => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id as DrawerTab)}
+            onClick={() => selectCashDrawerTab(t.id as DrawerTab)
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === t.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
             style={{ whiteSpace: "nowrap" }}

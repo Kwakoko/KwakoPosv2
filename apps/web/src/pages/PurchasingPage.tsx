@@ -11,13 +11,12 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Truck, ShoppingBag, Package, Plus, Search, CheckCircle, Clock, XCircle,
+import { Truck, ShoppingBag, Package, Plus, Search, CheckCircle, Clock, XCircle,
   PackageCheck, MapPin, Phone, User, TrendingUp, DollarSign, FileText, Eye,
   RefreshCw, Scale, Shield, AlertCircle, Edit3, Trash2, ChevronRight, Lock,
   Building2, ArrowDownRight, CreditCard, Wallet, Check, AlertTriangle, X, CheckCircle2
 } from "lucide-react";
-import { useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useBranch, useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
@@ -136,7 +135,19 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const toast = useToast();
   const { playSuccessChime, playWarningTone } = useAudioFeedback();
 
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<PurchTab>("suppliers");
+
+  const selectPurchasingTab = (tab: PurchTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<PurchTab, string> = {
+      "suppliers": "Suppliers",
+      "orders": "Purchase Orders",
+      "grn": "Goods Received",
+      "invoices": "Supplier Ledgers",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -822,7 +833,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         ].map((t) => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id as PurchTab)}
+            onClick={() => selectPurchasingTab(t.id as PurchTab)}
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === t.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
           >

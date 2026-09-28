@@ -13,15 +13,14 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckCircle,
+import { Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckCircle,
   AlertCircle, Scale, Eye, RefreshCw, QrCode, Share2, ShieldCheck, ShieldAlert,
   Sliders, Plus, FileText, Send, Copy, AlertTriangle, UserCheck, Sparkles
 } from "lucide-react";
 import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopos2/contracts";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { useSync, useAuth } from "../context/KwakoPosContexts.js";
+import { useSync, useAuth, useModule } from "../context/KwakoPosContexts.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { Sheet } from "../components/UI/Sheet.js";
 
@@ -37,7 +36,19 @@ export interface ReceiptsPageProps {
 export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiveTab }) => {
   const toast = useToast();
   const { playSuccessChime, playWarningTone } = useAudioFeedback();
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<ReceiptTab>("register");
+
+  const selectReceiptTab = (tab: ReceiptTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<ReceiptTab, string> = {
+      "register": "Receipt History",
+      "templates": "Receipt Templates",
+      "verification": "Receipt Verification",
+      "analytics": "Receipt Analytics",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -326,7 +337,7 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
         ].map((t) => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id as ReceiptTab)}
+            onClick={() => selectReceiptTab(t.id as ReceiptTab)
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === t.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
           >

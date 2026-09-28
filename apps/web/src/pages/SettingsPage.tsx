@@ -17,12 +17,11 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useEffect, useState } from "react";
-import {
-  Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
+import { Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
   Zap, Database, Save, CheckCircle, Globe, Check, Sliders, Calendar,
   DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles
 } from "lucide-react";
-import { useTenant, useBranch, useSync, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
+import { useTenant, useBranch, useSync, useTranslation, useLocale, useFormatters, useModule } from "../context/KwakoPosContexts.js";
 import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
@@ -47,8 +46,27 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   const { locale, setLocale, availableLocales } = useLocale();
   const { formatCurrency, formatMoneyCompact, formatDate, formatTime, formatNumber } = useFormatters();
 
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  const selectSettingsTab = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<SettingsTab, string> = {
+      "profile": "Business Profile & Identity",
+      "localization": "Settings",
+      "pos": "POS Configurations",
+      "tax": "Tax & Billing",
+      "inventory": "Inventory Rules",
+      "security": "Security Policies",
+      "notifications": "Settings",
+      "sync": "Settings",
+      "integrations": "Settings",
+      "developer": "Developer Options",
+      "advanced": "Change Log",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -262,7 +280,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => selectSettingsTab(tab.id)
               type="button"
               className={`v2-btn v2-btn-sm ${isActive ? "v2-btn-primary" : "v2-btn-ghost"}`}
               style={{ whiteSpace: "nowrap" }}

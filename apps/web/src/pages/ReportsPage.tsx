@@ -32,7 +32,7 @@ import {
   AreaChart, Area, PieChart as RePie, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
-import { useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
@@ -54,6 +54,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const { db } = useSync();
   const { currentTenantName, currentTenantId } = useTenant();
 
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<ReportTab>("sales");
   const [sales, setSales] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -64,6 +65,27 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [branchFilter, setBranchFilter] = useState("all");
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
   const isProductionLocked = productionCleanupService.isProductionLocked();
+
+  const selectReportTab = (tab: ReportTab) => {
+    setActiveTab(tab);
+    const globalTab: Record<ReportTab, string> = {
+      "sales": "Sales",
+      "profit": "Profit",
+      "cashier": "Cashier Performance",
+      "payment": "Payment Methods",
+      "inventory": "Inventory Valuation",
+      "customers": "Customers Report",
+      "returns": "Returns & Refunds",
+      "branch": "Branch Comparison",
+      "tax": "Tax",
+      "discount": "Discounts",
+      "expenses": "Expenses Report",
+      "movements": "Stock Movement",
+      "purchasing": "Purchasing Report",
+      "aging": "Receivables Aging",
+    };
+    setGlobalActiveTab(globalTab[tab]);
+  };
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -365,7 +387,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as ReportTab)}
+            onClick={() => selectReportTab(tab.id as ReportTab)}
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === tab.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
             style={{ whiteSpace: "nowrap" }}

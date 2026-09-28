@@ -62,6 +62,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+      - name: Production Navigation Lock — route/submenu contract
+        run: npm run certify:navigation-lock
 
       - name: Validate conventional commit
         run: npx tsx scripts/ci/validate-commit-message.ts

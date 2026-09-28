@@ -34,6 +34,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Production Navigation Lock — route/submenu contract
+        run: npm run certify:navigation-lock
       - name: Gate A — Tamper Detection & Control File Integrity
         run: npx tsx scripts/release/tamper-detector.ts
       - name: Gate B — Clean Monorepo Build Verification

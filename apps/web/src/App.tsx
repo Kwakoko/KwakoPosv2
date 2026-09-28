@@ -460,13 +460,12 @@ const AuthenticatedApp: React.FC = () => {
       explicitNavigationPathRef.current = null;
       return;
     }
-    const mappedPath = TAB_TO_PATH[activeTab] || (
-      manifest.sidebar.some(
-        (item) => typeof item !== "string" && Boolean(item.subItems?.includes(activeTab)),
-      )
-        ? currentPath
-        : null
+    const isCurrentManifestSubItem = manifest.sidebar.some(
+      (item) => typeof item !== "string" && Boolean(item.subItems?.includes(activeTab)),
     );
+    const mappedPath = isCurrentManifestSubItem
+      ? currentPath
+      : TAB_TO_PATH[activeTab] || null;
     if (!mappedPath) return;
     const path = mappedPath;
     if (currentPath !== path) {
