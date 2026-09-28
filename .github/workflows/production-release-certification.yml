@@ -1,11 +1,13 @@
 name: KwakoPos Exact Production Release Certification
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_sha:
         description: Exact Git SHA to certify and deploy
-        required: true
+        required: false
         type: string
 
 concurrency:
@@ -21,12 +23,13 @@ permissions:
 jobs:
   production-release-certification:
     name: Exact Release → Build → Tests → DB → HTTPS → Browser A/B → Promotion → Governance
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact release SHA
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_sha }}
+          ref: ${{ inputs.release_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -34,7 +37,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected='${{ inputs.release_sha }}'
+          expected='${{ inputs.release_sha || github.sha }}'
           actual="$(git rev-parse HEAD)"
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: release_sha is not a 40-character Git SHA"; exit 1; }
           [[ "$expected" == "$actual" ]] || { echo "RELEASE_BLOCKED: checkout SHA mismatch: expected=$expected actual=$actual"; exit 1; }
@@ -135,7 +138,7 @@ jobs:
       - name: Export and validate exact candidate identity
         shell: bash
         env:
-          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
         run: |
           set -euo pipefail
           node - <<'NODE'
@@ -155,7 +158,7 @@ jobs:
       - name: Independently verify container OCI source provenance
         shell: bash
         env:
-          EXPECTED_RELEASE_SHA: ${{ inputs.release_sha }}
+          EXPECTED_RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
           CANDIDATE_IMAGE_REF: ${{ env.CANDIDATE_IMAGE_REF }}
         run: |
           set -euo pipefail
@@ -169,7 +172,7 @@ jobs:
       - name: Validate provenance certification prerequisites
         shell: bash
         env:
-          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ inputs.release_sha || github.sha }}
           CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
           RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
           RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
@@ -187,7 +190,7 @@ jobs:
         env:
           NODE_ENV: production-certification
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CERTIFICATION_SHA: ${{ inputs.release_sha }}
+          CERTIFICATION_SHA: ${{ inputs.release_sha || github.sha }}
           CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
           RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
           RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
@@ -232,7 +235,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kwakopos-exact-release-evidence-${{ inputs.release_sha }}
+          name: kwakopos-exact-release-evidence-${{ inputs.release_sha || github.sha }}
           path: artifacts/release-evidence/
           retention-days: 90
           if-no-files-found: error
