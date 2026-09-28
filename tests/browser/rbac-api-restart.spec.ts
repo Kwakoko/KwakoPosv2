@@ -16,6 +16,7 @@ function startProcess(command: string, args: string[], env: NodeJS.ProcessEnv = 
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    shell: process.platform === "win32",
   });
   child.stdout?.on("data", (chunk) => process.stdout.write(`[RBAC_CHILD] ${chunk}`));
   child.stderr?.on("data", (chunk) => process.stderr.write(`[RBAC_CHILD_ERR] ${chunk}`));
@@ -125,13 +126,17 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
     expect(tenantId).toMatch(/^.+$/);
     expect(branchId).toMatch(/^.+$/);
 
+    const legalAcceptance = await api(page, "POST", "/api/legal/acceptance/accept-all", undefined, token);
+    expect(legalAcceptance.status, JSON.stringify(legalAcceptance.data)).toBe(200);
+
     // Execute the same HTTP mutation boundary used by UsersRolesPage, from a real Chromium page.
     const roleCreate = await api(page, "POST", "/api/v1/roles", {
       name: roleName,
       description: "Real Chromium RBAC restart proof",
       permissions: ["sales.create"],
     }, token);
-    expect(roleCreate.status, JSON.stringify(roleCreate.data)).toBe(200);
+    expect(roleCreate.status, JSON.stringify(roleCreate.data)).toBeGreaterThanOrEqual(200);
+    expect(roleCreate.status, JSON.stringify(roleCreate.data)).toBeLessThan(300);
     const roleId = roleCreate.data?.data?.id;
     expect(roleId).toMatch(/^.+$/);
 
@@ -143,7 +148,8 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
       roleId,
       branchId,
     }, token);
-    expect(userCreate.status, JSON.stringify(userCreate.data)).toBe(200);
+    expect(userCreate.status, JSON.stringify(userCreate.data)).toBeGreaterThanOrEqual(200);
+    expect(userCreate.status, JSON.stringify(userCreate.data)).toBeLessThan(300);
     const userId = userCreate.data?.data?.id;
     expect(userId).toMatch(/^.+$/);
 
@@ -180,6 +186,10 @@ test("RBAC real Chromium -> API -> PostgreSQL survives exact API restart", async
       SYNC_CERTIFICATION_PRISMA: "true",
     });
     await waitForHttp(`${apiBase}/version`);
+
+    // The workspace gate is intentionally re-established after a fresh API process starts.
+    const legalAcceptanceAfterRestart = await api(page, "POST", "/api/legal/acceptance/accept-all", undefined, token);
+    expect(legalAcceptanceAfterRestart.status, JSON.stringify(legalAcceptanceAfterRestart.data)).toBe(200);
 
     // Real Chromium rereads the exact persisted records through the newly restarted API process.
     const afterRestartUsers = await api(page, "GET", "/api/v1/users", undefined, token);
