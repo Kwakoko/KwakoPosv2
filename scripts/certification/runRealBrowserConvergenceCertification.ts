@@ -93,7 +93,7 @@ function readEvidence(evidencePath: string): RealBrowserConvergenceEvidence {
   if (evidence.authoritativePostgres?.products !== 1 || evidence.authoritativePostgres?.productVariants !== 1 || evidence.authoritativePostgres?.stockLedger !== 1 || evidence.authoritativePostgres?.openingStock !== 25) {
     throw new Error("REAL_BROWSER_CONVERGENCE_INVALID_EVIDENCE: authoritative PostgreSQL proof is incomplete");
   }
-  if (evidence.authoritativePostgres?.syncJournalRows !== 9 || evidence.authoritativePostgres?.syncOperationsProcessed !== 8) {
+  if (evidence.authoritativePostgres?.syncJournalRows !== 9 || evidence.authoritativePostgres?.syncOperationsProcessed !== 9) {
     throw new Error("REAL_BROWSER_CONVERGENCE_INVALID_EVIDENCE: sync journal/operation proof is incomplete");
   }
   if (evidence.indexedDbConvergence.clientCursors.length !== 5 ||

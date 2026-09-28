@@ -648,7 +648,7 @@ export class WorldStandardPrismaSyncEngine {
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
-      ...( { serverRevision: String(afterRevision) } as any ),
+      ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
   }
 }
