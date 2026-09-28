@@ -124,17 +124,20 @@ export async function publishGitHubRelease() {
             if (patchRes.ok) {
               const patchData: any = await patchRes.json();
               console.log(`🎉 Official GitHub Release updated: ${patchData.html_url}`);
+            } else {
+              const patchText = await patchRes.text();
+              throw new Error(`RELEASE_BLOCKED: GitHub release update failed HTTP ${patchRes.status}: ${patchText}`);
             }
+          } else {
+            throw new Error(`RELEASE_BLOCKED: GitHub release creation returned HTTP ${response.status}: ${errText}`);
           }
-        } else {
-          console.warn(`[WARN] GitHub API release creation returned HTTP ${response.status}: ${errText}`);
         }
       }
     } catch (err: any) {
-      console.warn(`[WARN] Could not create GitHub release via REST API: ${err.message}`);
+      throw new Error(`RELEASE_BLOCKED: GitHub publication failed: ${err.message}`);
     }
   } else {
-    console.log(`[INFO] GITHUB_TOKEN not present in environment. Local tag creation simulated.`);
+    throw new Error("RELEASE_BLOCKED: GITHUB_TOKEN/GH_TOKEN is required for authoritative publication.");
   }
 
   console.log("========================================================================");
@@ -165,6 +168,7 @@ export async function publishGitHubRelease() {
 
 if (process.argv[1]?.endsWith("publish-github-release.ts")) {
   publishGitHubRelease().catch((err) => {
-    console.error("Release publishing error:", err);
+    console.error("RELEASE_BLOCKED:", err?.message || err);
+    process.exit(1);
   });
 }
