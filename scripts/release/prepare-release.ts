@@ -1,4 +1,4 @@
-import { calculateNextVersion, determineBumpFromCommits, isValidSemVer } from "../../packages/config/src/semverEngine.js";
+import { calculateNextVersion, determineBumpFromCommits, isValidSemVer, compareSemVer } from "../../packages/config/src/semverEngine.js";
 import { generateReleaseManifest } from "./generate-release-manifest.js";
 import { syncWorkspaceVersions } from "./sync-workspace-versions.js";
 import { updateChangelog } from "./generate-changelog.js";
@@ -31,10 +31,7 @@ function getCommitsSince(tag: string | null): string[] {
     const raw = tag
       ? execSync(`git log ${tag}..HEAD --pretty=%B---END_COMMIT---`, { encoding: "utf8" })
       : execSync("git log -20 --pretty=%B---END_COMMIT---", { encoding: "utf8" });
-    return raw
-      .split("---END_COMMIT---")
-      .map((c) => c.trim())
-      .filter(Boolean);
+    return raw.split("---END_COMMIT---").map((c) => c.trim()).filter(Boolean);
   } catch {
     return [];
   }
@@ -46,37 +43,74 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
   console.log("================================================================");
 
   const { path: rootPkgPath, value: rootPkg } = readPackageJson();
-  const currentVersion = rootPkg.version || "2.0.0";
+  const currentVersion = rootPkg.version || "0.0.0";
   const baselineTag = getLatestSemVerTag();
-  const baselineVersion = baselineTag || currentVersion;
+  const baselineVersion = baselineTag ? baselineTag.replace(/^v/, "") : currentVersion;
   const commitMessages = getCommitsSince(baselineTag);
-  const bump = options?.forceBump || determineBumpFromCommits(commitMessages);
+  const detectedBump = determineBumpFromCommits(commitMessages);
+  const bump = options?.forceBump || detectedBump;
 
   console.log(`[INFO] Current package.json Version: ${currentVersion}`);
   console.log(`[INFO] Latest SemVer Tag: ${baselineTag || "none"}`);
   console.log(`[INFO] Commits Since Baseline: ${commitMessages.length}`);
   console.log(`[INFO] Detected Bump Type: ${bump}`);
 
-  if (currentVersion !== baselineVersion && !options?.dryRun) {
-    rootPkg.version = baselineVersion;
-    fs.writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + "\n", "utf8");
-    const lockPath = path.resolve(process.cwd(), "package-lock.json");
-    if (fs.existsSync(lockPath)) {
-      const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
-      lock.version = baselineVersion;
-      if (lock.packages?.[""]) lock.packages[""].version = baselineVersion;
-      fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+  // The committed version on main is authoritative until a release is actually created.
+  // Never roll a newer committed version backward to the previous release tag.
+  if (baselineTag && compareSemVer(currentVersion, baselineVersion) < 0) {
+    throw new Error(
+      `RELEASE_BLOCKED: package.json version ${currentVersion} is behind latest release tag ${baselineTag}`
+    );
+  }
+
+  // Recovery case: main already contains an unreleased, newer SemVer.
+  // Preserve that version and certify it for release instead of resetting it to the old tag.
+  if (baselineTag && compareSemVer(currentVersion, baselineVersion) > 0) {
+    const releaseVersion = currentVersion;
+    console.log(
+      `[INFO] Unreleased committed version detected: v${releaseVersion} is ahead of ${baselineTag}; preserving it.`
+    );
+
+    if (!options?.dryRun) {
+      syncWorkspaceVersions(releaseVersion);
+      updateChangelog(releaseVersion);
     }
-    syncWorkspaceVersions(baselineVersion);
-    console.log(`✓ Synchronized root and workspace package versions to baseline ${baselineVersion}`);
+
+    const manifest = generateReleaseManifest({
+      version: releaseVersion,
+      certification: "FAIL",
+      gitSha: execSync("git rev-parse HEAD", { encoding: "utf8" }).trim(),
+    });
+
+    if (!options?.dryRun) {
+      archiveReleaseArtifacts(releaseVersion);
+    }
+
+    console.log(`✓ Release candidate preserved at v${releaseVersion}`);
+    return {
+      changed: false,
+      currentVersion,
+      nextVersion: releaseVersion,
+      baselineTag,
+      bump: "NONE" as const,
+      manifest,
+      recovery: true,
+    };
   }
 
   if (bump === "NONE" && !options?.forceBump) {
     console.log("[INFO] No releasable Conventional Commit detected; version remains unchanged.");
-    return { changed: false, currentVersion: baselineVersion, nextVersion: baselineVersion, baselineTag, bump };
+    return {
+      changed: false,
+      currentVersion,
+      nextVersion: currentVersion,
+      baselineTag,
+      bump,
+    };
   }
 
-  const nextVersion = calculateNextVersion(baselineVersion, commitMessages, { forceBump: bump });
+  const baseForNextVersion = baselineTag ? baselineVersion : currentVersion;
+  const nextVersion = calculateNextVersion(baseForNextVersion, commitMessages, { forceBump: bump });
   console.log(`[INFO] Target Release Version: ${nextVersion}`);
 
   if (!options?.dryRun) {
@@ -90,16 +124,16 @@ export function prepareRelease(options?: { forceBump?: "MAJOR" | "MINOR" | "PATC
       if (lock.packages?.[""]) lock.packages[""].version = nextVersion;
       fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf8");
     }
-    console.log(`✓ Updated authoritative root version to ${nextVersion}`);
 
-    // Synchronize workspace subpackages
     syncWorkspaceVersions(nextVersion);
-
-    // Update CHANGELOG.md automatically
     updateChangelog(nextVersion);
   }
 
-  const manifest = generateReleaseManifest({ version: nextVersion, certification: "PASS" });
+  const manifest = generateReleaseManifest({
+    version: nextVersion,
+    certification: "FAIL",
+    gitSha: execSync("git rev-parse HEAD", { encoding: "utf8" }).trim(),
+  });
   console.log(`✓ Release Manifest synchronized for version ${manifest.version} (Tag: ${manifest.tag})`);
 
   if (!options?.dryRun) {
