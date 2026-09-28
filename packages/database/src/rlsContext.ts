@@ -1,5 +1,5 @@
 import type { TenantContext } from "@kwakopos2/contracts";
-import { prisma } from "./index.js";
+import { prisma } from "./client.js";
 
 /**
  * H-008: Set PostgreSQL RLS tenant context for the current DB session.

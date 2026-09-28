@@ -149,6 +149,7 @@ import {
   PrismaFinanceRepository,
   PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
+  prisma,
 } from "@kwakopos2/database";
 import {
   PluginRegistryEngine,
@@ -182,6 +183,7 @@ import {
 
 
 import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
+import { PrivilegedRbacMutationService, RbacMutationError } from "./services/rbacMutationService.js";
 import {
   createTraceContext,
   defaultLogger,
@@ -336,7 +338,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;
   const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
-
+  // User/Role identity mutations are privileged PostgreSQL operations; never route them through syncOutbox or in-memory fallbacks.
+  const rbacMutationService = productionPersistence ? new PrivilegedRbacMutationService(prisma) : null;
 
   // ── H-005: Hardened centralized error handler ──────────────────────────────
   // All internal error detail is logged server-side ONLY.  Clients receive a
@@ -1212,6 +1215,173 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         },
       },
     });
+  });
+
+  // Privileged identity routes — PostgreSQL only; no syncOutbox/in-memory fallback.
+  const requireRbacService = (reply: FastifyReply) => {
+    if (!rbacMutationService) {
+      reply.status(503).send({ success: false, error: { code: "RBAC_PERSISTENCE_REQUIRED", message: "User and role administration requires PostgreSQL persistence." } });
+      return false;
+    }
+    return true;
+  };
+  const rbacActor = (req: FastifyRequest) => {
+    const ctx = requireAdminContext(req);
+    return { ...ctx, deviceId: String(req.headers["x-device-id"] || "").trim() || null };
+  };
+
+  server.get("/api/v1/users", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      return { success: true, data: await rbacMutationService!.listUsers(rbacActor(req)) };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.post("/api/v1/users", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const body = (req.body || {}) as any;
+      const actor = rbacActor(req);
+      const tenantId = actor.tenantId;
+      const branchId = String(body.branchId || "").trim();
+      const roleId = String(body.roleId || "").trim();
+      if (!branchId || !roleId) return reply.status(400).send({ success: false, error: { code: "USER_ROLE_BRANCH_REQUIRED", message: "roleId and branchId are required." } });
+      const created = await rbacMutationService!.createUser(actor, {
+        firstName: String(body.firstName || "").trim(),
+        lastName: String(body.lastName || "").trim(),
+        email: String(body.email || "").trim(),
+        password: String(body.password || ""),
+        roleId,
+        branchId,
+      });
+      return reply.status(201).send({ success: true, data: created });
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.patch("/api/v1/users/:id", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const actor = rbacActor(req);
+      const body = (req.body || {}) as any;
+      const updated = await rbacMutationService!.updateUser(actor, String((req.params as any).id), {
+        firstName: body.firstName,
+        lastName: body.lastName,
+        email: body.email,
+        password: body.password,
+        roleId: body.roleId,
+        branchId: body.branchId,
+        status: body.status,
+      });
+      return { success: true, data: updated };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.delete("/api/v1/users/:id", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const actor = rbacActor(req);
+      const id = String((req.params as any).id);
+      const result = await rbacMutationService!.deactivateUser(actor, id);
+      return { success: true, data: result };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.get("/api/v1/roles", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      return { success: true, data: await rbacMutationService!.listRoles(rbacActor(req)) };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.post("/api/v1/roles", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const body = (req.body || {}) as any;
+      const created = await rbacMutationService!.createRole(rbacActor(req), {
+        name: String(body.name || "").trim(),
+        description: body.description == null ? null : String(body.description),
+        permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : [],
+      });
+      return reply.status(201).send({ success: true, data: created });
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.put("/api/v1/roles/:id", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const body = (req.body || {}) as any;
+      const updated = await rbacMutationService!.updateRole(rbacActor(req), String((req.params as any).id), {
+        name: String(body.name || "").trim(),
+        description: body.description == null ? null : String(body.description),
+        permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : [],
+      });
+      return { success: true, data: updated };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.delete("/api/v1/roles/:id", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const result = await rbacMutationService!.deleteRole(rbacActor(req), String((req.params as any).id));
+      return { success: true, data: result };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
+  });
+
+  server.get("/api/v1/auth/sessions", async (req, reply) => {
+    if (!productionPersistence) return reply.status(503).send({ success: false, error: { code: "SECURITY_PERSISTENCE_REQUIRED", message: "Session inspection requires PostgreSQL persistence." } });
+    const ctx = requireAdminContext(req);
+    const sessions = await prisma.deviceSession.findMany({
+      where: { tenantId: ctx.tenantId },
+      include: { user: { include: { role: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return { success: true, data: sessions.map((s) => ({ id: s.id, userName: s.user?.name, userEmail: s.user?.email, role: s.user?.role?.name, deviceId: s.deviceId, createdAt: s.createdAt })) };
+  });
+
+  server.delete("/api/v1/auth/sessions/:id", async (req, reply) => {
+    if (!productionPersistence) return reply.status(503).send({ success: false, error: { code: "SECURITY_PERSISTENCE_REQUIRED", message: "Session administration requires PostgreSQL persistence." } });
+    const ctx = requireAdminContext(req);
+    const id = String((req.params as any).id);
+    const session = await prisma.deviceSession.findFirst({ where: { id, tenantId: ctx.tenantId } });
+    if (!session) return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
+    await prisma.deviceSession.update({ where: { id }, data: { revokedAt: new Date() } });
+    return { success: true, data: { id, revoked: true } };
+  });
+
+  server.get("/api/v1/audit/logs", async (req, reply) => {
+    if (!requireRbacService(reply)) return;
+    try {
+      const events = await rbacMutationService!.listAuditEvents(rbacActor(req));
+      return { success: true, data: events.map((event: any) => ({ id: event.id, action: event.action, userName: event.userId, details: event.metadata, timestamp: event.createdAt, ipAddress: null })) };
+    } catch (error) {
+      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
+      throw error;
+    }
   });
 
   // Product routes (examples using schema parsing & tenant context)
@@ -4998,10 +5168,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalDocumentService.getHealthSummary(tenantId) });
   });
 
-  server.get("/api/v1/security/health", async (req, reply) => {
-    const { globalSecurityService } = await import("./services/securityService.js");
-    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
-    return reply.status(200).send({ success: true, data: globalSecurityService.getHealthSummary(tenantId) });
+  server.get("/api/v1/security/health", async (_req, reply) => {
+    // Security health is not allowed to fall back to process-local/in-memory state.
+    return reply.status(503).send({
+      success: false,
+      error: {
+        code: "SECURITY_READ_PERSISTENCE_UNAVAILABLE",
+        message: "Authoritative security health is unavailable because persistent security records are not configured.",
+      },
+    });
   });
 
   server.get("/api/v1/notifications/health", async (req, reply) => {
@@ -5046,10 +5221,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalAutonomousBusinessService.getHealthSummary(tenantId) });
   });
 
-  server.get("/api/v1/platform-security/health", async (req, reply) => {
-    const { globalPlatformSecurityService } = await import("./services/platformSecurityService.js");
-    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
-    return reply.status(200).send({ success: true, data: globalPlatformSecurityService.getHealthSummary(tenantId) });
+  server.get("/api/v1/platform-security/health", async (_req, reply) => {
+    // Platform security health must never be synthesized from in-memory engine state.
+    return reply.status(503).send({
+      success: false,
+      error: {
+        code: "PLATFORM_SECURITY_READ_PERSISTENCE_UNAVAILABLE",
+        message: "Authoritative platform-security health is unavailable because persistent security records are not configured.",
+      },
+    });
   });
 
   server.get("/api/v1/autonomous-operations/health", async (req, reply) => {

@@ -307,6 +307,31 @@ describe("Pillar 1 — Outbox Guarantees: Unit Tests", () => {
   });
 
 
+  it("forbids User and Role mutations from entering the client sync outbox", async () => {
+    const localDb = new LocalIndexedDbStore();
+    await localDb.ready;
+
+    expect(() => localDb.enqueueOutbox({
+      entityType: "User" as any,
+      entityId: "user-forbidden",
+      operationType: "CREATE",
+      payload: { email: "forbidden@example.com" },
+      tenantId: "tenant-security",
+      branchId: "branch-security",
+    })).toThrow("PRIVILEGED_ENTITY_OUTBOX_FORBIDDEN");
+    expect(localDb.syncOutbox.has("user-forbidden")).toBe(false);
+
+    expect(() => localDb.enqueueOutbox({
+      entityType: "Role" as any,
+      entityId: "role-forbidden",
+      operationType: "CREATE",
+      payload: { name: "Forbidden Role" },
+      tenantId: "tenant-security",
+      branchId: "branch-security",
+    })).toThrow("PRIVILEGED_ENTITY_OUTBOX_FORBIDDEN");
+    expect(localDb.syncOutbox.has("role-forbidden")).toBe(false);
+  });
+
   it("commitLocalOutboxes commits multiple outboxes and explicit deletes in one durable transaction", async () => {
     const db = new LocalIndexedDbStore();
     await db.ready;

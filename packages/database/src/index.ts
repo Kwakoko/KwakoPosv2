@@ -62,9 +62,7 @@ if (typeof (process as any).loadEnvFile === "function") {
     }
   }
 }
-
-export const prisma = new PrismaClient();
-
+export { prisma } from "./client.js";
 
 import { InMemoryStore, globalInMemoryStore } from "./inMemoryStore.js";
 export { InMemoryStore, globalInMemoryStore };

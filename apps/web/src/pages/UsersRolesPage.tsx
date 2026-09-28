@@ -25,7 +25,7 @@ import {
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
-import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
+
 
 type SubTab = "directory" | "employees" | "branches" | "roles_builder" | "matrix" | "sessions" | "audit" | "super_admin";
 
@@ -98,21 +98,12 @@ export interface AuditLogRecord {
   ipAddress?: string;
 }
 
-const SYSTEM_ROLES: CustomRoleRecord[] = [
-  { id: "role-owner", name: "Tenant Owner", slug: "tenant-owner", description: "Full administrative control across all tenant branches", isSystemRole: true, isCustom: false, permissions: ["*"] },
-  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.manage", "reports.view"] },
-  { id: "role-manager", name: "Branch Manager", slug: "branch-manager", description: "Branch operations, stock adjustments, purchase orders, and shift approvals", isSystemRole: true, isCustom: false, permissions: ["sales.*", "inventory.*", "purchase.*", "staff.view", "reports.branch"] },
-  { id: "role-cashier", name: "Cashier / POS Operator", slug: "cashier", description: "Point of sale registers, receipts, customer creation, and cash collection", isSystemRole: true, isCustom: false, permissions: ["sales.create", "payment.receive", "customer.create", "receipt.print"] },
-  { id: "role-inventory", name: "Inventory Officer", slug: "inventory-officer", description: "Stock intake, FEFO batching, supplier purchase orders, stock adjustments", isSystemRole: true, isCustom: false, permissions: ["product.manage", "stock.adjust", "purchase.manage", "supplier.manage"] },
-  { id: "role-accountant", name: "Accountant", slug: "accountant", description: "General ledger, operating expenses, tax filings, financial statements", isSystemRole: true, isCustom: false, permissions: ["expense.manage", "payment.manage", "financial_reports.view"] },
-];
-
 export const UsersRolesPage: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { currentTenantId, currentTenantName } = useTenant();
   const { currentBranchId, currentBranchName, availableBranches } = useBranch();
   const { permissions: rbacPermissions, hasPermission, isSuperAdmin } = useRbac();
-  const { isOnline, pendingOutboxCount, db } = useSync();
+  const { isOnline, pendingOutboxCount } = useSync();
   const toast = useToast();
 
   const [activeTab, setActiveTab] = useState<SubTab>("directory");
@@ -121,28 +112,14 @@ export const UsersRolesPage: React.FC = () => {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState("all");
 
   const [usersList, setUsersList] = useState<UserRecord[]>([]);
-  const [employeeProfiles, setEmployeeProfiles] = useState<Record<string, EmployeeProfileRecord>>({
-    "usr-current": {
-      id: "emp-001",
-      userId: currentUser?.id || "usr-current",
-      employeeNumber: "EMP-2026-001",
-      nationalId: "19901234-11100-00001-12",
-      address: "Kinondoni, Dar es Salaam",
-      emergencyContact: "+255 754 112 233 (Spouse)",
-      employmentDate: "2024-01-15",
-      salaryType: "MONTHLY",
-      notes: "Primary account holder and business director",
-    },
-  });
+  const [employeeProfiles, setEmployeeProfiles] = useState<Record<string, EmployeeProfileRecord>>({});
 
-  const [branchAssignments, setBranchAssignments] = useState<BranchRoleAssignment[]>([
-    { id: "bra-101", userId: currentUser?.id || "usr-current", userName: currentUser?.name || "Operator", branchId: "b-01", branchName: "Kariakoo Flagship", roleId: "role-owner", roleName: "Tenant Owner", isPrimary: true },
-    { id: "bra-102", userId: currentUser?.id || "usr-current", userName: currentUser?.name || "Operator", branchId: "b-02", branchName: "Mbezi Branch", roleId: "role-manager", roleName: "Branch Manager", isPrimary: false },
-  ]);
+  const [branchAssignments, setBranchAssignments] = useState<BranchRoleAssignment[]>([]);
 
-  const [customRoles, setCustomRoles] = useState<CustomRoleRecord[]>(SYSTEM_ROLES);
+  const [customRoles, setCustomRoles] = useState<CustomRoleRecord[]>([]);
   const [sessionsList, setSessionsList] = useState<SessionRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [securityReadError, setSecurityReadError] = useState<string | null>(null);
 
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [formFirstName, setFormFirstName] = useState("");
@@ -150,7 +127,7 @@ export const UsersRolesPage: React.FC = () => {
   const [formEmail, setFormEmail] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formRole, setFormRole] = useState("Cashier");
-  const [formBranch, setFormBranch] = useState(currentBranchName || "Main Branch");
+  const [formBranch, setFormBranch] = useState(currentBranchName || "");
   const [formPassword, setFormPassword] = useState("");
   const [formPin, setFormPin] = useState("");
 
@@ -178,119 +155,80 @@ export const UsersRolesPage: React.FC = () => {
 
   const loadUsersAndSecurity = useCallback(async () => {
     setIsLoading(true);
+    setSecurityReadError(null);
     try {
-      let users: UserRecord[] = [];
-      try {
-        const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/users");
-        if (res.success && Array.isArray(res.data)) {
-          users = res.data.map((u) => ({
-            id: u.id,
-            firstName: u.firstName || (u.name ? u.name.split(" ")[0] : "Staff"),
-            lastName: u.lastName || (u.name ? u.name.split(" ").slice(1).join(" ") : "Member"),
-            email: u.email,
-            phone: u.phone || "−",
-            username: u.username || u.email.split("@")[0],
-            role: u.role || "Cashier",
-            branch: u.branchName || currentBranchName || "Main Branch",
-            status: u.status === "SUSPENDED" ? "Suspended" : "Active",
-            lastLogin: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Recently",
-            pinSet: Boolean(u.pinSet || u.pin_hash),
-          }));
-        }
-      } catch {
-        const activeUser: UserRecord | null = currentUser ? {
-          id: currentUser.id,
-          firstName: currentUser.name ? currentUser.name.split(" ")[0] : "Authenticated",
-          lastName: currentUser.name ? currentUser.name.split(" ").slice(1).join(" ") : "Operator",
-          email: currentUser.email,
-          phone: "−",
-          username: currentUser.email.split("@")[0],
-          role: currentUser.role || "Tenant Owner",
-          branch: currentBranchName || "Active Branch",
-          status: "Active",
-          lastLogin: "Active Session",
-          pinSet: true,
-        } : null;
+      const [usersRes, rolesRes, sessionsRes, auditRes] = await Promise.all([
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/users"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/roles"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/auth/sessions"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/audit/logs"),
+      ]);
 
-        await db.ready;
-        const outboxUsers = [...db.syncOutbox.values()]
-          .filter((item) => item.entityType === "User" && item.status !== "FAILED")
-          .map((item) => {
-            const p = item.payload || {};
-            const fn = String(p.firstName || p.name || "Staff");
-            const ln = String(p.lastName || "");
-            return {
-              id: item.entityId || `usr-${Date.now()}`,
-              firstName: fn,
-              lastName: ln,
-              email: String(p.email || ""),
-              phone: String(p.phone || "−"),
-              username: String(p.username || p.email || ""),
-              role: String(p.role || "Cashier"),
-              branch: String(p.branch || currentBranchName || "Active Branch"),
-              status: "Active" as const,
-              lastLogin: "Just Created",
-              pinSet: Boolean(p.pin),
-            };
-          });
-        users = activeUser ? [activeUser, ...outboxUsers] : outboxUsers;
-      }
-      let sessions: SessionRecord[] = [];
-      try {
-        const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/auth/sessions");
-        if (res.success && Array.isArray(res.data)) {
-          sessions = res.data.map((s) => ({
-            sessionId: s.id || s.sessionId,
-            user: s.userName || s.userEmail || currentUser?.name || "Operator",
-            role: s.role || currentUser?.role || "Tenant Owner",
-            device: s.userAgent || "Web Browser (Chrome)",
-            ip: s.ipAddress || "127.0.0.1",
-            loginTime: new Date(s.createdAt || Date.now()).toLocaleString(),
-            lastActive: "Active Now",
-            isCurrent: true,
-          }));
-        }
-      } catch {
-        sessions = currentUser ? [
-          {
-            sessionId: "SESS-ACTIVE-01",
-            user: `${currentUser.name} (${currentUser.role})`,
-            role: currentUser.role,
-            device: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 45) : "Standard POS Browser",
-            ip: "Active Session (Localhost)",
-            loginTime: new Date().toLocaleTimeString(),
-            lastActive: "Active Now",
-            isCurrent: true,
-          },
-        ] : [];
-      }
-      let logs: AuditLogRecord[] = [];
-      try {
-        const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/audit/logs");
-        if (res.success && Array.isArray(res.data)) {
-          logs = res.data.map((l) => ({
-            id: l.id,
-            action: l.action || "SECURITY_EVENT",
-            user: l.userName || l.userEmail || "System",
-            details: l.details || "User authentication audit event recorded",
-            timestamp: new Date(l.timestamp || Date.now()).toLocaleString(),
-            ipAddress: l.ipAddress || "127.0.0.1",
-          }));
-        }
-      } catch {
-        logs = currentUser ? [
-          { id: "AUD-001", action: "USER_LOGIN_SUCCESS", user: currentUser.email, details: "Successful JWT bearer session initialization", timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
-          { id: "AUD-002", action: "TENANT_CONTEXT_SWITCH", user: currentUser.email, details: `Switched operational context to ${currentTenantName || "Active Tenant"}`, timestamp: new Date().toLocaleTimeString(), ipAddress: "127.0.0.1" },
-        ] : [];
-      }
-      setUsersList(users);
-      setSessionsList(sessions);
-      setAuditLogs(logs);
-    } catch {
+      if (!usersRes.success || !Array.isArray(usersRes.data)) throw new Error("USER_READ_FAILED");
+      if (!rolesRes.success || !Array.isArray(rolesRes.data)) throw new Error("ROLE_READ_FAILED");
+      if (!sessionsRes.success || !Array.isArray(sessionsRes.data)) throw new Error("SESSION_READ_FAILED");
+      if (!auditRes.success || !Array.isArray(auditRes.data)) throw new Error("AUDIT_READ_FAILED");
+
+      setUsersList(usersRes.data.map((u) => ({
+        id: u.id,
+        tenantId: u.tenantId,
+        firstName: u.firstName || (u.name ? u.name.split(" ")[0] : ""),
+        lastName: u.lastName || (u.name ? u.name.split(" ").slice(1).join(" ") : ""),
+        email: String(u.email || ""),
+        phone: u.phone || "",
+        username: u.username || u.email || "",
+        role: u.role?.name || u.roleName || "",
+        branch: u.branch?.name || u.branchName || "",
+        status: u.status === "SUSPENDED" ? "Suspended" : u.status === "INACTIVE" ? "Pending" : "Active",
+        lastLogin: u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "",
+        pinSet: Boolean(u.pinSet || u.pin_hash),
+      })));
+
+      const systemRoleNames = new Set(["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN","MANAGER","CASHIER","INVENTORY","ACCOUNTANT"]);
+      setCustomRoles(rolesRes.data.map((r) => {
+        const name = String(r.name || "");
+        const system = systemRoleNames.has(name.trim().toUpperCase());
+        return {
+          id: r.id,
+          tenantId: r.tenantId,
+          name,
+          slug: name.toLowerCase().replace(/\s+/g, "-"),
+          description: String(r.description || ""),
+          isSystemRole: system,
+          isCustom: !system,
+          permissions: Array.isArray(r.permissions) ? r.permissions.map(String) : [],
+        };
+      }));
+
+      setSessionsList(sessionsRes.data.map((s) => ({
+        sessionId: s.id || s.sessionId,
+        user: s.userName || s.userEmail || "",
+        role: s.role || "",
+        device: s.deviceId || "",
+        ip: "",
+        loginTime: s.createdAt ? new Date(s.createdAt).toLocaleString() : "",
+        lastActive: "",
+        isCurrent: false,
+      })));
+
+      setAuditLogs(auditRes.data.map((l) => ({
+        id: l.id,
+        action: String(l.action || ""),
+        user: String(l.userName || l.userEmail || ""),
+        details: typeof l.details === "string" ? l.details : JSON.stringify(l.details ?? {}),
+        timestamp: l.timestamp ? new Date(l.timestamp).toLocaleString() : "",
+        ipAddress: l.ipAddress || undefined,
+      })));
+    } catch (error) {
+      setUsersList([]);
+      setCustomRoles([]);
+      setSessionsList([]);
+      setAuditLogs([]);
+      setSecurityReadError(error instanceof Error ? error.message : "SECURITY_DATA_READ_FAILED");
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser, currentBranchName, currentTenantName, db]);
+  }, []);
 
   useEffect(() => {
     void loadUsersAndSecurity();
@@ -310,86 +248,96 @@ export const UsersRolesPage: React.FC = () => {
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formFirstName.trim() || !formEmail.trim() || !formPassword.trim()) return;
+    const selectedRole = customRoles.find((r) => r.name === formRole);
+    const selectedBranch = availableBranches.find((b) => b.name === formBranch);
+    if (!selectedRole?.id || !selectedBranch?.id) {
+      toast.error("Identity Configuration Required", "A persisted tenant role and branch must be selected before creating a user.");
+      return;
+    }
     const newUserPayload = {
       firstName: formFirstName.trim(),
       lastName: formLastName.trim(),
-      name: `${formFirstName.trim()} ${formLastName.trim()}`,
       email: formEmail.trim(),
       phone: formPhone.trim(),
-      role: formRole,
-      branch: formBranch,
       password: formPassword,
+      roleId: selectedRole.id,
+      branchId: selectedBranch.id,
       pin: formPin.trim(),
     };
-    let serverCreated = false;
     try {
-      const response = await apiFetch<{ success?: boolean }>("/api/v1/users", { method: "POST", body: JSON.stringify(newUserPayload) });
-      serverCreated = response?.success !== false;
-    } catch {
-      serverCreated = false;
-    }
-    if (!serverCreated) {
-      if (!currentTenantId || !currentBranchId) {
-        toast.error("Tenant Context Required", "A tenant and branch context are required to queue an offline user mutation.");
-        return;
-      }
-      await commitLocalOutbox(db, {
-        id: `USER-CREATE-${currentTenantId}-${currentBranchId}-${formEmail.trim().toLowerCase()}`,
-        entityType: "User",
-        entityId: `usr-${Date.now()}`,
-        operationType: "CREATE",
-        payload: { ...newUserPayload, tenantId: currentTenantId, branchId: currentBranchId } as unknown as Record<string, unknown>,
-        idempotencyKey: `USER-CREATE-${currentTenantId}-${currentBranchId}-${formEmail.trim().toLowerCase()}`,
-        tenantId: currentTenantId,
-        branchId: currentBranchId,
+      const response = await apiFetch<{ success?: boolean; data?: any }>("/api/v1/users", {
+        method: "POST",
+        body: JSON.stringify(newUserPayload),
       });
+      if (!response?.success || !response.data) throw new Error("USER_CREATE_FAILED");
+      const created = response.data;
+      setUsersList((prev) => [{
+        id: created.id,
+        tenantId: created.tenantId,
+        firstName: created.name?.split(" ")[0] || formFirstName.trim(),
+        lastName: created.name?.split(" ").slice(1).join(" ") || formLastName.trim(),
+        email: created.email,
+        phone: created.phone || formPhone.trim() || "",
+        username: created.email,
+        role: created.role?.name || selectedRole.name,
+        branch: created.branch?.name || selectedBranch.name,
+        status: created.status === "SUSPENDED" ? "Suspended" : "Active",
+        lastLogin: "",
+        pinSet: Boolean(created.pinSet),
+      }, ...prev]);
+      setIsAddUserOpen(false);
+      setFormFirstName("");
+      setFormLastName("");
+      setFormEmail("");
+      setFormPhone("");
+      setFormPassword("");
+      setFormPin("");
+      toast.success("User Created", "User account persisted in PostgreSQL.");
+    } catch (error) {
+      toast.error("User Creation Failed", error instanceof Error ? error.message : "The user account was not persisted.");
     }
-    const newUserRecord: UserRecord = {
-      id: `usr-${Date.now()}`,
-      firstName: formFirstName.trim(),
-      lastName: formLastName.trim(),
-      email: formEmail.trim(),
-      phone: formPhone.trim() || "−",
-      username: formEmail.trim().split("@")[0],
-      role: formRole,
-      branch: formBranch,
-      status: "Active",
-      lastLogin: "Just Added",
-      pinSet: Boolean(formPin.trim()),
-    };
-    setUsersList((prev) => [newUserRecord, ...prev]);
-    setIsAddUserOpen(false);
-    setFormFirstName("");
-    setFormLastName("");
-    setFormEmail("");
-    setFormPhone("");
-    setFormPassword("");
-    setFormPin("");
   };
-
-  const handleCreateCustomRole = (e: React.FormEvent) => {
+  const handleCreateCustomRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoleName.trim()) return;
-    const slug = newRoleName.toLowerCase().replace(/\s+/g, "-");
-    const roleObj: CustomRoleRecord = {
-      id: `role-cust-${Date.now()}`,
-      name: newRoleName.trim(),
-      slug,
-      description: newRoleDesc.trim() || "Custom tenant business role",
-      isSystemRole: false,
-      isCustom: true,
-      permissions: selectedRolePerms,
-    };
-    setCustomRoles((prev) => [...prev, roleObj]);
-    setIsRoleModalOpen(false);
-    setNewRoleName("");
-    setNewRoleDesc("");
+    try {
+      const response = await apiFetch<{ success?: boolean; data?: any }>("/api/v1/roles", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newRoleName.trim(),
+          description: newRoleDesc.trim() || null,
+          permissions: selectedRolePerms,
+        }),
+      });
+      if (!response?.success || !response.data) throw new Error("ROLE_CREATE_FAILED");
+      const role = response.data;
+      setCustomRoles((prev) => [...prev, {
+        id: role.id,
+        tenantId: role.tenantId,
+        name: String(role.name || ""),
+        slug: String(role.name || "").toLowerCase().replace(/\s+/g, "-"),
+        description: String(role.description || ""),
+        isSystemRole: false,
+        isCustom: true,
+        permissions: Array.isArray(role.permissions) ? role.permissions.map(String) : [],
+      }]);
+      setIsRoleModalOpen(false);
+      setNewRoleName("");
+      setNewRoleDesc("");
+      toast.success("Role Created", "Custom role persisted in PostgreSQL.");
+    } catch (error) {
+      toast.error("Role Creation Failed", error instanceof Error ? error.message : "The role was not persisted.");
+    }
   };
-
   const handleRevokeSession = async (sessionId: string) => {
-    if (confirm("Revoke active session token? User will be logged out on target device.")) {
-      await apiFetch(`/api/v1/auth/sessions/${sessionId}`, { method: "DELETE" }).catch(() => {});
+    if (!confirm("Revoke active session token? User will be logged out on target device.")) return;
+    try {
+      const response = await apiFetch<{ success?: boolean }>("/api/v1/auth/sessions/" + sessionId, { method: "DELETE" });
+      if (!response?.success) throw new Error("SESSION_REVOKE_FAILED");
       setSessionsList((prev) => prev.filter((s) => s.sessionId !== sessionId));
+      toast.success("Session Revoked", "Session revocation was persisted in PostgreSQL.");
+    } catch (error) {
+      toast.error("Session Revocation Failed", error instanceof Error ? error.message : "The session was not changed.");
     }
   };
 
@@ -398,31 +346,16 @@ export const UsersRolesPage: React.FC = () => {
       toast.warning("Action Denied", "You cannot delete your own active session account.");
       return;
     }
-    if (confirm(`Permanently delete user account for ${userRec.firstName} ${userRec.lastName}?`)) {
-      let serverDeleted = false;
-      try {
-        const response = await apiFetch<{ success?: boolean }>(`/api/v1/users/${userRec.id}`, { method: "DELETE" });
-        serverDeleted = response?.success !== false;
-      } catch {
-        serverDeleted = false;
-      }
-      if (!serverDeleted && currentTenantId && currentBranchId) {
-        await commitLocalOutbox(db, {
-          id: `USER-DELETE-${currentTenantId}-${currentBranchId}-${userRec.id}`,
-          entityType: "User",
-          entityId: userRec.id,
-          operationType: "DELETE",
-          payload: { id: userRec.id, tenantId: currentTenantId, branchId: currentBranchId },
-          idempotencyKey: `USER-DELETE-${currentTenantId}-${currentBranchId}-${userRec.id}`,
-          tenantId: currentTenantId,
-          branchId: currentBranchId,
-        });
-      }
+    if (!confirm("Deactivate user account for " + userRec.firstName + " " + userRec.lastName + "?")) return;
+    try {
+      const response = await apiFetch<{ success?: boolean }>("/api/v1/users/" + userRec.id, { method: "DELETE" });
+      if (!response?.success) throw new Error("USER_DEACTIVATE_FAILED");
       setUsersList((prev) => prev.filter((u) => u.id !== userRec.id));
-      toast.success("User Deleted", `Account for ${userRec.firstName} ${userRec.lastName} removed.`);
+      toast.success("User Deactivated", "Account status was persisted in PostgreSQL.");
+    } catch (error) {
+      toast.error("User Deactivation Failed", error instanceof Error ? error.message : "The account was not changed.");
     }
   };
-
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
       <div className="v2-flex v2-items-center v2-justify-between">
@@ -433,6 +366,11 @@ export const UsersRolesPage: React.FC = () => {
           <p className="v2-text-xs v2-text-muted">
             Multi-tenant identity foundation, 3-level permission scopes, custom role builder, and multi-branch assignment.
           </p>
+          {securityReadError && (
+            <div className="v2-alert v2-alert-danger v2-mt-2">
+              Live security data unavailable: {securityReadError}. No local or fabricated security data is being displayed.
+            </div>
+          )}
         </div>
         <div className="v2-flex v2-items-center v2-gap-2">
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => void loadUsersAndSecurity()} disabled={isLoading} type="button">
@@ -557,14 +495,8 @@ export const UsersRolesPage: React.FC = () => {
             </thead>
             <tbody>
               {usersList.map((u) => {
-                const emp = employeeProfiles[u.id] || {
-                  employeeNumber: `EMP-${u.id.slice(-4).toUpperCase()}`,
-                  nationalId: "19950000-00000-00001-01",
-                  address: "Dar es Salaam",
-                  emergencyContact: "+255 700 000 000",
-                  employmentDate: "2025-06-01",
-                  salaryType: "MONTHLY",
-                };
+                const emp = employeeProfiles[u.id];
+                if (!emp) return null;
                 return (
                   <tr key={u.id}>
                     <td className="v2-font-bold">{u.firstName} {u.lastName}</td>
@@ -738,7 +670,7 @@ export const UsersRolesPage: React.FC = () => {
                   <td><span className="badge v2-badge-accent">{l.action}</span></td>
                   <td className="v2-font-bold">{l.user}</td>
                   <td className="v2-text-xs">{l.details}</td>
-                  <td className="v2-mono v2-text-xs">{l.ipAddress || "127.0.0.1"}</td>
+                  <td className="v2-mono v2-text-xs">{l.ipAddress || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -757,15 +689,15 @@ export const UsersRolesPage: React.FC = () => {
           <div className="v2-grid v2-grid-3 v2-gap-4">
             <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
               <div className="v2-text-xs v2-font-bold v2-text-muted">Total Registered Tenants</div>
-              <div className="v2-text-lg v2-font-black">1,420 Businesses</div>
+              <div className="v2-text-lg v2-font-black">Live platform metric required</div>
             </div>
             <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
               <div className="v2-text-xs v2-font-bold v2-text-muted">Total Active Users</div>
-              <div className="v2-text-lg v2-font-black">8,940 Employees</div>
+              <div className="v2-text-lg v2-font-black">Live platform metric required</div>
             </div>
             <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
               <div className="v2-text-xs v2-font-bold v2-text-muted">Super Admin Status</div>
-              <div className="v2-text-lg v2-font-black" style={{ color: "var(--success)" }}>AUTHENTICATED</div>
+              <div className="v2-text-lg v2-font-black" style={{ color: currentUser ? "var(--success)" : "var(--danger)" }}>{currentUser ? "AUTHENTICATED" : "NOT AUTHENTICATED"}</div>
             </div>
           </div>
         </div>

@@ -207,6 +207,7 @@ export class PrivilegedRbacMutationService {
   }
 
   async listRoles(actor: Actor) {
+    await this.requirePermission(this.prisma, actor, "roles.manage");
     return this.prisma.role.findMany({
       where: { tenantId: actor.tenantId },
       orderBy: [{ name: "asc" }],
@@ -214,6 +215,7 @@ export class PrivilegedRbacMutationService {
   }
 
   async listUsers(actor: Actor) {
+    await this.requirePermission(this.prisma, actor, "users.manage");
     return this.prisma.user.findMany({
       where: { tenantId: actor.tenantId },
       include: { role: true, branch: true },

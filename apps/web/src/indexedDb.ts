@@ -14,6 +14,21 @@ import { globalMigrationEngine, MigrationJournalEntry } from "./persistence/migr
 import { globalSnapshotRecoveryEngine, RecoverySnapshot, SnapshotStoreItem } from "./persistence/snapshotRecoveryEngine.js";
 import { globalStoragePressureMonitor } from "./persistence/storagePressure.js";
 
+const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
+  "User",
+  "Role",
+  "PlatformSecurity",
+  "SuperAdmin",
+]);
+
+export function assertSyncOutboxEntityTypeAllowed(entityType: string): void {
+  if (SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES.has(String(entityType))) {
+    throw new Error(
+      `PRIVILEGED_ENTITY_OUTBOX_FORBIDDEN: ${entityType} mutations must use the privileged PostgreSQL mutation service and may not enter syncOutbox.`
+    );
+  }
+}
+
 export interface OutboxItem {
   id: string;
   entityType:
@@ -812,6 +827,7 @@ export class LocalIndexedDbStore {
   }
 
   recordOutboxMutation(item: OutboxItem, ctx?: TenantScopedContext): void {
+    assertSyncOutboxEntityTypeAllowed(String(item.entityType));
     if (ctx?.tenantId && !item.tenantId) {
       item = { ...item, tenantId: ctx.tenantId, branchId: ctx.branchId || item.branchId };
     }
@@ -832,6 +848,7 @@ export class LocalIndexedDbStore {
     }
     const outboxItems = [...(params.outboxItems || []), ...(params.outboxItem ? [params.outboxItem] : [])];
     if (!outboxItems.length) throw new Error("ATOMIC_MUTATION_OUTBOX_REQUIRED");
+    for (const item of outboxItems) assertSyncOutboxEntityTypeAllowed(String(item.entityType));
     const stagedWrites = this.drainPendingPersistenceWrites();
     const explicitWrites = params.writes.map((write) => ({ ...write }));
     const writeMap = new Map<string, { store: NativeStore; key: string; value?: any; delete?: boolean }>();
@@ -1380,6 +1397,7 @@ export class LocalIndexedDbStore {
         ? crypto.randomUUID()
         : `OP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
     const entityType = (item.entityType || item.entity || "Product") as OutboxItem["entityType"];
+    assertSyncOutboxEntityTypeAllowed(String(entityType));
     const entityId = item.entityId || opId;
     const operationType = item.operationType || "CREATE";
     const sourcePayload = item.payload || item.data || {};

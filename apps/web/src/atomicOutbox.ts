@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore, type OutboxItem, db as defaultDb } from "./indexedDb.js";
+import { LocalIndexedDbStore, assertSyncOutboxEntityTypeAllowed, type OutboxItem, db as defaultDb } from "./indexedDb.js";
 import { apiFetch } from "./services/apiClient.js";
 
 export const db = defaultDb;
@@ -151,6 +151,7 @@ function patchInstance(db: PatchedStore): void {
   db.enqueueOutbox = ((item: { entity?: string; action?: string; data?: Record<string, unknown> } & Partial<OutboxItem>): OutboxItem => {
     const opId = item.id || makeId();
     const entityType = (item.entityType || item.entity || "Product") as OutboxItem["entityType"];
+    assertSyncOutboxEntityTypeAllowed(String(entityType));
     const entityId = item.entityId || opId;
     const operationType = item.operationType || "CREATE";
     const sourcePayload = item.payload || item.data || {};
@@ -211,6 +212,7 @@ export async function enqueueOutbox(tx: any, targetDb: LocalIndexedDbStore = def
     if (!tx) throw new Error("Transaction payload is required");
     let item: OutboxItem;
     if (tx.entityType || tx.entity || tx.payload || tx.operationType) {
+      assertSyncOutboxEntityTypeAllowed(String(tx.entityType || tx.entity || "Product"));
       item = targetDb.enqueueOutbox(tx);
     } else {
       const opId = tx.id || tx.transactionId || makeId();

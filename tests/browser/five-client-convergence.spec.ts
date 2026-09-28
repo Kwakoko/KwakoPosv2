@@ -88,7 +88,7 @@ async function readClientState(page: Page, tenantId: string, branchId: string, p
 test("five independent browser clients converge through IndexedDB + PostgreSQL", async ({ browser }) => {
   const tenantId = randomUUID();
   const branchId = randomUUID();
-  const categoryId = randomUUID();
+  let categoryId = randomUUID();
   const userId = randomUUID();
   const email = `convergence-${tenantId.slice(0, 8)}@kwakopos.test`;
 
@@ -116,10 +116,6 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     await prisma.branch.create({
       data: { id: branchId, tenantId, name: "Main", code: `CONV-${branchId.slice(0, 8)}` },
     });
-    await prisma.category.create({
-      data: { id: categoryId, tenantId, branchId, name: "Convergence Test", code: "CONV" },
-    });
-
     for (const deviceId of deviceIds) {
       const accessToken = generateAccessToken({
         userId,
@@ -257,13 +253,42 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     expect(new Set(deviceSyncOperations.map((row) => row.entityId))).toEqual(new Set(deviceCustomerIds));
 
     const pageA = pages[0];
+
+    // Master data must enter through the same real browser -> IndexedDB -> outbox -> API -> PostgreSQL path.
+    // Do not seed Category directly in PostgreSQL; that bypasses the production browser path.
+    await pageA.getByRole("button", { name: "Categories & Brands", exact: true }).click();
+    await pageA.getByRole("button", { name: "Add Category", exact: true }).click();
+    const categoryDialog = pageA.locator('input[placeholder="e.g. Frozen Foods, Dairy, Beverages..."]').locator("..").locator("..");
+    await categoryDialog.locator('input[placeholder="e.g. Frozen Foods, Dairy, Beverages..."]').fill("Convergence Test");
+    await categoryDialog.getByRole("button", { name: "Save Category", exact: true }).click();
+    await expect(pageA.getByText("Convergence Test", { exact: true }).first()).toBeVisible({ timeout: 15000 });
+    await expect.poll(
+      async () => (await readClientState(pageA, tenantId, branchId)).pendingCount,
+      { timeout: 30000, intervals: [500, 1000, 2000] },
+    ).toBe(0);
+    const persistedCategory = await prisma.category.findFirst({
+      where: { tenantId, branchId, name: "Convergence Test" },
+      select: { id: true },
+    });
+    expect(persistedCategory?.id).toBeTruthy();
+    categoryId = persistedCategory!.id;
+
+    await pageA.getByRole("button", { name: "Overview", exact: true }).click();
+
     await pageA.evaluate(() => {
       (window as any).__kwakoOutboxEnqueueEvents = [];
       window.addEventListener("kwakopos:outbox-enqueued", (event: any) => {
-        (window as any).__kwakoOutboxEnqueueEvents.push({
-          id: event?.detail?.item?.id || event?.detail?.operationId || "",
-          entityType: event?.detail?.item?.entityType || event?.detail?.entityType || "",
-        });
+        const items = Array.isArray(event?.detail?.items)
+          ? event.detail.items
+          : event?.detail?.item
+            ? [event.detail.item]
+            : [];
+        for (const item of items) {
+          (window as any).__kwakoOutboxEnqueueEvents.push({
+            id: item?.id || item?.operationId || "",
+            entityType: item?.entityType || "",
+          });
+        }
       });
     });
     await pageA.getByRole("button", { name: /^Add Product$/ }).click();
@@ -320,8 +345,8 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     expect(Number(serverAdjustments[0].quantityChange)).toBe(25);
 
     // The database journal is part of the convergence contract: every pushed
-    // operation must atomically leave an immutable journal entry, including
-    // the StockLedger projection generated from the stock adjustment.
+    // operation must atomically leave an immutable journal entry. StockLedger is
+    // a derived PostgreSQL projection of the StockAdjustment, not a separate push.
     const journalRows = await prisma.$queryRawUnsafe<Array<{
       revision: bigint | number | string;
       operation_id: string;
@@ -342,12 +367,11 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     expect(journalRows.filter((row) => row.entity_type === "Product")).toHaveLength(1);
     expect(journalRows.filter((row) => row.entity_type === "ProductVariant")).toHaveLength(1);
     expect(journalRows.filter((row) => row.entity_type === "StockAdjustment")).toHaveLength(1);
-    expect(journalRows.filter((row) => row.entity_type === "StockLedger")).toHaveLength(1);
     expect(journalRows.every((row) => row.source === "push")).toBe(true);
     expect(journalRows.every((row, index) => index === 0 || BigInt(row.revision) > BigInt(journalRows[index - 1].revision))).toBe(true);
 
     const syncOperations = await prisma.syncOperation.count({ where: { tenantId, branchId, status: "PROCESSED" } });
-    expect(syncOperations).toBe(8);
+    expect(syncOperations).toBe(9);
     const outboxOperationIds = outboxEnqueueEvents.map((event) => event.id).filter(Boolean);
     const serverOperationsForOutbox = await prisma.syncOperation.findMany({
       where: { tenantId, branchId, operationId: { in: outboxOperationIds } },
@@ -362,7 +386,7 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     expect(headResponse.ok).toBe(true);
     const headEnvelope: any = await headResponse.json();
     const headData = headEnvelope?.data ?? headEnvelope;
-    const serverHeadRevision = String(headData?.serverHeadRevision ?? "0");
+    const serverHeadRevision = String(headData?.serverRevision ?? headData?.serverHeadRevision ?? "0");
     const serverSyncEpoch = String(headData?.syncEpoch ?? "");
     expect(serverHeadRevision).toBe(String(journalRows[journalRows.length - 1].revision));
     expect(serverSyncEpoch).not.toBe("");

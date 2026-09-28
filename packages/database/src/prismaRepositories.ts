@@ -24,7 +24,7 @@ import {
   validateRetroactiveTimeline,
   assertTenantIsolation,
 } from "@kwakopos2/domain";
-import { prisma } from "./index.js";
+import { prisma } from "./client.js";
 
 export const productShape = (row: any): Product => {
   const buyingPrice = Number(row.buyingPrice ?? 0);

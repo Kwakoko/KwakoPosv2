@@ -1,4 +1,4 @@
-﻿-- Convergence hardening: scope idempotency keys by tenant + branch.
+-- Convergence hardening: scope idempotency keys by tenant + branch.
 -- Existing unique constraints are removed before scoped constraints are installed.
 
 DROP INDEX IF EXISTS "stock_ledgers_idempotencyKey_key";
@@ -6,7 +6,7 @@ DROP INDEX IF EXISTS "stock_adjustments_idempotencyKey_key";
 DROP INDEX IF EXISTS "sync_operations_idempotencyKey_key";
 DROP INDEX IF EXISTS sync_operations_tenant_device_idempotency_uq;
 DROP INDEX IF EXISTS "sync_operations_tenantId_deviceId_operationId_key";
-DROP INDEX IF EXISTS "sync_change_journal_operation_id_key";
+ALTER TABLE sync_change_journal DROP CONSTRAINT IF EXISTS sync_change_journal_operation_id_key;
 
 CREATE UNIQUE INDEX IF NOT EXISTS stock_ledgers_tenant_branch_idempotency_uq
   ON stock_ledgers("tenantId", "branchId", "idempotencyKey");

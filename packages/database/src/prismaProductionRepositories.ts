@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
-import { prisma } from "./index.js";
+import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
 import { assertTenantIsolation } from "@kwakopos2/domain";
 

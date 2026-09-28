@@ -1,5 +1,5 @@
 import type { TenantContext } from "@kwakopos2/contracts";
-import { prisma } from "./index.js";
+import { prisma } from "./client.js";
 import { AccountingEngine, FinancialReportingEngine, TransactionNumbering, FinancialBridge } from "@kwakopos2/domain";
 
 
