@@ -7,6 +7,7 @@ All notable changes to KwakoPos will be documented in this file.
 ## [2.13.0] - 2026-09-28
 
 ### 🚧 Production Release Candidate
+- Certification retry is executed through the exact production release workflow; `v2.13.0` remains unpublished until that workflow passes.
 - Release candidate is bound to the exact `main` Git SHA and must pass the repository production certification workflow before `v2.13.0` is published.
 - Release engineering fixes preserve a committed version newer than the latest published tag and defer GitHub tag publication until certification succeeds.
 
