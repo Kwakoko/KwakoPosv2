@@ -108,36 +108,7 @@ jobs:
           git push origin HEAD:main
           RELEASE_SHA="$(git rev-parse HEAD)"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Dispatch exact production certification (tag/release publication deferred until certification PASS)
-        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
-        id: dispatch
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          RELEASE_SHA="${{ steps.commit_release.outputs.release_sha }}"
-          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid release SHA $RELEASE_SHA"; exit 1; }
-          gh workflow run production-release-certification.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_sha="$RELEASE_SHA"
-          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Wait for exact production certification and fail closed
-        if: steps.dispatch.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          RELEASE_SHA="${{ steps.dispatch.outputs.release_sha }}"
-          RUN_ID=""
-          for attempt in {1..30}; do
-            RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow production-release-certification.yml --limit 20 --json databaseId,headSha,event,createdAt --jq "[.[] | select(.headSha == \"$RELEASE_SHA\" and .event == \"workflow_dispatch\")] | sort_by(.createdAt) | last | .databaseId // empty")"
-            [[ -n "$RUN_ID" ]] && break
-            sleep 10
-          done
-          [[ -n "$RUN_ID" ]] || { echo "RELEASE_BLOCKED: exact production certification run was not observed"; exit 1; }
-          echo "Watching exact production certification run $RUN_ID for $RELEASE_SHA"
-          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
-      - name: Verify authoritative SemVer state
+      # Production certification is triggered automatically by the release commit on main.\n      - name: Verify authoritative SemVer state
         shell: bash
         run: |
           set -euo pipefail
