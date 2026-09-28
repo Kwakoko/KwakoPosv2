@@ -4,6 +4,22 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
+## [2.13.0] - 2026-09-28
+
+### 🚧 Production Release Candidate
+- Release candidate is bound to the exact `main` Git SHA and must pass the repository production certification workflow before `v2.13.0` is published.
+- Release engineering fixes preserve a committed version newer than the latest published tag and defer GitHub tag publication until certification succeeds.
+
+### Key Recent Changes
+- **persistence**: integrate sync epoch, SaaS record envelope, and durable device identity
+- **inventory**: implement backdated inventory movements and timeline validation
+- **convergence**: harden multi-device E2E convergence and certification
+- **web**: add browser crypto compatibility guards
+
+### 👥 Contributors
+Credit to: Kwakoko
+
+
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
