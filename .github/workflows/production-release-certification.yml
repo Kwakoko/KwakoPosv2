@@ -51,6 +51,15 @@ jobs:
           node-version: '20'
           cache: npm
 
+      - name: Mark certification started
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          set -euo pipefail
+          gh issue comment "$ISSUE_URL" --repo "$GITHUB_REPOSITORY" --body "Production certification STARTED for exact SHA \`$GITHUB_SHA\`."
+
       - name: Install dependencies
         run: npm ci
 
