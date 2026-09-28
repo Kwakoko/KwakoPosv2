@@ -106,6 +106,54 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
       expect(v1Store.sales.get("sale-v3")?.totalAmount).toBe(5000);
       expect(v1Store.products.get("prod-v1")?.name).toBe("Legacy Product");
       expect(v1Store.getPendingOutbox().length).toBe(1);
+      expect(v1Store.recoverySnapshots.size).toBeGreaterThan(0);
+    });
+
+    it("uses V3 syncMetadata for pre-V4 recovery before the dedicated recoverySnapshots store exists", async () => {
+      const v3DbName = `kwakopos-v3-recovery-${Math.random().toString(36).slice(2, 9)}`;
+      const v3Store = new LocalIndexedDbStore(3, v3DbName);
+      await v3Store.ready;
+
+      v3Store.saveProductLocal({
+        id: "prod-v3-recovery",
+        name: "V3 Recovery Product",
+        description: "Pre-V4 snapshot proof",
+        tenantId: "tenant-recovery",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      v3Store.recordOutboxMutation({
+        id: "out-v3-recovery",
+        entityType: "Product",
+        entityId: "prod-v3-recovery",
+        operationType: "CREATE",
+        payload: { name: "V3 Recovery Product", tenantId: "tenant-recovery" },
+        clientCreatedAt: new Date().toISOString(),
+        idempotencyKey: "idem-v3-recovery",
+        status: "PENDING",
+        tenantId: "tenant-recovery",
+      });
+      await v3Store.flushPersistence();
+
+      const snapshot = await v3Store.createVerifiedSnapshot("V3 pre-V4 recovery proof", "2.13.0");
+      const snapshotKey = `__migration_snapshot_v4__:${snapshot.id}`;
+      expect(v3Store.recoverySnapshots.size).toBe(0);
+      expect(v3Store.syncMetadata.get(snapshotKey)).toBeDefined();
+      expect(JSON.parse(v3Store.syncMetadata.get(snapshotKey)!).verified).toBe(true);
+
+      // Prove recovery does not depend on the process-local snapshot map.
+      globalSnapshotRecoveryEngine.deleteSnapshot(snapshot.id);
+      v3Store.close();
+
+      const reopenedV3 = new LocalIndexedDbStore(3, v3DbName);
+      await reopenedV3.ready;
+      expect(reopenedV3.recoverySnapshots.size).toBe(0);
+      expect(reopenedV3.syncMetadata.get(snapshotKey)).toBeDefined();
+
+      await reopenedV3.restoreSnapshot(snapshot.id);
+      expect(reopenedV3.products.get("prod-v3-recovery")?.name).toBe("V3 Recovery Product");
+      expect(reopenedV3.getPendingOutbox().length).toBe(1);
+      reopenedV3.close();
     });
 
     it("supports forward-compatible downgrade V4 -> V3 and rollback V4 -> V2 without destroying business data", async () => {

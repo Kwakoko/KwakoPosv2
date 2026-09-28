@@ -1,5 +1,10 @@
 import { LocalIndexedDbStore, assertSyncOutboxEntityTypeAllowed, type OutboxItem, db as defaultDb } from "./indexedDb.js";
 import { apiFetch } from "./services/apiClient.js";
+import {
+  createPersistenceStatus,
+  emitPersistenceStatusChanged,
+  persistenceStatusKey,
+} from "./persistence/persistenceStatus.js";
 
 export const db = defaultDb;
 
@@ -78,6 +83,21 @@ function scheduleAtomicBatch(db: PatchedStore): void {
           }];
         });
         const allWrites = [...stagedWrites, ...businessWrites];
+        const localCommittedStatuses = pending.items
+          .filter((item) => Boolean(item.tenantId))
+          .map((item) =>
+            createPersistenceStatus(
+              {
+                tenantId: item.tenantId!,
+                branchId: item.branchId,
+                entityType: item.entityType,
+                entityId: item.entityId,
+                operationId: item.id,
+                operationType: item.operationType,
+              },
+              "LOCAL_COMMITTED",
+            ),
+          );
         const stores = [
           "syncOutbox",
           "syncMetadata",
@@ -101,6 +121,13 @@ function scheduleAtomicBatch(db: PatchedStore): void {
               }
               for (const item of pending.items) {
                 tx.objectStore("syncOutbox").put(item, item.id);
+                const committedStatus = localCommittedStatuses.find((status) => status.operationId === item.id);
+                if (committedStatus) {
+                  tx.objectStore("syncMetadata").put(
+                    JSON.stringify(committedStatus),
+                    persistenceStatusKey(committedStatus.tenantId, committedStatus.branchId, committedStatus.entityType, committedStatus.entityId),
+                  );
+                }
                 const marker = JSON.stringify({
                   operationId: item.id,
                   entityType: item.entityType,
@@ -127,6 +154,14 @@ function scheduleAtomicBatch(db: PatchedStore): void {
           const rollbackStores = [...new Set(allWrites.map((write) => write.store).concat("syncOutbox"))] as any;
           await db.refreshStoresFromNative(rollbackStores).catch(() => undefined);
           throw error;
+        }
+
+        for (const status of localCommittedStatuses) {
+          const key = persistenceStatusKey(status.tenantId, status.branchId, status.entityType, status.entityId);
+          db.syncMetadata.set(key, JSON.stringify(status));
+          emitPersistenceStatusChanged(status);
+          const item = pending.items.find((candidate) => candidate.id === status.operationId);
+          if (item) db.setPersistenceStatus(item, "SYNC_PENDING");
         }
       });
 
@@ -229,6 +264,7 @@ export async function enqueueOutbox(tx: any, targetDb: LocalIndexedDbStore = def
         branchId: tx.branchId,
       };
       await targetDb.outbox.add(outboxItem);
+      targetDb.setPersistenceStatus(outboxItem, "SYNC_PENDING");
       item = outboxItem;
       try {
         if (typeof window !== "undefined") {

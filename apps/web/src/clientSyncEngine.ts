@@ -12,7 +12,14 @@ import type {
 import { globalRumCollector } from "./rum/rumCollector.js";
 import { globalClientCoordination } from "./persistence/clientCoordination.js";
 import { syncDiagnosticService } from "./services/syncDiagnosticService.js";
+import { getEffectiveStock } from "./services/inventoryStockService.js";
 import { apiFetch } from "./services/apiClient.js";
+import {
+  type PersistenceStatusRecord,
+  createPersistenceStatus,
+  emitPersistenceStatusChanged,
+  persistenceStatusKey,
+} from "./persistence/persistenceStatus.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
@@ -47,7 +54,14 @@ async function defaultDeltaApi(since?: string): Promise<SyncDeltaResponse> {
   return body.data || body;
 }
 
-async function applyRevisionedChanges(changes: RevisionedChange[], serverRevision: string, serverTimestamp: string, tenantId: string, branchId: string): Promise<number> {
+async function applyRevisionedChanges(
+  changes: RevisionedChange[],
+  serverRevision: string,
+  serverTimestamp: string,
+  tenantId: string,
+  branchId: string,
+  syncEpoch?: string,
+): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME);
@@ -58,6 +72,7 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   const tx = db.transaction(KNOWN_STORES as unknown as string[], "readwrite");
   const revisionKey = scopedSyncKey(tenantId, branchId, "lastSyncRevision");
   const syncTimeKey = scopedSyncKey(tenantId, branchId, "lastSyncTime");
+  const syncEpochKey = scopedSyncKey(tenantId, branchId, "syncEpoch");
   const categoryKey = tenantId + ":" + branchId + ":inventory_categories_meta";
   const brandKey = tenantId + ":" + branchId + ":inventory_brands_meta";
   const metadata = tx.objectStore("syncMetadata");
@@ -70,6 +85,7 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   })).filter((item) => item?.status === "PENDING");
 
   let applied = 0;
+  const persistenceStatusEvents: PersistenceStatusRecord[] = [];
   const initialRevisionRaw = await new Promise<any>((resolve) => {
     const request = metadata.get(revisionKey);
     request.onsuccess = () => resolve(request.result);
@@ -121,7 +137,34 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation) {
-      metadata.put(JSON.stringify({ conflictId: "CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
+      const conflictId = "CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision;
+      metadata.put(JSON.stringify({ conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
+      const rawStatus = await new Promise<any>((resolve) => {
+        const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null);
+      });
+      let previous: any;
+      try {
+        previous = rawStatus ? JSON.parse(rawStatus) : undefined;
+      } catch {
+        previous = undefined;
+      }
+      const conflictStatus = createPersistenceStatus(
+        {
+          tenantId,
+          branchId,
+          entityType: change.entityType,
+          entityId: change.entityId,
+          operationId: pendingMutation.id,
+          operationType: pendingMutation.operationType,
+        },
+        "CONFLICT",
+        previous,
+        { conflictId, serverRevision: change.revision },
+      );
+      metadata.put(JSON.stringify(conflictStatus), persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+      persistenceStatusEvents.push(conflictStatus);
       break;
     }
 
@@ -131,7 +174,34 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
       await upsertCatalogConfig(change.entityType, change, deleted);
     } else if (deleted) {
       if (storeName) await waitRequest(tx.objectStore(storeName).delete(change.entityId));
-      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + change.entityType + ":" + change.entityId);
+      const tombstonedAt = new Date().toISOString();
+      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: tombstonedAt }), "tombstone:" + change.entityType + ":" + change.entityId);
+      const rawStatus = await new Promise<any>((resolve) => {
+        const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => resolve(null);
+      });
+      let previous: any;
+      try {
+        previous = rawStatus ? JSON.parse(rawStatus) : undefined;
+      } catch {
+        previous = undefined;
+      }
+      const tombstoneStatus = createPersistenceStatus(
+        {
+          tenantId,
+          branchId,
+          entityType: change.entityType,
+          entityId: change.entityId,
+          operationId: "server:" + change.revision,
+          operationType: "DELETE",
+        },
+        "TOMBSTONED",
+        previous,
+        { serverRevision: change.revision },
+      );
+      metadata.put(JSON.stringify(tombstoneStatus), persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+      persistenceStatusEvents.push(tombstoneStatus);
     } else if (storeName) {
       const record = change.record;
       const recoveryPatch = Boolean(record?.__syncRecoveryPatch);
@@ -160,6 +230,9 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
   } else {
     metadata.put(String(cursor), revisionKey);
   }
+  if (syncEpoch) {
+    metadata.put(String(syncEpoch), syncEpochKey);
+  }
 
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -167,6 +240,7 @@ async function applyRevisionedChanges(changes: RevisionedChange[], serverRevisio
     tx.onabort = () => reject(tx.error || new Error("Revisioned sync transaction aborted"));
   });
   db.close();
+  for (const status of persistenceStatusEvents) emitPersistenceStatusChanged(status);
   return applied;
 }
 
@@ -416,12 +490,51 @@ export class ClientSyncEngine {
           deltaRes.serverRevision,
           deltaRes.serverTimestamp,
           effectiveTenantId || "tenant-default",
-          effectiveBranchId
+          effectiveBranchId,
+          typeof deltaRes.syncEpoch === "string" ? deltaRes.syncEpoch : undefined,
         );
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
           "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
         ]);
+
+        // Stock Ledger is authoritative. Rebuild the derived variant/product stock
+        // projections after a server delta so every browser reports the same balance.
+        const affectedVariantIds = new Set<string>();
+        for (const change of deltaRes.changes as RevisionedChange[]) {
+          const variantId = String(
+            change.entityType === "ProductVariant"
+              ? change.entityId
+              : (change.record?.variantId || ""),
+          ).trim();
+          if (variantId) affectedVariantIds.add(variantId);
+        }
+        const affectedProductIds = new Set<string>();
+        for (const variantId of affectedVariantIds) {
+          const variant = this.localDb.productVariants.get(variantId) as any;
+          if (!variant || variant.tenantId !== effectiveTenantId || variant.branchId !== effectiveBranchId) continue;
+          const effectiveStock = getEffectiveStock(
+            this.localDb,
+            variantId,
+            variant.productId,
+            effectiveTenantId,
+            effectiveBranchId,
+          );
+          const updatedVariant = {
+            ...variant,
+            inventoryQuantity: effectiveStock.stock,
+            stock: effectiveStock.stock,
+          };
+          this.localDb.productVariants.set(variantId, updatedVariant);
+          this.localDb.persist("productVariants", variantId, updatedVariant);
+          if (variant.productId) affectedProductIds.add(String(variant.productId));
+        }
+        for (const productId of affectedProductIds) {
+          this.localDb.recalculateProductStockLocal(productId);
+        }
+        if (affectedVariantIds.size > 0) {
+          await this.localDb.flushPersistence();
+        }
       } else {
         totalPulled = await this.localDb.applyServerDelta(deltaRes);
       }

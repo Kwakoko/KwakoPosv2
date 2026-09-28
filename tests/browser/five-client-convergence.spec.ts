@@ -45,13 +45,13 @@ async function readClientState(page: Page, tenantId: string, branchId: string, p
     const metadataValues = await Promise.all([
       new Promise<any>((resolve, reject) => {
         const tx = metadataDb.transaction("syncMetadata", "readonly");
-        const req = tx.objectStore("syncMetadata").get(`lastSyncRevision:${tenantId}:${branchId}`);
+        const req = tx.objectStore("syncMetadata").get(`syncScope:${tenantId}:${branchId}:lastSyncRevision`);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       }),
       new Promise<any>((resolve, reject) => {
         const tx = metadataDb.transaction("syncMetadata", "readonly");
-        const req = tx.objectStore("syncMetadata").get(`syncEpoch:${tenantId}:${branchId}`);
+        const req = tx.objectStore("syncMetadata").get(`syncScope:${tenantId}:${branchId}:syncEpoch`);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       }),
@@ -147,6 +147,10 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
       await context.addInitScript(({ session, deviceId }) => {
         localStorage.setItem("kwakopos:v2:session", JSON.stringify(session));
         localStorage.setItem("kwakopos:v2:device-id", deviceId);
+        // Keep each isolated certification context foreground-visible so the normal
+        // 30s production convergence heartbeat is exercised deterministically.
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
       }, { session: sessions[i].session, deviceId: deviceIds[i] });
       const page = await context.newPage();
       page.on("console", (msg) => {
@@ -390,6 +394,17 @@ test("five independent browser clients converge through IndexedDB + PostgreSQL",
     const serverSyncEpoch = String(headData?.syncEpoch ?? "");
     expect(serverHeadRevision).toBe(String(journalRows[journalRows.length - 1].revision));
     expect(serverSyncEpoch).not.toBe("");
+
+    // Invoke the production context sync path in every Chromium context.
+    // This calls syncOutbox() on the mounted application provider; no network/API
+    // mock or direct IndexedDB mutation is used.
+    await Promise.all(pages.map((page) => page.evaluate(async () => {
+      await new Promise<void>((resolve, reject) => {
+        window.dispatchEvent(new CustomEvent("kwakopos:context-sync-now", {
+          detail: { onComplete: () => resolve(), onError: (error: unknown) => reject(error) },
+        }));
+      });
+    })));
 
     const clientCursors: string[] = [];
     for (const [index, page] of pages.entries()) {

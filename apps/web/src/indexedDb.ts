@@ -13,6 +13,16 @@ import type {
 import { globalMigrationEngine, MigrationJournalEntry } from "./persistence/migrationEngine.js";
 import { globalSnapshotRecoveryEngine, RecoverySnapshot, SnapshotStoreItem } from "./persistence/snapshotRecoveryEngine.js";
 import { globalStoragePressureMonitor } from "./persistence/storagePressure.js";
+import {
+  type PersistenceState,
+  type PersistenceStatusRecord,
+  type PersistenceStatusSnapshot,
+  createPersistenceStatus,
+  emptyPersistenceStatusCounts,
+  emitPersistenceStatusChanged,
+  persistenceStatusKey,
+  PERSISTENCE_STATUS_KEY_PREFIX,
+} from "./persistence/persistenceStatus.js";
 
 const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
   "User",
@@ -101,6 +111,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 
 const DB_NAME = "kwakopos-v2";
 export const AUTHORITATIVE_SCHEMA_VERSION = 4;
+const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
   if (item.entityType === "Category" || item.entityType === "Brand") return 5;
@@ -848,6 +859,23 @@ export class LocalIndexedDbStore {
     }
     const outboxItems = [...(params.outboxItems || []), ...(params.outboxItem ? [params.outboxItem] : [])];
     if (!outboxItems.length) throw new Error("ATOMIC_MUTATION_OUTBOX_REQUIRED");
+    const localCommittedStatuses = outboxItems
+      .filter((item) => Boolean(item.tenantId || params.tenantContext?.tenantId))
+      .map((item) => {
+        const tenantId = item.tenantId || params.tenantContext!.tenantId;
+        const branchId = item.branchId || params.tenantContext?.branchId;
+        return createPersistenceStatus(
+          {
+            tenantId,
+            branchId,
+            entityType: item.entityType,
+            entityId: item.entityId,
+            operationId: item.id,
+            operationType: item.operationType,
+          },
+          "LOCAL_COMMITTED",
+        );
+      });
     for (const item of outboxItems) assertSyncOutboxEntityTypeAllowed(String(item.entityType));
     const stagedWrites = this.drainPendingPersistenceWrites();
     const explicitWrites = params.writes.map((write) => ({ ...write }));
@@ -866,12 +894,18 @@ export class LocalIndexedDbStore {
         }
       }
     }
-    const stores = [...new Set([...writes.map((w) => w.store), "syncOutbox"])];
+    const stores = [...new Set([...writes.map((w) => w.store), "syncOutbox", "syncMetadata"])];
     if (this.nativeDb) {
       for (const store of stores) if (!this.nativeDb.objectStoreNames.contains(store)) throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: missing IndexedDB store " + store);
       const tx = this.nativeDb.transaction(stores, "readwrite");
       for (const write of writes) { if (write.delete) tx.objectStore(write.store).delete(write.key); else tx.objectStore(write.store).put(write.value, write.key); }
       for (const item of outboxItems) tx.objectStore("syncOutbox").put(item, item.id);
+      for (const status of localCommittedStatuses) {
+        tx.objectStore("syncMetadata").put(
+          JSON.stringify(status),
+          persistenceStatusKey(status.tenantId, status.branchId, status.entityType, status.entityId),
+        );
+      }
       await new Promise<void>((resolve, reject) => {
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error || new Error("Atomic mutation failed"));
@@ -880,6 +914,18 @@ export class LocalIndexedDbStore {
     }
     for (const write of writes) { const target = this.getTargetMap(write.store); if (!target) continue; if (write.delete) target.delete(write.key); else target.set(write.key, write.value); }
     for (const item of outboxItems) this.syncOutbox.set(item.id, item);
+    for (const status of localCommittedStatuses) {
+      const key = persistenceStatusKey(status.tenantId, status.branchId, status.entityType, status.entityId);
+      this.syncMetadata.set(key, JSON.stringify(status));
+      emitPersistenceStatusChanged(status);
+      const item = outboxItems.find(
+        (candidate) =>
+          candidate.id === status.operationId &&
+          candidate.entityType === status.entityType &&
+          candidate.entityId === status.entityId,
+      );
+      if (item) this.setPersistenceStatus(item, "SYNC_PENDING");
+    }
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { items: outboxItems } }));
@@ -953,6 +999,54 @@ export class LocalIndexedDbStore {
     return { entity: entityData, outbox: outboxItem };
   }
 
+  private migrationSnapshotMetadataKey(snapshotId: string): string {
+    return PRE_V4_MIGRATION_SNAPSHOT_PREFIX + snapshotId;
+  }
+
+  private async loadPreV4MigrationSnapshot(snapshotId: string): Promise<RecoverySnapshot | null> {
+    const encoded = this.syncMetadata.get(this.migrationSnapshotMetadataKey(snapshotId));
+    if (!encoded) return null;
+
+    let snapshot: RecoverySnapshot;
+    try {
+      snapshot = JSON.parse(encoded) as RecoverySnapshot;
+    } catch {
+      throw new Error(`RECOVERY_ERROR: Snapshot ${snapshotId} metadata is invalid`);
+    }
+
+    if (snapshot.id !== snapshotId) {
+      throw new Error(`RECOVERY_ERROR: Snapshot ${snapshotId} metadata identity mismatch`);
+    }
+
+    const isVerified = await globalSnapshotRecoveryEngine.verifySnapshot(snapshot);
+    if (!isVerified) {
+      throw new Error(`RECOVERY_ERROR: Snapshot ${snapshotId} failed integrity verification`);
+    }
+    return snapshot;
+  }
+
+  private async persistMigrationSnapshot(snapshot: RecoverySnapshot): Promise<void> {
+    const legacyKey = this.migrationSnapshotMetadataKey(snapshot.id);
+
+    if (this.nativeDb?.objectStoreNames.contains("recoverySnapshots")) {
+      this.recoverySnapshots.set(snapshot.id, snapshot);
+      this.persist("recoverySnapshots", snapshot.id, snapshot);
+
+      if (this.nativeDb.objectStoreNames.contains("syncMetadata")) {
+        this.syncMetadata.delete(legacyKey);
+        this.persistDelete("syncMetadata", legacyKey);
+      }
+    } else if (this.nativeDb?.objectStoreNames.contains("syncMetadata")) {
+      const encoded = JSON.stringify(snapshot);
+      this.syncMetadata.set(legacyKey, encoded);
+      this.persist("syncMetadata", legacyKey, encoded);
+    } else {
+      throw new Error("RECOVERY_ERROR: No durable pre-V4 snapshot store is available");
+    }
+
+    await this.flushPersistence();
+  }
+
   async createVerifiedSnapshot(reason: string, appVersion = "2.12.5"): Promise<RecoverySnapshot> {
     const storesData: Record<string, SnapshotStoreItem[]> = {};
 
@@ -973,13 +1067,35 @@ export class LocalIndexedDbStore {
       applicationVersion: appVersion,
     });
 
-    this.recoverySnapshots.set(snapshot.id, snapshot);
-    this.persist("recoverySnapshots", snapshot.id, snapshot);
+    await this.persistMigrationSnapshot(snapshot);
     return snapshot;
   }
 
+  private async reopenNativeDbAtExistingVersion(): Promise<void> {
+    if (this.nativeDb || typeof indexedDB === "undefined") return;
+
+    this.nativeDb = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(this.dbName);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Recovery database reopen failed"));
+      request.onblocked = () => reject(new Error("Recovery database reopen blocked"));
+    });
+
+    this.nativeDb.onversionchange = () => {
+      try {
+        this.nativeDb?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }
+
   async restoreSnapshot(snapshotId: string): Promise<boolean> {
-    const snapshot = this.recoverySnapshots.get(snapshotId) || globalSnapshotRecoveryEngine.getSnapshot(snapshotId);
+    let snapshot =
+      this.recoverySnapshots.get(snapshotId) ||
+      globalSnapshotRecoveryEngine.getSnapshot(snapshotId) ||
+      (await this.loadPreV4MigrationSnapshot(snapshotId));
+
     if (!snapshot) {
       throw new Error(`RECOVERY_ERROR: Snapshot ${snapshotId} not found`);
     }
@@ -988,6 +1104,8 @@ export class LocalIndexedDbStore {
     if (!isVerified) {
       throw new Error(`RECOVERY_ERROR: Snapshot ${snapshotId} failed integrity verification`);
     }
+
+    await this.reopenNativeDbAtExistingVersion();
 
     for (const [storeName, items] of Object.entries(snapshot.stores)) {
       const typedStore = storeName as NativeStore;
@@ -1000,18 +1118,17 @@ export class LocalIndexedDbStore {
       }
 
       if (this.nativeDb && this.nativeDb.objectStoreNames.contains(typedStore)) {
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
           try {
             const tx = this.nativeDb!.transaction(typedStore, "readwrite");
             const store = tx.objectStore(typedStore);
             store.clear();
-            for (const item of items) {
-              store.put(item.value, item.key);
-            }
+            for (const item of items) store.put(item.value, item.key);
             tx.oncomplete = () => resolve();
-            tx.onerror = () => resolve();
-          } catch {
-            resolve();
+            tx.onerror = () => reject(tx.error || new Error(`Snapshot recovery failed: ${typedStore}`));
+            tx.onabort = () => reject(tx.error || new Error(`Snapshot recovery aborted: ${typedStore}`));
+          } catch (error) {
+            reject(error);
           }
         });
       }
@@ -1037,6 +1154,9 @@ export class LocalIndexedDbStore {
       `sync_conflict_${entityType}_${entityId}`,
       JSON.stringify({ entityType, entityId, operationId: pending.id, clientCreatedAt: pending.clientCreatedAt }),
     );
+    this.setPersistenceStatus(pending, "CONFLICT", {
+      conflictId: `CONFLICT-${entityType}-${entityId}`,
+    });
     return true;
   }
 
@@ -1425,6 +1545,7 @@ export class LocalIndexedDbStore {
   ): OutboxItem {
     const outboxItem = this.createOutboxItem(item);
     this.recordOutboxMutation(outboxItem);
+    this.setPersistenceStatus(outboxItem, "SYNC_PENDING");
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
@@ -1460,6 +1581,81 @@ export class LocalIndexedDbStore {
     return all.filter((i) => (!tenantId || i.tenantId === tenantId) && (!branchId || i.branchId === branchId));
   }
 
+  public getPersistenceStatus(
+    tenantId: string,
+    branchId: string | undefined,
+    entityType: string,
+    entityId: string,
+  ): PersistenceStatusRecord | null {
+    const raw = this.syncMetadata.get(persistenceStatusKey(tenantId, branchId, entityType, entityId));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as PersistenceStatusRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  public listPersistenceStatuses(tenantId?: string, branchId?: string): PersistenceStatusRecord[] {
+    const records: PersistenceStatusRecord[] = [];
+    for (const [key, raw] of this.syncMetadata.entries()) {
+      if (!key.startsWith(PERSISTENCE_STATUS_KEY_PREFIX) || typeof raw !== "string") continue;
+      try {
+        const record = JSON.parse(raw) as PersistenceStatusRecord;
+        if (tenantId && record.tenantId !== tenantId) continue;
+        if (branchId && (record.branchId || undefined) !== branchId) continue;
+        records.push(record);
+      } catch {
+        /* Ignore malformed observability entries; business data remains authoritative. */
+      }
+    }
+    return records.sort((a, b) => Date.parse(b.changedAt) - Date.parse(a.changedAt) || b.operationId.localeCompare(a.operationId));
+  }
+
+  public getPersistenceStatusSnapshot(tenantId?: string, branchId?: string): PersistenceStatusSnapshot {
+    const records = this.listPersistenceStatuses(tenantId, branchId);
+    const counts = emptyPersistenceStatusCounts();
+    for (const record of records) {
+      counts[record.state] += 1;
+    }
+    return {
+      tenantId: tenantId || null,
+      branchId: branchId || null,
+      counts,
+      total: records.length,
+      latest: records[0] || null,
+      records: records.slice(0, 100),
+    };
+  }
+
+  public setPersistenceStatus(
+    item: Pick<OutboxItem, "tenantId" | "branchId" | "entityType" | "entityId" | "id" | "operationType">,
+    state: PersistenceState,
+    details?: { error?: string; conflictId?: string; serverRevision?: string },
+  ): PersistenceStatusRecord | null {
+    if (!item.tenantId) return null;
+    const previous = this.getPersistenceStatus(item.tenantId, item.branchId, item.entityType, item.entityId);
+    const lifecyclePrevious = previous?.operationId === item.id ? previous : undefined;
+    const record = createPersistenceStatus(
+      {
+        tenantId: item.tenantId,
+        branchId: item.branchId,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        operationId: item.id,
+        operationType: item.operationType,
+      },
+      state,
+      lifecyclePrevious,
+      details,
+    );
+    const key = persistenceStatusKey(item.tenantId, item.branchId, item.entityType, item.entityId);
+    this.syncMetadata.set(key, JSON.stringify(record));
+    this.persist("syncMetadata", key, JSON.stringify(record));
+    emitPersistenceStatusChanged(record);
+    return record;
+  }
+
   retryFailedOutbox(tenantId?: string, branchId?: string): number {
     const failed = this.getFailedOutbox(tenantId, branchId);
     for (const item of failed) {
@@ -1467,6 +1663,7 @@ export class LocalIndexedDbStore {
       this.syncMetadata.delete(`error_${item.id}`);
       this.persist("syncOutbox", item.id, item);
       if (this.nativeDb) this.persistDelete("syncMetadata", `error_${item.id}`);
+      this.setPersistenceStatus(item, "SYNC_PENDING");
     }
     return failed.length;
   }
@@ -1478,6 +1675,7 @@ export class LocalIndexedDbStore {
     this.syncMetadata.delete(`error_${operationId}`);
     this.persist("syncOutbox", operationId, item);
     if (this.nativeDb) this.persistDelete("syncMetadata", `error_${operationId}`);
+    this.setPersistenceStatus(item, "SYNC_PENDING");
   }
 
   markOutboxSynced(operationId: string): void {
@@ -1485,6 +1683,7 @@ export class LocalIndexedDbStore {
     if (!item) return;
     item.status = "SYNCED";
     this.persist("syncOutbox", operationId, item);
+    this.setPersistenceStatus(item, item.operationType === "DELETE" ? "TOMBSTONED" : "SERVER_CONFIRMED");
     if (item.entityType === "Sale") {
       const saleId = item.entityId || operationId;
       const sale = this.sales.get(saleId);
@@ -1502,6 +1701,7 @@ export class LocalIndexedDbStore {
     this.syncMetadata.set(`error_${operationId}`, errorReason);
     this.persist("syncOutbox", operationId, item);
     this.persist("syncMetadata", `error_${operationId}`, errorReason);
+    this.setPersistenceStatus(item, "FAILED", { error: errorReason });
   }
 
   setSyncMetadata(key: string, value: string): void {
@@ -1588,6 +1788,20 @@ export class LocalIndexedDbStore {
             openReq.onerror = () => reject(openReq.error || new Error("Migration open failed"));
             openReq.onblocked = () => reject(new Error("Migration blocked by open connection"));
           });
+
+          if (targetVersion >= 4) {
+            // V4 is the first schema that owns the dedicated recoverySnapshots store.
+            // Promote the pre-V4 durable snapshot only after the upgrade transaction commits.
+            await this.persistMigrationSnapshot(snapshot);
+          } else {
+            // Older schemas use syncMetadata only as a temporary migration recovery journal.
+            const legacyKey = this.migrationSnapshotMetadataKey(snapshot.id);
+            if ((this.nativeDb as IDBDatabase | null)?.objectStoreNames.contains("syncMetadata")) {
+              this.syncMetadata.delete(legacyKey);
+              this.persistDelete("syncMetadata", legacyKey);
+              await this.flushPersistence();
+            }
+          }
         } catch (err) {
           console.error("Migration transaction failed, initiating automatic recovery:", err);
           await this.restoreSnapshot(snapshot.id);

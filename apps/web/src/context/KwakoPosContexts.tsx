@@ -14,7 +14,9 @@ import {
   switchContext as apiSwitchContext,
   safeUUID,
 } from "../services/apiClient.js";
-import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
+import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
+import type { PersistenceStatusSnapshot } from "../persistence/persistenceStatus.js";
 import {
   type IndustryModule,
   type ModuleManifest,
@@ -221,6 +223,7 @@ interface SyncContextType {
   syncEngine: ClientSyncEngine;
   syncError: string | null;
   lastSyncedAt: number | null;
+  persistenceStatus: PersistenceStatusSnapshot;
 }
 
 const DEFAULT_SYNC_CONTEXT: SyncContextType = {
@@ -234,6 +237,21 @@ const DEFAULT_SYNC_CONTEXT: SyncContextType = {
   syncEngine: null as any,
   syncError: null,
   lastSyncedAt: null,
+  persistenceStatus: {
+    tenantId: null,
+    branchId: null,
+    counts: {
+      LOCAL_COMMITTED: 0,
+      SYNC_PENDING: 0,
+      SERVER_CONFIRMED: 0,
+      FAILED: 0,
+      CONFLICT: 0,
+      TOMBSTONED: 0,
+    },
+    total: 0,
+    latest: null,
+    records: [],
+  },
 };
 
 const SyncContext = createContext<SyncContextType | null>(null);
@@ -345,6 +363,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatusSnapshot>(() =>
+    db.getPersistenceStatusSnapshot(),
+  );
 
   const toggleOfflineSimulation = useCallback(() => {
     setIsSimulatedOffline((prev) => !prev);
@@ -520,6 +541,28 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   );
   const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
   const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
+
+  const refreshPersistenceStatus = useCallback(() => {
+    const tenantId = currentTenantId || user?.tenantId || undefined;
+    const branchId = currentBranchId || user?.branchId || undefined;
+    void db.ready
+      .then(() => setPersistenceStatus(db.getPersistenceStatusSnapshot(tenantId, branchId)))
+      .catch(() => {});
+  }, [db, currentTenantId, currentBranchId, user?.tenantId, user?.branchId]);
+
+  useEffect(() => {
+    refreshPersistenceStatus();
+    window.addEventListener("kwakopos:persistence-status-changed", refreshPersistenceStatus);
+    window.addEventListener("kwakopos:outbox-enqueued", refreshPersistenceStatus);
+    window.addEventListener(DATA_CHANGED_EVENT, refreshPersistenceStatus);
+    const interval = setInterval(refreshPersistenceStatus, 3000);
+    return () => {
+      window.removeEventListener("kwakopos:persistence-status-changed", refreshPersistenceStatus);
+      window.removeEventListener("kwakopos:outbox-enqueued", refreshPersistenceStatus);
+      window.removeEventListener(DATA_CHANGED_EVENT, refreshPersistenceStatus);
+      clearInterval(interval);
+    };
+  }, [refreshPersistenceStatus]);
 
   const canAccessModule = useCallback((module: IndustryModule): boolean => {
     if (!user) return false;
@@ -810,6 +853,36 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
 
   // ─── Automated Convergence Lifecycles ──────────────────────────────────────────
 
+  // Imperative convergence hook used by UI automation and diagnostics. It executes
+  // the same configured syncOutbox path used by the application, including durable
+  // IndexedDB, real /sync/push, PostgreSQL journal, and /sync/delta application.
+  useEffect(() => {
+    const handleSyncNow = (event: Event) => {
+      const detail = (event as CustomEvent<{ onComplete?: (result: { pushed: number; pulled: number }) => void; onError?: (error: unknown) => void }>).detail;
+      const runWhenIdle = async () => {
+        // A boot/heartbeat sync may already be active. Wait for the mounted
+        // production sync lifecycle to become idle instead of silently dropping
+        // the requested convergence run.
+        const deadline = Date.now() + 15000;
+        while (isSyncInProgressRef.current && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (isSyncInProgressRef.current) {
+          throw new Error("SYNC_IN_PROGRESS_TIMEOUT");
+        }
+        return syncOutbox({ quiet: true, force: true });
+      };
+      void runWhenIdle().then(
+        (result) => {
+          if (result) detail?.onComplete?.(result);
+        },
+        (error) => detail?.onError?.(error),
+      );
+    };
+    window.addEventListener("kwakopos:context-sync-now", handleSyncNow);
+    return () => window.removeEventListener("kwakopos:context-sync-now", handleSyncNow);
+  }, [syncOutbox]);
+
   // 1. Cross-tab peer convergence via BroadcastChannel
   useEffect(() => {
     if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
@@ -1025,6 +1098,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     syncEngine,
     syncError,
     lastSyncedAt,
+    persistenceStatus,
   };
   const themeValue: ThemeContextType = {
     theme,

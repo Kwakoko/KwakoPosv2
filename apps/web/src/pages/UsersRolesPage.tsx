@@ -767,6 +767,20 @@ export const UsersRolesPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {isRoleModalOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 620, maxWidth: "92vw", padding: "1.5rem", maxHeight: "88vh", overflow: "auto" }}>
+            <div className="v2-flex v2-items-center v2-justify-between v2-mb-4"><h2 className="v2-text-lg v2-font-black">Build Custom Role</h2><button aria-label="Close role builder" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsRoleModalOpen(false)} type="button"><X size={15} /></button></div>
+            <form onSubmit={handleCreateCustomRole} className="v2-space-y-3">
+              <div><label className="v2-text-xs v2-font-bold v2-text-muted">ROLE NAME *</label><input aria-label="Role name" className="v2-input" value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} required /></div>
+              <div><label className="v2-text-xs v2-font-bold v2-text-muted">DESCRIPTION</label><textarea aria-label="Role description" className="v2-input" value={newRoleDesc} onChange={(e) => setNewRoleDesc(e.target.value)} rows={3} /></div>
+              <div><div className="v2-text-xs v2-font-bold v2-text-muted v2-mb-2">PERMISSIONS</div><div className="v2-grid v2-grid-2 v2-gap-2">{permissionsMatrix.map((p) => <label key={p.id} className="v2-flex v2-items-center v2-gap-2 v2-text-xs"><input type="checkbox" checked={selectedRolePerms.includes(p.id)} onChange={(e) => setSelectedRolePerms((prev) => e.target.checked ? Array.from(new Set([...prev, p.id])) : prev.filter((id) => id !== p.id))} /> <span>{p.name}</span></label>)}</div></div>
+              <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-3"><button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setIsRoleModalOpen(false)} type="button">Cancel</button><button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Create Role</button></div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

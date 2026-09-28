@@ -34,8 +34,29 @@ import { apiFetch, safeUUID } from "../services/apiClient.js";
 import { clientSyncEngine } from "../clientSyncEngine.js";
 import { Button } from "../components/UI/Button.js";
 import { SyncErrorsPanel } from "../components/SyncErrorsPanel.js";
+import type { PersistenceState } from "../persistence/persistenceStatus.js";
 
 type Sale = { id: string; saleNumber: string; grandTotal: number; soldAt: string; paymentStatus: string };
+
+const PERSISTENCE_STATE_ORDER: PersistenceState[] = [
+  "LOCAL_COMMITTED",
+  "SYNC_PENDING",
+  "SERVER_CONFIRMED",
+  "FAILED",
+  "CONFLICT",
+  "TOMBSTONED",
+];
+
+function persistenceStateBadge(state: PersistenceState): string {
+  switch (state) {
+    case "SERVER_CONFIRMED": return "v2-badge-success";
+    case "SYNC_PENDING": return "v2-badge-warning";
+    case "FAILED":
+    case "CONFLICT": return "v2-badge-danger";
+    case "TOMBSTONED": return "v2-badge-muted";
+    case "LOCAL_COMMITTED": return "v2-badge-info";
+  }
+}
 
 function useApiList<T>(url: string) {
   const [data, setData] = useState<T[]>([]);
@@ -137,7 +158,7 @@ export { UsersPage };
 
 export const DiagnosticsPage: React.FC = () => {
   const { t } = useTranslation();
-  const { db, syncError, isOnline, pendingOutboxCount: contextPendingCount } = useSync();
+  const { db, syncError, isOnline, pendingOutboxCount: contextPendingCount, persistenceStatus } = useSync();
   const [syncStatus, setSyncStatus] = useState<"IDLE" | "RUNNING" | "SUCCESS" | "FAILED">("IDLE");
   const [outboxCount, setOutboxCount] = useState<number>(contextPendingCount || 0);
   const outbox = db.getPendingOutbox();
@@ -203,6 +224,53 @@ export const DiagnosticsPage: React.FC = () => {
       </div>
       {syncError && <div className="badge v2-badge-danger v2-mb-4">{syncError}</div>}
       <SyncErrorsPanel onRetry={handleSyncNow} className="v2-mb-4" />
+
+      <div className="v2-card v2-mb-4">
+        <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
+          <div>
+            <div className="v2-card-title">Application Persistence State</div>
+            <div className="v2-text-xs v2-text-muted v2-mt-1">
+              LOCAL_COMMITTED → SYNC_PENDING → SERVER_CONFIRMED
+            </div>
+          </div>
+          {persistenceStatus.latest && (
+            <span className={`badge ${persistenceStateBadge(persistenceStatus.latest.state)}`}>
+              {persistenceStatus.latest.state}
+            </span>
+          )}
+        </div>
+        <div className="v2-card-body">
+          <div className="v2-grid v2-grid-cols-2 md:v2-grid-cols-3 lg:v2-grid-cols-6 v2-gap-2 v2-mb-3">
+            {PERSISTENCE_STATE_ORDER.map((state) => (
+              <div key={state} className="v2-p-2 v2-border v2-rounded-lg">
+                <div className="v2-text-xs v2-text-muted">{state}</div>
+                <div className="v2-text-lg v2-font-black v2-mt-1">{persistenceStatus.counts[state]}</div>
+              </div>
+            ))}
+          </div>
+          {persistenceStatus.records.length > 0 ? (
+            <div className="v2-space-y-2">
+              {persistenceStatus.records.slice(0, 8).map((record) => (
+                <div key={record.operationId} className="v2-flex v2-items-center v2-justify-between v2-gap-3 v2-p-2 v2-border-b">
+                  <div className="v2-min-w-0">
+                    <div className="v2-text-xs v2-font-bold">
+                      {record.entityType} · {record.entityId}
+                    </div>
+                    <div className="v2-text-xs v2-text-muted">
+                      {record.operationType} · {new Date(record.changedAt).toLocaleString()}
+                    </div>
+                    {record.error && <div className="v2-text-xs v2-text-danger v2-mt-1">{record.error}</div>}
+                  </div>
+                  <span className={`badge ${persistenceStateBadge(record.state)}`}>{record.state}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="v2-text-xs v2-text-muted">No local persistence lifecycle records yet.</div>
+          )}
+        </div>
+      </div>
+
       <div className="v2-card">
         <div className="v2-card-header"><div className="v2-card-title">{t("sync.syncOutbox")} ({outbox.length})</div></div>
         <div className="v2-card-body">

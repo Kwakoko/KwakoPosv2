@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test:unit && npm run test:integration && npm run test:sync",
     "test:unit": "vitest run tests/unit",
+    "test:persistence": "tsx scripts/certification/runNodePersistenceTestGate.ts",
     "test:integration": "vitest run tests/integration",
     "test:sync": "vitest run tests/sync",
     "superadmin:bootstrap": "tsx scripts/security/bootstrap-super-admin.ts",
