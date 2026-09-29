@@ -68,6 +68,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         idempotencyKey: "idem-v1",
         status: "PENDING",
         tenantId: "tenant-mig",
+        branchId: "branch-1",
       });
 
       // Migrate V1 -> V2
@@ -132,6 +133,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         idempotencyKey: "idem-v3-recovery",
         status: "PENDING",
         tenantId: "tenant-recovery",
+        branchId: "branch-recovery",
       });
       await v3Store.flushPersistence();
 
@@ -177,6 +179,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         idempotencyKey: "idem-durable",
         status: "PENDING",
         tenantId: "tenant-mig",
+        branchId: "branch-1",
       });
 
       // Downgrade V4 -> V3
@@ -284,7 +287,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         tenantId: "tenant-A",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      }, { tenantId: "tenant-A" });
+      }, { tenantId: "tenant-A", branchId: "branch-A" });
 
       db.recordOutboxMutation({
         id: "out-A",
@@ -295,7 +298,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         clientCreatedAt: new Date().toISOString(),
         idempotencyKey: "idem-A",
         status: "PENDING",
-      }, { tenantId: "tenant-A" });
+      }, { tenantId: "tenant-A", branchId: "branch-A" });
 
       // Tenant B records
       db.saveProductLocal({
@@ -305,7 +308,7 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         tenantId: "tenant-B",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      }, { tenantId: "tenant-B" });
+      }, { tenantId: "tenant-B", branchId: "branch-B" });
 
       db.recordOutboxMutation({
         id: "out-B",
@@ -316,14 +319,14 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
         clientCreatedAt: new Date().toISOString(),
         idempotencyKey: "idem-B",
         status: "PENDING",
-      }, { tenantId: "tenant-B" });
+      }, { tenantId: "tenant-B", branchId: "branch-B" });
 
       // Scoped queries
-      const outboxA = db.getPendingOutbox("tenant-A");
+      const outboxA = db.getPendingOutbox("tenant-A", "branch-A");
       expect(outboxA).toHaveLength(1);
       expect(outboxA[0].id).toBe("out-A");
 
-      const outboxB = db.getPendingOutbox("tenant-B");
+      const outboxB = db.getPendingOutbox("tenant-B", "branch-B");
       expect(outboxB).toHaveLength(1);
       expect(outboxB[0].id).toBe("out-B");
 
@@ -332,8 +335,8 @@ describe("KwakoPos PWA Durable Lifecycle & Zero-Data-Loss Engine", () => {
 
       expect(db.products.has("prod-B")).toBe(false);
       expect(db.products.has("prod-A")).toBe(true);
-      expect(db.getPendingOutbox("tenant-A")).toHaveLength(1);
-      expect(db.getPendingOutbox("tenant-B")).toHaveLength(0);
+      expect(db.getPendingOutbox("tenant-A", "branch-A")).toHaveLength(1);
+      expect(db.getPendingOutbox("tenant-B", "branch-B")).toHaveLength(0);
     });
   });
 

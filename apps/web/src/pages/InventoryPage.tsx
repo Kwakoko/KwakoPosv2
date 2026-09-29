@@ -167,6 +167,22 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       setActiveTab(map[propActiveTab]);
     }
   }, [propActiveTab]);
+
+const selectInventoryTab = useCallback((tab: InventoryTab) => {
+    setActiveTab(tab);
+    const sidebarTabByLocalTab: Record<InventoryTab, string> = {
+      dashboard: "Inventory Overview",
+      products: "Products",
+      categories: "Categories & Brands",
+      ledger: "Stock Adjustment",
+      transfers: "Stock Transfer",
+      count: "Stock Count",
+      recipes: "Product Bundles & Kits",
+      wastage: "Wastage & Spillage",
+      reports: "Inventory Reports",
+    };
+    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
+  }, [setGlobalActiveTab]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
 

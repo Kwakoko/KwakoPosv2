@@ -5,8 +5,8 @@ import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 
 describe("PWA Versioning & Safe Upgrade Durability Engine", () => {
   it("formats version display string correctly with authoritative release version", () => {
-    const pwa = new PwaVersionManager("2.12.5");
-    expect(pwa.getFormattedVersionDisplay()).toBe("KwakoPos © 2026 • Version 2.12.5");
+    const pwa = new PwaVersionManager("2.13.0");
+    expect(pwa.getFormattedVersionDisplay()).toBe("KwakoPos \u00A9 2026 \u2022 Version 2.13.0");
   });
 
   it("performs safe PWA upgrade without destroying pending outbox mutations or local products", async () => {
@@ -33,6 +33,7 @@ describe("PWA Versioning & Safe Upgrade Durability Engine", () => {
       idempotencyKey: "idem-pwa-001",
       status: "PENDING",
       tenantId: "tenant-pwa",
+      branchId: "branch-pwa",
     });
 
     const pwa = new PwaVersionManager("2.12.5", 1, store);

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPosv2 — Purchasing, Suppliers & Goods Receiving (GRN)
  * ─────────────────────────────────────────────────────────────────────────────
  * Complete procurement management command center matching mature legacy UX:
@@ -16,7 +16,11 @@ import { Truck, ShoppingBag, Package, Plus, Search, CheckCircle, Clock, XCircle,
   RefreshCw, Scale, Shield, AlertCircle, Edit3, Trash2, ChevronRight, Lock,
   Building2, ArrowDownRight, CreditCard, Wallet, Check, AlertTriangle, X, CheckCircle2
 } from "lucide-react";
+<<<<<<< HEAD
 import { useBranch, useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
+=======
+import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
+>>>>>>> 8608f9f (chore: finalize production hardening)
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
@@ -131,6 +135,7 @@ const isDemoGrn = (g: any): boolean => {
 export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantId } = useTenant();
   const { currentBranchId, currentBranchName } = useBranch();
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const { db } = useSync();
   const toast = useToast();
   const { playSuccessChime, playWarningTone } = useAudioFeedback();
@@ -162,6 +167,17 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       setActiveTab(map[propActiveTab]);
     }
   }, [propActiveTab]);
+
+const selectPurchasingTab = useCallback((tab: PurchTab) => {
+    setActiveTab(tab);
+    const sidebarTabByLocalTab: Record<PurchTab, string> = {
+      suppliers: "Suppliers",
+      orders: "Purchase Orders",
+      grn: "Goods Received",
+      invoices: "Supplier Ledgers",
+    };
+    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
+  }, [setGlobalActiveTab]);
 
   const [searchQuery, setSearchQuery] = useState("");
 

@@ -16,12 +16,22 @@
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
  */
+<<<<<<< HEAD
 import React, { useEffect, useState } from "react";
 import { Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
   Zap, Database, Save, CheckCircle, Globe, Check, Sliders, Calendar,
   DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles
 } from "lucide-react";
 import { useTenant, useBranch, useSync, useTranslation, useLocale, useFormatters, useModule } from "../context/KwakoPosContexts.js";
+=======
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
+  Zap, Database, Save, CheckCircle, Globe, Check, Sliders, Calendar,
+  DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles
+} from "lucide-react";
+import { useTenant, useBranch, useModule, useSync, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
+>>>>>>> 8608f9f (chore: finalize production hardening)
 import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
@@ -39,6 +49,7 @@ export interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiveTab }) => {
   const { currentTenantId, currentTenantName } = useTenant();
+  const { setActiveTab: setGlobalActiveTab } = useModule();
   const { currentBranchName, currentBranchId } = useBranch();
   const { db } = useSync();
   const toast = useToast();
@@ -102,6 +113,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       setActiveTab(map[propActiveTab]);
     }
   }, [propActiveTab]);
+
+const selectSettingsTab = useCallback((tab: SettingsTab) => {
+    setActiveTab(tab);
+    const sidebarTabByLocalTab: Partial<Record<SettingsTab, string>> = {
+      profile: "Business Profile & Identity",
+      localization: "Settings",
+      pos: "POS Configurations",
+      tax: "Tax & Billing",
+      inventory: "Inventory Rules",
+      security: "Security Policies",
+      notifications: "Settings",
+      sync: "Settings",
+      integrations: "Settings",
+      developer: "Developer Options",
+      advanced: "Change Log",
+    };
+    setGlobalActiveTab(sidebarTabByLocalTab[tab] || "Settings");
+  }, [setGlobalActiveTab]);
 
   // Form states across tabs
   const [profile, setProfile] = useState(() => {
@@ -280,7 +309,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
           return (
             <button
               key={tab.id}
+<<<<<<< HEAD
               onClick={() => selectSettingsTab(tab.id)
+=======
+              onClick={() => selectSettingsTab(tab.id)}
+>>>>>>> 8608f9f (chore: finalize production hardening)
               type="button"
               className={`v2-btn v2-btn-sm ${isActive ? "v2-btn-primary" : "v2-btn-ghost"}`}
               style={{ whiteSpace: "nowrap" }}

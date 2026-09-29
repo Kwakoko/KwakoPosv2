@@ -117,6 +117,8 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
       clientCreatedAt: now,
       idempotencyKey: "DEV-OFFLINE/OP-001",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     expect(browserDb.getPendingOutbox()).toHaveLength(1);
@@ -165,6 +167,8 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
       clientCreatedAt: now,
       idempotencyKey: "DEV-WA/OP-001",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     browserADb.recordOutboxMutation({
@@ -176,6 +180,8 @@ describe("KwakoPos Production Web UI + API Routing & PWA Certification Suite", (
       clientCreatedAt: now,
       idempotencyKey: "DEV-WA/OP-002",
       status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
     });
 
     // Browser A syncs to server

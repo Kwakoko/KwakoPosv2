@@ -1,4 +1,4 @@
-﻿/**
+/**
  * KwakoPosv2 — Reports & Analytics Command Center
  * ─────────────────────────────────────────────────────────────────────────────
  * Full-fidelity reporting suite featuring 14 sub-report modules:
@@ -32,7 +32,11 @@ import {
   AreaChart, Area, PieChart as RePie, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
+<<<<<<< HEAD
 import { useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
+=======
+import { useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
+>>>>>>> 8608f9f (chore: finalize production hardening)
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
@@ -53,6 +57,7 @@ export interface ReportsPageProps {
 export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveTab }) => {
   const { db } = useSync();
   const { currentTenantName, currentTenantId } = useTenant();
+  const { setActiveTab: setGlobalActiveTab } = useModule();
 
   const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<ReportTab>("sales");
@@ -112,6 +117,27 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setActiveTab(map[propActiveTab]);
     }
   }, [propActiveTab]);
+
+const selectReportTab = useCallback((tab: ReportTab) => {
+    setActiveTab(tab);
+    const sidebarTabByLocalTab: Record<ReportTab, string> = {
+      sales: "Sales",
+      profit: "Profit",
+      cashier: "Cashier Performance",
+      payment: "Payment Methods",
+      inventory: "Inventory Valuation",
+      customers: "Customers Report",
+      returns: "Returns & Refunds",
+      branch: "Branch Comparison",
+      tax: "Tax",
+      discount: "Discounts",
+      expenses: "Expenses Report",
+      movements: "Stock Movement",
+      purchasing: "Purchasing Report",
+      aging: "Receivables Aging",
+    };
+    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
+  }, [setGlobalActiveTab]);
 
   // ─── Hydrate Authoritative Data from Local DB & localStorage ──────────────
   const loadReportData = useCallback(async () => {

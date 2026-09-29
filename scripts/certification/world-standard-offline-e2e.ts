@@ -36,7 +36,7 @@ async function waitForHttp(url: string, child?: ChildProcess, label = "web"): Pr
   child?.on("error", onError);
   try {
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (child?.exitCode !== null || child?.signalCode) {
+      if (child && (child.exitCode !== null || child.signalCode)) {
         throw new Error(
           "E2E_" + label.toUpperCase() + "_PROCESS_EXITED:" + childLabel(child) +
           (childError ? ":" + childError : ""),
