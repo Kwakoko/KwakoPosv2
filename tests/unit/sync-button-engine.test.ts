@@ -56,6 +56,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       pushApiFn: mockPushApi,
       deltaApiFn: mockDeltaApi,
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
   });
 
@@ -77,6 +78,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "CREATE",
       payload: { name: "Product 1" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
     localDb.enqueueOutbox({
       entityType: "Product",
@@ -84,6 +86,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "CREATE",
       payload: { name: "Product 2" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
 
     let countBefore = await clientSyncEngine.localDb.getPendingOutboxCount();
@@ -135,6 +138,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       pushApiFn: failingPushApi,
       deltaApiFn: mockDeltaApi,
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
 
     localDb.enqueueOutbox({
@@ -143,6 +147,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "UPDATE",
       payload: { name: "Forbidden" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
     const countBefore = await clientSyncEngine.localDb.getPendingOutboxCount();
     expect(countBefore).toBe(1);
@@ -176,7 +181,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
     const customDb = new LocalIndexedDbStore(5);
     await customDb.ready;
     customDb.clear({ allowDestructiveReset: true });
-    const customEngine = new ClientSyncEngine("custom-dev", customDb, mockPushApi, mockDeltaApi, "tenant-test-01");
+    const customEngine = new ClientSyncEngine("custom-dev", customDb, mockPushApi, mockDeltaApi, "tenant-test-01", "branch-test-01");
 
     customDb.enqueueOutbox({
       entityType: "Customer",
@@ -184,6 +189,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "CREATE",
       payload: { name: "Alice" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
     customDb.enqueueOutbox({
       entityType: "Customer",
@@ -191,6 +197,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "CREATE",
       payload: { name: "Bob" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
     customDb.enqueueOutbox({
       entityType: "Customer",
@@ -198,6 +205,7 @@ describe("ClientSyncEngine & Sync Button Workflow", () => {
       operationType: "CREATE",
       payload: { name: "Charlie" },
       tenantId: "tenant-test-01",
+      branchId: "branch-test-01",
     });
 
     expect(await customEngine.localDb.getPendingOutboxCount()).toBe(3);

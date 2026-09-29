@@ -117,7 +117,7 @@ export async function runDisasterRecoverySimulationSuite(): Promise<{
     const startRto = Date.now();
     const db = new LocalIndexedDbStore(5);
     await db.ready;
-    const clientEngine = new ClientSyncEngine("dev-dr-net", db);
+    const clientEngine = new ClientSyncEngine("dev-dr-net", db, undefined, undefined, ctx.tenantId, ctx.branchId);
     db.recordOutboxMutation({
       id: "OP-NET-1",
       entityType: "StockAdjustment",
@@ -127,6 +127,8 @@ export async function runDisasterRecoverySimulationSuite(): Promise<{
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: "NET-KEY-1",
       status: "PENDING",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
     });
 
     let offlinePreserved = false;

@@ -65,11 +65,13 @@ describe("5-Step Product Registration Wizard Invariants Suite", () => {
 
     localDb1 = new LocalIndexedDbStore(5);
     await localDb1.ready;
-    syncEngine1 = new ClientSyncEngine("device-browser-1", localDb1);
+    localDb1.clear({ allowDestructiveReset: true });
+    syncEngine1 = new ClientSyncEngine("device-browser-1", localDb1, undefined, undefined, tenant1Ctx.tenantId, tenant1Ctx.branchId);
 
     localDb2 = new LocalIndexedDbStore(5);
     await localDb2.ready;
-    syncEngine2 = new ClientSyncEngine("device-browser-2", localDb2);
+    localDb2.clear({ allowDestructiveReset: true });
+    syncEngine2 = new ClientSyncEngine("device-browser-2", localDb2, undefined, undefined, tenant1Ctx.tenantId, tenant1Ctx.branchId);
   });
 
   // ── 1. Validation Fail-Closed Logic ──────────────────────────────────────────

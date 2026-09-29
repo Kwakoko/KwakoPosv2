@@ -186,6 +186,8 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: `idem-off-${randomUUID()}`,
       status: "PENDING",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
     });
 
     const outbox = localDb.getPendingOutbox();
@@ -230,6 +232,8 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: `IDEM-A1-${randomUUID()}`,
       status: "PENDING",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
     });
 
     const pushA = syncEngine.processPush(ctx, {
@@ -264,7 +268,7 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
 
   // P1-010 PWA upgrade/recovery
   it("P1-010: PWA local storage schema upgrade preserves pending outbox queue", async () => {
-    const db = new LocalIndexedDbStore(4, `kwakopos-p1-010-${randomUUID()}`);
+    const db = new LocalIndexedDbStore(1, `kwakopos-p1-010-${randomUUID()}`);
     await db.ready;
     db.recordOutboxMutation({
       id: "OP-UPGRADE-1",
@@ -275,6 +279,8 @@ describe("Phase 1 Commercial Core Acceptance Suite (P1-001 to P1-010)", () => {
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: "UPGRADE-KEY-1",
       status: "PENDING",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
     });
 
     // Simulate schema upgrade from v1 to v2

@@ -76,6 +76,7 @@ describe("SyncDiagnosticService & Operator Failure Panel", () => {
       pushApiFn: failingPushApi,
       deltaApiFn: mockDeltaApi,
       tenantId: "tenant-err-test",
+      branchId: "branch-err-test",
     });
 
     localDb.enqueueOutbox({
@@ -84,6 +85,7 @@ describe("SyncDiagnosticService & Operator Failure Panel", () => {
       operationType: "CREATE",
       payload: { name: "Sample Item" },
       tenantId: "tenant-err-test",
+      branchId: "branch-err-test",
     });
 
     // Run sync and expect rejection

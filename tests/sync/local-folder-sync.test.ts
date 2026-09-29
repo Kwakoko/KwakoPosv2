@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { execSync } from "child_process";
 import {
   parseSemVer,
   isValidSemVer,
@@ -27,8 +28,32 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
   let tempDir: string;
   const valid40CharSha = "2b65e64e96c6c3497271aea1125fe2ec0a969df5";
 
-  beforeEach(() => {
+  function initGitInMockDir(dir: string, version = "2.7.0") {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "KwakoPos", version }), "utf8");
+    try {
+      execSync("git init -b main", { cwd: dir, stdio: "ignore" });
+    } catch {
+      execSync("git init", { cwd: dir, stdio: "ignore" });
+    }
+    execSync('git config user.name "Test User"', { cwd: dir, stdio: "ignore" });
+    execSync('git config user.email "test@kwakoko.com"', { cwd: dir, stdio: "ignore" });
+    execSync('git add . && git commit -m "chore: initial baseline commit"', { cwd: dir, stdio: "ignore" });
+  }
+
+  beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kwakopos-sync-test-15-"));
+    fs.writeFileSync(path.join(tempDir, "package.json"), JSON.stringify({ name: "KwakoPos-Sync-Fixture", version: "2.7.0" }), "utf8");
+
+    // Force initialize git so Local HEAD SHA isn't 0000000...
+    try {
+      execSync("git init -b main", { cwd: tempDir, stdio: "ignore" });
+    } catch {
+      execSync("git init", { cwd: tempDir, stdio: "ignore" });
+    }
+    execSync('git config user.name "Test User"', { cwd: tempDir, stdio: "ignore" });
+    execSync('git config user.email "test@kwakoko.com"', { cwd: tempDir, stdio: "ignore" });
+    execSync('git add . && git commit -m "chore: initial baseline commit"', { cwd: tempDir, stdio: "ignore" });
   });
 
   afterEach(() => {
@@ -87,8 +112,9 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
 
     it("should block synchronization if SHA mismatch occurs", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+      initGitInMockDir(mockProjectDir, "2.7.0");
+
+      const localHeadSha = inspectLocalRepository(mockProjectDir).commitSha;
 
       const result = await synchronizeLocalVersionFolder({
         cwd: mockProjectDir,
@@ -96,7 +122,7 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
           repo: "Kwakoko/KwakoPosv2",
           tag: "v2.8.0",
           version: "2.8.0",
-          commitSha: valid40CharSha,
+          commitSha: localHeadSha,
           publishedAt: new Date().toISOString(),
           draft: false,
           prerelease: false,
@@ -130,12 +156,10 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
   describe("4. Mode B Release Promotion & Directory Pointer", () => {
     it("should physically move folder into releases archive and write current.ptr pointer", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.mkdirSync(path.join(mockProjectDir, ".git"), { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+      initGitInMockDir(mockProjectDir, "2.7.0");
 
       const localHead = inspectLocalRepository(mockProjectDir).commitSha;
-      const targetSha = isValid40CharGitSha(localHead) ? localHead : valid40CharSha;
+      const targetSha = localHead;
 
       const result = await synchronizeLocalVersionFolder({
         cwd: mockProjectDir,
@@ -171,12 +195,10 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
 
     it("should atomically roll back Mode B promotion folder back to project root and update pointer", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.mkdirSync(path.join(mockProjectDir, ".git"), { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+      initGitInMockDir(mockProjectDir, "2.7.0");
 
       const localHead = inspectLocalRepository(mockProjectDir).commitSha;
-      const targetSha = isValid40CharGitSha(localHead) ? localHead : valid40CharSha;
+      const targetSha = localHead;
 
       const syncRes = await synchronizeLocalVersionFolder({
         cwd: mockProjectDir,
@@ -294,8 +316,7 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
   describe("6. Ownership-Aware Concurrency Locks & Malformed Lock Fail-Closed Policy", () => {
     it("should block sync attempt if active lock held by current PID with fresh heartbeat and valid lockId", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+      initGitInMockDir(mockProjectDir, "2.7.0");
 
       const localHeadSha = inspectLocalRepository(mockProjectDir).commitSha;
 
@@ -333,8 +354,7 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
 
     it("should fail closed without deleting malformed lock files", async () => {
       const mockProjectDir = path.join(tempDir, "KwakoPos-v2.7.0");
-      fs.mkdirSync(mockProjectDir, { recursive: true });
-      fs.writeFileSync(path.join(mockProjectDir, "package.json"), JSON.stringify({ name: "KwakoPos", version: "2.7.0" }), "utf8");
+      initGitInMockDir(mockProjectDir, "2.7.0");
 
       const localHeadSha = inspectLocalRepository(mockProjectDir).commitSha;
 

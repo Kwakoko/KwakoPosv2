@@ -122,8 +122,9 @@ export async function runPerformanceBenchmarkSuite(): Promise<{
     });
 
     // Offline Sync Event Drain
-    const db = new LocalIndexedDbStore();
-    const clientEngine = new ClientSyncEngine("dev-perf-1x", db);
+    const db = new LocalIndexedDbStore(5);
+    await db.ready;
+    const clientEngine = new ClientSyncEngine("dev-perf-1x", db, undefined, undefined, ctx.tenantId, ctx.branchId);
     for (let i = 0; i < 10; i++) {
       db.recordOutboxMutation({
         id: `OP-1X-${i}`,
@@ -134,6 +135,8 @@ export async function runPerformanceBenchmarkSuite(): Promise<{
         clientCreatedAt: new Date().toISOString(),
         idempotencyKey: `IDEM-1X-${i}`,
         status: "PENDING",
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
       });
     }
     const t0Sync = performance.now();

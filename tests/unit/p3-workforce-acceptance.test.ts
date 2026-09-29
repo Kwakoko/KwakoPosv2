@@ -216,8 +216,9 @@ describe("Phase 3 Workforce Management Acceptance Suite (P3-001 to P3-010)", () 
 
   // P3-009 Offline sync
   it("P3-009: Offline field worker attendance mutations are durably queued and synchronized", async () => {
-    const localDb = new LocalIndexedDbStore(5);
+    const localDb = new LocalIndexedDbStore(5, `kwakopos-p3-009-${randomUUID()}`);
     await localDb.ready;
+    localDb.clear({ allowDestructiveReset: true });
 
     localDb.recordOutboxMutation({
       id: "OP-ATT-01",
@@ -228,6 +229,8 @@ describe("Phase 3 Workforce Management Acceptance Suite (P3-001 to P3-010)", () 
       clientCreatedAt: new Date().toISOString(),
       idempotencyKey: `idem-att-field-${randomUUID()}`,
       status: "PENDING",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
     });
 
     const outbox = localDb.getPendingOutbox();

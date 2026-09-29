@@ -478,3 +478,4 @@ export {
   orderSyncOperations,
 } from "./syncIntegrity.js";
 export { SyncConflictLogger, globalSyncConflictLogger } from "./syncConflictLogger.js";
+export * from "./gates/shaResolution.js";

@@ -10,7 +10,7 @@ export interface QualityGateReport { overallPassed: boolean; version: string; ti
 
 function runCommand(command: string, timeout = 600000): { passed: boolean; output: string } {
   try {
-    const output = execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout });
+    const output = execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout, maxBuffer: 32 * 1024 * 1024 });
     return { passed: true, output: output.trim() };
   } catch (error: any) {
     const output = `${error?.stdout || ""}${error?.stderr || ""}`.trim();
@@ -20,7 +20,7 @@ function runCommand(command: string, timeout = 600000): { passed: boolean; outpu
 
 function runSecurityAuditGate(): { passed: boolean; output: string } {
   try {
-    const output = execSync("npm audit --omit=dev --json", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180000 });
+    const output = execSync("npm audit --omit=dev --json", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180000, maxBuffer: 32 * 1024 * 1024 });
     return { passed: true, output: output.trim() };
   } catch (error: any) {
     const raw = String(error?.stdout || "").trim();

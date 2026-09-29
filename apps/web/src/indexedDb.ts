@@ -1116,6 +1116,8 @@ export class LocalIndexedDbStore {
       const encoded = JSON.stringify(snapshot);
       this.syncMetadata.set(legacyKey, encoded);
       this.persist("syncMetadata", legacyKey, encoded);
+    } else if (typeof indexedDB === "undefined" || !this.nativeDb) {
+      this.recoverySnapshots.set(snapshot.id, snapshot);
     } else {
       throw new Error("RECOVERY_ERROR: No durable pre-V4 snapshot store is available");
     }

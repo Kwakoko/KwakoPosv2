@@ -34,8 +34,9 @@ export async function runChaosFailureInjectionSuite(): Promise<{
   const syncEngine = new SyncEngine(productRepo, stockRepo, globalInMemoryStore);
 
   // SCENARIO 1: Network Loss During Outbox Sync Push
-  const db1 = new LocalIndexedDbStore();
-  const clientEngine1 = new ClientSyncEngine("device-chaos-1", db1);
+  const db1 = new LocalIndexedDbStore(5);
+  await db1.ready;
+  const clientEngine1 = new ClientSyncEngine("device-chaos-1", db1, undefined, undefined, ctx.tenantId, ctx.branchId);
   const varId1 = randomUUID();
 
   db1.recordOutboxMutation({
@@ -47,6 +48,8 @@ export async function runChaosFailureInjectionSuite(): Promise<{
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CHAOS-KEY-1",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
 
   // Inject Simulated Network Drop during Sync
@@ -79,8 +82,9 @@ export async function runChaosFailureInjectionSuite(): Promise<{
   });
 
   // SCENARIO 2: Duplicate Delivery After Retry (Network Acknowledgment Dropped)
-  const db2 = new LocalIndexedDbStore();
-  const clientEngine2 = new ClientSyncEngine("device-chaos-2", db2);
+  const db2 = new LocalIndexedDbStore(5);
+  await db2.ready;
+  const clientEngine2 = new ClientSyncEngine("device-chaos-2", db2, undefined, undefined, ctx.tenantId, ctx.branchId);
   const prodId2 = randomUUID();
   const opId2 = randomUUID();
   const idemKey2 = `IDEM-CHAOS-${randomUUID()}`;
@@ -118,7 +122,8 @@ export async function runChaosFailureInjectionSuite(): Promise<{
   });
 
   // SCENARIO 3: Service Worker Storage Exhaustion / IndexedDB Version Migration
-  const db3 = new LocalIndexedDbStore();
+  const db3 = new LocalIndexedDbStore(3, `kwakopos-chaos-3-${randomUUID().slice(0, 6)}`);
+  await db3.ready;
   const varId3 = randomUUID();
   db3.recordOutboxMutation({
     id: "OP-CHAOS-3",
@@ -129,6 +134,8 @@ export async function runChaosFailureInjectionSuite(): Promise<{
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CHAOS-KEY-3",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
 
   const mig = await db3.migrateToVersion(4);
