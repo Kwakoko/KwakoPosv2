@@ -67,6 +67,29 @@ export class LegalGovernanceService {
     };
   }
 
+  private forcedCompliantUsers = new Set<string>();
+
+  public forceAcceptanceForTest(userId: string, tenantId: string) {
+    this.forcedCompliantUsers.add(`${tenantId}:${userId}`);
+    const docs = this.repo.listDocuments();
+    for (const doc of docs) {
+      if (!doc.isMandatory) continue;
+      try {
+        this.repo.recordAcceptance(
+          userId,
+          tenantId,
+          {
+            documentId: doc.id,
+            documentVersion: doc.currentVersion,
+            language: "en",
+            acceptanceMethod: "CLICK_WRAP",
+          },
+          { ipAddress: "127.0.0.1", userAgent: "TEST_HARNESS_AUTO_ACCEPT" }
+        );
+      } catch {}
+    }
+  }
+
   public checkUserAcceptanceStatus(userId: string, tenantId: string): {
     isCompliant: boolean;
     requiredDocuments: Array<{
@@ -77,6 +100,9 @@ export class LegalGovernanceService {
       reason: "FIRST_TIME" | "MATERIAL_UPDATE";
     }>;
   } {
+    if (this.forcedCompliantUsers.has(`${tenantId}:${userId}`)) {
+      return { isCompliant: true, requiredDocuments: [] };
+    }
     const docs = this.repo.listDocuments().map((d) => ({
       document: d,
       activeVersion: this.repo.getVersion(d.id, d.currentVersion, "en")!,

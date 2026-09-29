@@ -21,6 +21,7 @@ import {
   emitPersistenceStatusChanged,
   persistenceStatusKey,
 } from "./persistence/persistenceStatus.js";
+import { normalizeSyncPayload } from "./services/payloadValidationService.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
@@ -426,36 +427,17 @@ export class ClientSyncEngine {
         const pushPayload: SyncPushRequest = {
           deviceId: this.deviceId,
           operations: batch.map((op) => {
-            let normalizedPayload = op.payload;
-            if (op.entityType === "Sale" && normalizedPayload) {
-              const rawItems = Array.isArray(normalizedPayload.items)
-                ? normalizedPayload.items
-                : Array.isArray(normalizedPayload.cart)
-                ? normalizedPayload.cart
-                : [];
-              normalizedPayload = {
-                ...normalizedPayload,
-                id: op.entityId || normalizedPayload.id,
+            const normalizedPayload = normalizeSyncPayload(
+              op.entityType,
+              op.operationType,
+              op.payload,
+              {
                 deviceId: this.deviceId,
                 operationId: op.id,
-                idempotencyKey: op.idempotencyKey || op.id,
-                items: rawItems.map((it: any) => ({
-                  productId: String(it.productId || it.product?.id || it.id || "prod_unknown"),
-                  variantId: String(it.variantId || `${it.productId || it.product?.id || it.id || "prod"}-default`),
-                  quantity: Number(it.quantity || it.qty || 1),
-                  unitPrice: Number(it.unitPrice ?? it.price ?? it.product?.price ?? 0),
-                  unitCost: Number(it.unitCost ?? it.costPrice ?? (it.product as any)?.costPrice ?? (it.product as any)?.buyingPrice ?? 0),
-                  discountAmount: Number(it.discountAmount || 0),
-                  taxAmount: Number(it.taxAmount || 0),
-                })),
-                payments: normalizedPayload.payments || [
-                  {
-                    amount: Number(normalizedPayload.grandTotal || normalizedPayload.totalAmount || normalizedPayload.total || 0),
-                    paymentMethod: "CASH",
-                  },
-                ],
-              };
-            }
+                idempotencyKey: op.idempotencyKey,
+                entityId: op.entityId,
+              }
+            );
             return {
               operationId: op.id,
               entityType: op.entityType as any,

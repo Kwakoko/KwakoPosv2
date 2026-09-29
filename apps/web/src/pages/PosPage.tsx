@@ -33,6 +33,7 @@ import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
+import { normalizePaymentMethod, normalizeSalePayload } from "../services/payloadValidationService.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -977,15 +978,55 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       };
     });
 
-    const payments = [
-      {
+    const normalizedPaymentMethod = (method: string): string => {
+      const upperMethod = method.toUpperCase();
+      // Map specific local mobile operators to the contract's expected enum
+      if (["M-PESA", "MPESA", "TIGO_PESA", "HALOPESA", "AIRTEL_MONEY"].includes(upperMethod)) {
+        return "MOBILE_MONEY";
+      }
+      return upperMethod;
+    };
+
+    const rawPayments: Array<{
+      id: string;
+      amount: number;
+      paymentMethod: string;
+      provider?: string;
+      status: string;
+      providerRef?: string;
+    }> = [];
+
+    if (paymentMethod === "Split") {
+      if (splitAmounts.Cash > 0) {
+        rawPayments.push({ id: `pay-${saleId}-cash`, amount: splitAmounts.Cash, paymentMethod: "CASH", provider: "CASH", status: "COMPLETED" });
+      }
+      if (splitAmounts.MPesa > 0) {
+        rawPayments.push({ id: `pay-${saleId}-mpesa`, amount: splitAmounts.MPesa, paymentMethod: "M-PESA", provider: "MPESA", status: "COMPLETED", providerRef: mpesaRef });
+      }
+      if (splitAmounts.Card > 0) {
+        rawPayments.push({ id: `pay-${saleId}-card`, amount: splitAmounts.Card, paymentMethod: "CARD", status: "COMPLETED", providerRef: cardAuthRef });
+      }
+      if (splitAmounts.Bank > 0) {
+        rawPayments.push({ id: `pay-${saleId}-bank`, amount: splitAmounts.Bank, paymentMethod: "BANK", status: "COMPLETED", providerRef: bankRef });
+      }
+    } else {
+      rawPayments.push({
         id: `pay-${saleId}`,
         amount: cartGrandTotal,
-        paymentMethod: paymentMethod.toUpperCase(),
+        paymentMethod,
+        provider: paymentMethod === "M-Pesa" ? "MPESA" : undefined,
         status: "COMPLETED",
         providerRef: paymentMethod === "M-Pesa" ? mpesaRef : paymentMethod === "Card" ? cardAuthRef : paymentMethod === "Bank" ? bankRef : undefined,
-      },
-    ];
+      });
+    }
+
+    // Apply this mapper to your payments array mapping logic:
+    const paymentPayload = rawPayments.map((p) => ({
+      ...p,
+      paymentMethod: normalizedPaymentMethod(p.paymentMethod),
+    }));
+
+    const payments = paymentPayload;
 
     const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
@@ -1091,9 +1132,15 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       void (async () => {
         await retryWithBackoff(
           async () => {
+            const pushPayload = normalizeSalePayload(saleRecord, {
+              entityId: saleId,
+              deviceId: "pos-terminal",
+              operationId: saleId,
+              idempotencyKey: saleId,
+            });
             const res = await apiFetch("/api/v1/pos/sales", {
               method: "POST",
-              body: JSON.stringify(saleRecord),
+              body: JSON.stringify(pushPayload),
             });
             if (res) {
               db.markOutboxSynced(outboxItem.id);

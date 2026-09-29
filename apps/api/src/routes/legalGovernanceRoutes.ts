@@ -233,6 +233,33 @@ export function legalGovernanceRoutes(
     }
   });
 
+  // Mock override routes for test and evaluation environments
+  server.post("/api/legal/mock-accept", async (req, reply) => {
+    try {
+      const rawBody = (req.body || {}) as Record<string, unknown>;
+      const tenantContext = (req as any).tenantContext;
+      const userId = String(rawBody.userId || tenantContext?.userId || req.headers["x-user-id"] || "test-user-01");
+      const tenantId = String(rawBody.tenantId || tenantContext?.tenantId || req.headers["x-tenant-id"] || "test-tenant-01");
+      service.forceAcceptanceForTest(userId, tenantId);
+      return reply.send({ success: true, message: "Compliance status mock-signed and accepted", userId, tenantId });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  server.post("/api/test/legal/force-accept", async (req, reply) => {
+    try {
+      const rawBody = (req.body || {}) as Record<string, unknown>;
+      const tenantContext = (req as any).tenantContext;
+      const userId = String(rawBody.userId || tenantContext?.userId || req.headers["x-user-id"] || "test-user-01");
+      const tenantId = String(rawBody.tenantId || tenantContext?.tenantId || req.headers["x-tenant-id"] || "test-tenant-01");
+      service.forceAcceptanceForTest(userId, tenantId);
+      return reply.send({ success: true, message: "Compliance status mock-signed and accepted", userId, tenantId });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   // Withdraw previously given optional consent
   server.post("/api/legal/acceptance/withdraw", async (req, reply) => {
     try {

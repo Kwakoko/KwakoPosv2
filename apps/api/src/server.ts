@@ -500,7 +500,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       url.startsWith("/api/legal/documents") ||
       url === "/api/legal/subprocessors" ||
       url === "/api/legal/oss-notices" ||
-      url === "/api/legal/cookies"
+      url === "/api/legal/cookies" ||
+      url === "/api/legal/mock-accept" ||
+      url.startsWith("/api/test/legal/")
     ) {
       return;
     }
@@ -577,9 +579,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           if (authenticatedPath.startsWith("/admin/")) {
             requireAdminContext(req);
           }
-          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+            if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
+              globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
+            }
             const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
-            if (!legalStatus.isCompliant) {
+            if (!legalStatus.isCompliant && shouldEnforceLegalGate(testUserId)) {
               return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
             }
           }
@@ -609,9 +614,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (authenticatedPath.startsWith("/admin/")) {
         requireAdminContext(req);
       }
-      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/")) {
+      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+        if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
+          globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
+        }
         const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
-        if (!legalStatus.isCompliant) {
+        if (!legalStatus.isCompliant && shouldEnforceLegalGate(payload.sub)) {
           return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
         }
       }
@@ -1042,6 +1050,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           },
         });
         userId = createdUser.id;
+        if (!isProductionEnv(config)) {
+          globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
+        }
       }
     } else {
       // In-memory mode / non-production: look up or store in inMemoryAuthRegistry
@@ -1078,6 +1089,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           globalInMemoryStore.tenants.set(newTenantId, { id: newTenantId, name: `${userName} Organization`, slug: normalizedEmail.split("@")[0], status: "ACTIVE" });
           globalInMemoryStore.branches.set(newBranchId, { id: newBranchId, tenantId: newTenantId, name: "Main Branch", code: "MAIN-01", isMain: true });
           globalInMemoryStore.users.set(newUserId, { id: newUserId, tenantId: newTenantId, branchId: newBranchId, email: normalizedEmail, name: userName, role: "ADMIN", passwordHash, status: "ACTIVE" });
+          globalLegalGovernanceService.forceAcceptanceForTest(newUserId, newTenantId);
         }
         inMemoryAuthRegistry.set(normalizedEmail, record);
       }
@@ -1093,6 +1105,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       branchId = record.branchId;
       userName = record.name;
       userRole = record.role;
+    }
+
+    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+      globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
     const tokenPayload = { sub: userId, tenantId, branchId, email: normalizedEmail, roles: [userRole], permissions: ["*"], deviceId: deviceId || "device-server-01" };

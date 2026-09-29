@@ -1,5 +1,6 @@
 import { LocalIndexedDbStore, assertSyncOutboxEntityTypeAllowed, type OutboxItem, db as defaultDb } from "./indexedDb.js";
 import { apiFetch } from "./services/apiClient.js";
+import { normalizeSyncPayload } from "./services/payloadValidationService.js";
 import {
   createPersistenceStatus,
   emitPersistenceStatusChanged,
@@ -313,36 +314,17 @@ export async function retryWithBackoff(
 }
 
 async function defaultApiPush(item: OutboxItem): Promise<any> {
-  let normalizedPayload = item.payload;
-  if (item.entityType === "Sale" && normalizedPayload) {
-    const rawItems = Array.isArray(normalizedPayload.items)
-      ? normalizedPayload.items
-      : Array.isArray(normalizedPayload.cart)
-      ? normalizedPayload.cart
-      : [];
-    normalizedPayload = {
-      ...normalizedPayload,
-      id: item.entityId || normalizedPayload.id,
+  const normalizedPayload = normalizeSyncPayload(
+    item.entityType,
+    item.operationType,
+    item.payload,
+    {
       deviceId: "pos-terminal",
       operationId: item.id,
-      idempotencyKey: item.idempotencyKey || item.id,
-      items: rawItems.map((it: any) => ({
-        productId: String(it.productId || it.product?.id || it.id || "prod_unknown"),
-        variantId: String(it.variantId || `${it.productId || it.product?.id || it.id || "prod"}-default`),
-        quantity: Number(it.quantity || it.qty || 1),
-        unitPrice: Number(it.unitPrice ?? it.price ?? it.product?.price ?? 0),
-        unitCost: Number(it.unitCost ?? it.costPrice ?? (it.product as any)?.costPrice ?? (it.product as any)?.buyingPrice ?? 0),
-        discountAmount: Number(it.discountAmount || 0),
-        taxAmount: Number(it.taxAmount || 0),
-      })),
-      payments: normalizedPayload.payments || [
-        {
-          amount: Number(normalizedPayload.grandTotal || normalizedPayload.totalAmount || normalizedPayload.total || 0),
-          paymentMethod: "CASH",
-        },
-      ],
-    };
-  }
+      idempotencyKey: item.idempotencyKey,
+      entityId: item.entityId,
+    }
+  );
 
   const body = {
     deviceId: "pos-terminal",
