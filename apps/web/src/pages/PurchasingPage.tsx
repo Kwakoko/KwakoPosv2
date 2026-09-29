@@ -16,11 +16,7 @@ import { Truck, ShoppingBag, Package, Plus, Search, CheckCircle, Clock, XCircle,
   RefreshCw, Scale, Shield, AlertCircle, Edit3, Trash2, ChevronRight, Lock,
   Building2, ArrowDownRight, CreditCard, Wallet, Check, AlertTriangle, X, CheckCircle2
 } from "lucide-react";
-<<<<<<< HEAD
-import { useBranch, useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
-=======
 import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
->>>>>>> 8608f9f (chore: finalize production hardening)
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
@@ -140,10 +136,9 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const toast = useToast();
   const { playSuccessChime, playWarningTone } = useAudioFeedback();
 
-  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<PurchTab>("suppliers");
 
-  const selectPurchasingTab = (tab: PurchTab) => {
+  const selectPurchasingTab = useCallback((tab: PurchTab) => {
     setActiveTab(tab);
     const globalTab: Record<PurchTab, string> = {
       "suppliers": "Suppliers",
@@ -152,7 +147,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       "invoices": "Supplier Ledgers",
     };
     setGlobalActiveTab(globalTab[tab]);
-  };
+  }, [setGlobalActiveTab]);
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -168,16 +163,6 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     }
   }, [propActiveTab]);
 
-const selectPurchasingTab = useCallback((tab: PurchTab) => {
-    setActiveTab(tab);
-    const sidebarTabByLocalTab: Record<PurchTab, string> = {
-      suppliers: "Suppliers",
-      orders: "Purchase Orders",
-      grn: "Goods Received",
-      invoices: "Supplier Ledgers",
-    };
-    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
-  }, [setGlobalActiveTab]);
 
   const [searchQuery, setSearchQuery] = useState("");
 

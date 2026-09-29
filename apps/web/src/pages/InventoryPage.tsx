@@ -131,7 +131,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [activeTab, setActiveTab] = useState<InventoryTab>("dashboard");
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
 
-  const selectInventoryTab = (tab: InventoryTab) => {
+  const selectInventoryTab = useCallback((tab: InventoryTab) => {
     setActiveTab(tab);
     const globalTab: Record<InventoryTab, string> = {
       "dashboard": "Inventory Overview",
@@ -145,7 +145,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "reports": "Inventory Reports",
     };
     setGlobalActiveTab(globalTab[tab]);
-  };
+  }, [setGlobalActiveTab]);
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -167,22 +167,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       setActiveTab(map[propActiveTab]);
     }
   }, [propActiveTab]);
-
-const selectInventoryTab = useCallback((tab: InventoryTab) => {
-    setActiveTab(tab);
-    const sidebarTabByLocalTab: Record<InventoryTab, string> = {
-      dashboard: "Inventory Overview",
-      products: "Products",
-      categories: "Categories & Brands",
-      ledger: "Stock Adjustment",
-      transfers: "Stock Transfer",
-      count: "Stock Count",
-      recipes: "Product Bundles & Kits",
-      wastage: "Wastage & Spillage",
-      reports: "Inventory Reports",
-    };
-    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
-  }, [setGlobalActiveTab]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
 

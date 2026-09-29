@@ -23,11 +23,7 @@ import { Wallet, DollarSign, Clock, ArrowDownRight, ArrowUpRight, Lock, Unlock,
   Printer, Key, ShieldAlert, Cpu, Calculator, Send, Building, Activity, X,
   RotateCcw, Copy, Check, Sparkles
 } from "lucide-react";
-<<<<<<< HEAD
-import { useAuth, useBranch, useRbac, useSync, useTenant, useModule } from "../context/KwakoPosContexts.js";
-=======
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
->>>>>>> 8608f9f (chore: finalize production hardening)
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
@@ -100,11 +96,10 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   const toast = useToast();
   const { playBeep, playSuccessChime, playWarningTone } = useAudioFeedback();
 
-  const { setActiveTab: setGlobalActiveTab } = useModule();
   const [activeTab, setActiveTab] = useState<DrawerTab>("active");
   const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
 
-  const selectCashDrawerTab = (tab: DrawerTab) => {
+  const selectCashDrawerTab = useCallback((tab: DrawerTab) => {
     setActiveTab(tab);
     const globalTab: Record<DrawerTab, string> = {
       "active": "Shift & Active Register",
@@ -119,7 +114,7 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
       "hardware": "Security & RBAC Rules",
     };
     setGlobalActiveTab(globalTab[tab]);
-  };
+  }, [setGlobalActiveTab]);
 
   useEffect(() => {
     if (!propActiveTab) return;
@@ -139,22 +134,6 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
     }
   }, [propActiveTab]);
 
-const selectCashDrawerTab = useCallback((tab: DrawerTab) => {
-    setActiveTab(tab);
-    const sidebarTabByLocalTab: Record<DrawerTab, string> = {
-      active: "Shift & Active Register",
-      denominations: "Denomination Calculator",
-      blind: "Cash Drawer",
-      reconciliation: "Reconciliation & Variances",
-      reports: "15 Financial Reports",
-      safe: "Safe & Bank Deposits",
-      nosale: "No Sale & Event Logs",
-      ledger: "Cash Movement Ledger",
-      history: "Cash Drawer",
-      hardware: "Security & RBAC Rules",
-    };
-    setGlobalActiveTab(sidebarTabByLocalTab[tab]);
-  }, [setGlobalActiveTab]);
 
   const [shiftStatus, setShiftStatus] = useState<"OPEN" | "LOCKED" | "CLOSED">("CLOSED");
   const [shiftId, setShiftId] = useState("");
@@ -719,11 +698,7 @@ Manager Sign-off:  _____________________
         ].map((t) => (
           <button
             key={t.id}
-<<<<<<< HEAD
-            onClick={() => selectCashDrawerTab(t.id as DrawerTab)
-=======
             onClick={() => selectCashDrawerTab(t.id as DrawerTab)}
->>>>>>> 8608f9f (chore: finalize production hardening)
             type="button"
             className={`v2-btn v2-btn-sm ${activeTab === t.id ? "v2-btn-primary" : "v2-btn-ghost"}`}
             style={{ whiteSpace: "nowrap" }}

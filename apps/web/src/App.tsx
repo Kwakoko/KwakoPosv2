@@ -460,12 +460,9 @@ const AuthenticatedApp: React.FC = () => {
       explicitNavigationPathRef.current = null;
       return;
     }
-<<<<<<< HEAD
-=======
     // A nested sidebar item belongs to the currently active module. Resolve that
     // ownership before consulting the global label -> route table so duplicate labels
     // (e.g. "Suppliers", "Reports", "Settings") cannot escape their module workspace.
->>>>>>> 8608f9f (chore: finalize production hardening)
     const isCurrentManifestSubItem = manifest.sidebar.some(
       (item) => typeof item !== "string" && Boolean(item.subItems?.includes(activeTab)),
     );
