@@ -20,7 +20,7 @@ import {
   ShoppingCart, Search, Plus, Minus, Trash2, UserPlus, ShieldAlert,
   HelpCircle, Calculator, ArrowLeftRight, X, DollarSign, Wallet, CreditCard,
   Building, Building2, Smartphone, Coins, PauseCircle, PlayCircle, Printer, CheckCircle, AlertTriangle,
-  RefreshCw, Lock, Unlock, Eye, Sparkles, Tag, Scale, QrCode, Command,
+  RefreshCw, RotateCcw, Lock, Unlock, Eye, Sparkles, Tag, Scale, QrCode, Command,
   Calendar, Clock, ChevronDown, ChevronRight, FileText, Monitor, Barcode
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
@@ -676,7 +676,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   }, []);
 
   // Add Item to Cart
-  const addToCart = (prod: PosProduct, variantId?: string, variantName?: string, priceOverride?: number) => {
+  const addToCart = (
+    prod: PosProduct,
+    variantId?: string,
+    variantName?: string,
+    priceOverride?: number,
+    keepModalOpen = false
+  ) => {
     if (!shiftOpen) {
       playWarningTone();
       toast.warning("Shift Required", "Must open a shift before adding items to cart.");
@@ -719,7 +725,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       setCart((prev) => [...prev, { product: prod, variantId, variantName, price: itemPrice, qty: 1 }]);
     }
     playBeep(880, 50);
-    setVariantModalProduct(null);
+    if (!keepModalOpen) {
+      setVariantModalProduct(null);
+    }
   };
 
   const handleProductClick = (prod: PosProduct) => {
@@ -1237,8 +1245,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
       {/* Header Bar */}
-      <div className="v2-flex v2-items-center v2-justify-between">
-        <div className="v2-flex v2-items-center v2-gap-3">
+      <div
+        className="v2-flex v2-items-center v2-justify-between v2-gap-3"
+        style={{ flexWrap: "wrap", rowGap: "0.6rem" }}
+      >
+        <div className="v2-flex v2-items-center v2-gap-3" style={{ minWidth: "fit-content" }}>
           <div
             style={{
               width: 38,
@@ -1249,83 +1260,265 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               alignItems: "center",
               justifyContent: "center",
               color: "#fff",
+              flexShrink: 0,
             }}
           >
             <ShoppingCart size={20} />
           </div>
           <div>
-            <h1 className="v2-text-lg v2-font-black" style={{ letterSpacing: "-.02em" }}>
-              {t("pos.title")}
-            </h1>
-            <div className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-text-muted">
+            <div className="v2-flex v2-items-center v2-gap-2">
+              <h1 className="v2-text-lg v2-font-black" style={{ letterSpacing: "-.02em", margin: 0, lineHeight: 1.2 }}>
+                {t("pos.title")}
+              </h1>
+              <span
+                style={{
+                  fontSize: "0.68rem",
+                  padding: "1px 6px",
+                  borderRadius: "var(--radius-sm)",
+                  background: shiftOpen ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                  color: shiftOpen ? "#10b981" : "#ef4444",
+                  fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3px",
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: shiftOpen ? "#10b981" : "#ef4444" }} />
+                {shiftOpen ? "Till Active" : "Till Closed"}
+              </span>
+            </div>
+            <div className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-text-muted" style={{ marginTop: 2 }}>
               <span>{currentTenantName}</span> · <span>{currentBranchName}</span>
             </div>
           </div>
         </div>
 
         {/* Function Keys Shortcut Bar */}
-        <div className="v2-flex v2-gap-1">
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setCart([])} type="button" title="F1">
-            [F1] {t("pos.newSale")}
-          </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setShiftModal(true)} type="button" title="Shift & Till Drawer">
-            <Coins size={13} style={{ marginRight: 3 }} /> [Shift Till]
-          </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => searchRef.current?.focus()} type="button" title="F3">
-            [F3] {t("common.search")}
-          </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setHoldCartModal(true)} disabled={cart.length === 0} type="button" title="F4">
-            [F4] {t("pos.holdOrder")} ({heldCarts.length})
-          </button>
-          <button className="v2-btn v2-btn-ghost v2-btn-sm v2-mono" onClick={() => setResumeCartModal(true)} type="button" title="F5">
-            [F5] {t("pos.resumeOrder")}
-          </button>
+        <div
+          className="v2-flex v2-items-center v2-gap-1.5"
+          style={{
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            alignItems: "center",
+          }}
+        >
           <button
-            className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
+            className="v2-btn v2-btn-ghost v2-btn-sm"
+            onClick={() => setCart([])}
+            type="button"
+            title="Start New Sale (F1)"
+          >
+            <RotateCcw size={12} />
+            <span>New Sale</span>
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(128, 128, 128, 0.15)",
+                border: "1px solid var(--surface-border)",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                lineHeight: 1,
+                marginLeft: 3,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F1
+            </kbd>
+          </button>
+
+          <button
+            className="v2-btn v2-btn-ghost v2-btn-sm"
+            onClick={() => setShiftModal(true)}
+            type="button"
+            title="Shift & Till Drawer Reconciliation"
+          >
+            <Coins size={12} />
+            <span>Till</span>
+          </button>
+
+          <button
+            className="v2-btn v2-btn-ghost v2-btn-sm"
+            onClick={() => searchRef.current?.focus()}
+            type="button"
+            title="Focus Product Search (F3)"
+          >
+            <Search size={12} />
+            <span>Search</span>
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(128, 128, 128, 0.15)",
+                border: "1px solid var(--surface-border)",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                lineHeight: 1,
+                marginLeft: 3,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F3
+            </kbd>
+          </button>
+
+          <button
+            className="v2-btn v2-btn-ghost v2-btn-sm"
+            onClick={() => setHoldCartModal(true)}
+            disabled={cart.length === 0}
+            type="button"
+            title="Hold Current Order (F4)"
+          >
+            <PauseCircle size={12} />
+            <span>Hold</span>
+            {heldCarts.length > 0 && (
+              <span
+                style={{
+                  background: "var(--accent, #3b82f6)",
+                  color: "#fff",
+                  fontSize: "0.65rem",
+                  padding: "0 5px",
+                  borderRadius: "10px",
+                  fontWeight: 700,
+                  marginLeft: 1,
+                }}
+              >
+                {heldCarts.length}
+              </span>
+            )}
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(128, 128, 128, 0.15)",
+                border: "1px solid var(--surface-border)",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                lineHeight: 1,
+                marginLeft: 3,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F4
+            </kbd>
+          </button>
+
+          <button
+            className="v2-btn v2-btn-ghost v2-btn-sm"
+            onClick={() => setResumeCartModal(true)}
+            disabled={heldCarts.length === 0}
+            type="button"
+            title="Resume Held Order (F5)"
+          >
+            <PlayCircle size={12} />
+            <span>Resume</span>
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(128, 128, 128, 0.15)",
+                border: "1px solid var(--surface-border)",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                lineHeight: 1,
+                marginLeft: 3,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F5
+            </kbd>
+          </button>
+
+          <button
+            className="v2-btn v2-btn-ghost v2-btn-sm"
             onClick={() => setDiscountPercent((prev) => (prev === 0 ? 5 : prev === 5 ? 10 : prev === 10 ? 15 : 0))}
             type="button"
-            title="F6"
+            title="Apply Discount (F6)"
           >
-            [F6] {t("pos.applyDiscount")}: {discountPercent}%
+            <Tag size={12} />
+            <span>{discountPercent > 0 ? `${discountPercent}%` : "Discount"}</span>
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(128, 128, 128, 0.15)",
+                border: "1px solid var(--surface-border)",
+                color: "var(--text-muted)",
+                fontWeight: 700,
+                lineHeight: 1,
+                marginLeft: 3,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F6
+            </kbd>
           </button>
+
           <button
-            className={`v2-btn v2-btn-sm v2-mono ${showQuickKeys ? "v2-btn-secondary" : "v2-btn-ghost"}`}
+            className={`v2-btn v2-btn-sm ${showQuickKeys ? "v2-btn-secondary" : "v2-btn-ghost"}`}
             onClick={() => setShowQuickKeys((prev) => !prev)}
             type="button"
             title="Toggle Fast-Tap Favorites"
           >
-            ★ Favorites
+            <Sparkles size={12} />
+            <span>Favorites</span>
           </button>
+
           <button
-            className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
+            className="v2-btn v2-btn-ghost v2-btn-sm"
             onClick={() => {
               window.open("/customer-display", "KwakoPosCustomerDisplay", "width=1024,height=768,menubar=no,toolbar=no,location=no,status=no");
             }}
             type="button"
             title="Open Customer-Facing Secondary Display Window"
           >
-            <Monitor size={13} style={{ marginRight: 3 }} /> [Customer Display]
+            <Monitor size={12} />
+            <span>Display</span>
           </button>
+
           <button
-            className="v2-btn v2-btn-ghost v2-btn-sm v2-mono"
+            className="v2-btn v2-btn-ghost v2-btn-sm"
             onClick={() => setBarcodeModalOpen(true)}
             type="button"
             title="Print Barcode Labels & Shelf Tags"
           >
-            <Barcode size={13} style={{ marginRight: 3 }} /> [Barcode Labels]
+            <Barcode size={12} />
+            <span>Barcodes</span>
           </button>
+
           <button
-            className="v2-btn v2-btn-primary v2-btn-sm v2-mono"
+            className="v2-btn v2-btn-primary v2-btn-sm"
             onClick={handleInitiateCheckout}
-            aria-disabled={cart.length === 0 || cartGrandTotal <= 0}
-            style={{
-              opacity: cart.length === 0 || cartGrandTotal <= 0 ? 0.6 : 1,
-              cursor: cart.length === 0 || cartGrandTotal <= 0 ? "not-allowed" : "pointer",
-            }}
+            disabled={cart.length === 0 || cartGrandTotal <= 0}
             type="button"
-            title="F7"
+            title="Pay Now (F7)"
+            style={{
+              padding: "4px 10px",
+              fontWeight: 700,
+            }}
           >
-            [F7] {t("pos.payNow")}
+            <CreditCard size={12} />
+            <span>Pay Now</span>
+            <kbd
+              style={{
+                fontSize: "0.65rem",
+                padding: "1px 4px",
+                borderRadius: "3px",
+                background: "rgba(255,255,255,0.22)",
+                color: "#fff",
+                fontWeight: 700,
+                marginLeft: 3,
+                lineHeight: 1,
+                fontFamily: "var(--font-mono, monospace)",
+              }}
+            >
+              F7
+            </kbd>
           </button>
         </div>
       </div>
@@ -2169,59 +2362,157 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         </div>
       )}
 
-      {/* --- Variant Selection Popup Modal --- */}
+      {/* --- Variant Selection Popup Modal (Solution 1: Live In-Modal Stepper & Done Button) --- */}
       {variantModalProduct && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
-          <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setVariantModalProduct(null);
+          }}
+        >
+          <div className="v2-card" style={{ width: 480, maxWidth: "92vw", padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between v2-mb-3">
               <div>
                 <h2 className="v2-text-base v2-font-black">{variantModalProduct.name}</h2>
-                <div className="v2-text-xs v2-text-muted">Select Product Variant to Add to Cart</div>
+                <div className="v2-text-xs v2-text-muted">Select Product Variants to Add to Cart</div>
               </div>
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">✕</button>
             </div>
 
-            <div className="v2-space-y-2 v2-mb-4" style={{ maxHeight: 280, overflowY: "auto" }}>
+            <div className="v2-space-y-2 v2-mb-4" style={{ maxHeight: 320, overflowY: "auto" }}>
               {variantModalProduct.variants?.map((v) => {
                 const isVarOos = v.stock <= 0;
+                const cartIdx = cart.findIndex(
+                  (item) => item.product.id === variantModalProduct.id && item.variantId === v.id
+                );
+                const inCartQty = cartIdx > -1 ? cart[cartIdx].qty : 0;
+                const isMaxReached = inCartQty >= v.stock;
+
                 return (
                   <div
                     key={v.id}
                     className="v2-flex v2-items-center v2-justify-between v2-p-3"
                     style={{
-                      background: isVarOos ? "var(--surface-3)" : "var(--surface-2)",
+                      background: isVarOos
+                        ? "var(--surface-3)"
+                        : inCartQty > 0
+                        ? "var(--surface-3)"
+                        : "var(--surface-2)",
                       borderRadius: "var(--radius-md)",
-                      border: isVarOos ? "1px dashed #94a3b8" : "1px solid transparent",
+                      border: inCartQty > 0
+                        ? "1px solid var(--accent, #3b82f6)"
+                        : isVarOos
+                        ? "1px dashed #94a3b8"
+                        : "1px solid transparent",
                       opacity: isVarOos ? 0.7 : 1,
+                      transition: "all 0.15s ease",
                     }}
                   >
                     <div>
-                      <div className="v2-font-bold v2-text-xs">{v.name}</div>
+                      <div className="v2-flex v2-items-center v2-gap-2">
+                        <span className="v2-font-bold v2-text-xs">{v.name}</span>
+                        {inCartQty > 0 && (
+                          <span
+                            className="v2-badge v2-badge-sm"
+                            style={{
+                              background: "rgba(59, 130, 246, 0.15)",
+                              color: "var(--accent, #3b82f6)",
+                              fontSize: "0.7rem",
+                              padding: "1px 6px",
+                              borderRadius: "var(--radius-sm)",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {inCartQty} in cart
+                          </span>
+                        )}
+                      </div>
                       <div className="v2-mono v2-text-xs v2-text-muted">
                         SKU: {v.sku} · {v.stock} in stock {isVarOos && "· (Out of Stock)"}
                       </div>
                     </div>
+
                     <div className="v2-flex v2-items-center v2-gap-2">
                       <span className="v2-mono v2-font-black v2-text-xs">{money(v.price)}</span>
-                      <button
-                        className={`v2-btn v2-btn-sm ${isVarOos ? "v2-btn-secondary" : "v2-btn-primary"}`}
-                        onClick={() => addToCart(variantModalProduct, v.id, v.name, v.price)}
-                        disabled={isVarOos}
-                        type="button"
-                      >
-                        {isVarOos ? "Out of Stock" : <><Plus size={11} /> Add</>}
-                      </button>
+                      {inCartQty > 0 ? (
+                        <div
+                          className="v2-flex v2-items-center v2-gap-1"
+                          style={{
+                            background: "var(--surface-1)",
+                            borderRadius: "var(--radius-sm)",
+                            padding: "2px 4px",
+                            border: "1px solid var(--surface-border)",
+                          }}
+                        >
+                          <button
+                            className="v2-btn v2-btn-secondary v2-btn-sm"
+                            style={{ padding: "3px 7px", height: "auto" }}
+                            onClick={() => updateQty(cartIdx, -1)}
+                            title="Decrease quantity"
+                            type="button"
+                          >
+                            <Minus size={11} />
+                          </button>
+                          <span className="v2-mono v2-font-bold v2-text-xs" style={{ width: 22, textAlign: "center" }}>
+                            {inCartQty}
+                          </span>
+                          <button
+                            className={`v2-btn v2-btn-sm ${isMaxReached ? "v2-btn-secondary" : "v2-btn-primary"}`}
+                            style={{ padding: "3px 7px", height: "auto" }}
+                            onClick={() => updateQty(cartIdx, 1)}
+                            disabled={isMaxReached}
+                            title={isMaxReached ? "Maximum stock reached" : "Add more"}
+                            type="button"
+                          >
+                            <Plus size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className={`v2-btn v2-btn-sm ${isVarOos ? "v2-btn-secondary" : "v2-btn-primary"}`}
+                          onClick={() => addToCart(variantModalProduct, v.id, v.name, v.price, true)}
+                          disabled={isVarOos}
+                          type="button"
+                        >
+                          {isVarOos ? "Out of Stock" : <><Plus size={11} /> Add</>}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className="v2-flex v2-justify-end">
-              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setVariantModalProduct(null)} type="button">
-                Close
-              </button>
-            </div>
+            {/* Footer with in-cart count summary and Done button */}
+            {(() => {
+              const totalInCartForProduct = cart
+                .filter((item) => item.product.id === variantModalProduct.id && item.variantId)
+                .reduce((sum, item) => sum + item.qty, 0);
+
+              return (
+                <div
+                  className="v2-flex v2-items-center v2-justify-between v2-pt-3"
+                  style={{ borderTop: "1px solid var(--surface-border)" }}
+                >
+                  <div className="v2-text-xs v2-text-muted">
+                    {totalInCartForProduct > 0 ? (
+                      <span style={{ color: "var(--accent, #3b82f6)", fontWeight: 700 }}>
+                        ✓ {totalInCartForProduct} {totalInCartForProduct === 1 ? "item" : "items"} in cart
+                      </span>
+                    ) : (
+                      <span>Select variants and quantities to add</span>
+                    )}
+                  </div>
+                  <button
+                    className={`v2-btn v2-btn-sm ${totalInCartForProduct > 0 ? "v2-btn-primary" : "v2-btn-ghost"}`}
+                    onClick={() => setVariantModalProduct(null)}
+                    type="button"
+                  >
+                    {totalInCartForProduct > 0 ? `Done (${totalInCartForProduct})` : "Close"}
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

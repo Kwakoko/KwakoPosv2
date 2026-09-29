@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
 import { KokoCompanion } from '../components/KokoCompanion.js';
+import { ToggleSwitch } from '../components/UI/ToggleSwitch.js';
+import { useToast } from '../components/UI/Toast.js';
 import type { TraVfdIntegrationStatus } from '@kwakopos2/contracts';
 import { useAuthoritativeSyncStatus } from '../services/syncStatusService.js';
 
@@ -248,7 +250,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const tenantId = currentTenantId || user?.tenantId || '';
   const branchId = currentBranchId || user?.branchId || '';
   const syncStatus = useAuthoritativeSyncStatus({ tenantId: tenantId || null, branchId: branchId || null });
+  const toast = useToast();
   const [traVfdStatus, setTraVfdStatus] = useState<TraVfdIntegrationStatus | null>(null);
+  const [isVfdModalOpen, setIsVfdModalOpen] = useState(false);
+  const [isRefreshingVfd, setIsRefreshingVfd] = useState(false);
+  const [isVfdEnabled, setIsVfdEnabled] = useState(() => {
+    try {
+      const savedVfd = db.getConfigurationLocal?.("tra_vfd_config", { tenantId: tenantId || "", branchId: branchId || "" }) as any;
+      if (savedVfd && typeof savedVfd.enabled === "boolean") return savedVfd.enabled;
+    } catch {}
+    return false;
+  });
+
+  const refreshVfdStatus = useCallback(async () => {
+    if (!tenantId || !branchId || !isOnline) return;
+    setIsRefreshingVfd(true);
+    try {
+      const body = await apiFetch<any>('/api/v1/tra-vfd/status', {
+        headers: { 'x-tenant-id': tenantId, 'x-branch-id': branchId, 'x-user-id': user?.id || '' },
+      });
+      const data = (body?.data || body) as TraVfdIntegrationStatus;
+      setTraVfdStatus(data);
+      if (data && typeof data.status === "string") {
+        setIsVfdEnabled(data.status !== "DISABLED");
+      }
+      toast.success("TRA VFD Status Updated", `Gateway state: ${data.status} (${data.environment || "TEST"})`);
+    } catch (err: any) {
+      toast.error("VFD Refresh Failed", err?.message || "Could not retrieve status");
+    } finally {
+      setIsRefreshingVfd(false);
+    }
+  }, [tenantId, branchId, isOnline, user?.id, toast]);
 
   useEffect(() => {
     let active = true;
@@ -256,16 +288,66 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       setTraVfdStatus(null);
       return () => { active = false; };
     }
+    try {
+      const local = db.getConfigurationLocal?.("tra_vfd_config", { tenantId, branchId }) as any;
+      if (local && typeof local.enabled === "boolean") {
+        setIsVfdEnabled(local.enabled);
+      }
+    } catch {}
+
     if (!isOnline) return () => { active = false; };
-    void apiFetch<any>('/v1/tra-vfd/status', {
+    void apiFetch<any>('/api/v1/tra-vfd/status', {
       headers: { 'x-tenant-id': tenantId, 'x-branch-id': branchId, 'x-user-id': user?.id || '' },
     }).then((body) => {
-      if (active) setTraVfdStatus((body?.data || body) as TraVfdIntegrationStatus);
+      if (active) {
+        const data = (body?.data || body) as TraVfdIntegrationStatus;
+        setTraVfdStatus(data);
+        if (data && typeof data.status === "string") {
+          setIsVfdEnabled(data.status !== "DISABLED");
+        }
+      }
     }).catch(() => {
       if (active) setTraVfdStatus(null);
     });
     return () => { active = false; };
-  }, [tenantId, branchId, isOnline, user?.id]);
+  }, [tenantId, branchId, isOnline, user?.id, db]);
+
+  const handleDashboardVfdToggle = async (newVal: boolean) => {
+    setIsVfdEnabled(newVal);
+    const existing = (db.getConfigurationLocal?.("tra_vfd_config", { tenantId, branchId }) as any) || {};
+    const vfdObj = {
+      ...existing,
+      enabled: newVal,
+      endpoint: String(existing.endpoint || "").trim(),
+    };
+    db.saveConfigurationLocal?.("tra_vfd_config", vfdObj, { tenantId, branchId });
+    const taxSaved = (db.getConfigurationLocal?.("tax_config") as any) || {};
+    db.saveConfigurationLocal?.("tax_config", { ...taxSaved, traVfdEnabled: newVal });
+
+    if (tenantId && branchId && isOnline) {
+      try {
+        await apiFetch('/api/v1/tra-vfd/config', {
+          method: 'PUT',
+          body: JSON.stringify(vfdObj),
+          headers: { 'x-tenant-id': tenantId, 'x-branch-id': branchId, 'x-user-id': user?.id || '' },
+        });
+        toast.success(
+          newVal ? "TRA VFD Fiscalization ON" : "TRA VFD Fiscalization OFF",
+          newVal
+            ? "Receipts will now be cryptographically signed and queued for TRA verification."
+            : "TRA VFD signing disabled. Offline sales will not require fiscal signatures."
+        );
+        void refreshVfdStatus();
+      } catch (err: any) {
+        toast.warning("Saved Locally", "Terminal updated local VFD state. Server sync will retry.");
+      }
+    } else {
+      toast.info(
+        newVal ? "TRA VFD ON (Offline Mode)" : "TRA VFD OFF (Offline Mode)",
+        "Local terminal setting applied. Will synchronize with cloud when reconnected."
+      );
+    }
+  };
 
   const traVfdVerifiedCount = traVfdStatus?.stateCounts.TRA_VERIFIED ?? 0;
   const traVfdRejectedCount = traVfdStatus?.stateCounts.TRA_REJECTED ?? 0;
@@ -1622,24 +1704,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Status Badge 1: authoritative TRA VFD integration state */}
-          <span
-            className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 ${
+          <button
+            type="button"
+            onClick={() => setIsVfdModalOpen(true)}
+            className={`h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border transition-all whitespace-nowrap shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
               !isOnline || !traVfdStatus
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50'
+                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
                 : traVfdStatus.status === 'VERIFIED'
-                ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-500/30 dark:border-emerald-700/50 hover:border-emerald-400'
                 : traVfdStatus.status === 'DISABLED'
-                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50'
-                : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50'
+                ? 'bg-slate-500/10 text-slate-600 dark:bg-slate-950/40 dark:text-slate-400 border-slate-500/30 dark:border-slate-700/50 hover:border-slate-400'
+                : 'bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-500/30 dark:border-amber-700/50 hover:border-amber-400'
             }`}
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title={!isOnline ? 'Offline: last server state is retained' : traVfdStatus ? `Server-authoritative TRA VFD state: ${traVfdStatus.status}` : 'TRA VFD server state unavailable'}
+            title="Click to toggle TRA VFD on/off & view live gateway metrics"
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>
-              {!isOnline ? 'TRA VFD: Offline' : traVfdStatus ? `TRA VFD: ${traVfdStatus.status}` : 'TRA VFD: State Unavailable'}
+              {!isOnline
+                ? 'TRA VFD: Offline'
+                : traVfdStatus
+                ? `TRA VFD: ${traVfdStatus.status}`
+                : isVfdEnabled
+                ? 'TRA VFD: ON'
+                : 'TRA VFD: OFF'}
             </span>
-          </span>
+          </button>
 
           {/* Status Badge 2: Offline Readiness */}
           <span
@@ -3672,6 +3762,154 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
         </div>
       </Sheet>
+
+      {/* ── TRA VFD Quick Management Modal ────────────────────────────────────── */}
+      {isVfdModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setIsVfdModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxHeight: "90vh", overflowY: "auto" }}
+          >
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-xs">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white" style={{ letterSpacing: "-.01em" }}>
+                    TRA VFD Quick Management
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Tanzania Revenue Authority Electronic Fiscal Device
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVfdModalOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Power Switch Banner with Tactile Toggle */}
+              <div
+                className="p-4 rounded-xl border flex items-center justify-between transition-all"
+                style={{
+                  background: isVfdEnabled ? "rgba(16, 185, 129, 0.08)" : "var(--surface-2)",
+                  borderColor: isVfdEnabled ? "rgba(16, 185, 129, 0.35)" : "var(--surface-border)",
+                }}
+              >
+                <div style={{ paddingRight: "1rem" }}>
+                  <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Fiscal Device Signing</span>
+                    <span
+                      className="px-2 py-0.5 text-[10px] font-extrabold rounded-full"
+                      style={{
+                        background: isVfdEnabled ? "rgba(16, 185, 129, 0.2)" : "rgba(148, 163, 184, 0.2)",
+                        color: isVfdEnabled ? "#10b981" : "var(--text-muted)",
+                      }}
+                    >
+                      {isVfdEnabled ? "ACTIVE (ON)" : "DISABLED (OFF)"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                    {isVfdEnabled
+                      ? "Receipts automatically generate TRA fiscal tokens and queue for background verification."
+                      : "Receipt signing is paused. Transactions complete immediately without waiting for fiscal signatures."}
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={isVfdEnabled}
+                  size="lg"
+                  onChange={(val) => void handleDashboardVfdToggle(val)}
+                  label="TRA VFD Power Toggle"
+                />
+              </div>
+
+              {/* Real-time Counters */}
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60">
+                  <div className="text-[11px] text-slate-400 font-semibold">Pending Queue</div>
+                  <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                    {traVfdQueuedCount}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">Verified</div>
+                  <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                    {traVfdVerifiedCount}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                  <div className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold">Rejected</div>
+                  <div className="text-xl font-black text-rose-600 dark:text-rose-400 mt-1">
+                    {traVfdRejectedCount}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status & Environment Specs */}
+              <div className="p-3.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 space-y-2 border border-slate-200/50 dark:border-slate-700/50">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 dark:text-slate-400">Server State:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {traVfdStatus?.status || (isOnline ? "NOT CONNECTED" : "OFFLINE")}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 dark:text-slate-400">Target Environment:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    {traVfdStatus?.environment || "TEST (Sandbox)"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 dark:text-slate-400">Certified Provider:</span>
+                  <span className={`font-bold ${traVfdStatus?.configured ? "text-emerald-500" : "text-amber-500"}`}>
+                    {traVfdStatus?.configured ? "ONLINE & READY" : "PENDING SETUP"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => void refreshVfdStatus()}
+                  disabled={isRefreshingVfd}
+                  className="px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingVfd ? "animate-spin" : ""}`} />
+                  <span>{isRefreshingVfd ? "Testing..." : "Test Connection"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsVfdModalOpen(false);
+                    onNavigate?.("settings");
+                    if (setActiveTab) setActiveTab("Fiscal Device (TRA)" as any);
+                  }}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-primary text-white hover:opacity-90 flex items-center gap-1.5 transition-opacity cursor-pointer shadow-sm"
+                >
+                  <span>Open Full Fiscal Settings</span>
+                  <span>&rarr;</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

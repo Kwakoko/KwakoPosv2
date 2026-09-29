@@ -118,7 +118,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { name: "Reports", subItems: ["Sales", "Profit", "Inventory Valuation", "Tax", "Customers Report", "Expenses Report", "Payment Methods", "Stock Movement", "Purchasing Report", "Discounts", "Returns & Refunds", "Branch Comparison", "Cashier Performance", "Receivables Aging"] },
       "Employees",
       { name: "AI Insights Engine", subItems: ["Business Health Score", "Sales Intelligence", "Inventory Intelligence", "Profit & Pricing", "Customer CLV", "Cash Flow & Burn", "Fraud & Security", "Branch Comparison", "Demand Forecast"] },
-      { name: "Settings", subItems: ["Business Profile & Identity", "POS Configurations", "Inventory Rules", "Tax & Billing", "Security Policies", "Terminals & Sessions", "Trash Can & Recovery", "Subscriptions & Billing", "Developer Options", "Help & Manuals", "Change Log"] },
+      { name: "Settings", subItems: ["Business Profile & Identity", "POS Configurations", "Inventory Rules", "Tax & Billing", "Fiscal Device (TRA)", "Payment Gateways", "Security Policies", "Terminals & Sessions", "Trash Can & Recovery", "Subscriptions & Billing", "Developer Options", "Help & Manuals", "Change Log"] },
     ],
     bottomNav: [
       { label: "Home", tab: "Dashboard", icon: "LayoutDashboard" },

@@ -20,7 +20,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   Settings, Building, Printer, Scale, Package, Shield, Bell, RefreshCw,
   Zap, Database, Save, CheckCircle, Globe, Check, Sliders, Calendar,
-  DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles
+  DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles,
+  ShieldCheck, ArrowRight, CreditCard
 } from "lucide-react";
 import { useTenant, useBranch, useModule, useSync, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
 import { useToast } from "../components/UI/Toast.js";
@@ -28,10 +29,11 @@ import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
 import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
 import { apiFetch } from "../services/apiClient.js";
-
+import { ToggleSwitch } from "../components/UI/ToggleSwitch.js";
+import { TraVfdFiscalizationCard, TraVfdCardConfig } from "../components/TRA/TraVfdFiscalizationCard.js";
 
 type SettingsTab =
-  | "profile" | "localization" | "pos" | "tax" | "inventory"
+  | "profile" | "localization" | "pos" | "tax" | "fiscal" | "inventory"
   | "security" | "notifications" | "sync" | "integrations" | "developer" | "advanced";
 
 export interface SettingsPageProps {
@@ -58,6 +60,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       "localization": "Settings",
       "pos": "POS Configurations",
       "tax": "Tax & Billing",
+      "fiscal": "Fiscal Device (TRA)",
       "inventory": "Inventory Rules",
       "security": "Security Policies",
       "notifications": "Settings",
@@ -77,6 +80,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       "POS Configurations":          "pos",
       "Inventory Rules":             "inventory",
       "Tax & Billing":               "tax",
+      "Fiscal Device (TRA)":         "fiscal",
+      "Fiscal Device":               "fiscal",
+      "fiscal":                      "fiscal",
+      "tra":                         "fiscal",
+      "tra-vfd":                     "fiscal",
+      "vfd":                         "fiscal",
       "Security Policies":           "security",
       "Terminals & Sessions":        "pos",
       "Trash Can & Recovery":        "advanced",
@@ -97,7 +106,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       "Audit Trail":                 "advanced",
       "Branch Management":           "profile",
       "Custom Fields":               "advanced",
-      "Fiscal Device (TRA)":         "tax",
     };
     if (map[propActiveTab]) {
       setActiveTab(map[propActiveTab]);
@@ -137,18 +145,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
 
   useEffect(() => {
     const saved = db.getConfigurationLocal?.("tax_config") as any;
-    if (saved) {
+    const savedVfd = db.getConfigurationLocal?.("tra_vfd_config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
+    if (saved || savedVfd) {
       setTaxConfig((prev) => ({
         ...prev,
-        vatEnabled: Boolean(saved.vatEnabled),
-        vatRatePercent: Number(saved.vatRatePercent ?? 0),
-        currencySymbol: saved.currencySymbol || prev.currencySymbol,
-        currencyCode: saved.currencyCode || prev.currencyCode,
-        traVfdEnabled: saved.traVfdEnabled ?? prev.traVfdEnabled,
-        traVfdEndpoint: saved.traVfdEndpoint || prev.traVfdEndpoint,
+        vatEnabled: Boolean(saved?.vatEnabled),
+        vatRatePercent: Number(saved?.vatRatePercent ?? 0),
+        currencySymbol: saved?.currencySymbol || prev.currencySymbol,
+        currencyCode: saved?.currencyCode || prev.currencyCode,
+        traVfdEnabled: savedVfd?.enabled ?? saved?.traVfdEnabled ?? prev.traVfdEnabled,
+        traVfdEndpoint: savedVfd?.endpoint || saved?.traVfdEndpoint || prev.traVfdEndpoint,
+        traVfdEnvironment: (savedVfd?.environment || saved?.traVfdEnvironment || prev.traVfdEnvironment || "TEST") as "TEST" | "PRODUCTION",
+        traVfdTin: savedVfd?.tin || saved?.traVfdTin || prev.traVfdTin || "",
+        traVfdCertSerial: savedVfd?.certSerial || saved?.traVfdCertSerial || prev.traVfdCertSerial || "",
+        traVfdRegistrationId: savedVfd?.registrationId || saved?.traVfdRegistrationId || prev.traVfdRegistrationId || "",
+        traVfdEfdSerial: savedVfd?.efdSerial || saved?.traVfdEfdSerial || prev.traVfdEfdSerial || "",
+        traVfdReceiptCode: savedVfd?.receiptCode || saved?.traVfdReceiptCode || prev.traVfdReceiptCode || "",
+        traVfdRoutingKey: savedVfd?.routingKey || saved?.traVfdRoutingKey || prev.traVfdRoutingKey || "vfdrct",
       }));
     }
-  }, [db]);
+  }, [db, currentTenantId, currentBranchId]);
 
   useEffect(() => {
     if (!currentTenantId || !currentBranchId || typeof navigator === "undefined" || !navigator.onLine) return;
@@ -156,8 +172,29 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       .then((res) => {
         const config = res?.data || res;
         if (!config || typeof config.enabled !== "boolean") return;
-        const next = { enabled: config.enabled, endpoint: String(config.endpoint || "") };
-        setTaxConfig((prev) => ({ ...prev, traVfdEnabled: next.enabled, traVfdEndpoint: next.endpoint }));
+        const next = {
+          enabled: config.enabled,
+          endpoint: String(config.endpoint || ""),
+          environment: (config.environment || "TEST") as "TEST" | "PRODUCTION",
+          tin: config.tin || "",
+          certSerial: config.certSerial || "",
+          registrationId: config.registrationId || "",
+          efdSerial: config.efdSerial || "",
+          receiptCode: config.receiptCode || "",
+          routingKey: config.routingKey || "vfdrct",
+        };
+        setTaxConfig((prev) => ({
+          ...prev,
+          traVfdEnabled: next.enabled,
+          traVfdEndpoint: next.endpoint,
+          traVfdEnvironment: next.environment,
+          traVfdTin: next.tin,
+          traVfdCertSerial: next.certSerial,
+          traVfdRegistrationId: next.registrationId,
+          traVfdEfdSerial: next.efdSerial,
+          traVfdReceiptCode: next.receiptCode,
+          traVfdRoutingKey: next.routingKey,
+        }));
         db.saveConfigurationLocal?.("tra_vfd_config", next, { tenantId: currentTenantId, branchId: currentBranchId });
       })
       .catch(() => {
@@ -176,14 +213,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   const [taxConfig, setTaxConfig] = useState(() => {
     try {
       const saved = db.getConfigurationLocal?.("tax_config") as any;
-      if (saved) {
+      const savedVfd = db.getConfigurationLocal?.("tra_vfd_config") as any;
+      if (saved || savedVfd) {
         return {
-          vatEnabled: Boolean(saved.vatEnabled),
-          vatRatePercent: Number(saved.vatRatePercent ?? 0),
-          currencySymbol: saved.currencySymbol || "Tsh",
-          currencyCode: saved.currencyCode || "TZS",
-          traVfdEnabled: saved.traVfdEnabled ?? false,
-          traVfdEndpoint: saved.traVfdEndpoint || "",
+          vatEnabled: Boolean(saved?.vatEnabled),
+          vatRatePercent: Number(saved?.vatRatePercent ?? 0),
+          currencySymbol: saved?.currencySymbol || "Tsh",
+          currencyCode: saved?.currencyCode || "TZS",
+          traVfdEnabled: savedVfd?.enabled ?? saved?.traVfdEnabled ?? false,
+          traVfdEndpoint: savedVfd?.endpoint || saved?.traVfdEndpoint || "",
+          traVfdEnvironment: (savedVfd?.environment || saved?.traVfdEnvironment || "TEST") as "TEST" | "PRODUCTION",
+          traVfdTin: savedVfd?.tin || saved?.traVfdTin || "",
+          traVfdCertSerial: savedVfd?.certSerial || saved?.traVfdCertSerial || "",
+          traVfdRegistrationId: savedVfd?.registrationId || saved?.traVfdRegistrationId || "",
+          traVfdEfdSerial: savedVfd?.efdSerial || saved?.traVfdEfdSerial || "",
+          traVfdReceiptCode: savedVfd?.receiptCode || saved?.traVfdReceiptCode || "",
+          traVfdRoutingKey: savedVfd?.routingKey || saved?.traVfdRoutingKey || "vfdrct",
         };
       }
     } catch {}
@@ -194,8 +239,82 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       currencyCode: "TZS",
       traVfdEnabled: false,
       traVfdEndpoint: "",
+      traVfdEnvironment: "TEST" as "TEST" | "PRODUCTION",
+      traVfdTin: "",
+      traVfdCertSerial: "",
+      traVfdRegistrationId: "",
+      traVfdEfdSerial: "",
+      traVfdReceiptCode: "",
+      traVfdRoutingKey: "vfdrct",
     };
   });
+
+  const handleUpdateVfdConfig = (updates: Partial<TraVfdCardConfig>) => {
+    setTaxConfig((prev) => {
+      const next = {
+        ...prev,
+        traVfdEndpoint: updates.endpoint !== undefined ? updates.endpoint : prev.traVfdEndpoint,
+        traVfdEnvironment: (updates.environment !== undefined ? updates.environment : prev.traVfdEnvironment) as "TEST" | "PRODUCTION",
+        traVfdTin: updates.tin !== undefined ? updates.tin : prev.traVfdTin,
+        traVfdCertSerial: updates.certSerial !== undefined ? updates.certSerial : prev.traVfdCertSerial,
+        traVfdRegistrationId: updates.registrationId !== undefined ? updates.registrationId : prev.traVfdRegistrationId,
+        traVfdEfdSerial: updates.efdSerial !== undefined ? updates.efdSerial : prev.traVfdEfdSerial,
+        traVfdReceiptCode: updates.receiptCode !== undefined ? updates.receiptCode : prev.traVfdReceiptCode,
+        traVfdRoutingKey: updates.routingKey !== undefined ? updates.routingKey : prev.traVfdRoutingKey,
+      };
+      db.saveConfigurationLocal?.("tra_vfd_config", {
+        enabled: Boolean(next.traVfdEnabled),
+        endpoint: String(next.traVfdEndpoint || "").trim(),
+        environment: next.traVfdEnvironment || "TEST",
+        tin: next.traVfdTin || undefined,
+        certSerial: next.traVfdCertSerial || undefined,
+        registrationId: next.traVfdRegistrationId || undefined,
+        efdSerial: next.traVfdEfdSerial || undefined,
+        receiptCode: next.traVfdReceiptCode || undefined,
+        routingKey: next.traVfdRoutingKey || "vfdrct",
+      }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
+      return next;
+    });
+  };
+
+  const handleTraVfdToggle = async (newVal: boolean) => {
+    setTaxConfig((prev) => ({ ...prev, traVfdEnabled: newVal }));
+    const vfdObj = {
+      enabled: newVal,
+      endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
+      environment: taxConfig.traVfdEnvironment || "TEST",
+      tin: taxConfig.traVfdTin || undefined,
+      certSerial: taxConfig.traVfdCertSerial || undefined,
+      registrationId: taxConfig.traVfdRegistrationId || undefined,
+      efdSerial: taxConfig.traVfdEfdSerial || undefined,
+      receiptCode: taxConfig.traVfdReceiptCode || undefined,
+      routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
+    };
+    db.saveConfigurationLocal?.("tra_vfd_config", vfdObj, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
+    db.saveConfigurationLocal?.("tax_config", { ...taxConfig, traVfdEnabled: newVal });
+
+    if (currentTenantId && currentBranchId && typeof navigator !== "undefined" && navigator.onLine) {
+      try {
+        await apiFetch("/api/v1/tra-vfd/config", {
+          method: "PUT",
+          body: JSON.stringify(vfdObj),
+        });
+        toast.success(
+          newVal ? "TRA VFD Fiscalization ON" : "TRA VFD Fiscalization OFF",
+          newVal
+            ? "Receipts will now be cryptographically formatted and queued for TRA verification."
+            : "TRA VFD signing disabled. Offline sales will not require fiscal signatures."
+        );
+      } catch (err: any) {
+        toast.warning("Saved Locally", "Terminal updated local VFD state. Server sync will retry.");
+      }
+    } else {
+      toast.info(
+        newVal ? "TRA VFD ON (Offline Mode)" : "TRA VFD OFF (Offline Mode)",
+        "Local terminal setting applied. Will synchronize with cloud when reconnected."
+      );
+    }
+  };
 
   const [invConfig, setInvConfig] = useState({
     enforceFefoBatching: true,
@@ -212,6 +331,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     db.saveConfigurationLocal?.("tra_vfd_config", {
       enabled: Boolean(taxConfig.traVfdEnabled),
       endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
+      environment: taxConfig.traVfdEnvironment || "TEST",
+      tin: taxConfig.traVfdTin || undefined,
+      certSerial: taxConfig.traVfdCertSerial || undefined,
+      registrationId: taxConfig.traVfdRegistrationId || undefined,
+      efdSerial: taxConfig.traVfdEfdSerial || undefined,
+      receiptCode: taxConfig.traVfdReceiptCode || undefined,
+      routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
     }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
     db.saveConfigurationLocal?.("inv_config", invConfig);
     if (currentTenantId && currentBranchId && typeof navigator !== "undefined" && navigator.onLine) {
@@ -221,6 +347,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
           body: JSON.stringify({
             enabled: Boolean(taxConfig.traVfdEnabled),
             endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
+            environment: taxConfig.traVfdEnvironment || "TEST",
+            tin: taxConfig.traVfdTin || undefined,
+            certSerial: taxConfig.traVfdCertSerial || undefined,
+            registrationId: taxConfig.traVfdRegistrationId || undefined,
+            efdSerial: taxConfig.traVfdEfdSerial || undefined,
+            receiptCode: taxConfig.traVfdReceiptCode || undefined,
+            routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
           }),
         });
       } catch (error: any) {
@@ -238,6 +371,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     { id: "localization", label: t("settings.tabLocalization"), icon: Globe },
     { id: "pos", label: t("settings.tabPos"), icon: Printer },
     { id: "tax", label: t("settings.tabTax"), icon: Scale },
+    { id: "fiscal", label: "Fiscal Device (TRA)", icon: ShieldCheck },
     { id: "inventory", label: t("settings.tabInventory"), icon: Package },
     { id: "security", label: t("settings.tabSecurity"), icon: Shield },
     { id: "notifications", label: t("settings.tabNotifications"), icon: Bell },
@@ -489,26 +623,79 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 <input className="v2-input" value={taxConfig.currencySymbol} onChange={(e) => setTaxConfig({ ...taxConfig, currencySymbol: e.target.value })} />
               </div>
             </div>
-            <div>
-              <label className="v2-text-xs v2-font-bold v2-text-muted">TRA VFD Fiscal Signing Server Endpoint</label>
-              <input className="v2-input" value={taxConfig.traVfdEndpoint} onChange={(e) => setTaxConfig({ ...taxConfig, traVfdEndpoint: e.target.value })} placeholder="https://your-vfd-gateway.example/api" />
+            {/* Quick TRA VFD Fiscal Device Card */}
+            <TraVfdFiscalizationCard
+              config={{
+                enabled: Boolean(taxConfig.traVfdEnabled),
+                endpoint: taxConfig.traVfdEndpoint || "",
+                environment: taxConfig.traVfdEnvironment || "TEST",
+                tin: taxConfig.traVfdTin || "",
+                certSerial: taxConfig.traVfdCertSerial || "",
+                registrationId: taxConfig.traVfdRegistrationId || "",
+                efdSerial: taxConfig.traVfdEfdSerial || "",
+                receiptCode: taxConfig.traVfdReceiptCode || "",
+                routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
+              }}
+              onConfigChange={handleUpdateVfdConfig}
+              onToggle={handleTraVfdToggle}
+              isCompact={true}
+              onOpenFullSettings={() => selectSettingsTab("fiscal")}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Fiscal Device (TRA VFD) Dedicated Command Center Tab */}
+      {activeTab === "fiscal" && (
+        <div className="v2-space-y-4">
+          <TraVfdFiscalizationCard
+            config={{
+              enabled: Boolean(taxConfig.traVfdEnabled),
+              endpoint: taxConfig.traVfdEndpoint || "",
+              environment: taxConfig.traVfdEnvironment || "TEST",
+              tin: taxConfig.traVfdTin || "",
+              certSerial: taxConfig.traVfdCertSerial || "",
+              registrationId: taxConfig.traVfdRegistrationId || "",
+              efdSerial: taxConfig.traVfdEfdSerial || "",
+              receiptCode: taxConfig.traVfdReceiptCode || "",
+              routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
+            }}
+            onConfigChange={handleUpdateVfdConfig}
+            onToggle={handleTraVfdToggle}
+          />
+
+          {/* Compliance & Offline Tolerance Rules */}
+          <div className="v2-card">
+            <div className="v2-card-header">
+              <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                <ShieldCheck size={18} className="v2-text-accent" />
+                <span>TRA Legal Compliance &amp; Offline Tolerance Rules</span>
+              </div>
             </div>
-            <div className="v2-flex v2-items-center v2-justify-between v2-p-3" style={{ border: "1px solid var(--surface-border)", borderRadius: "var(--radius-md, .55rem)", background: "var(--surface-2)" }}>
-              <div>
-                <div className="v2-font-bold v2-text-sm">TRA VFD Fiscalization</div>
-                <div className="v2-text-xs v2-text-muted" style={{ maxWidth: "44rem", marginTop: ".2rem" }}>
-                  ON sends completed receipts to the separate durable TRA VFD fiscal queue. OFF prevents new fiscal requests; existing queued fiscal work remains preserved for recovery.
+            <div className="v2-card-body v2-space-y-3">
+              <div className="v2-text-xs v2-text-muted">
+                KwakoPos v2 provides authoritative EFDMS/VFD compliance certified under the Tanzania Revenue Authority (TRA) electronic fiscal receipt framework:
+              </div>
+              <div className="v2-grid v2-grid-3 v2-gap-3">
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-font-bold v2-text-xs v2-mb-1">1. Zero Cashier Blocking</div>
+                  <div className="v2-text-xs v2-text-muted">
+                    If TRA servers or branch Internet disconnect, transactions immediately complete locally with a pending fiscal token. Cashier checkouts are never blocked.
+                  </div>
+                </div>
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-font-bold v2-text-xs v2-mb-1">2. Durable Outbox Queue</div>
+                  <div className="v2-text-xs v2-text-muted">
+                    Pending receipts queue in encrypted IndexedDB. Once connectivity returns, the background worker transmits and reconciles them with exponential backoff.
+                  </div>
+                </div>
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-font-bold v2-text-xs v2-mb-1">3. QR &amp; Verification Code</div>
+                  <div className="v2-text-xs v2-text-muted">
+                    Fiscal receipts generate official verification URLs and QR codes verifiable by TRA receipt check scanners and customer mobile devices.
+                  </div>
                 </div>
               </div>
-              <label className="v2-flex v2-items-center v2-gap-2" style={{ cursor: "pointer", flexShrink: 0 }}>
-                <span className="v2-text-xs v2-font-black">{taxConfig.traVfdEnabled ? "ON" : "OFF"}</span>
-                <input
-                  type="checkbox"
-                  aria-label="TRA VFD Fiscalization On Off"
-                  checked={Boolean(taxConfig.traVfdEnabled)}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, traVfdEnabled: e.target.checked })}
-                />
-              </label>
             </div>
           </div>
         </div>
@@ -839,8 +1026,68 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         </div>
       )}
 
-      {/* Other Tabs */}
-      {["notifications", "sync", "integrations"].includes(activeTab) && (
+      {/* Integrations Tab */}
+      {activeTab === "integrations" && (
+        <div className="v2-space-y-4">
+          {/* TRA VFD Integration Card */}
+          <TraVfdFiscalizationCard
+            config={{
+              enabled: Boolean(taxConfig.traVfdEnabled),
+              endpoint: taxConfig.traVfdEndpoint || "",
+              environment: taxConfig.traVfdEnvironment || "TEST",
+              tin: taxConfig.traVfdTin || "",
+              certSerial: taxConfig.traVfdCertSerial || "",
+              registrationId: taxConfig.traVfdRegistrationId || "",
+              efdSerial: taxConfig.traVfdEfdSerial || "",
+              receiptCode: taxConfig.traVfdReceiptCode || "",
+              routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
+            }}
+            onConfigChange={handleUpdateVfdConfig}
+            onToggle={handleTraVfdToggle}
+            onOpenFullSettings={() => selectSettingsTab("fiscal")}
+          />
+
+          {/* Payment Gateways Card */}
+          <div className="v2-card">
+            <div className="v2-card-header">
+              <div className="v2-card-title v2-flex v2-items-center v2-gap-2">
+                <CreditCard size={18} />
+                <span>Mobile Money & Banking Gateways</span>
+              </div>
+            </div>
+            <div className="v2-card-body v2-space-y-3">
+              <div className="v2-grid v2-grid-3 v2-gap-3">
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                    <strong className="v2-text-xs">Vodacom M-Pesa</strong>
+                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                  </div>
+                  <div className="v2-text-xs v2-text-muted">C2B Paybill & Till STK Push integrated via webhooks.</div>
+                </div>
+
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                    <strong className="v2-text-xs">Airtel Money</strong>
+                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                  </div>
+                  <div className="v2-text-xs v2-text-muted">Merchant collection API & instant settlement.</div>
+                </div>
+
+                <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
+                  <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
+                    <strong className="v2-text-xs">CRDB / NMB Bank</strong>
+                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                  </div>
+                  <div className="v2-text-xs v2-text-muted">Host-to-host bank statement & QR payment feeds.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notifications & Sync Tabs */}
+      {["notifications", "sync"].includes(activeTab) && (
         <div className="v2-card">
           <div className="v2-card-header">
             <div className="v2-card-title">
