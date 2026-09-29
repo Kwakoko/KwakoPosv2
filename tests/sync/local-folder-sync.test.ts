@@ -30,30 +30,58 @@ describe("Local Semantic Version Folder Synchronization Engine (15-Gate Integrit
 
   function initGitInMockDir(dir: string, version = "2.7.0") {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "KwakoPos", version }), "utf8");
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "KwakoPos", version }),
+      "utf8"
+    );
+
+    // Define environment settings to tie Git directly to this mock directory context on Windows
+    const gitEnv = {
+      ...process.env,
+      GIT_DIR: path.join(dir, ".git"),
+      GIT_WORK_TREE: dir,
+    };
+
     try {
-      execSync("git init -b main", { cwd: dir, stdio: "ignore" });
+      execSync("git init -b main", { cwd: dir, env: gitEnv, stdio: "ignore" });
     } catch {
-      execSync("git init", { cwd: dir, stdio: "ignore" });
+      execSync("git init", { cwd: dir, env: gitEnv, stdio: "ignore" });
     }
-    execSync('git config user.name "Test User"', { cwd: dir, stdio: "ignore" });
-    execSync('git config user.email "test@kwakoko.com"', { cwd: dir, stdio: "ignore" });
-    execSync('git add . && git commit -m "chore: initial baseline commit"', { cwd: dir, stdio: "ignore" });
+
+    // Force system identity configurations for the local mock workspace
+    execSync('git config user.name "Test User"', { cwd: dir, env: gitEnv, stdio: "ignore" });
+    execSync('git config user.email "test@kwakoko.com"', { cwd: dir, env: gitEnv, stdio: "ignore" });
+    execSync('git config local.user.name "Test User"', { cwd: dir, env: gitEnv, stdio: "ignore" });
+    execSync('git config local.user.email "test@kwakoko.com"', { cwd: dir, env: gitEnv, stdio: "ignore" });
+
+    // Execute explicit staging commands bound to the custom environment
+    execSync("git add .", { cwd: dir, env: gitEnv, stdio: "ignore" });
+    execSync('git commit -m "chore: initial baseline commit"', { cwd: dir, env: gitEnv, stdio: "ignore" });
   }
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kwakopos-sync-test-15-"));
     fs.writeFileSync(path.join(tempDir, "package.json"), JSON.stringify({ name: "KwakoPos-Sync-Fixture", version: "2.7.0" }), "utf8");
 
+    const gitEnv = {
+      ...process.env,
+      GIT_DIR: path.join(tempDir, ".git"),
+      GIT_WORK_TREE: tempDir,
+    };
+
     // Force initialize git so Local HEAD SHA isn't 0000000...
     try {
-      execSync("git init -b main", { cwd: tempDir, stdio: "ignore" });
+      execSync("git init -b main", { cwd: tempDir, env: gitEnv, stdio: "ignore" });
     } catch {
-      execSync("git init", { cwd: tempDir, stdio: "ignore" });
+      execSync("git init", { cwd: tempDir, env: gitEnv, stdio: "ignore" });
     }
-    execSync('git config user.name "Test User"', { cwd: tempDir, stdio: "ignore" });
-    execSync('git config user.email "test@kwakoko.com"', { cwd: tempDir, stdio: "ignore" });
-    execSync('git add . && git commit -m "chore: initial baseline commit"', { cwd: tempDir, stdio: "ignore" });
+    execSync('git config user.name "Test User"', { cwd: tempDir, env: gitEnv, stdio: "ignore" });
+    execSync('git config user.email "test@kwakoko.com"', { cwd: tempDir, env: gitEnv, stdio: "ignore" });
+    execSync('git config local.user.name "Test User"', { cwd: tempDir, env: gitEnv, stdio: "ignore" });
+    execSync('git config local.user.email "test@kwakoko.com"', { cwd: tempDir, env: gitEnv, stdio: "ignore" });
+    execSync("git add .", { cwd: tempDir, env: gitEnv, stdio: "ignore" });
+    execSync('git commit -m "chore: initial baseline commit"', { cwd: tempDir, env: gitEnv, stdio: "ignore" });
   });
 
   afterEach(() => {
