@@ -6,22 +6,36 @@ import type {
   TenantContext,
 } from "@kwakopos2/contracts";
 import { assertEmployeeTenantOwnership } from "./workforceInvariants.js";
-import { randomUUID, createHash } from "crypto";
+import { randomUUID } from "crypto";
+import { Algorithm, hashSync as argon2HashSync, verifySync as argon2VerifySync } from "@node-rs/argon2";
 
 export class EmployeeEngine {
   /**
-   * Hashes a 4-6 digit employee PIN for offline/online authentication.
+   * Hashes a 4-6 digit employee PIN using Argon2id with a unique random salt.
+   * Legacy SHA-256/MD5 PIN hashes are intentionally not generated or accepted.
    */
   static hashPin(pin: string): string {
-    return createHash("sha256").update(`kwako-pin:${pin}`).digest("hex");
+    if (!/^\d{4,6}$/.test(pin)) throw new Error("PIN must contain 4-6 digits.");
+    return argon2HashSync(pin, {
+      algorithm: Algorithm.Argon2id,
+      memoryCost: Number(process.env.KWAKOPOS_PIN_ARGON2_MEMORY_COST || 19456),
+      timeCost: Number(process.env.KWAKOPOS_PIN_ARGON2_TIME_COST || 2),
+      parallelism: Number(process.env.KWAKOPOS_PIN_ARGON2_PARALLELISM || 1),
+      outputLen: 32,
+    });
   }
 
   /**
-   * Verifies an employee PIN against the stored hash.
+   * Verifies an employee PIN. Only Argon2id hashes are accepted; legacy hashes
+   * fail closed and therefore cannot be used as an offline authorization fallback.
    */
   static verifyPin(pin: string, storedHash?: string | null): boolean {
-    if (!storedHash) return false;
-    return this.hashPin(pin) === storedHash;
+    if (!/^\d{4,6}$/.test(pin) || !storedHash || !storedHash.startsWith("$argon2id$")) return false;
+    try {
+      return argon2VerifySync(storedHash, pin);
+    } catch {
+      return false;
+    }
   }
 
   /**

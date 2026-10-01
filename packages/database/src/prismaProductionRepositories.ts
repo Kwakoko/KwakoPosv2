@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
-import { assertTenantIsolation } from "@kwakopos2/domain";
+import { assertTenantIsolation, EmployeeEngine } from "@kwakopos2/domain";
 
 const db: any = prisma;
 
@@ -250,7 +250,7 @@ export class PrismaWorkforceRepository {
         employeeNumber:number, firstName:req.firstName, lastName:req.lastName, preferredName:req.preferredName??null, phone:req.phone??null, email:req.email??null,
         address:req.address??null, emergencyContact:req.emergencyContact??null, dateOfBirth:req.dateOfBirth?new Date(req.dateOfBirth):null,
         hireDate:req.hireDate?new Date(req.hireDate):undefined, departmentId:req.departmentId??null, positionId:req.positionId??null, managerId:req.managerId??null,
-        workType:req.workType||"FULL_TIME", contractType:req.contractType||"PERMANENT", pinCodeHash:null }});
+        workType:req.workType||"FULL_TIME", contractType:req.contractType||"PERMANENT", pinCodeHash:req.pinCode ? EmployeeEngine.hashPin(req.pinCode) : null }});
       const initialRecord = await tx.employmentRecord.create({data:{ tenantId:ctx.tenantId, employeeId:employee.id, effectiveDate:employee.hireDate,
         changeType:"HIRE", departmentId:employee.departmentId, positionId:employee.positionId, branchId:employee.branchId, managerId:employee.managerId,
         contractType:employee.contractType, payRate:employee.baseSalary, createdById:ctx.userId }});

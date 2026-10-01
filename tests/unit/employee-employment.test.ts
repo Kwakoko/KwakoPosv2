@@ -37,6 +37,11 @@ describe("Employee Master & Employment History Engine", () => {
     expect(employee.pinCodeHash).toBeTruthy();
     expect(EmployeeEngine.verifyPin("1234", employee.pinCodeHash)).toBe(true);
     expect(EmployeeEngine.verifyPin("9999", employee.pinCodeHash)).toBe(false);
+    expect(employee.pinCodeHash).toMatch(/^\$argon2id\$/);
+    const secondHash = EmployeeEngine.hashPin("1234");
+    expect(secondHash).not.toBe(employee.pinCodeHash);
+    expect(EmployeeEngine.verifyPin("1234", secondHash)).toBe(true);
+    expect(EmployeeEngine.verifyPin("1234", "5f4dcc3b5aa765d61d8327deb882cf99")).toBe(false);
 
     expect(initialRecord.changeType).toBe("HIRE");
     expect(initialRecord.employeeId).toBe(employee.id);
