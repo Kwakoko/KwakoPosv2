@@ -5,6 +5,10 @@ export interface LoginResponseUser {
   email: string;
   name: string;
   role: string;
+  tenantName?: string;
+  tenantSlug?: string;
+  branchName?: string;
+  branchCode?: string;
 }
 
 export interface LoginResponse {
@@ -132,30 +136,37 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
   const url = typeof input === "string" && input.startsWith("/") && typeof window === "undefined"
     ? `http://127.0.0.1:${(globalThis as any).process?.env?.PORT || 3000}${input}`
     : input;
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(init.headers || {}),
-    },
-    credentials: "include",
-  });
+  const controller = typeof AbortController !== "undefined" && !init.signal ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(new Error("Request timed out after 15s")), 15000) : null;
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: init.signal || controller?.signal,
+      headers: {
+        Accept: "application/json",
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(init.headers || {}),
+      },
+      credentials: "include",
+    });
 
-  const body = (await response.json().catch(() => ({}))) as T & ApiErrorPayload & { data?: any };
-  if (response.status === 401 && allowRefresh && getStoredSession() && !String(input).includes("/auth/")) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) return requestJson<T>(input, init, false);
+    const body = (await response.json().catch(() => ({}))) as T & ApiErrorPayload & { data?: any };
+    if (response.status === 401 && allowRefresh && getStoredSession() && !String(input).includes("/auth/")) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) return requestJson<T>(input, init, false);
+    }
+    if (response.status === 428 && body?.error?.code === "SUPER_ADMIN_SETUP_REQUIRED") {
+      throw new SuperAdminSetupRequiredError(body.error.message || "Super Admin security setup is required", body.data || {});
+    }
+    if (response.status === 401 && body?.error?.code === "MFA_REQUIRED") {
+      throw new MfaRequiredError(body.error.message || "Valid Super Admin MFA code is required");
+    }
+    if (!response.ok) throw new Error(body?.error?.message || `Request failed with HTTP ${response.status}`);
+    return body;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
-  if (response.status === 428 && body?.error?.code === "SUPER_ADMIN_SETUP_REQUIRED") {
-    throw new SuperAdminSetupRequiredError(body.error.message || "Super Admin security setup is required", body.data || {});
-  }
-  if (response.status === 401 && body?.error?.code === "MFA_REQUIRED") {
-    throw new MfaRequiredError(body.error.message || "Valid Super Admin MFA code is required");
-  }
-  if (!response.ok) throw new Error(body?.error?.message || `Request failed with HTTP ${response.status}`);
-  return body;
 }
 
 async function refreshAccessToken(): Promise<string | null> {

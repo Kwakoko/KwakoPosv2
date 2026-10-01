@@ -977,6 +977,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     let userId: string;
     let userName = email.split("@")[0] || "Admin User";
     let userRole = "ADMIN";
+    let tenantName: string | undefined;
+    let tenantSlug: string | undefined;
+    let branchName: string | undefined;
+    let branchCode: string | undefined;
 
     if (productionPersistence) {
       const { prisma } = await import("@kwakopos2/database");
@@ -996,6 +1000,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         branchId = existingUser.branchId;
         userName = existingUser.name || userName;
         userRole = String(existingUser.role?.name || "ADMIN");
+        tenantName = existingUser.tenant?.name;
+        tenantSlug = existingUser.tenant?.slug;
+        branchName = existingUser.branch?.name;
+        branchCode = existingUser.branch?.code;
       } else {
         // Auto-provision initial tenant and user deterministically so that data permanently persists
         const baseSlug = (normalizedEmail.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 32);
@@ -1027,6 +1035,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         }
         tenantId = tenant.id;
         branchId = tenant.branches[0]?.id || randomUUID();
+        tenantName = tenant.name;
+        tenantSlug = tenant.slug;
+        branchName = tenant.branches[0]?.name || "Main Branch";
+        branchCode = tenant.branches[0]?.code || "MAIN-01";
 
         let role = await prisma.role.findFirst({ where: { tenantId, name: "ADMIN" } });
         if (!role) {
@@ -1121,7 +1133,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         accessToken,
         refreshToken: session.refreshToken,
         sessionId: session.sessionId,
-        user: { id: userId, tenantId, branchId, email: normalizedEmail, name: userName, role: userRole },
+        user: {
+          id: userId,
+          tenantId,
+          branchId,
+          email: normalizedEmail,
+          name: userName,
+          role: userRole,
+          tenantName,
+          tenantSlug,
+          branchName,
+          branchCode,
+        },
       },
     });
   });
@@ -1220,12 +1243,40 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const accessToken = generateAccessToken(tokenPayload);
     const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
 
+    let targetTenantName: string | undefined;
+    let targetTenantSlug: string | undefined;
+    let targetBranchName: string | undefined;
+    let targetBranchCode: string | undefined;
+
+    if (productionPersistence && newTenantId && newTenantId !== "PLATFORM_SUPER_ADMIN") {
+      try {
+        const { prisma } = await import("@kwakopos2/database");
+        const foundTenant = await prisma.tenant.findUnique({
+          where: { id: newTenantId },
+          include: { branches: true },
+        });
+        if (foundTenant) {
+          targetTenantName = foundTenant.name;
+          targetTenantSlug = foundTenant.slug;
+          const foundBranch = foundTenant.branches.find((b) => b.id === newBranchId) || foundTenant.branches[0];
+          if (foundBranch) {
+            targetBranchName = foundBranch.name;
+            targetBranchCode = foundBranch.code;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     return reply.send({
       success: true,
       data: {
         accessToken,
         refreshToken: session.refreshToken,
         sessionId: session.sessionId,
+        tenantName: targetTenantName,
+        branchName: targetBranchName,
         user: {
           id: userId,
           tenantId: newTenantId,
@@ -1233,6 +1284,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
           email: userEmail,
           name: "Admin User",
           role: ctx?.roles?.[0] || "ADMIN",
+          tenantName: targetTenantName,
+          tenantSlug: targetTenantSlug,
+          branchName: targetBranchName,
+          branchCode: targetBranchCode,
         },
       },
     });
@@ -1747,6 +1802,48 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
     const result = await (syncEngine as any).resolveConflict(requireTenantContext(req), params.conflictId, body.resolution, body.mergedPayload);
+    return { success: true, data: result };
+  });
+
+  server.get("/sync/journal/stats", async (req) => {
+    if (typeof (syncEngine as any).getJournalCompactionStats !== "function") {
+      return { success: false, error: "Journal compaction is not supported by current sync engine" };
+    }
+    const isGlobal = (req.query as any)?.all === "true";
+    const ctx = isGlobal ? undefined : req.tenantContext;
+    const stats = await (syncEngine as any).getJournalCompactionStats(ctx);
+    return { success: true, data: stats };
+  });
+
+  server.post("/sync/journal/compact", async (req) => {
+    if (typeof (syncEngine as any).compactJournal !== "function") {
+      return { success: false, error: "Journal compaction is not supported by current sync engine" };
+    }
+    const body = z.object({
+      retainRevisions: z.number().int().positive().optional(),
+      maxAgeDays: z.number().int().positive().optional(),
+      beforeRevision: z.string().optional(),
+      dryRun: z.boolean().optional(),
+      allTenants: z.boolean().optional(),
+    }).parse(req.body || {});
+
+    if (body.allTenants) {
+      const results = await (syncEngine as any).compactAllJournals({
+        retainRevisions: body.retainRevisions,
+        maxAgeDays: body.maxAgeDays,
+        beforeRevision: body.beforeRevision,
+        dryRun: body.dryRun,
+      });
+      return { success: true, data: results };
+    }
+
+    const ctx = requireTenantContext(req);
+    const result = await (syncEngine as any).compactJournal(ctx, {
+      retainRevisions: body.retainRevisions,
+      maxAgeDays: body.maxAgeDays,
+      beforeRevision: body.beforeRevision,
+      dryRun: body.dryRun,
+    });
     return { success: true, data: result };
   });
   // ==========================================

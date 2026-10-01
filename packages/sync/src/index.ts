@@ -468,7 +468,13 @@ export class SyncEngine {
 }
 
 export { PrismaSyncEngine } from "./prismaSyncEngine.js";
-export { WorldStandardPrismaSyncEngine } from "./worldStandardPrismaSyncEngine.js";
+export {
+  WorldStandardPrismaSyncEngine,
+  type JournalCompactionStats,
+  type JournalCompactionOptions,
+  type JournalCompactionResult,
+  type CompactionScopeContext,
+} from "./worldStandardPrismaSyncEngine.js";
 export {
   checkRollbackBarrier,
   validateSyncEpoch,

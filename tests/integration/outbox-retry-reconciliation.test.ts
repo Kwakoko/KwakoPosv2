@@ -62,6 +62,8 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
           entityType: "Sale",
           entityId: saleId,
           operationType: "CREATE",
+          tenantId: "tenant-integ-1",
+          branchId: "branch-integ-1",
           payload: {
             id: saleId,
             items: [{ variantId, qty: 2, price: 35000 }],

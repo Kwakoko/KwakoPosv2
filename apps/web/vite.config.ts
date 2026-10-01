@@ -6,8 +6,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const browserCryptoPath = path.resolve(__dirname, "src/utils/browserCrypto.ts");
 
+// Ignore transient socket resets from client browser disconnects/reloads
+process.on("uncaughtException", (err: any) => {
+  if (err?.code === "ECONNRESET" || err?.code === "EPIPE" || err?.code === "ECONNABORTED") {
+    return;
+  }
+  console.error("[Vite Uncaught Exception]", err);
+  process.exit(1);
+});
+
 const configureProxy = (proxy: any) => {
-  proxy.on("error", (_err: any, _req: any, res: any) => {
+  proxy.on("error", (err: any, _req: any, res: any) => {
+    if (err?.code === "ECONNRESET" || err?.code === "EPIPE" || err?.code === "ECONNABORTED") {
+      return;
+    }
     try {
       if (res && !res.headersSent && typeof res.writeHead === "function") {
         res.writeHead(503, { "Content-Type": "application/json" });
@@ -28,13 +40,19 @@ const configureProxy = (proxy: any) => {
     }
   });
 
-  proxy.on("proxyReq", (_proxyReq: any, req: any) => {
+  proxy.on("proxyReq", (proxyReq: any, req: any) => {
+    if (proxyReq && typeof proxyReq.on === "function") {
+      proxyReq.on("error", () => {});
+    }
     if (req && typeof req.on === "function") {
       req.on("error", () => {});
     }
   });
 
-  proxy.on("proxyRes", (_proxyRes: any, _req: any, res: any) => {
+  proxy.on("proxyRes", (proxyRes: any, _req: any, res: any) => {
+    if (proxyRes && typeof proxyRes.on === "function") {
+      proxyRes.on("error", () => {});
+    }
     if (res && typeof res.on === "function") {
       res.on("error", () => {});
     }
@@ -71,36 +89,50 @@ export default defineConfig({
       "/auth": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/api": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/sync": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/admin": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/telemetry": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/health": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
       "/version": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
+        timeout: 10000,
+        proxyTimeout: 10000,
         configure: configureProxy,
       },
     },

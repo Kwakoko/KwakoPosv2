@@ -56,6 +56,14 @@ async function defaultDeltaApi(since?: string): Promise<SyncDeltaResponse> {
   return body.data || body;
 }
 
+async function defaultBootstrapApi(req: SyncBootstrapRequest): Promise<SyncBootstrapResponse> {
+  const body = await apiFetch<any>("/sync/bootstrap", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+  return body.data || body;
+}
+
 async function applyRevisionedChanges(
   changes: RevisionedChange[],
   serverRevision: string,
@@ -167,6 +175,19 @@ async function applyRevisionedChanges(
       );
       metadata.put(JSON.stringify(conflictStatus), persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
       persistenceStatusEvents.push(conflictStatus);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kwakopos:sync-conflict-detected", {
+            detail: {
+              conflictId,
+              entityType: change.entityType,
+              entityId: change.entityId,
+              revision: change.revision,
+              operationId: pendingMutation.id,
+            },
+          }),
+        );
+      }
       break;
     }
 
@@ -484,6 +505,15 @@ export class ClientSyncEngine {
       const deltaRes = (await effectiveDelta(`rev:${lastRevision}`)) as any;
       if (!deltaRes || typeof deltaRes.serverTimestamp !== "string")
         throw new Error("SYNC_PROTOCOL_VIOLATION: delta response is missing serverTimestamp");
+
+      if (deltaRes.requiresBootstrap) {
+        console.info(
+          `[SYNC] Journal compaction gap detected (client cursor rev:${lastRevision} was pruned; journal min is rev:${deltaRes.compactionMinRevision}). Initiating authoritative snapshot bootstrap.`
+        );
+        const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
+        return { pushed: pushedCount, pulled: bootstrapRes.applied };
+      }
+
       let totalPulled = 0;
       if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
         totalPulled = await applyRevisionedChanges(

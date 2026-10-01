@@ -46,6 +46,10 @@ export interface AuthUser {
   role: string;
   tenantId: string;
   branchId: string;
+  tenantName?: string;
+  tenantSlug?: string;
+  branchName?: string;
+  branchCode?: string;
 }
 
 interface JwtClaims {
@@ -108,7 +112,8 @@ export const useAuth = (): AuthContextType => {
 interface TenantContextType {
   currentTenantId: string | null;
   currentTenantName: string | null;
-  availableTenants: { id: string; name: string }[];
+  currentTenantSlug?: string | null;
+  availableTenants: { id: string; name: string; slug?: string }[];
   switchTenant: (id: string) => Promise<void>;
   isImpersonating: boolean;
 }
@@ -116,6 +121,7 @@ interface TenantContextType {
 const DEFAULT_TENANT_CONTEXT: TenantContextType = {
   currentTenantId: null,
   currentTenantName: null,
+  currentTenantSlug: null,
   availableTenants: [],
   switchTenant: async () => {},
   isImpersonating: false,
@@ -130,13 +136,15 @@ export const useTenant = (): TenantContextType => {
 interface BranchContextType {
   currentBranchId: string | null;
   currentBranchName: string | null;
-  availableBranches: { id: string; name: string }[];
+  currentBranchCode?: string | null;
+  availableBranches: { id: string; name: string; code?: string }[];
   switchBranch: (id: string) => Promise<void>;
 }
 
 const DEFAULT_BRANCH_CONTEXT: BranchContextType = {
   currentBranchId: null,
   currentBranchName: null,
+  currentBranchCode: null,
   availableBranches: [],
   switchBranch: async () => {},
 };
@@ -223,6 +231,8 @@ interface SyncContextType {
   pendingOutboxCount: number;
   syncStatus: SyncStatusSnapshot;
   syncOutbox: (options?: { quiet?: boolean; force?: boolean }) => Promise<any>;
+  /** Force a full bootstrap re-sync from the server, wiping and replacing local IndexedDB state. */
+  forceBootstrap: () => Promise<void>;
   db: LocalIndexedDbStore;
   syncEngine: ClientSyncEngine;
   syncError: string | null;
@@ -238,6 +248,7 @@ const DEFAULT_SYNC_CONTEXT: SyncContextType = {
   pendingOutboxCount: 0,
   syncStatus: syncStatusService.getSnapshot(),
   syncOutbox: async () => {},
+  forceBootstrap: async () => {},
   db: null as any,
   syncEngine: null as any,
   syncError: null,
@@ -354,6 +365,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       role: stored.user.role,
       tenantId: stored.user.tenantId,
       branchId: stored.user.branchId,
+      tenantName: stored.user.tenantName,
+      tenantSlug: stored.user.tenantSlug,
+      branchName: stored.user.branchName,
+      branchCode: stored.user.branchCode,
     };
   });
   const [isInitializing, setIsInitializing] = useState(() => !getStoredSession()?.user);
@@ -504,6 +519,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       role: loggedIn.role,
       tenantId: loggedIn.tenantId,
       branchId: loggedIn.branchId,
+      tenantName: loggedIn.tenantName,
+      tenantSlug: loggedIn.tenantSlug,
+      branchName: loggedIn.branchName,
+      branchCode: loggedIn.branchCode,
     };
     setUser(authUser);
     try {
@@ -880,6 +899,47 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
   }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine]);
 
+  // Force-bootstrap: wipe local IndexedDB and re-fetch from authoritative server snapshot.
+  // Triggered by UI button or `kwakopos:force-bootstrap` window event.
+  const forceBootstrap = useCallback(async () => {
+    if (!isOnline) return;
+    const targetTenantId = user?.tenantId || currentTenantId || "tenant-default";
+    const targetBranchId = user?.branchId || currentBranchId || "branch-default";
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      await syncEngine.bootstrapWithServer(
+        async (req) => {
+          const body = await apiFetch<any>("/sync/bootstrap", {
+            method: "POST",
+            headers: {
+              "x-tenant-id": targetTenantId,
+              "x-branch-id": targetBranchId,
+              "x-user-id": user?.id || "user-default",
+            },
+            body: JSON.stringify(req),
+          });
+          return body.data || body;
+        },
+        targetTenantId,
+        targetBranchId,
+      );
+      // After bootstrap, purge any remaining orphaned outbox items from old scopes.
+      db.purgeOrphanedOutbox(targetTenantId, targetBranchId);
+      await db.refreshStoresFromNative();
+      setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
+      const syncScope = { tenantId: targetTenantId, branchId: targetBranchId };
+      await syncStatusService.refreshCounts(syncScope);
+      setSyncStatus(syncStatusService.getSnapshot(syncScope));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", bootstrapped: true } }));
+      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Bootstrap failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user, currentTenantId, currentBranchId, isOnline, db, syncEngine]);
+
   // ─── Automated Convergence Lifecycles ──────────────────────────────────────────
 
   // Imperative convergence hook used by UI automation and diagnostics. It executes
@@ -911,6 +971,28 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     window.addEventListener("kwakopos:context-sync-now", handleSyncNow);
     return () => window.removeEventListener("kwakopos:context-sync-now", handleSyncNow);
   }, [syncOutbox]);
+
+  // Force-bootstrap event: dispatching `kwakopos:force-bootstrap` from DevTools or the UI
+  // triggers a full authoritative snapshot re-sync, clearing ghost products and orphaned outbox items.
+  useEffect(() => {
+    const handleForceBootstrap = () => { void forceBootstrap(); };
+    window.addEventListener("kwakopos:force-bootstrap", handleForceBootstrap);
+    return () => window.removeEventListener("kwakopos:force-bootstrap", handleForceBootstrap);
+  }, [forceBootstrap]);
+
+  // On boot: purge orphaned outbox items from old test sessions to keep the pending-sync count clean.
+  useEffect(() => {
+    const targetTenantId = user?.tenantId || currentTenantId;
+    const targetBranchId = user?.branchId || currentBranchId;
+    if (!targetTenantId || !targetBranchId) return;
+    try {
+      const purged = db.purgeOrphanedOutbox(targetTenantId, targetBranchId);
+      if (purged > 0) {
+        console.info(`[Sync] Boot-time orphan purge: removed ${purged} outbox items from old scopes.`);
+      }
+    } catch { /* never break the app */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.tenantId, user?.branchId, currentTenantId, currentBranchId]);
 
   // 1. Cross-tab peer convergence via BroadcastChannel
   useEffect(() => {
@@ -1068,21 +1150,25 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   }, [isOnline, db, user?.tenantId, user?.branchId]);
 
   const availableTenantsList = useMemo(() => {
-    if (impersonatedTenant) return [{ id: impersonatedTenant.tenantId, name: `${impersonatedTenant.tenantName} (Audit)` }];
+    if (impersonatedTenant) return [{ id: impersonatedTenant.tenantId, name: `${impersonatedTenant.tenantName} (Audit)`, slug: (impersonatedTenant as any).tenantSlug }];
     if (!user?.tenantId) return [];
     const friendlyName = (user as any).tenantName || "Bravados";
-    return [{ id: user.tenantId, name: friendlyName }];
+    const slug = (user as any).tenantSlug || undefined;
+    return [{ id: user.tenantId, name: friendlyName, slug }];
   }, [user, impersonatedTenant]);
 
   const availableBranchesList = useMemo(() => {
-    if (impersonatedTenant) return [{ id: impersonatedTenant.branchId, name: `${impersonatedTenant.branchName} (Audit)` }];
+    if (impersonatedTenant) return [{ id: impersonatedTenant.branchId, name: `${impersonatedTenant.branchName} (Audit)`, code: (impersonatedTenant as any).branchCode }];
     if (!user?.branchId) return [];
     const friendlyBranch = (user as any).branchName || "Main HQ";
-    return [{ id: user.branchId, name: friendlyBranch }];
+    const code = (user as any).branchCode || undefined;
+    return [{ id: user.branchId, name: friendlyBranch, code }];
   }, [user, impersonatedTenant]);
 
   const currentTenantName = impersonatedTenant?.tenantName || (isSuperAdmin ? "Platform Super Admin" : availableTenantsList.find((t) => t.id === currentTenantId)?.name || "Bravados");
+  const currentTenantSlug = impersonatedTenant ? (impersonatedTenant as any).tenantSlug || null : user?.tenantSlug || null;
   const currentBranchName = impersonatedTenant?.branchName || (isSuperAdmin ? "Global Control Plane" : availableBranchesList.find((b) => b.id === currentBranchId)?.name || "Main HQ");
+  const currentBranchCode = impersonatedTenant ? (impersonatedTenant as any).branchCode || null : user?.branchCode || null;
 
   const authValue: AuthContextType = {
     user,
@@ -1099,6 +1185,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const tenantValue: TenantContextType = {
     currentTenantId,
     currentTenantName,
+    currentTenantSlug,
     availableTenants: availableTenantsList,
     switchTenant,
     isImpersonating: Boolean(impersonatedTenant),
@@ -1106,6 +1193,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const branchValue: BranchContextType = {
     currentBranchId,
     currentBranchName,
+    currentBranchCode,
     availableBranches: availableBranchesList,
     switchBranch,
   };
@@ -1144,6 +1232,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     pendingOutboxCount,
     syncStatus,
     syncOutbox,
+    forceBootstrap,
     db,
     syncEngine,
     syncError,

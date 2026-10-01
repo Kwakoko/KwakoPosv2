@@ -18,6 +18,8 @@ import {
 import { useAuth, useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { syncTelemetryService, type SyncTelemetryMetrics } from "../services/syncTelemetryService.js";
 import { SyncConflictResolutionModal } from "./SyncConflictResolutionModal.js";
+import { globalStoragePressureMonitor } from "../persistence/storagePressure.js";
+import { HumanIdBadge } from "./UI/HumanIdBadge.js";
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return "0 MB";
@@ -30,8 +32,8 @@ function formatBytes(bytes?: number): string {
 
 export const SyncTelemetryHUD: React.FC = () => {
   const { user } = useAuth();
-  const { currentTenantName, currentTenantId } = useTenant();
-  const { currentBranchName, currentBranchId } = useBranch();
+  const { currentTenantName, currentTenantId, currentTenantSlug } = useTenant();
+  const { currentBranchName, currentBranchId, currentBranchCode } = useBranch();
   const { isOnline, pendingOutboxCount, syncOutbox, isSyncing, isSimulatedOffline, toggleOfflineSimulation, db } = useSync();
 
   const [metrics, setMetrics] = useState<SyncTelemetryMetrics>(syncTelemetryService.getMetrics());
@@ -39,6 +41,8 @@ export const SyncTelemetryHUD: React.FC = () => {
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [isStoragePersisted, setIsStoragePersisted] = useState(false);
+  const [isRequestingPersistence, setIsRequestingPersistence] = useState(false);
 
   const conflictCount = useMemo(() => {
     if (!db?.syncMetadata) return 0;
@@ -94,6 +98,38 @@ export const SyncTelemetryHUD: React.FC = () => {
       setTimeout(() => setFeedbackMsg(null), 5000);
     } finally {
       setIsProbing(false);
+    }
+  };
+
+  useEffect(() => {
+    void globalStoragePressureMonitor.isPersisted().then((persisted) => {
+      setIsStoragePersisted(persisted);
+    });
+    const handleStoragePersisted = (e: any) => {
+      setIsStoragePersisted(Boolean(e.detail?.persisted));
+    };
+    window.addEventListener("kwakopos:storage-persisted", handleStoragePersisted);
+    return () => {
+      window.removeEventListener("kwakopos:storage-persisted", handleStoragePersisted);
+    };
+  }, []);
+
+  const handleRequestPersistence = async () => {
+    setIsRequestingPersistence(true);
+    try {
+      const res = await globalStoragePressureMonitor.requestPersistence();
+      setIsStoragePersisted(res.persisted);
+      if (res.persisted) {
+        setFeedbackMsg({ text: "✓ Browser persistent storage granted (Eviction-protected)." });
+      } else {
+        setFeedbackMsg({ text: "Browser operating in best-effort storage mode." });
+      }
+      setTimeout(() => setFeedbackMsg(null), 4000);
+    } catch (err: any) {
+      setFeedbackMsg({ text: `Failed to request persistence: ${err?.message || String(err)}`, isError: true });
+      setTimeout(() => setFeedbackMsg(null), 5000);
+    } finally {
+      setIsRequestingPersistence(false);
     }
   };
 
@@ -459,9 +495,31 @@ export const SyncTelemetryHUD: React.FC = () => {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ color: "var(--muted)" }}>Tenant / Branch:</span>
-                  <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
-                    {currentTenantName} / {currentBranchName}
-                  </span>
+                  <div style={{ display: "flex", gap: "0.35rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {currentTenantId && (
+                      <HumanIdBadge
+                        fullId={currentTenantId}
+                        displayCode={currentTenantSlug || currentTenantName || undefined}
+                        prefix="TNT"
+                        size="xs"
+                        variant="tenant"
+                      />
+                    )}
+                    {currentBranchId && (
+                      <HumanIdBadge
+                        fullId={currentBranchId}
+                        displayCode={currentBranchCode || currentBranchName || undefined}
+                        prefix="BR"
+                        size="xs"
+                        variant="branch"
+                      />
+                    )}
+                    {!currentTenantId && !currentBranchId && (
+                      <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
+                        {currentTenantName || "Unknown"} / {currentBranchName || "Unknown"}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {metrics.storageQuotaTotalBytes ? (
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -471,6 +529,26 @@ export const SyncTelemetryHUD: React.FC = () => {
                     </span>
                   </div>
                 ) : null}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "0.25rem", borderTop: "1px dashed var(--surface-border)" }}>
+                  <span style={{ color: "var(--muted)" }}>Storage Durability:</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span className={`badge ${isStoragePersisted ? "v2-badge-success" : "v2-badge-warning"}`} style={{ fontSize: "0.72rem" }}>
+                      {isStoragePersisted ? "Persistent (Durable)" : "Best-Effort"}
+                    </span>
+                    {!isStoragePersisted && (
+                      <button
+                        type="button"
+                        className="v2-btn v2-btn-outline v2-btn-sm"
+                        style={{ padding: "0.15rem 0.45rem", fontSize: "0.68rem", height: "auto" }}
+                        disabled={isRequestingPersistence}
+                        onClick={handleRequestPersistence}
+                        title="Promote browser storage to durable/persistent via navigator.storage.persist()"
+                      >
+                        {isRequestingPersistence ? "Requesting…" : "Enable Durability"}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Feedback Banner */}

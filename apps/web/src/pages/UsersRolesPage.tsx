@@ -25,6 +25,7 @@ import {
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/apiClient.js";
 import { useToast } from "../context/ToastContext.js";
+import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 
 
 type SubTab = "directory" | "employees" | "branches" | "roles_builder" | "matrix" | "sessions" | "audit" | "super_admin";
@@ -450,7 +451,9 @@ export const UsersRolesPage: React.FC = () => {
                   <tr key={u.id}>
                     <td>
                       <div className="v2-font-bold">{u.firstName} {u.lastName}</div>
-                      <div className="v2-mono v2-text-xs v2-text-muted">{u.id}</div>
+                      <div className="v2-mt-1">
+                        <HumanIdBadge fullId={u.id} prefix="USR" size="xs" variant="user" />
+                      </div>
                     </td>
                     <td>
                       <div className="v2-text-xs">{u.email}</div>

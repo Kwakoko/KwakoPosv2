@@ -2198,8 +2198,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                       <div className="v2-space-y-2">
                         {(["Cash", "MPesa", "Card", "Bank"] as const).map((ch) => (
                           <div key={ch} className="v2-flex v2-items-center v2-gap-2">
-                            <span className="v2-text-xs v2-font-bold" style={{ width: 60 }}>
-                              {ch === "MPesa" ? "M-Pesa" : ch}
+                            <span className="v2-text-xs v2-font-bold" style={{ width: 80 }}>
+                              {ch === "MPesa" ? "Mobile Money" : ch}
                             </span>
                             <input
                               type="number"
@@ -3143,7 +3143,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               </div>
 
               <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">Phone Number / M-Pesa</label>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">Phone Number / Mobile Money</label>
                 <input
                   className="v2-input"
                   placeholder="e.g. +255 754 123 456"

@@ -75,11 +75,28 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
         }).catch(() => {});
       }
 
-      localDb.syncMetadata.delete(`sync_conflict_${conflict.id}`);
-      localDb.syncMetadata.delete(`sync_conflict_${conflict.entityType}_${conflict.entityId}`);
-      await localDb.flushPersistence?.().catch(() => {});
+      if (action === "ACCEPT_SERVER" && conflict.operationId && localDb?.outboxQueue) {
+        localDb.outboxQueue.delete(conflict.operationId);
+      }
 
-      setMessage(`Conflict ${conflict.id} successfully resolved.`);
+      localDb.syncMetadata?.delete(`sync_conflict_${conflict.id}`);
+      localDb.syncMetadata?.delete(`sync_conflict_${conflict.entityType}_${conflict.entityId}`);
+      await localDb?.flushPersistence?.().catch(() => {});
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kwakopos:sync-conflict-resolved", {
+            detail: { conflictId: conflict.id, action },
+          }),
+        );
+        window.dispatchEvent(
+          new CustomEvent("kwakopos:context-sync-now", {
+            detail: { force: true },
+          }),
+        );
+      }
+
+      setMessage(`Conflict ${conflict.id} successfully resolved. Replication resumed.`);
       loadConflicts();
     } catch (err: any) {
       setMessage(`Failed to resolve conflict: ${err?.message || String(err)}`);

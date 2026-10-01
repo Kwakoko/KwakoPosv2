@@ -17,6 +17,42 @@ type JournalRow = {
   created_at: Date;
 };
 
+export interface JournalCompactionStats {
+  tenantId: string;
+  branchId: string;
+  totalEntries: number;
+  minRevision: string | null;
+  maxRevision: string | null;
+  oldestEntryDate: string | null;
+  newestEntryDate: string | null;
+}
+
+export interface JournalCompactionOptions {
+  retainRevisions?: number;
+  maxAgeDays?: number;
+  beforeRevision?: string;
+  dryRun?: boolean;
+}
+
+export interface JournalCompactionResult {
+  tenantId: string;
+  branchId: string;
+  entriesExamined: number;
+  prunedCount: number;
+  safeRevisionThreshold: string;
+  retainedCount: number;
+  dryRun: boolean;
+  compactedAt: string;
+}
+
+export type CompactionScopeContext = {
+  tenantId: string;
+  branchId: string;
+  userId?: string;
+  roles?: string[];
+  permissions?: string[];
+};
+
 export class WorldStandardPrismaSyncEngine {
   private readonly finance: PrismaAtomicCommercialFinanceService;
   private infrastructureReady: Promise<void> | null = null;
@@ -708,6 +744,23 @@ export class WorldStandardPrismaSyncEngine {
     const lastDeliveredRevision = changes.length ? changes[changes.length - 1].revision : afterRevision;
     const normalizedChanges = changes.map((change: any) => ({ revision: String(change.revision), entityType: change.entity_type, entityId: change.entity_id, operationType: change.operation_type, record: change.record, source: change.source }));
     if (revisionMode) {
+      if (afterRevision > 0n) {
+        const minRevRows = await prisma.$queryRawUnsafe<Array<{ min_rev: bigint | number | string | null }>>(
+          `SELECT MIN(revision) AS min_rev FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2`,
+          ctx.tenantId, ctx.branchId,
+        );
+        const minRev = minRevRows[0]?.min_rev ? BigInt(minRevRows[0].min_rev) : 0n;
+        if (minRev > 1n && afterRevision < minRev) {
+          return {
+            serverTimestamp: new Date().toISOString(),
+            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch,
+            serverRevision: String(afterRevision),
+            changes: [],
+            requiresBootstrap: true,
+            compactionMinRevision: String(minRev),
+          } as any;
+        }
+      }
       return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
     }
     const since = new Date(rawSince);
@@ -726,5 +779,140 @@ export class WorldStandardPrismaSyncEngine {
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
+  }
+  async getJournalCompactionStats(ctx?: CompactionScopeContext): Promise<JournalCompactionStats[]> {
+    await this.ensureInfrastructure();
+    let query: string;
+    const params: any[] = [];
+
+    if (ctx?.tenantId && ctx?.branchId) {
+      query = `
+        SELECT tenant_id, branch_id,
+               COUNT(*)::text AS total_entries,
+               MIN(revision)::text AS min_revision,
+               MAX(revision)::text AS max_revision,
+               MIN(created_at)::text AS oldest_entry_date,
+               MAX(created_at)::text AS newest_entry_date
+          FROM sync_change_journal
+         WHERE tenant_id = $1 AND branch_id = $2
+         GROUP BY tenant_id, branch_id
+      `;
+      params.push(ctx.tenantId, ctx.branchId);
+    } else {
+      query = `
+        SELECT tenant_id, branch_id,
+               COUNT(*)::text AS total_entries,
+               MIN(revision)::text AS min_revision,
+               MAX(revision)::text AS max_revision,
+               MIN(created_at)::text AS oldest_entry_date,
+               MAX(created_at)::text AS newest_entry_date
+          FROM sync_change_journal
+         GROUP BY tenant_id, branch_id
+         ORDER BY tenant_id, branch_id
+      `;
+    }
+
+    const rows = await prisma.$queryRawUnsafe<any[]>(query, ...params);
+    return rows.map((r) => ({
+      tenantId: r.tenant_id,
+      branchId: r.branch_id,
+      totalEntries: Number(r.total_entries || 0),
+      minRevision: r.min_revision ? String(r.min_revision) : null,
+      maxRevision: r.max_revision ? String(r.max_revision) : null,
+      oldestEntryDate: r.oldest_entry_date ? new Date(r.oldest_entry_date).toISOString() : null,
+      newestEntryDate: r.newest_entry_date ? new Date(r.newest_entry_date).toISOString() : null,
+    }));
+  }
+
+  async compactJournal(
+    ctx: CompactionScopeContext,
+    options?: JournalCompactionOptions,
+  ): Promise<JournalCompactionResult> {
+    await this.ensureInfrastructure();
+    const dryRun = Boolean(options?.dryRun);
+    const retainRevisions = options?.retainRevisions ?? 5000;
+    const maxAgeDays = options?.maxAgeDays;
+
+    const statsList = await this.getJournalCompactionStats(ctx);
+    const stats = statsList[0];
+    if (!stats || stats.totalEntries === 0) {
+      return {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        entriesExamined: 0,
+        prunedCount: 0,
+        safeRevisionThreshold: "0",
+        retainedCount: 0,
+        dryRun,
+        compactedAt: new Date().toISOString(),
+      };
+    }
+
+    const currentMaxRev = stats.maxRevision ? BigInt(stats.maxRevision) : 0n;
+    let safeRevision: bigint;
+
+    if (options?.beforeRevision) {
+      const explicitRev = BigInt(options.beforeRevision);
+      safeRevision = explicitRev < currentMaxRev ? explicitRev : currentMaxRev;
+    } else {
+      const retainBig = BigInt(retainRevisions);
+      safeRevision = currentMaxRev > retainBig ? (currentMaxRev - retainBig + 1n) : 0n;
+    }
+
+    if (safeRevision <= 0n) {
+      return {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        entriesExamined: stats.totalEntries,
+        prunedCount: 0,
+        safeRevisionThreshold: "0",
+        retainedCount: stats.totalEntries,
+        dryRun,
+        compactedAt: new Date().toISOString(),
+      };
+    }
+
+    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
+    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+
+    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
+      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+      deleteSql += ` AND created_at < $4`;
+      params.push(cutoffDate);
+    }
+
+    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+      `SELECT COUNT(*)::text AS count ${deleteSql}`,
+      ...params,
+    );
+    const prunedCount = Number(countRows[0]?.count || 0);
+
+    if (!dryRun && prunedCount > 0) {
+      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+    }
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      entriesExamined: stats.totalEntries,
+      prunedCount,
+      safeRevisionThreshold: String(safeRevision),
+      retainedCount: stats.totalEntries - (dryRun ? 0 : prunedCount),
+      dryRun,
+      compactedAt: new Date().toISOString(),
+    };
+  }
+
+  async compactAllJournals(options?: JournalCompactionOptions): Promise<JournalCompactionResult[]> {
+    await this.ensureInfrastructure();
+    const scopes = await prisma.$queryRawUnsafe<Array<{ tenant_id: string; branch_id: string }>>(
+      `SELECT DISTINCT tenant_id, branch_id FROM sync_change_journal ORDER BY tenant_id, branch_id`,
+    );
+    const results: JournalCompactionResult[] = [];
+    for (const scope of scopes) {
+      const res = await this.compactJournal({ tenantId: scope.tenant_id, branchId: scope.branch_id }, options);
+      results.push(res);
+    }
+    return results;
   }
 }

@@ -69,8 +69,8 @@ export const LegalAcceptanceModal: React.FC<{
     setAgreed(false);
     setError(null);
 
-    // Fetch document details by slug
-    const slug = activePending.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    // Fetch document details by canonical slug, documentId, or normalized title
+    const slug = (activePending as any).slug || (activePending as any).documentId || activePending.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     apiFetch<{
       success: boolean;
       data: { document: any; activeVersion: any };

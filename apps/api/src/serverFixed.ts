@@ -394,7 +394,31 @@ export async function startFixedServer(): Promise<FastifyInstance> {
   const server = buildFixedServer({ config });
   const port = Number(process.env.PORT || config.PORT || 3000);
   const host = process.env.HOST || config.HOST || "0.0.0.0";
-  await server.listen({ port, host });
+
+  let attempts = 0;
+  while (true) {
+    try {
+      await server.listen({ port, host });
+      break;
+    } catch (err: any) {
+      if (err?.code === "EADDRINUSE" && attempts < 5) {
+        attempts++;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const shutdown = async () => {
+    try {
+      await server.close();
+    } catch {}
+    process.exit(0);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+
   console.log(`KwakoPos 2.0 API listening on ${host}:${port}`);
   return server;
 }

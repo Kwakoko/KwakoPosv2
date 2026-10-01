@@ -329,7 +329,7 @@ export const CustomerDisplayPage: React.FC = () => {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", color: "#94a3b8", fontSize: "0.95rem", fontWeight: 700 }}>
                 <Smartphone size={20} style={{ color: "#38bdf8" }} />
-                <span>M-Pesa / Mobile Money</span>
+                <span>Mobile Money</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", color: "#94a3b8", fontSize: "0.95rem", fontWeight: 700 }}>
                 <CreditCard size={20} style={{ color: "#a855f7" }} />

@@ -50,7 +50,7 @@ const getTenderBadge = (method?: string) => {
   const m = (method || 'Cash').toLowerCase();
   if (m.includes('mpesa') || m.includes('m-pesa') || m.includes('mobile')) {
     return {
-      label: 'M-Pesa',
+      label: 'Mobile Money',
       Icon: Smartphone,
       color: '#10b981',
       bg: 'rgba(16, 185, 129, 0.12)',
@@ -128,9 +128,11 @@ interface KPICardProps {
   trend?: 'up' | 'down' | null;
   trendLabel?: string;
   onClick?: () => void;
+  /** Optional inline action button rendered inside the card (does not trigger onClick). */
+  action?: { label: string; onClick: () => void };
 }
 
-const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, trend, trendLabel, onClick }) => (
+const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, trend, trendLabel, onClick, action }) => (
   <div
     onClick={onClick}
     className={`relative overflow-hidden rounded-2xl bg-white dark:bg-darkbg-card border border-slate-100 dark:border-darkbg-border p-5 shadow-sm transition-all duration-200 ${onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
@@ -151,6 +153,17 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
           </span>
         )}
         <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500 leading-tight">{desc}</p>
+        {action && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+            className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors"
+            style={{ background: `${accent}18`, color: accent }}
+          >
+            <RefreshCw className="h-3 w-3" />
+            {action.label}
+          </button>
+        )}
       </div>
       <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 shadow-sm" style={{ background: `${accent}18` }}>
         <div style={{ color: accent }}>{icon}</div>
@@ -233,7 +246,7 @@ export interface DashboardPageProps {
 
 type RechartsModule = typeof import("recharts");
 
-const ChartFallback = (props: any) => (
+const ChartFallback = ({ children, ...props }: any) => (
   <div style={{ width: "100%", minHeight: 180 }} aria-hidden="true" {...props} />
 );
 
@@ -244,7 +257,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const { currentBranchId, currentBranchName } = useBranch();
   const { currentTenantId, currentTenantName } = useTenant();
-  const { db, isOnline } = useSync();
+  const { db, isOnline, forceBootstrap } = useSync();
 
   const role = user?.role || 'Admin';
   const tenantId = currentTenantId || user?.tenantId || '';
@@ -413,6 +426,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const Pie = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Pie, props) : null, [rechartsModule]);
   const BarChart = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.BarChart, props) : <ChartFallback {...props} />, [rechartsModule]);
   const Bar = useCallback((props: any) => rechartsModule ? React.createElement(rechartsModule.Bar, props) : null, [rechartsModule]);
+
+  // 1. Ensure module loading state is tracked clearly
+  const isChartEngineReady = !!rechartsModule && typeof AreaChart === "function";
 
   // ── Load Operational Data (IndexedDB + API) ────────────────────────────────
   const loadData = useCallback(async () => {
@@ -777,6 +793,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const totalSavings  = products.filter(p => p.category === 'Savings').reduce((sum, p) => sum + (p.stock * p.price), 0) / 10;
     const totalLoans    = customers.reduce((sum, c) => sum + (c.outstandingBalance || 0), 0);
     const unsyncedCount = syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount;
+    // Permanently-abandoned items (exceeded retry cap) shown separately as conflicts.
+    const conflictCount = syncStatus.abandonedOutboxCount ?? 0;
 
     // SACCO: member growth vs last month
     const lastMonthStart = new Date(now); lastMonthStart.setMonth(lastMonthStart.getMonth() - 1); lastMonthStart.setDate(1); lastMonthStart.setHours(0,0,0,0);
@@ -831,10 +849,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       nearExpiryCount, totalSavings, totalLoans,
       customerCount: customers.length, supplierCount: suppliers.length,
       customerTrend, customerTrendPct,
-      unsyncedCount, topProduct,
+      unsyncedCount, conflictCount, topProduct,
       todayOrderCount: todayOrders.length,
     };
-  }, [products, productVariants, validOrders, customers, suppliers, costLookup, syncStatus.pendingOutboxCount, syncStatus.failedOutboxCount]);
+  }, [products, productVariants, validOrders, customers, suppliers, costLookup, syncStatus.pendingOutboxCount, syncStatus.failedOutboxCount, syncStatus.abandonedOutboxCount]);
 
   // ── Chart Data ─────────────────────────────────────────────────────────────
 
@@ -1152,7 +1170,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       const rawMethod = (o.paymentMethod || 'Cash').trim();
       let normalized = rawMethod;
       if (/cash/i.test(rawMethod)) normalized = 'Cash';
-      else if (/mpesa|m-pesa|airtel|tigo|halopesa|mobile/i.test(rawMethod)) normalized = 'M-Pesa / Mobile Money';
+      else if (/mpesa|m-pesa|airtel|tigo|halopesa|mobile/i.test(rawMethod)) normalized = 'Mobile Money';
       else if (/card|visa|mastercard|pos/i.test(rawMethod)) normalized = 'Bank Card';
       else if (/bank|transfer|wire/i.test(rawMethod)) normalized = 'Bank Transfer';
       else if (/split/i.test(rawMethod)) normalized = 'Split Tender';
@@ -1178,7 +1196,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         badgeBg: 'rgba(59,130,246,0.12)',
         textColor: '#3b82f6',
       },
-      'M-Pesa / Mobile Money': {
+      'Mobile Money': {
         color: '#10b981',
         icon: Smartphone,
         badgeBg: 'rgba(16,185,129,0.12)',
@@ -1630,7 +1648,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           { title: 'Stock Alerts',        value: stats.lowStockCount + stats.outOfStockCount, desc: `${stats.outOfStockCount} out of stock · ${stats.lowStockCount} low`,   icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
           { title: 'Customer Debts',      value: fmtCcy(stats.totalLoans),            desc: `${stats.customerCount} registered customers`,                                   icon: <Users className="h-5 w-5"/>,        accent: '#8b5cf6' },
           { title: 'Inventory Value',     value: fmtCcy(stats.inventoryVal),          desc: 'Retail value of all stocked items',                                             icon: <PiggyBank className="h-5 w-5"/>,    accent: '#ec4899' },
-          { title: 'Pending Sync',        value: stats.unsyncedCount,                 desc: stats.unsyncedCount > 0 ? `${stats.unsyncedCount} mutations pending sync` : 'All changes synced to cloud', icon: <RefreshCw className="h-5 w-5"/>,    accent: '#f97316' },
+          {
+            title: 'Pending Sync',
+            value: stats.unsyncedCount,
+            desc: stats.unsyncedCount > 0
+              ? `${stats.unsyncedCount} mutations queued · ${stats.conflictCount > 0 ? `${stats.conflictCount} conflict${stats.conflictCount > 1 ? 's' : ''}` : 'syncing…'}`
+              : stats.conflictCount > 0
+                ? `${stats.conflictCount} server conflict${stats.conflictCount > 1 ? 's' : ''} — tap ⟳ to resolve`
+                : 'All changes synced to cloud',
+            icon: <RefreshCw className="h-5 w-5"/>,
+            accent: stats.conflictCount > 0 ? '#ef4444' : '#f97316',
+            action: isOnline ? { label: 'Force Sync', onClick: forceBootstrap } : undefined,
+          },
         ];
 
       case 'Restaurant': {
@@ -1688,6 +1717,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
+      {/* Standalone SVG Injection Strategy: Global gradient definitions */}
+      <svg style={{ height: 0, width: 0, position: 'absolute', opacity: 0 }} aria-hidden="true">
+        <defs>
+          <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
+            <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+          </linearGradient>
+          <linearGradient id="gradRev" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
+            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+          </linearGradient>
+          <linearGradient id="gradPro" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+          </linearGradient>
+          <linearGradient id="gradCogs" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+          </linearGradient>
+        </defs>
+      </svg>
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -2416,9 +2466,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
               </div>
             )}
-            <ResponsiveContainer width="100%" height="100%">
+            {/* Option A: Explicit SVG container for safe definition of gradients */}
+            <svg style={{ height: 0, width: 0, position: 'absolute' }} aria-hidden="true">
+              <defs>
+                <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="gradRev" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="gradPro" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.25}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+                <linearGradient id="gradCogs" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25}/>
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+            </svg>
+            {!isChartEngineReady ? (
+              <ChartFallback />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={revenueAnalytics.chartPoints} margin={{ top: 10, right: 12, left: -24, bottom: 0 }}>
                 <defs>
+                  <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                  </linearGradient>
                   <linearGradient id="gradRev" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
@@ -2550,6 +2628,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 )}
               </AreaChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -2603,7 +2682,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               <>
                 {/* Donut Chart with Center KPI */}
                 <div className="relative h-44 w-full flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
+                  {!isChartEngineReady ? (
+                    <ChartFallback />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
                         data={paymentChannelSummary.items}
@@ -2653,6 +2735,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                       />
                     </PieChart>
                   </ResponsiveContainer>
+                  )}
 
                   {/* Donut Center KPI */}
                   <div

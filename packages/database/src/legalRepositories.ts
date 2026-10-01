@@ -648,7 +648,18 @@ export class ScopedLegalGovernanceRepository {
   }
 
   public getDocumentBySlug(slug: string, language: LegalLanguage = "en"): { document: LegalDocument; activeVersion: LegalDocumentVersion } | null {
-    const doc = Array.from(this.store.legalDocuments.values()).find((d) => d.slug === slug);
+    const raw = String(slug || "").trim().toLowerCase();
+    const doc = Array.from(this.store.legalDocuments.values()).find((d) => {
+      if (d.slug.toLowerCase() === raw) return true;
+      if (d.id === slug) return true;
+      const typeSlug = d.documentType.toLowerCase().replace(/_/g, "-");
+      if (typeSlug === raw) return true;
+      const canonicalSlug = d.canonicalTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      if (canonicalSlug === raw) return true;
+      if (raw.endsWith(d.slug.toLowerCase()) || raw.includes(d.slug.toLowerCase())) return true;
+      if (d.activeVersion?.title && d.activeVersion.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") === raw) return true;
+      return false;
+    });
     if (!doc) return null;
 
     let version = this.store.legalDocumentVersions.get(`${doc.id}:${doc.currentVersion}:${language}`);

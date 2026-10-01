@@ -212,7 +212,7 @@ export const fr: TranslationDictionary = {
     payNow: "Passer à la Caisse (F9)",
     checkoutTitle: "Finaliser la Transaction",
     paymentMethodCash: "Espèces",
-    paymentMethodMpesa: "Paiement Mobile / M-Pesa",
+    paymentMethodMpesa: "Paiement Mobile",
     paymentMethodCard: "Carte Bancaire",
     paymentMethodBank: "Virement Bancaire",
     paymentMethodCredit: "Crédit Client / Compte",

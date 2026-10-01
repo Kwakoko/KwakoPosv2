@@ -19,6 +19,8 @@ export interface SyncStatusSnapshot extends SyncStatusScope {
   state: SyncStatusState;
   pendingOutboxCount: number;
   failedOutboxCount: number;
+  /** Items permanently abandoned after exceeding the server-rejection retry cap. */
+  abandonedOutboxCount: number;
   lastSyncedAt: number | null;
   lastSyncDurationMs: number;
   lastError: string | null;
@@ -34,6 +36,7 @@ const emptySnapshot = (): SyncStatusSnapshot => ({
   state: "IDLE",
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
+  abandonedOutboxCount: 0,
   lastSyncedAt: null,
   lastSyncDurationMs: 0,
   lastError: null,
@@ -135,8 +138,17 @@ export class SyncStatusService {
       const tenantId = scope?.tenantId ?? this.snapshot.tenantId ?? undefined;
       const branchId = scope?.branchId ?? this.snapshot.branchId ?? undefined;
       const pending = this.db.getPendingOutbox(tenantId, branchId).length;
-      const failed = this.db.getFailedOutbox ? this.db.getFailedOutbox(tenantId, branchId).length : 0;
-      this.update({ pendingOutboxCount: pending, failedOutboxCount: failed });
+      // Retriable failures (will be re-queued on next heartbeat)
+      const failed = this.db.getRetriableFailedOutbox
+        ? this.db.getRetriableFailedOutbox(tenantId, branchId).length
+        : this.db.getFailedOutbox
+          ? this.db.getFailedOutbox(tenantId, branchId).length
+          : 0;
+      // Permanently abandoned (exceeded retry cap — shown as conflicts, not pending)
+      const abandoned = this.db.getAbandonedOutbox
+        ? this.db.getAbandonedOutbox(tenantId, branchId).length
+        : 0;
+      this.update({ pendingOutboxCount: pending, failedOutboxCount: failed, abandonedOutboxCount: abandoned });
     } catch (error) {
       this.failSync(error);
     }
@@ -185,6 +197,7 @@ export function useAuthoritativeSyncStatus(scope?: Partial<SyncStatusScope>): Sy
 export function syncStatusLabel(snapshot: SyncStatusSnapshot): string {
   if (snapshot.state === "OFFLINE") return "OFFLINE";
   if (snapshot.state === "SYNCING") return "SYNCING";
+  if (snapshot.abandonedOutboxCount > 0) return "CONFLICT";
   if (snapshot.failedOutboxCount > 0) return "ERROR";
   if (snapshot.pendingOutboxCount > 0) return "PENDING";
   return snapshot.state === "SUCCESS" ? "SYNCED" : "IDLE";

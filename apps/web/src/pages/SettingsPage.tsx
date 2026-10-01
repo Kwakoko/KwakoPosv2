@@ -31,6 +31,7 @@ import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
 import { apiFetch } from "../services/apiClient.js";
 import { ToggleSwitch } from "../components/UI/ToggleSwitch.js";
 import { TraVfdFiscalizationCard, TraVfdCardConfig } from "../components/TRA/TraVfdFiscalizationCard.js";
+import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 
 type SettingsTab =
   | "profile" | "localization" | "pos" | "tax" | "fiscal" | "inventory"
@@ -41,7 +42,7 @@ export interface SettingsPageProps {
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiveTab }) => {
-  const { currentTenantId, currentTenantName } = useTenant();
+  const { currentTenantId, currentTenantName, currentTenantSlug } = useTenant();
   const { setActiveTab: setGlobalActiveTab } = useModule();
   const { currentBranchName, currentBranchId } = useBranch();
   const { db } = useSync();
@@ -768,9 +769,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
               </div>
             </div>
             <div className="v2-card-body v2-space-y-3">
-              <div className="v2-text-xs v2-text-muted">
-                Offline IndexedDB storage engine is operating under authoritative schema version 4.
-                Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong> ({currentTenantId}).
+              <div className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-2 v2-flex-wrap">
+                <span>Offline IndexedDB storage engine is operating under authoritative schema version 4. Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong></span>
+                {currentTenantId && (
+                  <HumanIdBadge
+                    fullId={currentTenantId}
+                    displayCode={currentTenantSlug || undefined}
+                    prefix="TNT"
+                    size="xs"
+                    variant="tenant"
+                  />
+                )}
               </div>
               <div className="v2-grid v2-grid-3 v2-gap-3">
                 <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>
@@ -800,9 +809,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
               </div>
             </div>
             <div className="v2-card-body v2-space-y-3">
-              <div className="v2-text-xs v2-text-muted">
-                Offline IndexedDB storage engine is operating under authoritative schema version 4.
-                Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong> ({currentTenantId}).
+              <div className="v2-text-xs v2-text-muted v2-flex v2-items-center v2-gap-2 v2-flex-wrap">
+                <span>Offline IndexedDB storage engine is operating under authoritative schema version 4. Workspace sync is active and isolated to tenant <strong>{currentTenantName}</strong></span>
+                {currentTenantId && (
+                  <HumanIdBadge
+                    fullId={currentTenantId}
+                    displayCode={currentTenantSlug || undefined}
+                    prefix="TNT"
+                    size="xs"
+                    variant="tenant"
+                  />
+                )}
               </div>
               <div className="v2-grid v2-grid-3 v2-gap-3">
                 <div className="v2-card v2-p-3" style={{ background: "var(--surface-2)" }}>

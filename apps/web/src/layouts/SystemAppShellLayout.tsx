@@ -55,7 +55,9 @@ import { useToast } from "../context/ToastContext.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { WindowManagerContainer } from "../components/WindowManager/WindowManagerContainer.js";
 import { SyncTelemetryHUD } from "../components/SyncTelemetryHUD.js";
+import { SyncConflictResolutionModal } from "../components/SyncConflictResolutionModal.js";
 import { useWindowManager } from "../context/WindowManagerContext.js";
+import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -1724,23 +1726,88 @@ const NotificationsPanel: React.FC<{
 // ─── User Dropdown Panel ───────────────────────────────────────────────────────
 
 const UserPanel: React.FC<{
-  user: { name: string; email: string; role: string } | null;
+  user: {
+    name: string;
+    email: string;
+    role: string;
+    id?: string;
+    tenantId?: string;
+    branchId?: string;
+    tenantSlug?: string;
+    branchCode?: string;
+  } | null;
   onLogout: () => void;
   onNavigate: (path: string) => void;
   onClose: () => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
-}> = ({ user, onLogout, onNavigate, onClose, theme, onToggleTheme }) => {
+  currentTenantId?: string | null;
+  currentBranchId?: string | null;
+  currentTenantSlug?: string | null;
+  currentBranchCode?: string | null;
+}> = ({
+  user,
+  onLogout,
+  onNavigate,
+  onClose,
+  theme,
+  onToggleTheme,
+  currentTenantId,
+  currentBranchId,
+  currentTenantSlug,
+  currentBranchCode,
+}) => {
   const { t } = useTranslation();
   const { isSuperAdmin } = useRbac();
+  const activeTenantId = currentTenantId || user?.tenantId;
+  const activeBranchId = currentBranchId || user?.branchId;
+  const activeTenantSlug = currentTenantSlug || user?.tenantSlug;
+  const activeBranchCode = currentBranchCode || user?.branchCode;
+
   return (
-    <div className="dropdown-panel user-panel">
-      <div className="user-panel-header">
+    <div className="dropdown-panel user-panel" style={{ minWidth: 290 }}>
+      <div className="user-panel-header" style={{ alignItems: "flex-start" }}>
         <div className="user-panel-avatar">{user ? getInitials(user.name) : "?"}</div>
-        <div>
-          <div className="user-panel-name">{user?.name || "Unknown"}</div>
-          <div className="user-panel-role">{user?.role}</div>
-          <div className="user-panel-email">{user?.email}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="user-panel-name v2-truncate">{user?.name || "Unknown"}</div>
+          <div style={{ display: "flex", gap: "0.35rem", alignItems: "center", marginTop: "0.2rem", flexWrap: "wrap" }}>
+            <span className="user-panel-role" style={{ textTransform: "uppercase", fontWeight: 700 }}>{user?.role}</span>
+            {user?.id && (
+              <HumanIdBadge
+                fullId={user.id}
+                prefix="USR"
+                size="xs"
+                variant="user"
+                label="Staff"
+              />
+            )}
+          </div>
+          <div className="user-panel-email v2-truncate" style={{ marginTop: "0.25rem" }}>{user?.email}</div>
+
+          {(activeTenantId || activeBranchId) && (
+            <div style={{ display: "flex", gap: "0.35rem", alignItems: "center", marginTop: "0.45rem", flexWrap: "wrap" }}>
+              {activeTenantId && (
+                <HumanIdBadge
+                  fullId={activeTenantId}
+                  displayCode={activeTenantSlug || undefined}
+                  prefix="TNT"
+                  size="xs"
+                  variant="tenant"
+                  label="Tenant"
+                />
+              )}
+              {activeBranchId && (
+                <HumanIdBadge
+                  fullId={activeBranchId}
+                  displayCode={activeBranchCode || undefined}
+                  prefix="BR"
+                  size="xs"
+                  variant="branch"
+                  label="Branch"
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1805,15 +1872,15 @@ const UserPanel: React.FC<{
 const TenantBranchPanel: React.FC<{
   currentTenantId: string | null;
   currentBranchId: string | null;
-  availableTenants: { id: string; name: string }[];
-  availableBranches: { id: string; name: string }[];
+  availableTenants: { id: string; name: string; slug?: string }[];
+  availableBranches: { id: string; name: string; code?: string }[];
   onSwitchTenant: (id: string) => void;
   onSwitchBranch: (id: string) => void;
   onClose: () => void;
 }> = ({ currentTenantId, currentBranchId, availableTenants, availableBranches, onSwitchTenant, onSwitchBranch, onClose }) => {
   const { t } = useTranslation();
   return (
-    <div className="dropdown-panel" style={{ width: 260 }}>
+    <div className="dropdown-panel" style={{ width: 280 }}>
       <div className="dropdown-header">
         {t("nav.tenant")}
         <button className="topbar-icon-btn" onClick={onClose} aria-label="Close panel"><X size={13} /></button>
@@ -1824,10 +1891,13 @@ const TenantBranchPanel: React.FC<{
           className={`dropdown-item${currentTenantId === tenant.id ? " active" : ""}`}
           onClick={() => { onSwitchTenant(tenant.id); onClose(); }}
           type="button"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}
         >
-          <Building size={14} aria-hidden="true" />
-          <span className="v2-truncate">{tenant.name}</span>
-          {currentTenantId === tenant.id && <Check size={12} aria-hidden="true" />}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+            <Building size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+            <span className="v2-truncate">{tenant.name}</span>
+          </div>
+          <HumanIdBadge fullId={tenant.id} displayCode={tenant.slug} prefix="TNT" size="xs" variant="tenant" copyable={false} />
         </button>
       ))}
       <div className="dropdown-divider" />
@@ -1838,10 +1908,13 @@ const TenantBranchPanel: React.FC<{
           className={`dropdown-item${currentBranchId === b.id ? " active" : ""}`}
           onClick={() => { onSwitchBranch(b.id); onClose(); }}
           type="button"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}
         >
-          <MapPin size={14} aria-hidden="true" />
-          <span className="v2-truncate">{b.name}</span>
-          {currentBranchId === b.id && <Check size={12} aria-hidden="true" />}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+            <MapPin size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+            <span className="v2-truncate">{b.name}</span>
+          </div>
+          <HumanIdBadge fullId={b.id} displayCode={b.code} prefix="BR" size="xs" variant="branch" copyable={false} />
         </button>
       ))}
     </div>
@@ -1855,8 +1928,10 @@ export const TopBar: React.FC<{
   currentBranchId: string | null;
   currentTenantName: string | null;
   currentBranchName: string | null;
-  availableTenants: { id: string; name: string }[];
-  availableBranches: { id: string; name: string }[];
+  currentTenantSlug?: string | null;
+  currentBranchCode?: string | null;
+  availableTenants: { id: string; name: string; slug?: string }[];
+  availableBranches: { id: string; name: string; code?: string }[];
   onSwitchTenant: (id: string) => void;
   onSwitchBranch: (id: string) => void;
   isOnline: boolean;
@@ -1866,7 +1941,16 @@ export const TopBar: React.FC<{
   onNavigate: (path: string) => void;
   onOpenSearch: () => void;
   onLogout: () => void;
-  user: { name: string; email: string; role: string } | null;
+  user: {
+    name: string;
+    email: string;
+    role: string;
+    id?: string;
+    tenantId?: string;
+    branchId?: string;
+    tenantSlug?: string;
+    branchCode?: string;
+  } | null;
   onOpenMobileSidebar: () => void;
   onSync: () => void | Promise<void>;
   onOpenInspectModal?: () => void;
@@ -1875,6 +1959,7 @@ export const TopBar: React.FC<{
   onToggleAudio?: () => void;
 }> = ({
   currentTenantId, currentBranchId, currentTenantName, currentBranchName,
+  currentTenantSlug, currentBranchCode,
   availableTenants, availableBranches, onSwitchTenant, onSwitchBranch,
   isOnline, pendingOutboxCount, theme, onToggleTheme, onNavigate,
   onOpenSearch, onLogout, user, onOpenMobileSidebar, onSync, onOpenInspectModal,
@@ -2329,6 +2414,10 @@ export const TopBar: React.FC<{
                 onClose={() => setShowUser(false)}
                 theme={theme}
                 onToggleTheme={onToggleTheme}
+                currentTenantId={currentTenantId}
+                currentBranchId={currentBranchId}
+                currentTenantSlug={currentTenantSlug}
+                currentBranchCode={currentBranchCode}
               />
             )}
           </div>
@@ -2364,9 +2453,9 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   currentPath, onNavigate, resolveTabPath, children,
 }) => {
   const { user, logout, impersonatedTenant, stopImpersonation } = useAuth();
-  const { currentTenantId, currentTenantName, availableTenants, switchTenant } = useTenant();
-  const { currentBranchId, currentBranchName, availableBranches, switchBranch } = useBranch();
-  const { isOnline, pendingOutboxCount, syncOutbox } = useSync();
+  const { currentTenantId, currentTenantName, currentTenantSlug, availableTenants, switchTenant } = useTenant();
+  const { currentBranchId, currentBranchName, currentBranchCode, availableBranches, switchBranch } = useBranch();
+  const { isOnline, pendingOutboxCount, syncOutbox, db } = useSync();
   const { theme, toggleTheme } = useTheme();
   const { permissions, isSuperAdmin } = useRbac();
   const { isMobileSidebarOpen, setIsMobileSidebarOpen } = useModule();
@@ -2380,6 +2469,41 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const [isAudioMuted, setIsAudioMuted] = useState(() => audioSynthesizer.getMuted());
   const [isInspectModalOpen, setIsInspectModalOpen] = useState(false);
   const [release, setRelease] = useState<{ appVersion?: string; gitSha?: string }>({});
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+  const [syncConflictCount, setSyncConflictCount] = useState(0);
+
+  const refreshSyncConflicts = useCallback(() => {
+    if (!db?.syncMetadata) {
+      setSyncConflictCount(0);
+      return;
+    }
+    let count = 0;
+    for (const key of db.syncMetadata.keys()) {
+      if (key.startsWith("sync_conflict_")) {
+        count++;
+      }
+    }
+    setSyncConflictCount(count);
+  }, [db]);
+
+  useEffect(() => {
+    refreshSyncConflicts();
+    const onConflictDetected = () => {
+      refreshSyncConflicts();
+      setIsConflictModalOpen(true);
+    };
+    const onConflictResolved = () => {
+      refreshSyncConflicts();
+    };
+    window.addEventListener("kwakopos:sync-conflict-detected", onConflictDetected);
+    window.addEventListener("kwakopos:sync-conflict-resolved", onConflictResolved);
+    window.addEventListener("kwakopos:persistence-status-changed", refreshSyncConflicts);
+    return () => {
+      window.removeEventListener("kwakopos:sync-conflict-detected", onConflictDetected);
+      window.removeEventListener("kwakopos:sync-conflict-resolved", onConflictResolved);
+      window.removeEventListener("kwakopos:persistence-status-changed", refreshSyncConflicts);
+    };
+  }, [refreshSyncConflicts]);
 
   const canAdminister = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 
@@ -2454,6 +2578,8 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         currentBranchId={currentBranchId}
         currentTenantName={currentTenantName}
         currentBranchName={currentBranchName}
+        currentTenantSlug={currentTenantSlug}
+        currentBranchCode={currentBranchCode}
         availableTenants={availableTenants}
         availableBranches={availableBranches}
         onSwitchTenant={(id) => void safeSwitchTenant(id)}
@@ -2472,7 +2598,16 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
           }
           onNavigate("/");
         }}
-        user={user ? { name: user.name, email: user.email, role: user.role } : null}
+        user={user ? {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          id: user.id,
+          tenantId: user.tenantId,
+          branchId: user.branchId,
+          tenantSlug: user.tenantSlug,
+          branchCode: user.branchCode,
+        } : null}
         onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
         onSync={async () => {
           await syncOutbox({ force: true });
@@ -2521,6 +2656,57 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         </div>
 
         <main id="app-root" className="main-content" role="main">
+          {syncConflictCount > 0 && (
+            <div
+              className="sync-conflict-sticky-banner"
+              style={{
+                background: "linear-gradient(90deg, rgba(239, 68, 68, 0.16) 0%, rgba(245, 158, 11, 0.14) 100%)",
+                border: "1px solid rgba(239, 68, 68, 0.5)",
+                borderRadius: "8px",
+                padding: "0.75rem 1rem",
+                marginBottom: "1rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "1rem",
+                boxShadow: "0 4px 14px rgba(239, 68, 68, 0.12)",
+                zIndex: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <AlertTriangle size={20} style={{ color: "#ef4444", flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "#f87171" }}>
+                    Replication Paused: {syncConflictCount} Unresolved Sync Conflict{syncConflictCount > 1 ? "s" : ""}
+                  </div>
+                  <div style={{ fontSize: "0.78rem", color: "var(--muted, #94a3b8)" }}>
+                    Cloud sync is paused at the conflicting revision to safeguard transaction consistency. Resolve to resume real-time replication.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConflictModalOpen(true)}
+                style={{
+                  background: "#ef4444",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "0.45rem 0.9rem",
+                  fontSize: "0.82rem",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Layers size={14} />
+                <span>Resolve Conflicts Now</span>
+              </button>
+            </div>
+          )}
           {isSuperAdminUser && impersonatedTenant && (
             <div
               className="impersonation-banner"
@@ -2600,6 +2786,14 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
 
       <WindowManagerContainer />
       <SyncTelemetryHUD />
+      <SyncConflictResolutionModal
+        isOpen={isConflictModalOpen}
+        onClose={() => {
+          setIsConflictModalOpen(false);
+          refreshSyncConflicts();
+        }}
+        localDb={db}
+      />
 
       <AppVersionFooter
         appVersion={release.appVersion}

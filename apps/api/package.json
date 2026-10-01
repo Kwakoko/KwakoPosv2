@@ -4,7 +4,8 @@
   "main": "./dist/apps/api/src/serverFixed.js",
   "scripts": {
     "build": "tsx ../../scripts/ci/harden-production-finance.ts && tsc -p tsconfig.json",
-    "dev": "tsx watch src/serverFixed.ts",
+    "dev": "tsx src/serverFixed.ts",
+    "dev:watch": "tsx watch src/serverFixed.ts",
     "start": "node dist/apps/api/src/serverFixed.js",
     "clean": "rm -rf dist"
   },

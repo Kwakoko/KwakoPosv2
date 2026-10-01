@@ -105,8 +105,16 @@ export class SyncTelemetryService {
   public async refreshOutboxCount(): Promise<number> {
     try {
       if (this.localDb) {
-        const pending = this.localDb.getPendingOutbox().length;
-        const failed = this.localDb.getFailedOutbox ? this.localDb.getFailedOutbox().length : 0;
+        // Queue telemetry must follow the same authoritative tenant/branch scope
+        // as the application sync status. Counting the whole local outbox here
+        // can leak another tenant/branch's pending work into the HUD badge.
+        const scope = syncStatusService.getSnapshot();
+        const tenantId = scope.tenantId ?? undefined;
+        const branchId = scope.branchId ?? undefined;
+        const pending = this.localDb.getPendingOutbox(tenantId, branchId).length;
+        const failed = this.localDb.getFailedOutbox
+          ? this.localDb.getFailedOutbox(tenantId, branchId).length
+          : 0;
         this.metrics.pendingOutboxCount = pending;
         this.metrics.failedOutboxCount = failed;
       }

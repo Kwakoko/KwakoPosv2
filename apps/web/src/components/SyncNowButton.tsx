@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { clientSyncEngine } from "../clientSyncEngine.js";
 import { Button } from "./UI/Button.js";
 import { SyncErrorsPanel } from "./SyncErrorsPanel.js";
+import { syncStatusService } from "../services/syncStatusService.js";
 
 export interface SyncNowButtonProps {
   onSyncComplete?: (result: { pushed: number; pulled: number }) => void;
@@ -20,8 +21,8 @@ export const SyncNowButton: React.FC<SyncNowButtonProps> = ({
 
   const refreshOutboxCount = useCallback(async () => {
     try {
-      const count = await clientSyncEngine.localDb.getPendingOutboxCount();
-      setOutboxCount(count);
+      const snapshot = await syncStatusService.refreshCounts();
+      setOutboxCount(snapshot.pendingOutboxCount);
     } catch (err) {
       console.error("Failed to refresh outbox count:", err);
     }

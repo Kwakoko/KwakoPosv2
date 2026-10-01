@@ -4,6 +4,7 @@ import { apiFetch } from "../services/apiClient.js";
 import { useAuth, useTranslation } from "../context/KwakoPosContexts.js";
 import { ALL_MODULE_KEYS } from "../modules/moduleRegistry.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
+import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 
 const STEPS = ["Business Profile", "Localization", "Industry / Modules", "Main Branch", "Owner Account", "Review & Confirm", "Provisioning / Completion"] as const;
 type FormState = { businessName: string; slug: string; country: string; currency: string; timezone: string; locale: string; industry: string; modules: string[]; branchName: string; branchCode: string; ownerName: string; ownerEmail: string; ownerPassword: string };
@@ -195,7 +196,14 @@ export const TenantOnboardingPage: React.FC = () => {
     {error && <div className="v2-card" style={{ border: "1px solid var(--danger)", color: "var(--danger)", padding: "1rem" }} role="alert">{error}</div>}
     {result && <div className="v2-card" style={{ border: "1px solid var(--success)", padding: "1.2rem" }} role="status">
       <div className="v2-flex v2-items-center v2-gap-2"><CheckCircle2 size={18} /><strong>Tenant provisioned, completed and owner authenticated</strong></div>
-      <p className="v2-text-xs v2-text-muted">Tenant: {result.tenantId} · Branch: {result.branchId} · Owner: {result.ownerUserId}</p>
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.5rem", marginBottom: "0.75rem" }}>
+        <span className="v2-text-xs v2-text-muted">Tenant:</span>
+        <HumanIdBadge fullId={result.tenantId} prefix="TNT" size="xs" variant="tenant" />
+        <span className="v2-text-xs v2-text-muted">· Branch:</span>
+        <HumanIdBadge fullId={result.branchId} prefix="BR" size="xs" variant="branch" />
+        <span className="v2-text-xs v2-text-muted">· Owner:</span>
+        <HumanIdBadge fullId={result.ownerUserId} prefix="USR" size="xs" variant="user" />
+      </div>
       <button className="v2-btn v2-btn-primary" onClick={() => { window.history.pushState({}, "", "/"); window.dispatchEvent(new PopStateEvent("popstate")); }} type="button">Open Workspace</button>
     </div>}
     {!result && <div className="v2-card" style={{ padding: "1.4rem" }}>

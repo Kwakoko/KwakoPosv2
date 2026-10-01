@@ -2,9 +2,15 @@ import "./styles.css";
 import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { fontPersistenceEngine } from "./persistence/fontPersistenceEngine.js";
+import { globalStoragePressureMonitor } from "./persistence/storagePressure.js";
 
 // Enforce and persist system-wide typography adopted from legacy app
 fontPersistenceEngine.initialize();
+
+// Ensure durable storage across browsers on boot (Recommendation 1)
+globalStoragePressureMonitor.ensurePersistentStorage().catch((err) => {
+  console.warn("[KwakoPos Boot] Persistent storage initialization warning:", err);
+});
 
 interface ErrorBoundaryProps {
   children: ReactNode;

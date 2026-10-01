@@ -81,6 +81,7 @@ export class LegalGovernanceEngine {
     requiredDocuments: Array<{
       documentId: string;
       documentType: string;
+      slug: string;
       title: string;
       requiredVersion: string;
       reason: "FIRST_TIME" | "MATERIAL_UPDATE";
@@ -89,6 +90,7 @@ export class LegalGovernanceEngine {
     const required: Array<{
       documentId: string;
       documentType: string;
+      slug: string;
       title: string;
       requiredVersion: string;
       reason: "FIRST_TIME" | "MATERIAL_UPDATE";
@@ -106,6 +108,7 @@ export class LegalGovernanceEngine {
         required.push({
           documentId: document.id,
           documentType: document.documentType,
+          slug: document.slug,
           title: activeVersion.title,
           requiredVersion: activeVersion.version,
           reason: "FIRST_TIME",
@@ -116,6 +119,7 @@ export class LegalGovernanceEngine {
           required.push({
             documentId: document.id,
             documentType: document.documentType,
+            slug: document.slug,
             title: activeVersion.title,
             requiredVersion: activeVersion.version,
             reason: "MATERIAL_UPDATE",

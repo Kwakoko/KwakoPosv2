@@ -32,6 +32,9 @@ const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
   "SuperAdmin",
 ]);
 
+/** Maximum number of server rejections before an outbox item is permanently abandoned. */
+export const MAX_OUTBOX_RETRIES = 5;
+
 export function assertSyncOutboxEntityTypeAllowed(entityType: string): void {
   if (SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES.has(String(entityType))) {
     throw new Error(
@@ -67,6 +70,10 @@ export interface OutboxItem {
   status: "PENDING" | "SYNCED" | "FAILED";
   tenantId?: string;
   branchId?: string;
+  /** Number of times this item has been attempted and rejected by the server. */
+  retryCount?: number;
+  /** ISO timestamp when this item was permanently abandoned (retryCount >= MAX_OUTBOX_RETRIES). */
+  abandonedAt?: string;
 }
 
 export type NativeStore =
@@ -1731,7 +1738,8 @@ export class LocalIndexedDbStore {
   }
 
   retryFailedOutbox(tenantId?: string, branchId?: string): number {
-    const failed = this.getFailedOutbox(tenantId, branchId);
+    // Only retry items that have NOT been permanently abandoned.
+    const failed = this.getRetriableFailedOutbox(tenantId, branchId);
     for (const item of failed) {
       item.status = "PENDING";
       this.syncMetadata.delete(`error_${item.id}`);
@@ -1772,11 +1780,69 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "FAILED";
+    item.retryCount = (item.retryCount ?? 0) + 1;
+    // Permanently abandon items that have hit the server-rejection retry cap.
+    // They will no longer be re-queued by retryFailedOutbox() and will be
+    // excluded from the pending-sync badge count shown to the user.
+    if (item.retryCount >= MAX_OUTBOX_RETRIES && !item.abandonedAt) {
+      item.abandonedAt = new Date().toISOString();
+      console.warn(
+        `[Sync] Outbox item ${operationId} (${item.entityType}:${item.entityId}) permanently abandoned after ${item.retryCount} server rejections. Reason: ${errorReason}`,
+      );
+    }
     this.syncMetadata.set(`error_${operationId}`, errorReason);
     this.persist("syncOutbox", operationId, item);
     this.persist("syncMetadata", `error_${operationId}`, errorReason);
     this.setPersistenceStatus(item, "FAILED", { error: errorReason });
   }
+
+  /**
+   * Returns all FAILED outbox items that are NOT permanently abandoned (retryCount < MAX_OUTBOX_RETRIES).
+   * These are items that can still be retried safely.
+   */
+  getRetriableFailedOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
+    return this.getFailedOutbox(tenantId, branchId).filter(
+      (item) => !item.abandonedAt && (item.retryCount ?? 0) < MAX_OUTBOX_RETRIES,
+    );
+  }
+
+  /**
+   * Returns permanently abandoned outbox items (server-rejected >= MAX_OUTBOX_RETRIES times).
+   * These are displayed as a separate "conflict" count, never as "pending sync".
+   */
+  getAbandonedOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
+    return this.getFailedOutbox(tenantId, branchId).filter((item) => Boolean(item.abandonedAt));
+  }
+
+  /**
+   * Hard-delete outbox items that match an orphan predicate:
+   * - Items scoped to a different tenant/branch than the current scope (old test session data)
+   * - Abandoned items older than maxAgeDays (default: 30 days)
+   *
+   * Returns the number of items purged.
+   */
+  purgeOrphanedOutbox(
+    activeTenantId: string,
+    activeBranchId: string,
+    maxAgeDays = 30,
+  ): number {
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    let purged = 0;
+    for (const [id, item] of this.syncOutbox.entries()) {
+      if (item.status === "SYNCED") continue; // never touch successfully synced items
+      const isWrongScope =
+        item.tenantId && item.tenantId !== activeTenantId;
+      const isAbandonedStale =
+        item.abandonedAt && Date.parse(item.abandonedAt) < cutoff;
+      if (isWrongScope || isAbandonedStale) {
+        this.syncOutbox.delete(id);
+        if (this.nativeDb) this.persistDelete("syncOutbox", id);
+        purged++;
+      }
+    }
+    return purged;
+  }
+
 
   setSyncMetadata(key: string, value: string): void {
     this.syncMetadata.set(key, value);
