@@ -380,7 +380,10 @@ export class WorldStandardPrismaSyncEngine {
         await tx.productVariant.update({ where: { id: op.entityId }, data: { isActive: false } });
       } else {
         const payload = stripSyncControlFields(op.payload as any);
-        await tx.productVariant.update({ where: { id: op.entityId }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode, price: payload.price, costPrice: payload.costPrice, inventoryQuantity: payload.inventoryQuantity ?? payload.stock, reservedQuantity: payload.reservedQuantity, reorderLevel: payload.reorderLevel, attributes: payload.attributes, isActive: payload.isActive } });
+        if (payload.inventoryQuantity !== undefined || payload.stock !== undefined) {
+          throw new Error("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
+        }
+        await tx.productVariant.update({ where: { id: op.entityId }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode, price: payload.price, costPrice: payload.costPrice, reservedQuantity: payload.reservedQuantity, reorderLevel: payload.reorderLevel, attributes: payload.attributes, isActive: payload.isActive } });
       }
       return;
     }
@@ -682,7 +685,13 @@ export class WorldStandardPrismaSyncEngine {
       const operationId = "conflict-resolution:" + conflictId;
       switch (conflict.entity_type) {
         case "Product": await tx.product.update({ where: { id: conflict.entity_id }, data: { name: payload.name, description: payload.description ?? null, sku: payload.sku, category: payload.category ?? "General", isActive: payload.isActive ?? true } }); break;
-        case "ProductVariant": await tx.productVariant.update({ where: { id: conflict.entity_id }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, inventoryQuantity: payload.inventoryQuantity ?? payload.stock ?? 0, reservedQuantity: payload.reservedQuantity ?? 0, reorderLevel: payload.reorderLevel ?? 0, attributes: payload.attributes ?? {}, isActive: payload.isActive ?? true } }); break;
+        case "ProductVariant": {
+          if (payload.inventoryQuantity !== undefined || payload.stock !== undefined) {
+            throw new Error("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
+          }
+          await tx.productVariant.update({ where: { id: conflict.entity_id }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, reservedQuantity: payload.reservedQuantity ?? 0, reorderLevel: payload.reorderLevel ?? 0, attributes: payload.attributes ?? {}, isActive: payload.isActive ?? true } });
+          break;
+        }
         case "Customer": await tx.customer.update({ where: { id: conflict.entity_id }, data: { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } }); break;
         case "Supplier": await tx.supplier.update({ where: { id: conflict.entity_id }, data: { supplierCode: payload.supplierCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, taxPin: payload.taxPin ?? null, status: payload.status ?? "ACTIVE" } }); break;
         default: throw new Error("SYNC_CONFLICT_RESOLUTION_UNSUPPORTED:" + conflict.entity_type);

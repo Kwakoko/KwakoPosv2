@@ -73,7 +73,7 @@ export class PrismaAtomicCommercialFinanceService {
         const l = lines[i];
         const qtySold = Math.abs(l.quantity);
         if (typeof (tx as any).$queryRawUnsafe === "function") {
-          const lockRows = await (tx as any).$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, l.variantId, ctx.tenantId, ctx.branchId) as Array<{ id: string }>;
+          const lockRows = await (tx as any).$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, l.variantId, ctx.tenantId, ctx.branchId) as Array<{ id: string }>;
           if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
         const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
@@ -186,7 +186,7 @@ export class PrismaAtomicCommercialFinanceService {
         const i = req.items[idx];
         const item = receipt.items[idx];
         const qtyReceived = Math.abs(i.quantityReceived);
-        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, i.variantId, ctx.tenantId, ctx.branchId);
+        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, i.variantId, ctx.tenantId, ctx.branchId);
         const v = await tx.productVariant.findUnique({ where: { id: i.variantId } });
         const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: i.variantId } });
         const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);

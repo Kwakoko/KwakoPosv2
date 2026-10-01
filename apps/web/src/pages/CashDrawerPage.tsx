@@ -202,10 +202,12 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   // Blind Count State
   const [blindDeclaredCash, setBlindDeclaredCash] = useState(0);
   const [blindCountDone, setBlindCountDone] = useState(false);
+  const [blindCountSealedAt, setBlindCountSealedAt] = useState<string | null>(null);
 
-  // Reconciliation Variance Calculation
-  const declaredCash = blindCountDone ? blindDeclaredCash : denominationTotal;
-  const discrepancy = declaredCash - expectedCash;
+  // Blind reconciliation: expected system cash remains hidden until the physical count is sealed.
+  const declaredCash = blindCountDone ? blindDeclaredCash : 0;
+  const discrepancy = blindCountDone ? declaredCash - expectedCash : 0;
+  const canCloseShift = shiftStatus === "OPEN" && blindCountDone && Boolean(blindCountSealedAt);
   const toleranceThreshold = 500; // TZS 500
   const isVarianceAccepted = Math.abs(discrepancy) <= toleranceThreshold;
   const requiresManagerApproval = Math.abs(discrepancy) > 5000;
@@ -225,6 +227,16 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setShiftStatus("OPEN");
         setShiftId(activeShift.shiftNumber || activeShift.id || `SFT-${Date.now()}`);
         setOpeningFloat(Number(activeShift.openingFloat || 0));
+        const persistedBlindCount = activeShift.blindCashCount;
+        if (persistedBlindCount?.sealedAt && Number.isFinite(Number(persistedBlindCount.amount)) && Number(persistedBlindCount.amount) >= 0) {
+          setBlindDeclaredCash(Number(persistedBlindCount.amount));
+          setBlindCountDone(true);
+          setBlindCountSealedAt(String(persistedBlindCount.sealedAt));
+        } else {
+          setBlindDeclaredCash(0);
+          setBlindCountDone(false);
+          setBlindCountSealedAt(null);
+        }
         setOpenedAtTime(activeShift.openedAt ? new Date(activeShift.openedAt).toISOString().slice(0, 16).replace("T", " ") : "Today");
 
         const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
@@ -282,6 +294,9 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setCashOut(0);
         setSafeDrops(0);
         setCashExpenses(0);
+        setBlindDeclaredCash(0);
+        setBlindCountDone(false);
+        setBlindCountSealedAt(null);
         setLedger([]);
       }
 
@@ -519,6 +534,12 @@ Manager Sign-off:  _____________________
     }
 
     if (modalType === "CLOSE_SHIFT") {
+      if (!blindCountDone || !blindCountSealedAt) {
+        toast.error("Blind Count Required", "Physically count and seal the cashier cash declaration before closing the shift.");
+        selectCashDrawerTab("blind");
+        setModalType(null);
+        return;
+      }
       setShiftStatus("CLOSED");
       const closeRecord: ShiftRecord = {
         id: `SFT-${Date.now()}`,
@@ -546,6 +567,9 @@ Manager Sign-off:  _____________________
       setShiftHistory(updatedHistory);
       db.saveConfigurationLocal("shift_history", updatedHistory);
       db.saveConfigurationLocal("active_shift_session", null);
+      setBlindCountDone(false);
+      setBlindCountSealedAt(null);
+      setBlindDeclaredCash(0);
       setModalType(null);
       handleGenerateZReport();
       toast.info("Shift Closed", "Register reconciled and Z-Report compiled.");
@@ -643,8 +667,8 @@ Manager Sign-off:  _____________________
             <Key size={13} /> Open Drawer (No Sale)
           </button>
           {shiftStatus === "OPEN" ? (
-            <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} type="button">
-              <Lock size={13} /> Close Shift &amp; Z-Report
+            <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} disabled={!canCloseShift} type="button" title={canCloseShift ? "Close after sealed blind cash count" : "Seal blind cash count before closing"}>
+              <Lock size={13} /> {canCloseShift ? "Close Shift &amp; Z-Report" : "Seal Blind Count to Close"}
             </button>
           ) : (
             <button className="v2-btn v2-btn-success v2-btn-sm" onClick={() => setModalType("OPEN_SHIFT")} type="button">
@@ -668,16 +692,16 @@ Manager Sign-off:  _____________________
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Expected Drawer Cash</div>
-          <div className="kpi-card-value" style={{ color: "var(--text)" }}>{money(expectedCash)}</div>
-          <div className="kpi-card-desc">Float + Sales − Out − Drops</div>
+          <div className="kpi-card-value" style={{ color: "var(--text)" }}>{blindCountDone ? money(expectedCash) : "HIDDEN"}</div>
+          <div className="kpi-card-desc">{blindCountDone ? "Revealed after blind count is sealed" : "Hidden until physical cash count is sealed"}</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Reconciliation Discrepancy</div>
-          <div className="kpi-card-value" style={{ color: discrepancy === 0 ? "var(--success)" : "var(--danger)" }}>
-            {discrepancy === 0 ? "BALANCED (Tsh 0)" : money(discrepancy)}
+          <div className="kpi-card-value" style={{ color: blindCountDone ? (discrepancy === 0 ? "var(--success)" : "var(--danger)") : "var(--text)" }}>
+            {blindCountDone ? (discrepancy === 0 ? "BALANCED (Tsh 0)" : money(discrepancy)) : "HIDDEN"}
           </div>
           <div className="kpi-card-desc">
-            {discrepancy === 0 ? "Zero Variance" : isVarianceAccepted ? "Within Tolerance (TZS 500)" : "Requires Manager Approval"}
+            {blindCountDone ? (discrepancy === 0 ? "Zero Variance" : isVarianceAccepted ? "Within Tolerance (TZS 500)" : "Requires Manager Approval") : "Hidden until physical cash count is sealed"}
           </div>
         </div>
       </div>
@@ -895,10 +919,12 @@ Manager Sign-off:  _____________________
               type="button"
               onClick={() => {
                 setBlindCountDone(false);
-                setActiveTab("reconciliation");
+                setBlindCountSealedAt(null);
+                setBlindDeclaredCash(0);
+                setActiveTab("blind");
               }}
             >
-              <CheckCircle size={14} /> Apply Count to Shift Reconciliation ({money(denominationTotal)})
+              <CheckCircle size={14} /> Continue to Blind Cash Count
             </button>
           </div>
         </div>
@@ -931,8 +957,21 @@ Manager Sign-off:  _____________________
                 <button
                   className="v2-btn v2-btn-primary"
                   style={{ width: "100%", justifyContent: "center" }}
-                  onClick={() => setBlindCountDone(true)}
-                  disabled={!blindDeclaredCash}
+                  onClick={() => {
+                    if (!blindDeclaredCash || blindDeclaredCash < 0) return;
+                    const sealedAt = new Date().toISOString();
+                    setBlindCountDone(true);
+                    setBlindCountSealedAt(sealedAt);
+                    const activeShift = db.getConfigurationLocal?.("active_shift_session");
+                    if (activeShift) {
+                      db.saveConfigurationLocal("active_shift_session", {
+                        ...activeShift,
+                        blindCashCount: { amount: blindDeclaredCash, sealedAt, sealedBy: currentUser?.name || "Cashier" },
+                      });
+                    }
+                    setActiveTab("reconciliation");
+                  }}
+                  disabled={!blindDeclaredCash || blindDeclaredCash < 0}
                   type="button"
                 >
                   Lock Blind Declaration
@@ -946,7 +985,7 @@ Manager Sign-off:  _____________________
                 </div>
                 <div className="v2-flex v2-justify-between v2-text-xs">
                   <span>System Expected Cash:</span>
-                  <span className="v2-mono v2-font-bold">{money(expectedCash)}</span>
+                  <span className="v2-mono v2-font-bold">{blindCountDone ? money(expectedCash) : "HIDDEN"}</span>
                 </div>
                 <div className="v2-flex v2-justify-between v2-text-xs v2-pt-2" style={{ borderTop: "1px solid var(--surface-border)" }}>
                   <span className="v2-font-bold">Variance Status:</span>
@@ -954,7 +993,16 @@ Manager Sign-off:  _____________________
                     {discrepancy === 0 ? "BALANCED" : money(discrepancy)}
                   </span>
                 </div>
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} onClick={() => setBlindCountDone(false)} type="button">
+                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} onClick={() => {
+                  setBlindCountDone(false);
+                  setBlindCountSealedAt(null);
+                  setBlindDeclaredCash(0);
+                  const activeShift = db.getConfigurationLocal?.("active_shift_session");
+                  if (activeShift) {
+                    const { blindCashCount: _discarded, ...withoutBlindCount } = activeShift;
+                    db.saveConfigurationLocal("active_shift_session", withoutBlindCount);
+                  }
+                }} type="button">
                   Re-enter Blind Count
                 </button>
               </div>
@@ -965,6 +1013,7 @@ Manager Sign-off:  _____________________
 
       {/* ─── TAB 4: SHIFT RECONCILIATION ───────────────────────────────────────── */}
       {activeTab === "reconciliation" && (
+        blindCountDone ? (
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">Mathematical Cash Reconciliation Summary</div></div>
           <div className="v2-p-4 v2-space-y-4">
@@ -1001,6 +1050,14 @@ Manager Sign-off:  _____________________
             </div>
           </div>
         </div>
+        ) : (
+          <div className="v2-card v2-p-6 v2-text-center">
+            <EyeOff size={28} style={{ color: "var(--accent)", margin: "0 auto .5rem" }} />
+            <div className="v2-font-bold">Blind cash count required</div>
+            <div className="v2-text-xs v2-text-muted v2-mt-2">Expected cash and variance remain sealed until the physical count is locked.</div>
+            <button className="v2-btn v2-btn-primary v2-btn-sm" style={{ marginTop: ".75rem" }} onClick={() => setActiveTab("blind")} type="button">Go to Blind Cash Count</button>
+          </div>
+        )
       )}
 
       {/* ─── TAB 5: FINANCIAL REPORTS (X & Z) ──────────────────────────────────── */}
@@ -1025,8 +1082,8 @@ Manager Sign-off:  _____________________
                   <h3 className="v2-text-sm v2-font-bold">Z-Report (Shift Closing Settlement)</h3>
                   <p className="v2-text-xs v2-text-muted">Official end-of-day register closure, zeros registers, and settles daily books.</p>
                 </div>
-                <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} type="button">
-                  <Lock size={13} /> Close &amp; Run Z-Reading
+                <button className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => setModalType("CLOSE_SHIFT")} disabled={!canCloseShift} type="button" title={canCloseShift ? "Close after sealed blind cash count" : "Seal blind cash count before closing"}>
+                  <Lock size={13} /> {canCloseShift ? "Close &amp; Run Z-Reading" : "Seal Blind Count to Close"}
                 </button>
               </div>
             </div>
@@ -1458,7 +1515,7 @@ Manager Sign-off:  _____________________
               <div className="v2-flex v2-justify-between"><span>(−) Safe Transfers:</span><span>−{money(activeReportSlip.safeDrops)}</span></div>
               <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, paddingTop: "0.3rem", borderTop: "1px dotted #cbd5e1" }}>
                 <span>EXPECTED IN DRAWER:</span>
-                <span>{money(activeReportSlip.expectedCash)}</span>
+                <span>{activeReportSlip.type === "Z_REPORT" || blindCountDone ? money(activeReportSlip.expectedCash) : "HIDDEN UNTIL BLIND COUNT"}</span>
               </div>
             </div>
 
@@ -1466,11 +1523,11 @@ Manager Sign-off:  _____________________
             <div style={{ borderBottom: "1px dashed #94a3b8", paddingBottom: "0.6rem", marginBottom: "0.6rem" }}>
               <div className="v2-flex v2-justify-between" style={{ fontWeight: 800 }}>
                 <span>PHYSICAL DECLARED:</span>
-                <span>{money(activeReportSlip.declaredCash)}</span>
+                <span>{activeReportSlip.type === "Z_REPORT" || blindCountDone ? money(activeReportSlip.declaredCash) : "SEALED"}</span>
               </div>
               <div className="v2-flex v2-justify-between" style={{ fontWeight: 900, fontSize: "0.85rem", color: activeReportSlip.variance === 0 ? "#16a34a" : "#dc2626" }}>
                 <span>VARIANCE:</span>
-                <span>{activeReportSlip.variance > 0 ? `+${money(activeReportSlip.variance)} (OVER)` : activeReportSlip.variance < 0 ? `${money(activeReportSlip.variance)} (SHORT)` : "TSH 0 (BALANCED)"}</span>
+                <span>{activeReportSlip.type === "Z_REPORT" || blindCountDone ? (activeReportSlip.variance > 0 ? `+${money(activeReportSlip.variance)} (OVER)` : activeReportSlip.variance < 0 ? `${money(activeReportSlip.variance)} (SHORT)` : "TSH 0 (BALANCED)") : "HIDDEN UNTIL BLIND COUNT"}</span>
               </div>
             </div>
 
