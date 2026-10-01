@@ -8,6 +8,7 @@ export type TraVfdFiscalState =
 export interface TraVfdOutboxItem {
   id: string; tenantId: string; branchId: string;
   receiptId?: string | null; transactionId: string; deviceId: string;
+  chainSequence: number; previousReceiptHash?: string | null; receiptHash?: string | null;
   payload: Record<string, unknown>; fiscalState: TraVfdFiscalState;
   status: "PENDING" | "SUBMITTING" | "SENT" | "FAILED";
   fiscalizationId?: string; attempts: number; lastError?: string;
@@ -20,15 +21,41 @@ export function getTraVfdConfig(db: LocalIndexedDbStore, ctx: TenantScopedContex
   return db.getConfigurationLocal(CONFIG_KEY, ctx) || { enabled: false, endpoint: "" };
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function canonicalMoney(value: unknown): string {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount)) throw new Error("TRA_VFD_INVALID_MONEY");
+  return amount.toFixed(2);
+}
+
+async function buildLocalChain(db: LocalIndexedDbStore, ctx: { tenantId: string; branchId: string }, input: { deviceId: string; transactionId: string; payload: Record<string, unknown>; createdAt: string }) {
+  const previous = [...db.traVfdOutbox.values()]
+    .filter((item: any) => item.tenantId === ctx.tenantId && item.branchId === ctx.branchId && item.deviceId === input.deviceId && item.receiptHash)
+    .sort((a: any, b: any) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    .at(-1);
+  const chainSequence = Number(previous?.chainSequence || 0) + 1;
+  const previousReceiptHash = previous?.receiptHash || "GENESIS";
+  const payload = input.payload;
+  const invoiceNumber = String(payload.invoiceNumber || payload.receiptNumber || input.transactionId);
+  const timestampUtc = new Date(String(payload.createdAt || payload.created_at || input.createdAt)).toISOString();
+  const canonical = `${previousReceiptHash}|${invoiceNumber}|${timestampUtc}|${canonicalMoney(payload.grandTotal ?? payload.total)}|${canonicalMoney(payload.taxTotal ?? payload.taxAmount)}`;
+  const receiptHash = await sha256Hex(canonical);
+  return { chainSequence, previousReceiptHash, receiptHash };
+}
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID() : `TVFD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
-export function enqueueTraVfdOutbox(
+export async function enqueueTraVfdOutbox(
   db: LocalIndexedDbStore,
   ctx: Required<Pick<TenantScopedContext, "tenantId" | "branchId">>,
   input: { receiptId?: string | null; transactionId: string; deviceId: string; payload: Record<string, unknown> },
-): TraVfdOutboxItem | null {
+): Promise<TraVfdOutboxItem | null> {
   const config = getTraVfdConfig(db, ctx);
   if (!config.enabled) return null;
   const existing = [...db.traVfdOutbox.values()].find(
@@ -36,10 +63,12 @@ export function enqueueTraVfdOutbox(
   );
   if (existing) return existing;
   const now = new Date().toISOString();
+  const chain = await buildLocalChain(db, ctx, { deviceId: input.deviceId, transactionId: input.transactionId, payload: input.payload, createdAt: now });
   const item: TraVfdOutboxItem = {
     id: makeId(), tenantId: ctx.tenantId, branchId: ctx.branchId,
     receiptId: input.receiptId ?? null, transactionId: input.transactionId, deviceId: input.deviceId,
     payload: input.payload, fiscalState: "LOCAL_FISCAL_PENDING", status: "PENDING",
+    chainSequence: chain.chainSequence, previousReceiptHash: chain.previousReceiptHash, receiptHash: chain.receiptHash,
     attempts: 0, nextAttemptAt: null, createdAt: now, updatedAt: now,
   };
   db.traVfdOutbox.set(item.id, item);
@@ -90,7 +119,7 @@ export async function processTraVfdOutbox(
         headers: { "x-tenant-id": ctx.tenantId, "x-branch-id": ctx.branchId },
         body: JSON.stringify({
           receiptId: item.receiptId, transactionId: item.transactionId,
-          deviceId: item.deviceId, payload: item.payload,
+          deviceId: item.deviceId, chainSequence: item.chainSequence, previousReceiptHash: item.previousReceiptHash, receiptHash: item.receiptHash, payload: item.payload,
         }),
       });
       const fiscal = queued.data || queued;

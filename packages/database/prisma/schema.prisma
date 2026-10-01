@@ -2846,6 +2846,9 @@ model TraVfdFiscalization {
   receiptId           String?        @unique
   transactionId       String
   deviceId            String
+  chainSequence       Int            @default(0)
+  previousReceiptHash String?
+  receiptHash         String?
   state               String         @default("LOCAL_FISCAL_PENDING")
   requestPayload      Json
   responsePayload     Json?
@@ -2870,6 +2873,7 @@ model TraVfdFiscalization {
   outbox              TraVfdOutbox[]
 
   @@unique([tenantId, branchId, transactionId])
+  @@unique([tenantId, branchId, deviceId, chainSequence])
   @@index([tenantId, branchId, state])
   @@index([tenantId, branchId, nextAttemptAt])
   @@map("tra_vfd_fiscalizations")

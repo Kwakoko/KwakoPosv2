@@ -38,6 +38,9 @@ export const TraVfdFiscalizationDTOSchema = z.object({
   receiptId: z.string().nullable(),
   transactionId: z.string(),
   deviceId: z.string(),
+  chainSequence: z.number().int().nonnegative(),
+  previousReceiptHash: z.string().nullable().optional(),
+  receiptHash: z.string().nullable().optional(),
   state: TraVfdFiscalStateEnum,
   requestPayload: z.record(z.string(), z.unknown()),
   responsePayload: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -59,6 +62,9 @@ export const CreateTraVfdFiscalizationRequestSchema = z.object({
   receiptId: z.string().nullable().optional(),
   transactionId: z.string().min(1),
   deviceId: z.string().min(1),
+  chainSequence: z.number().int().positive().optional(),
+  previousReceiptHash: z.string().nullable().optional(),
+  receiptHash: z.string().nullable().optional(),
   payload: z.record(z.string(), z.unknown()),
 });
 

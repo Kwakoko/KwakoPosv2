@@ -21,7 +21,7 @@ describe("TRA VFD fiscalization separation", () => {
     const ctx = { tenantId: "tenant-vfd-off", branchId: "branch-vfd-off" };
 
     expect(getTraVfdConfig(db, ctx).enabled).toBe(false);
-    const item = enqueueTraVfdOutbox(db, ctx, {
+    const item = await enqueueTraVfdOutbox(db, ctx, {
       transactionId: "SALE-VFD-OFF-001",
       receiptId: "SALE-VFD-OFF-001",
       deviceId: "TEST",
@@ -45,7 +45,7 @@ describe("TRA VFD fiscalization separation", () => {
     }, ctx);
     await db.flushPersistence();
 
-    const item = enqueueTraVfdOutbox(db, ctx, {
+    const item = await enqueueTraVfdOutbox(db, ctx, {
       transactionId: "SALE-VFD-ON-001",
       receiptId: "SALE-VFD-ON-001",
       deviceId: "TEST",
@@ -54,6 +54,9 @@ describe("TRA VFD fiscalization separation", () => {
     await db.flushPersistence();
 
     expect(item?.fiscalState).toBe("LOCAL_FISCAL_PENDING");
+    expect(item?.chainSequence).toBe(1);
+    expect(item?.previousReceiptHash).toBe("GENESIS");
+    expect(item?.receiptHash).toMatch(/^[a-f0-9]{64}$/);
     expect(item?.status).toBe("PENDING");
     expect(db.syncOutbox.size).toBe(0);
     expect(db.traVfdOutbox.get(item!.id)?.transactionId).toBe("SALE-VFD-ON-001");
@@ -62,5 +65,22 @@ describe("TRA VFD fiscalization separation", () => {
     await reopened.ready;
     expect(reopened.traVfdOutbox.get(item!.id)?.fiscalState).toBe("LOCAL_FISCAL_PENDING");
     expect(reopened.syncOutbox.size).toBe(0);
+    expect(reopened.traVfdOutbox.get(item!.id)?.receiptHash).toBe(item!.receiptHash);
   });
+  it("chains consecutive fiscal receipts on the same terminal", async () => {
+    const db = new LocalIndexedDbStore(5, `kwakopos-vfd-chain-${Date.now()}`);
+    await db.ready;
+    const ctx = { tenantId: "tenant-chain", branchId: "branch-chain" };
+    db.saveConfigurationLocal("tra_vfd_config", { enabled: true, endpoint: "https://vfd.example.test/api" }, ctx);
+    await db.flushPersistence();
+
+    const first = await enqueueTraVfdOutbox(db, ctx, { transactionId: "SALE-CHAIN-001", deviceId: "terminal-a", payload: { receiptNumber: "R-1", createdAt: "2026-10-01T10:00:00.000Z", grandTotal: 1000, taxTotal: 180 } });
+    const second = await enqueueTraVfdOutbox(db, ctx, { transactionId: "SALE-CHAIN-002", deviceId: "terminal-a", payload: { receiptNumber: "R-2", createdAt: "2026-10-01T10:01:00.000Z", grandTotal: 2000, taxTotal: 360 } });
+
+    expect(first?.chainSequence).toBe(1);
+    expect(second?.chainSequence).toBe(2);
+    expect(second?.previousReceiptHash).toBe(first?.receiptHash);
+    expect(second?.receiptHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
 });

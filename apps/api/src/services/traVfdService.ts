@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 import {
   TraVfdFiscalState,
@@ -29,7 +30,9 @@ function extractString(body: any, keys: string[]): string | null {
 function mapFiscalization(row: any): TraVfdFiscalizationDTO {
   return {
     id: row.id, tenantId: row.tenantId, branchId: row.branchId, receiptId: row.receiptId,
-    transactionId: row.transactionId, deviceId: row.deviceId, state: row.state as TraVfdFiscalState,
+    transactionId: row.transactionId, deviceId: row.deviceId, chainSequence: row.chainSequence,
+    previousReceiptHash: row.previousReceiptHash ?? null, receiptHash: row.receiptHash ?? null,
+    state: row.state as TraVfdFiscalState,
     requestPayload: row.requestPayload, responsePayload: row.responsePayload ?? null,
     fiscalReceiptNumber: row.fiscalReceiptNumber ?? null, fiscalCode: row.fiscalCode ?? null,
     verificationCode: row.verificationCode ?? null, lastError: row.lastError ?? null,
@@ -39,6 +42,23 @@ function mapFiscalization(row: any): TraVfdFiscalizationDTO {
     reconciliationError: row.reconciliationError ?? null,
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
   };
+}
+function canonicalMoney(value: unknown): string {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount)) throw new Error("TRA_VFD_INVALID_MONEY");
+  return amount.toFixed(2);
+}
+
+function canonicalFiscalTimestamp(payload: any, fallback: Date): string {
+  const value = payload?.createdAt || payload?.created_at;
+  const parsed = value ? new Date(String(value)) : fallback;
+  if (Number.isNaN(parsed.getTime())) throw new Error("TRA_VFD_INVALID_TIMESTAMP");
+  return parsed.toISOString();
+}
+
+function computeReceiptHash(previousHash: string, invoiceNumber: string, timestampUtc: string, grandTotal: unknown, taxTotal: unknown): string {
+  const payload = `${previousHash}|${invoiceNumber}|${timestampUtc}|${canonicalMoney(grandTotal)}|${canonicalMoney(taxTotal)}`;
+  return createHash("sha256").update(payload, "utf8").digest("hex");
 }
 function totalOf(payload: any): number {
   return Number(payload?.grandTotal ?? payload?.total ?? payload?.totalAmount ?? 0);
@@ -131,11 +151,27 @@ export class TraVfdService {
     const config = await prisma.traVfdConfig.findUnique({ where: { tenantId_branchId: { tenantId: ctx.tenantId, branchId: ctx.branchId } } });
     if (!config?.enabled) throw new Error("TRA_VFD_DISABLED");
     const fiscalization = await prisma.$transaction(async tx => {
+      const lockKey = `kwakopos:tra-vfd-chain:${ctx.tenantId}:${ctx.branchId}:${req.deviceId}`;
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", lockKey);
+      const latest = await tx.traVfdFiscalization.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: req.deviceId },
+        orderBy: { chainSequence: "desc" },
+        select: { chainSequence: true, receiptHash: true },
+      });
+      const chainSequence = (latest?.chainSequence ?? 0) + 1;
+      const previousReceiptHash = latest?.receiptHash || "GENESIS";
+      const payload = req.payload as any;
+      const invoiceNumber = String(payload.invoiceNumber || payload.receiptNumber || req.transactionId);
+      const timestampUtc = canonicalFiscalTimestamp(payload, new Date());
+      const receiptHash = computeReceiptHash(previousReceiptHash, invoiceNumber, timestampUtc, payload.grandTotal ?? payload.total, payload.taxTotal ?? payload.taxAmount);
+      if (req.chainSequence !== undefined && (req.chainSequence !== chainSequence || req.previousReceiptHash !== previousReceiptHash || req.receiptHash !== receiptHash)) {
+        throw new Error("TRA_VFD_FISCAL_CHAIN_CONFLICT");
+      }
       const created = await tx.traVfdFiscalization.create({
         data: {
           tenantId: ctx.tenantId, branchId: ctx.branchId, receiptId: req.receiptId ?? null,
-          transactionId: req.transactionId, deviceId: req.deviceId, state: "LOCAL_FISCAL_PENDING",
-          requestPayload: req.payload as any, attempts: 0, reconciliationStatus: "PENDING",
+          transactionId: req.transactionId, deviceId: req.deviceId, chainSequence, previousReceiptHash, receiptHash,
+          state: "LOCAL_FISCAL_PENDING", requestPayload: req.payload as any, attempts: 0, reconciliationStatus: "PENDING",
         },
       });
       await tx.traVfdOutbox.create({

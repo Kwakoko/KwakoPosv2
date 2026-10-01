@@ -32,6 +32,7 @@ import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
+import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { normalizePaymentMethod, normalizeSalePayload } from "../services/payloadValidationService.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
@@ -1103,10 +1104,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }
     const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, tenantContext });
     const outboxItem = atomicResult.outbox;
-    const traVfdItem = enqueueTraVfdOutbox(db, tenantContext, {
+    const traVfdItem = await enqueueTraVfdOutbox(db, tenantContext, {
       receiptId: saleId,
       transactionId: saleId,
-      deviceId: "pos-terminal",
+      deviceId: getOrCreatePersistentDeviceId("pos"),
       payload: receiptRecord,
     });
     if (traVfdItem && isOnline) {
