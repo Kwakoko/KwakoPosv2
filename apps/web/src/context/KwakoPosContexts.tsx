@@ -18,6 +18,7 @@ import {
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
+import { dispatchDrawerOutbox, recoverInterruptedDrawerOutbox } from "../services/cashDrawerOutboxService.js";
 import type { PersistenceStatusSnapshot } from "../persistence/persistenceStatus.js";
 import { syncStatusService, type SyncStatusSnapshot } from "../services/syncStatusService.js";
 import {
@@ -1128,6 +1129,29 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       }
     };
   }, [isOnline, syncOutbox]);
+
+  // Cash drawer has its own high-priority hardware queue. It is independent of syncOutbox and TRA VFD.
+  useEffect(() => {
+    if (!user?.tenantId || !user?.branchId) return;
+    const ctx = { tenantId: user.tenantId, branchId: user.branchId };
+    const runDrawer = () => {
+      void dispatchDrawerOutbox(db, ctx).catch((error) => {
+        console.warn("[CASH DRAWER] Hardware queue processing failed:", error);
+      });
+    };
+    void db.ready.then(() => {
+      recoverInterruptedDrawerOutbox(db);
+      runDrawer();
+    }).catch(() => undefined);
+    const timer = window.setInterval(runDrawer, 5000);
+    window.addEventListener("focus", runDrawer);
+    window.addEventListener("online", runDrawer);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", runDrawer);
+      window.removeEventListener("online", runDrawer);
+    };
+  }, [db, user?.tenantId, user?.branchId]);
 
   // TRA VFD has its own fiscal worker and durable queue. It never calls syncOutbox.
   useEffect(() => {

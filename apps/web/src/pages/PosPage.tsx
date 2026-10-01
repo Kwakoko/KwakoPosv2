@@ -35,6 +35,7 @@ import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../se
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
 import { normalizePaymentMethod, normalizeSalePayload } from "../services/payloadValidationService.js";
+import { createDrawerOutboxItem, dispatchDrawerOutbox } from "../services/cashDrawerOutboxService.js";
 import type { CustomerDisplayPayload } from "./CustomerDisplayPage.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -1028,6 +1029,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }));
 
     const payments = paymentPayload;
+    const paymentDeviceId = getOrCreatePersistentDeviceId("pos");
 
     const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
@@ -1084,6 +1086,17 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       items: mappedItems, createdAt: saleRecord.createdAt,
       fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
     };
+    const drawerOutboxItems = payments
+      .filter((payment: any) => payment.paymentMethod === "CASH")
+      .map((payment: any) => createDrawerOutboxItem({
+        saleId,
+        paymentId: String(payment.id),
+        tenantId: tenantContext.tenantId,
+        branchId: tenantContext.branchId || "",
+        deviceId: paymentDeviceId,
+        requestedAt: saleRecord.createdAt,
+        payload: { saleId, paymentId: payment.id, amount: payment.amount, cashSessionId: (db.getConfigurationLocal?.("active_shift_session") as any)?.id },
+      }));
     const localSaleOutbox: any = {
       id: saleId, entityType: "Sale", entityId: saleId, operationType: "CREATE", payload: saleRecord,
       clientCreatedAt: saleRecord.createdAt, idempotencyKey: saleId, status: "PENDING",
@@ -1102,8 +1115,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         break;
       }
     }
-    const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, tenantContext });
+    const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, drawerOutboxItems, tenantContext });
     const outboxItem = atomicResult.outbox;
+    if (drawerOutboxItems.length) void dispatchDrawerOutbox(db, tenantContext).catch(() => {});
     const traVfdItem = await enqueueTraVfdOutbox(db, tenantContext, {
       receiptId: saleId,
       transactionId: saleId,

@@ -155,6 +155,17 @@ export class MigrationEngine {
         // Index creation is best-effort in mocked IndexedDB implementations.
       }
     }
+
+    // V5 -> V6: Dedicated high-priority cash drawer hardware queue.
+    // Independent from syncOutbox and traVfdOutbox.
+    if (toVersion === 6) {
+      if (!db.objectStoreNames.contains("drawerOutbox")) db.createObjectStore("drawerOutbox");
+      try {
+        const store = transaction.objectStore("drawerOutbox");
+        if (!store.indexNames.contains("by_tenant")) store.createIndex("by_tenant", "tenantId", { unique: false });
+        if (!store.indexNames.contains("by_status")) store.createIndex("by_status", "status", { unique: false });
+      } catch {}
+    }
   }
 
   private ensureStoreIndices(transaction: IDBTransaction): void {

@@ -76,6 +76,23 @@ export interface OutboxItem {
   abandonedAt?: string;
 }
 
+export interface DrawerOutboxItem {
+  id: string;
+  operationId: string;
+  saleId: string;
+  paymentId: string;
+  tenantId: string;
+  branchId: string;
+  deviceId: string;
+  status: "PENDING" | "EXECUTING" | "SUCCEEDED" | "FAILED" | "TIMEOUT" | "UNKNOWN";
+  attempts: number;
+  requestedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  lastError?: string;
+  payload: Record<string, unknown>;
+}
+
 export type NativeStore =
   | "products"
   | "productVariants"
@@ -90,6 +107,7 @@ export type NativeStore =
   | "suppliers"
   | "syncOutbox"
   | "traVfdOutbox"
+  | "drawerOutbox"
   | "syncMetadata"
   | "configuration"
   | "auditState"
@@ -111,6 +129,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
   "suppliers",
   "syncOutbox",
   "traVfdOutbox",
+  "drawerOutbox",
   "syncMetadata",
   "configuration",
   "auditState",
@@ -120,7 +139,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 ];
 
 const DB_NAME = "kwakopos-v2";
-export const AUTHORITATIVE_SCHEMA_VERSION = 5;
+export const AUTHORITATIVE_SCHEMA_VERSION = 6;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
@@ -249,6 +268,7 @@ export class LocalIndexedDbStore {
   suppliers: QueryableStore<any>;
   syncOutbox: QueryableStore<OutboxItem>;
   traVfdOutbox: QueryableStore<any>;
+  drawerOutbox: QueryableStore<DrawerOutboxItem>;
   syncMetadata: QueryableStore<string>;
   configuration: QueryableStore<any>;
   auditState: QueryableStore<any>;
@@ -294,6 +314,7 @@ export class LocalIndexedDbStore {
     this.suppliers = new QueryableStore<any>("suppliers", p);
     this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
     this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
+    this.drawerOutbox = new QueryableStore<DrawerOutboxItem>("drawerOutbox", p);
     this.syncMetadata = new QueryableStore<string>("syncMetadata", p);
     this.configuration = new QueryableStore<any>("configuration", p);
     this.auditState = new QueryableStore<any>("auditState", p);
@@ -380,7 +401,7 @@ export class LocalIndexedDbStore {
         const startupStores: NativeStore[] = [
           "products", "productVariants", "stockBalance", "stockLedger", "stockAdjustments",
           "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers",
-          "syncOutbox", "traVfdOutbox", "syncMetadata", "configuration",
+          "syncOutbox", "traVfdOutbox", "drawerOutbox", "syncMetadata", "configuration",
         ];
         const activeStores = startupStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
         for (const store of activeStores) {
@@ -447,6 +468,8 @@ export class LocalIndexedDbStore {
         return this.syncOutbox;
       case "traVfdOutbox":
         return this.traVfdOutbox;
+      case "drawerOutbox":
+        return this.drawerOutbox;
       case "syncMetadata":
         return this.syncMetadata;
       case "configuration":
@@ -619,6 +642,7 @@ export class LocalIndexedDbStore {
     this.suppliers.clear();
     this.syncOutbox.clear();
     this.traVfdOutbox.clear();
+    this.drawerOutbox.clear();
     this.syncMetadata.clear();
     this.configuration.clear();
     this.auditState.clear();
@@ -671,6 +695,7 @@ export class LocalIndexedDbStore {
     filterTenant(this.suppliers, "suppliers");
     filterTenant(this.syncOutbox, "syncOutbox");
     filterTenant(this.traVfdOutbox, "traVfdOutbox");
+    filterTenant(this.drawerOutbox, "drawerOutbox");
     filterTenant(this.configuration, "configuration");
     filterTenant(this.auditState, "auditState");
   }
@@ -928,6 +953,7 @@ export class LocalIndexedDbStore {
     writes: Array<{ store: NativeStore; key: string; value?: any; delete?: boolean }>;
     outboxItem?: OutboxItem;
     outboxItems?: OutboxItem[];
+    drawerOutboxItems?: DrawerOutboxItem[];
     tenantContext?: TenantScopedContext;
   }): Promise<{ outbox: OutboxItem; outboxes: OutboxItem[] }> {
     await this.ready;
@@ -936,6 +962,7 @@ export class LocalIndexedDbStore {
       throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: IndexedDB is not available for atomic mutation");
     }
     const outboxItems = [...(params.outboxItems || []), ...(params.outboxItem ? [params.outboxItem] : [])];
+    const drawerOutboxItems = params.drawerOutboxItems || [];
     if (!outboxItems.length) throw new Error("ATOMIC_MUTATION_OUTBOX_REQUIRED");
     const localCommittedStatuses = outboxItems
       .filter((item) => Boolean(item.tenantId || params.tenantContext?.tenantId))
@@ -972,12 +999,13 @@ export class LocalIndexedDbStore {
         }
       }
     }
-    const stores = [...new Set([...writes.map((w) => w.store), "syncOutbox", "syncMetadata"])];
+    const stores = [...new Set([...writes.map((w) => w.store), "syncOutbox", "syncMetadata", ...(drawerOutboxItems.length ? ["drawerOutbox"] : [])])];
     if (this.nativeDb) {
       for (const store of stores) if (!this.nativeDb.objectStoreNames.contains(store)) throw new Error("LOCAL_PERSISTENCE_UNAVAILABLE: missing IndexedDB store " + store);
       const tx = this.nativeDb.transaction(stores, "readwrite");
       for (const write of writes) { if (write.delete) tx.objectStore(write.store).delete(write.key); else tx.objectStore(write.store).put(write.value, write.key); }
       for (const item of outboxItems) tx.objectStore("syncOutbox").put(item, item.id);
+      for (const item of drawerOutboxItems) tx.objectStore("drawerOutbox").put(item, item.id);
       for (const status of localCommittedStatuses) {
         tx.objectStore("syncMetadata").put(
           JSON.stringify(status),
@@ -992,6 +1020,7 @@ export class LocalIndexedDbStore {
     }
     for (const write of writes) { const target = this.getTargetMap(write.store); if (!target) continue; if (write.delete) target.delete(write.key); else target.set(write.key, write.value); }
     for (const item of outboxItems) this.syncOutbox.set(item.id, item);
+    for (const item of drawerOutboxItems) this.drawerOutbox.set(item.id, item);
     for (const status of localCommittedStatuses) {
       const key = persistenceStatusKey(status.tenantId, status.branchId, status.entityType, status.entityId);
       this.syncMetadata.set(key, JSON.stringify(status));
@@ -1480,7 +1509,7 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], traVfdOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
     const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
