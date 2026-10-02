@@ -81,6 +81,8 @@ export interface ModuleManifest {
   version?: string;
   /** Parent platform identity under the brand hierarchy */
   parentPlatform?: string;
+  /** Explicit dashboard KPI/card keys. Card presentation lives in the Dashboard Card Registry. */
+  dashboardCardKeys?: string[];
 }
 
 // ─── Sector Metadata ────────────────────────────────────────────────────────
@@ -128,6 +130,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Reports", tab: "Reports", icon: "BarChart3" },
     ],
     widgets: ["SalesToday", "ProfitToday", "InventoryValue", "LowStock"],
+    dashboardCardKeys: ["RetailSalesToday", "RetailGrossProfit", "RetailAov", "RetailProducts", "RetailStockAlerts", "RetailCustomerDebts", "RetailInventoryValue", "PendingSync"],
     description: "Retail inventory count, sales, receipts, and client reward points.",
     version: "v2.5",
   },
@@ -160,6 +163,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Orders", tab: "Orders", icon: "ClipboardList" },
     ],
     widgets: ["SalesToday", "OpenTables", "PendingOrders", "KitchenStatus"],
+    dashboardCardKeys: ["RestaurantSalesToday", "RestaurantActiveService", "RestaurantKitchenQueue", "RestaurantKitchenStatus"],
     description: "Table dining coordinates, kitchen ticket flows, and recipe costs.",
     version: "v2.5",
   },
@@ -188,6 +192,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Reports", tab: "Reports", icon: "BarChart2" },
     ],
     widgets: ["TotalSavings", "LoanDisbursements", "OutstandingRepayments", "MembersJoined"],
+    dashboardCardKeys: ["SaccoDepositsSavings", "SaccoOutstandingLoans", "SaccoInterestEarned", "SaccoMembers"],
     description: "Cooperative member capital, savings programs, and lending terms.",
     requiresSubscription: true,
     version: "v2.5",
@@ -287,6 +292,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Stock", tab: "Pharmacy Inventory", icon: "Package" },
     ],
     widgets: ["SalesToday", "PrescriptionsPending", "ExpiryAlerts", "LowStock", "NHIFClaims", "OTCSales"],
+    dashboardCardKeys: ["PharmacySalesToday", "PharmacyPendingRx", "PharmacyNearExpiry", "PharmacyCriticalLowDrugs"],
     description: "Full-stack pharmacy management: prescriptions, batch/expiry FEFO, patient CRM, drug safety engine, NHIF/insurance billing, and controlled drug register.",
     requiresSubscription: true,
     version: "v2.5",
@@ -966,6 +972,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Health", tab: "Health & Veterinary", icon: "Activity" },
     ],
     widgets: ["TotalAnimals", "ActiveFlocks", "EggProduction", "MilkYield", "FeedConsumption", "MortalityRate", "VaccinationDue", "LowFeedStock", "FarmProfit"],
+    dashboardCardKeys: ["PoultryAnimals", "PoultryFlocks", "PoultryEggsToday", "PoultryMortalityRate"],
     description: "Complete commercial livestock & poultry suite: flock lifecycle, FCR feed formulation, hatchery incubators, dairy milking sessions, vet lab reports, and POS integration.",
     requiresSubscription: true,
     version: "v2.5",
@@ -1029,6 +1036,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "AI", tab: "AI Consultant", icon: "Sparkles" },
     ],
     widgets: ["TotalClients", "ActiveEngagements", "MonthlyRevenue", "ConsultantUtilization", "BillableHours", "ProposalConversionRate", "UpcomingMeetings", "ExpiringContracts"],
+    dashboardCardKeys: ["ConsultantClients", "ConsultantEngagements", "ConsultantRevenue", "ConsultantUtilization", "ConsultantBillableHours", "ConsultantProposalConversion", "ConsultantUpcomingMeetings", "ConsultantExpiringContracts"],
     description: "Automatic client portals, proposals, contracts, project deliverables, timesheets, and AI business analysis.",
     requiresSubscription: true,
     version: "v2.5",
