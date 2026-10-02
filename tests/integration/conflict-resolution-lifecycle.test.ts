@@ -226,7 +226,6 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       expect(await sync.listConflicts(ctx)).not.toContainEqual(expect.objectContaining({ id: productConflictId }));
       expect(await prisma.auditEvent.count({ where: { tenantId, branchId, action: "SYNC_CONFLICT_RESOLVED" } })).toBeGreaterThanOrEqual(4);
     } finally {
-      await prisma.auditEvent.deleteMany({ where: { tenantId } });
       await prisma.$executeRawUnsafe("DELETE FROM sync_change_journal WHERE tenant_id = $1", tenantId);
       await prisma.$executeRawUnsafe("DELETE FROM sync_conflict_record WHERE tenant_id = $1", tenantId);
       await prisma.productVariant.deleteMany({ where: { tenantId } });
