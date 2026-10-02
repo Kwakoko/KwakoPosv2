@@ -18,8 +18,8 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 
 ### Class 1: Safe Merge (Independent Non-Overlapping Attributes)
 - **Applies to:** Customer profiles, Supplier contact details, Product metadata (description, barcode) where attributes do not overlap.
-- **Resolution Rule:** Server merges non-conflicting field values into the target record. The resultant record receives an updated monotonic server timestamp.
-- **Example:** Device A updates customer phone number while Device B updates customer delivery address. Both fields are retained.
+- **Resolution Rule:** The server never silently field-merges a stale mutation. An operator may select `MERGE` with an explicit merged payload; the result is committed atomically and journaled.
+- **Example:** Device A updates customer phone number while Device B updates customer delivery address. An explicit merge can retain both values.
 
 ### Class 2: Sequential Business Operations (Additive / Ledger Mutations)
 - **Applies to:** Sales, Stock Movements, Payments, Expenses, Returns.
@@ -39,3 +39,9 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 
 ## 2. Audit Trail
 All resolved and rejected conflicts are logged to `ProductionAuditStream` with full details including `operationId`, `idempotencyKey`, `tenantId`, `actorId`, and affected payload diffs.
+
+## 3. Specialized Business Incidents
+
+- `SaleOversell` is a durable business incident tied to a committed sale and immutable StockLedger. Resolution acknowledges the incident and never rewrites ledger history.
+- `UnitConversionConflict` is persisted after the failed transaction rolls back. `ACCEPT_SERVER` acknowledges the authoritative stock state; `ACCEPT_LOCAL` and `MERGE` reattempt the conversion against current PostgreSQL state.
+- PostgreSQL `audit_events` is the authoritative conflict audit store; the in-memory `ProductionAuditStream` is not authoritative.
