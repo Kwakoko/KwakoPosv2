@@ -43,6 +43,7 @@ describe("Conflict detection convergence lifecycle", () => {
       tenantId,
       branchId,
       "sync-epoch-test",
+      dbName,
     );
 
     db.close();
