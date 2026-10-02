@@ -147,12 +147,15 @@ async function applyRevisionedChanges(
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation && change.source === "conflict-resolution") {
+      const resolvedConflictId = String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:")
+        ? String(pendingMutation.error).slice("SYNC_CONFLICT:".length)
+        : "";
       pendingMutation.status = "CONFLICT_RESOLVED";
       pendingMutation.resolution = "SERVER_APPLIED";
       delete pendingMutation.error;
       outbox.put(pendingMutation, pendingMutation.id);
       metadata.delete("error_" + pendingMutation.id);
-      if (String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:")) metadata.delete("sync_conflict_" + String(pendingMutation.error).slice("SYNC_CONFLICT:".length));
+      if (resolvedConflictId) metadata.delete("sync_conflict_" + resolvedConflictId);
       metadata.delete("sync_conflict_" + pendingMutation.entityType + "_" + pendingMutation.entityId);
       const resolvedStatus = createPersistenceStatus(
         { tenantId, branchId, entityType: pendingMutation.entityType, entityId: pendingMutation.entityId, operationId: pendingMutation.id, operationType: pendingMutation.operationType },
