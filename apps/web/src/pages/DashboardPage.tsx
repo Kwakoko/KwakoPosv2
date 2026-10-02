@@ -398,7 +398,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const localRevision = syncStatus.localRevision || "0";
     let isBehind = false;
 
-    if (serverRevision && /^\\d+$/.test(serverRevision) && /^\\d+$/.test(localRevision)) {
+    if (serverRevision && /^\d+$/.test(serverRevision) && /^\d+$/.test(localRevision)) {
       try {
         isBehind = BigInt(localRevision) < BigInt(serverRevision);
       } catch {
