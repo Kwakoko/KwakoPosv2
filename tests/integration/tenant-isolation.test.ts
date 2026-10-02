@@ -66,6 +66,26 @@ describe("Tenant & Branch Multi-Tenant Security Suite", () => {
     );
   });
 
+
+  it("rejects missing branch context and excludes branchless records", () => {
+    const productA = productRepo.createProduct(tenantACtx, {
+      name: "Alpha Branch Scoped Product",
+      sku: "SKU-STRICT-BRANCH",
+      variants: [{ name: "Standard", sku: "VAR-STRICT-BRANCH", price: 10, costPrice: 5 }],
+    });
+
+    const malformed = { ...productA, id: "branchless-product", branchId: "" } as any;
+    globalInMemoryStore.products.set(malformed.id, malformed);
+
+    expect(() => productRepo.getProducts({ ...tenantACtx, branchId: undefined } as any)).toThrow(
+      /TENANT_BRANCH_CONTEXT_REQUIRED/
+    );
+
+    const scoped = productRepo.getProducts(tenantACtx);
+    expect(scoped.map((p) => p.id)).toEqual([productA.id]);
+    expect(scoped.some((p) => p.id === malformed.id)).toBe(false);
+  });
+
   it("prevents Tenant B from adjusting stock on Tenant A variant", () => {
     const productA = productRepo.createProduct(tenantACtx, {
       name: "Alpha Premium Tea",
