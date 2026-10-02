@@ -150,12 +150,22 @@ export class SyncStatusService {
       const localRevision = tenantId && branchId
         ? String(this.db.syncMetadata.get(`syncScope:${tenantId}:${branchId}:lastSyncRevision`) ?? "0")
         : "0";
-      const syncEpoch = tenantId && branchId
+      const scopePrefix = tenantId && branchId ? `syncScope:${tenantId}:${branchId}:` : null;
+      const syncEpoch = scopePrefix
         ? (() => {
-            const value = this.db.syncMetadata.get(`syncScope:${tenantId}:${branchId}:syncEpoch`);
+            const value = this.db.syncMetadata.get(scopePrefix + "syncEpoch");
             return value == null ? null : String(value);
           })()
         : null;
+      const durableLastSync = scopePrefix ? this.db.syncMetadata.get(scopePrefix + "lastSyncTime") : null;
+      const durableLastSyncedAt = (() => {
+        if (typeof durableLastSync === "number" && Number.isFinite(durableLastSync)) return durableLastSync;
+        if (typeof durableLastSync === "string") {
+          const parsed = Date.parse(durableLastSync);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      })();
       // Retriable failures (will be re-queued on next heartbeat)
       const failed = this.db.getRetriableFailedOutbox
         ? this.db.getRetriableFailedOutbox(tenantId, branchId).length
@@ -172,6 +182,7 @@ export class SyncStatusService {
         abandonedOutboxCount: abandoned,
         localRevision,
         syncEpoch,
+        ...(durableLastSyncedAt !== null ? { lastSyncedAt: durableLastSyncedAt } : {}),
       });
     } catch (error) {
       this.failSync(error);
