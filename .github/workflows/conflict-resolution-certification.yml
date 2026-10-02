@@ -75,6 +75,13 @@ jobs:
             --environment ci \
             --releaseChannel stable
 
+      - name: Build sync dependencies
+        run: |
+          npm run build --workspace=@kwakopos2/contracts
+          npm run build --workspace=@kwakopos2/config
+          npm run build --workspace=@kwakopos2/domain
+          npm run build --workspace=@kwakopos2/database
+
       - name: Build sync engine
         run: npm run build --workspace=@kwakopos2/sync
 
