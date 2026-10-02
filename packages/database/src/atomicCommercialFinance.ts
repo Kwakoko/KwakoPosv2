@@ -111,8 +111,30 @@ export class PrismaAtomicCommercialFinanceService {
               JSON.stringify({ currentInventory: qtyBefore }),
             );
           } catch {
-            // non-fatal if conflict table is not present
+            throw new Error("SYNC_CONFLICT_PERSISTENCE_UNAVAILABLE");
           }
+          await tx.auditEvent.create({
+            data: {
+              id: randomUUID(),
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              userId: ctx.userId,
+              deviceId: req.deviceId || "sync-engine",
+              action: "SYNC_CONFLICT_DETECTED",
+              entityType: "SaleOversell",
+              entityId: l.variantId,
+              metadata: {
+                conflictId,
+                operationId: req.operationId || saleId,
+                saleId,
+                variantId: l.variantId,
+                qtySold,
+                qtyBefore,
+                shortfall,
+                source: "oversell",
+              },
+            },
+          });
         }
 
         const notes = isOversell
