@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { getDashboardCardDefinitions } from "../../apps/web/src/services/dashboardCardRegistry.js";
+import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
 
 describe("Dashboard Card Registry", () => {
   it("uses explicit module card keys and never carries baked KPI values", () => {
-    const modules = ["Retail", "Restaurant", "SACCO", "Pharmacy", "Poultry", "BusinessConsultant"] as const;
-
-    for (const module of modules) {
+    for (const module of ALL_MODULE_KEYS) {
       const cards = getDashboardCardDefinitions(module);
       expect(cards.length).toBeGreaterThan(0);
 
@@ -26,3 +25,17 @@ describe("Dashboard Card Registry", () => {
     expect(poultry.find((card) => card.kpiKey === "PoultryEggsToday")?.format).toBe("count");
   });
 });
+
+
+  it("resolves every module manifest card key to a registered card", () => {
+    for (const module of ALL_MODULE_KEYS) {
+      const declaredKeys = MODULE_MANIFESTS[module].dashboardCardKeys ?? [];
+      const cards = getDashboardCardDefinitions(module);
+
+      expect(new Set(cards.map((card) => card.key)).size).toBe(cards.length);
+
+      for (const key of declaredKeys) {
+        expect(cards.some((card) => card.key === key)).toBe(true);
+      }
+    }
+  });
