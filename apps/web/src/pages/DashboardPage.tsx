@@ -752,7 +752,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         (variantId ? varMap.get(variantId) : undefined) ?? prodMap.get(productId) ?? 0,
       getItemCOGS: (item: { productId: string; variantId?: string; price: number; quantity: number }) => {
         const unitCost = (item.variantId ? varMap.get(item.variantId) : undefined) ?? prodMap.get(item.productId) ?? 0;
-        return (unitCost > 0 ? unitCost : item.price * 0.70) * item.quantity;
+        // Never infer cost from selling price. Missing cost means the gross-profit
+        // calculation is not authoritative; the server KPI remains the online authority.
+        return unitCost > 0 ? unitCost * item.quantity : 0;
       }
     };
   }, [products, productVariants]);
@@ -845,7 +847,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       return (new Date(p.expiryDate).getTime() - now) < 90 * 24 * 60 * 60 * 1000;
     }).length;
 
-    const totalSavings  = products.filter(p => p.category === 'Savings').reduce((sum, p) => sum + (p.stock * p.price), 0) / 10;
     const totalLoans    = customers.reduce((sum, c) => sum + (c.outstandingBalance || 0), 0);
     const unsyncedCount = syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount;
     // Permanently-abandoned items (exceeded retry cap) shown separately as conflicts.
@@ -901,7 +902,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       inventoryVal, lowStockCount, outOfStockCount,
       activeVariantCount: activeProductVariants.length,
       todayCOGS, todayGrossProfit, todayMargin,
-      nearExpiryCount, totalSavings, totalLoans,
+      nearExpiryCount, totalLoans,
       customerCount: customers.length, supplierCount: suppliers.length,
       customerTrend, customerTrendPct,
       unsyncedCount, conflictCount, topProduct,
@@ -915,31 +916,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const DAY_LABELS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const now = new Date();
-
-    if (activeModule === 'SACCO') {
-      const chartPoints = Array.from({ length: 6 }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-        const mOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth();
-        });
-        const Savings = mOrders.reduce((s, o) => s + o.total, 0);
-        return { name: MONTH_LABELS[d.getMonth()], fullLabel: `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`, Savings, Loans: 0, Revenue: Savings, Profit: Math.round(Savings * 0.15), COGS: 0, PriorRevenue: 0, ordersCount: mOrders.length, marginPct: '15.0' };
-      });
-      const totalRev = chartPoints.reduce((s, p) => s + p.Revenue, 0);
-      const totalProfit = chartPoints.reduce((s, p) => s + p.Profit, 0);
-      return {
-        chartPoints,
-        totalRevenue: totalRev,
-        totalProfit,
-        totalCOGS: 0,
-        marginPct: totalRev > 0 ? ((totalProfit / totalRev) * 100).toFixed(1) : '0.0',
-        revenueDeltaPct: null as string | null,
-        profitDeltaPct: null as string | null,
-        priorTotalRevenue: 0,
-        peakHour: null as { hour: string; revenue: number; ordersCount: number } | null,
-      };
-    }
 
     let chartPoints: Array<{
       name: string;
