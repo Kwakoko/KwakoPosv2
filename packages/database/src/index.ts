@@ -68,6 +68,12 @@ import { InMemoryStore, globalInMemoryStore } from "./inMemoryStore.js";
 export { InMemoryStore, globalInMemoryStore };
 export { setRlsTenantContext, clearRlsTenantContext } from "./rlsContext.js";
 
+function assertTenantBranchContext(ctx: TenantContext): void {
+  if (!ctx?.tenantId || !ctx?.branchId) {
+    throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED: authenticated tenant and branch are required");
+  }
+}
+
 export class ScopedProductRepository {
   private store: InMemoryStore;
   constructor(store: InMemoryStore = globalInMemoryStore) {
@@ -420,15 +426,16 @@ export class ScopedProductRepository {
   }
 
   getProducts(ctx: TenantContext): Product[] {
+    assertTenantBranchContext(ctx);
     const products = Array.from(this.store.products.values()).filter(
-      (p) => p.tenantId === ctx.tenantId && (!ctx.branchId || !p.branchId || p.branchId === ctx.branchId)
+      (p) => p.tenantId === ctx.tenantId && p.branchId === ctx.branchId
     );
 
     return products.map((p) => {
       this.recalculateProductStock(ctx, p.id);
       const fresh = this.store.products.get(p.id)!;
       const variants = Array.from(this.store.variants.values())
-        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId))
+        .filter((v) => v.productId === p.id && v.tenantId === ctx.tenantId && v.branchId === ctx.branchId)
         .map((v) => this.attachEffectivePrices(fresh, v));
       return { ...fresh, variants };
     });
