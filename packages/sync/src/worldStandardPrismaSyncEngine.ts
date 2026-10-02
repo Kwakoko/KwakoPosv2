@@ -127,6 +127,7 @@ export class WorldStandardPrismaSyncEngine {
     remotePayload?: unknown;
     deviceId?: string;
   }): Promise<{ status: string; conflictId: string }> {
+    await this.ensureInfrastructure();
     if (!input.conflictId || !input.operationId || !input.entityType || !input.entityId) {
       throw new Error("SYNC_CONFLICT_REGISTRATION_INVALID");
     }
