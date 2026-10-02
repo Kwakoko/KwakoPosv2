@@ -1677,17 +1677,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         action = isOnline
           ? { label: "Force Sync", onClick: forceBootstrap }
           : undefined;
-      } else if (definition.authoritativeKpiKey && authoritativeKpis) {
+      } else if (
+        authoritativeKpis &&
+        authoritativeKpis.kpis?.[definition.kpiKey] !== null &&
+        authoritativeKpis.kpis?.[definition.kpiKey] !== undefined
+      ) {
         value = formatDashboardKpiValue(definition, authoritativeKpis);
         desc = isOnline
           ? definition.description
           : `${definition.description} · Last authoritative snapshot`;
-      } else if (definition.authoritativeKpiKey) {
+      } else if (authoritativeKpis && authoritativeKpis.kpis?.[definition.kpiKey] === null) {
+        desc = `${definition.description} · Authoritative KPI not implemented`;
+      } else if (definition.systemKey) {
+        desc = definition.description;
+      } else {
         desc = isOnline
           ? `${definition.description} · Waiting for authoritative PostgreSQL KPI`
           : `${definition.description} · No cached authoritative snapshot`;
-      } else {
-        desc = `${definition.description} · Authoritative KPI not registered`;
       }
 
       return {
