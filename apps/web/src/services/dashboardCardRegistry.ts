@@ -22,35 +22,22 @@ import type { DashboardKpiSnapshot } from "./dashboardKpiService.js";
 
 export type DashboardCardFormat = "currency" | "count" | "percent" | "text";
 
-export type DashboardAuthoritativeKpiKey =
-  | "salesToday"
-  | "grossProfit"
-  | "aov"
-  | "todayOrderCount"
-  | "completedOrders"
-  | "inventoryValue"
-  | "stockAlerts"
-  | "lowStockCount"
-  | "outOfStockCount"
-  | "customerDebts"
-  | "customerCount"
-  | "productCount"
-  | "supplierCount";
-
 export interface DashboardCardDefinition {
   key: string;
+  /** Stable KPI identifier resolved by the authoritative dashboard KPI service. */
+  kpiKey: string;
   title: string;
   description: string;
   icon: LucideIcon;
   accent: string;
   format: DashboardCardFormat;
-  authoritativeKpiKey?: DashboardAuthoritativeKpiKey;
   systemKey?: "pendingOutbox";
 }
 
 const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   SalesToday: {
     key: "SalesToday",
+    kpiKey: "SalesToday",
     title: "Sales Today",
     description: "Completed sales recorded by PostgreSQL",
     icon: DollarSign,
@@ -60,6 +47,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   GrossProfitToday: {
     key: "GrossProfitToday",
+    kpiKey: "GrossProfitToday",
     title: "Gross Profit",
     description: "Completed-sales gross profit from PostgreSQL",
     icon: TrendingUp,
@@ -69,6 +57,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   AovToday: {
     key: "AovToday",
+    kpiKey: "AovToday",
     title: "Average Order Value",
     description: "Completed sales value divided by completed orders",
     icon: ShoppingCart,
@@ -78,6 +67,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ProductCount: {
     key: "ProductCount",
+    kpiKey: "ProductCount",
     title: "Active Products",
     description: "Active products in the current branch",
     icon: Package,
@@ -87,6 +77,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   StockAlerts: {
     key: "StockAlerts",
+    kpiKey: "StockAlerts",
     title: "Stock Alerts",
     description: "Low-stock plus out-of-stock variants",
     icon: AlertTriangle,
@@ -96,6 +87,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   CustomerDebts: {
     key: "CustomerDebts",
+    kpiKey: "CustomerDebts",
     title: "Customer Debts",
     description: "Current customer receivables in the branch",
     icon: Users,
@@ -105,6 +97,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   InventoryValue: {
     key: "InventoryValue",
+    kpiKey: "InventoryValue",
     title: "Inventory Value",
     description: "Current branch stock valuation",
     icon: PiggyBank,
@@ -114,6 +107,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   CompletedOrders: {
     key: "CompletedOrders",
+    kpiKey: "CompletedOrders",
     title: "Completed Orders",
     description: "Completed orders recorded by PostgreSQL today",
     icon: Banknote,
@@ -123,6 +117,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   LowStock: {
     key: "LowStock",
+    kpiKey: "LowStock",
     title: "Low Stock",
     description: "Active variants at or below reorder level",
     icon: AlertTriangle,
@@ -132,6 +127,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   OutOfStock: {
     key: "OutOfStock",
+    kpiKey: "OutOfStock",
     title: "Out of Stock",
     description: "Active variants with no available quantity",
     icon: Package,
@@ -141,6 +137,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   CustomerCount: {
     key: "CustomerCount",
+    kpiKey: "CustomerCount",
     title: "Active Customers",
     description: "Active customers in the current branch",
     icon: Users,
@@ -150,6 +147,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   SupplierCount: {
     key: "SupplierCount",
+    kpiKey: "SupplierCount",
     title: "Active Suppliers",
     description: "Active suppliers in the current branch",
     icon: Briefcase,
@@ -159,6 +157,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PendingSync: {
     key: "PendingSync",
+    kpiKey: "PendingSync",
     title: "Pending Sync",
     description: "Local mutations awaiting cloud synchronization",
     icon: RefreshCw,
@@ -171,6 +170,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
 const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   RestaurantActiveService: {
     key: "RestaurantActiveService",
+    kpiKey: "RestaurantActiveService",
     title: "Active Service",
     description: "Live service-window workload",
     icon: Layers,
@@ -179,6 +179,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   RestaurantKitchenQueue: {
     key: "RestaurantKitchenQueue",
+    kpiKey: "RestaurantKitchenQueue",
     title: "Kitchen Queue",
     description: "Orders awaiting kitchen completion",
     icon: Clock,
@@ -187,6 +188,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PharmacyPendingRx: {
     key: "PharmacyPendingRx",
+    kpiKey: "PharmacyPendingRx",
     title: "Pending Prescriptions",
     description: "Prescriptions awaiting pharmacist validation",
     icon: Clock,
@@ -195,6 +197,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PharmacyNearExpiry: {
     key: "PharmacyNearExpiry",
+    kpiKey: "PharmacyNearExpiry",
     title: "Near-Expiry Alerts",
     description: "Medicines requiring expiry review",
     icon: AlertTriangle,
@@ -203,6 +206,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   RestaurantKitchenStatus: {
     key: "RestaurantKitchenStatus",
+    kpiKey: "RestaurantKitchenStatus",
     title: "Kitchen Status",
     description: "Authoritative kitchen workload status is not registered",
     icon: Clock,
@@ -211,6 +215,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   SaccoDepositsSavings: {
     key: "SaccoDepositsSavings",
+    kpiKey: "SaccoDepositsSavings",
     title: "Deposits & Savings",
     description: "Member savings balance",
     icon: PiggyBank,
@@ -219,6 +224,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   SaccoOutstandingLoans: {
     key: "SaccoOutstandingLoans",
+    kpiKey: "SaccoOutstandingLoans",
     title: "Outstanding Loans",
     description: "Active lending portfolio value",
     icon: Briefcase,
@@ -227,6 +233,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   SaccoInterestEarned: {
     key: "SaccoInterestEarned",
+    kpiKey: "SaccoInterestEarned",
     title: "Interest Earned YTD",
     description: "Requires an authoritative accrued-interest KPI",
     icon: TrendingUp,
@@ -235,6 +242,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   SaccoMembers: {
     key: "SaccoMembers",
+    kpiKey: "SaccoMembers",
     title: "SACCO Members",
     description: "Registered members in the current branch",
     icon: Users,
@@ -243,6 +251,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PoultryAnimals: {
     key: "PoultryAnimals",
+    kpiKey: "PoultryAnimals",
     title: "Total Animals",
     description: "Requires an authoritative livestock register KPI",
     icon: Footprints,
@@ -251,6 +260,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PoultryFlocks: {
     key: "PoultryFlocks",
+    kpiKey: "PoultryFlocks",
     title: "Active Flocks",
     description: "Requires an authoritative flock register KPI",
     icon: Egg,
@@ -259,6 +269,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PoultryEggsToday: {
     key: "PoultryEggsToday",
+    kpiKey: "PoultryEggsToday",
     title: "Daily Production",
     description: "Requires an authoritative egg-production KPI",
     icon: TrendingUp,
@@ -267,6 +278,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   PoultryMortalityRate: {
     key: "PoultryMortalityRate",
+    kpiKey: "PoultryMortalityRate",
     title: "Mortality Rate",
     description: "Requires authoritative mortality records",
     icon: AlertTriangle,
@@ -275,6 +287,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantClients: {
     key: "ConsultantClients",
+    kpiKey: "ConsultantClients",
     title: "Total Clients",
     description: "Requires an authoritative consulting-client KPI",
     icon: Users,
@@ -283,6 +296,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantEngagements: {
     key: "ConsultantEngagements",
+    kpiKey: "ConsultantEngagements",
     title: "Active Engagements",
     description: "Requires an authoritative engagement KPI",
     icon: Briefcase,
@@ -291,6 +305,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantRevenue: {
     key: "ConsultantRevenue",
+    kpiKey: "ConsultantRevenue",
     title: "Monthly Revenue",
     description: "Requires an authoritative consulting-revenue KPI",
     icon: DollarSign,
@@ -299,6 +314,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantUtilization: {
     key: "ConsultantUtilization",
+    kpiKey: "ConsultantUtilization",
     title: "Utilization Rate",
     description: "Requires authoritative billable-time records",
     icon: TrendingUp,
@@ -307,6 +323,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantBillableHours: {
     key: "ConsultantBillableHours",
+    kpiKey: "ConsultantBillableHours",
     title: "Billable Hours",
     description: "Requires authoritative timesheet records",
     icon: Clock,
@@ -315,6 +332,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantProposalConversion: {
     key: "ConsultantProposalConversion",
+    kpiKey: "ConsultantProposalConversion",
     title: "Proposal Conversion",
     description: "Requires authoritative proposal workflow data",
     icon: TrendingUp,
@@ -323,6 +341,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantUpcomingMeetings: {
     key: "ConsultantUpcomingMeetings",
+    kpiKey: "ConsultantUpcomingMeetings",
     title: "Upcoming Meetings",
     description: "Requires authoritative calendar data",
     icon: Calendar,
@@ -331,6 +350,7 @@ const MODULE_CARDS: Record<string, DashboardCardDefinition> = {
   },
   ConsultantExpiringContracts: {
     key: "ConsultantExpiringContracts",
+    kpiKey: "ConsultantExpiringContracts",
     title: "Expiring Contracts",
     description: "Requires authoritative contract data",
     icon: AlertTriangle,
@@ -381,9 +401,8 @@ export function formatDashboardKpiValue(
   definition: DashboardCardDefinition,
   snapshot: DashboardKpiSnapshot,
 ): string | number {
-  if (!definition.authoritativeKpiKey) return "—";
-
-  const value = snapshot[definition.authoritativeKpiKey];
+  const value = snapshot.kpis?.[definition.kpiKey];
+  if (value === null || value === undefined) return "—";
   if (definition.format === "currency") {
     const amount = Number(value);
     return amount >= 1_000_000
