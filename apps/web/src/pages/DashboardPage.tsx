@@ -18,6 +18,7 @@ import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/Kw
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
 import { apiFetch } from '../services/apiClient.js';
 import { fetchDashboardKpiSnapshot, type DashboardKpiSnapshot } from '../services/dashboardKpiService.js';
+import { getDashboardCardDefinitions, formatDashboardKpiValue } from '../services/dashboardCardRegistry.js';
 import { DATA_CHANGED_EVENT } from '../services/dataChangeEvent.js';
 import { outboxMatchesScope } from '../indexedDb.js';
 import {
@@ -422,14 +423,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const interval = setInterval(() => { void refreshAuthoritativeKpis(); }, 3000);
     return () => clearInterval(interval);
   }, [refreshAuthoritativeKpis, tenantId, branchId, isOnline]);
-
-  const kpiMoney = useCallback((serverValue: number, offlineValue: number) => {
-    return isOnline ? (authoritativeKpis ? fmtCcy(serverValue) : '—') : fmtCcy(offlineValue);
-  }, [isOnline, authoritativeKpis]);
-
-  const kpiCount = useCallback((serverValue: number, offlineValue: number) => {
-    return isOnline ? (authoritativeKpis ? serverValue : '—') : offlineValue;
-  }, [isOnline, authoritativeKpis]);
 
   // ── Operational States ─────────────────────────────────────────────────────
   const [products, setProducts] = useState<LocalProduct[]>([]);
@@ -1686,92 +1679,59 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     </div>
   );
 
-  // ── KPI Grid Config ────────────────────────────────────────────────────────
-
+  // ── KPI Cards: definitions come from the Module Registry + Dashboard Card Registry.
+  // Calculation/authority remains in dashboardKpiService; this component only renders it.
   const kpiCards = useMemo((): KPICardProps[] => {
-    if (activeModule === 'BusinessConsultant') return [
-      { title: 'Total Clients',         value: '48 active',     desc: 'Directory portfolio',              icon: <Users className="h-5 w-5"/>,       accent: '#6366f1', trend: 'up', trendLabel: '+5 this month' },
-      { title: 'Active Engagements',    value: '18 projects',   desc: 'Retainer & advisory projects',     icon: <Briefcase className="h-5 w-5"/>,    accent: '#3b82f6' },
-      { title: 'Monthly Revenue',       value: 'Tsh 42.5M',     desc: 'Accrued consulting income',        icon: <DollarSign className="h-5 w-5"/>,   accent: '#f59e0b', trend: 'up' },
-      { title: 'Utilization Rate',      value: '84.2%',         desc: 'Target utilization >80%',          icon: <TrendingUp className="h-5 w-5"/>,   accent: '#10b981', trend: 'up' },
-      { title: 'Billable Hours',        value: '320 hrs',       desc: 'This month to date',               icon: <Clock className="h-5 w-5"/>,        accent: '#f43f5e', trend: 'up' },
-      { title: 'Proposal Conversion',   value: '68.5%',         desc: 'Sent vs accepted proposals',       icon: <BarChart2 className="h-5 w-5"/>,    accent: '#10b981', trend: 'up' },
-      { title: 'Upcoming Meetings',     value: '12 scheduled',  desc: 'Next 7 days',                      icon: <Calendar className="h-5 w-5"/>,     accent: '#3b82f6' },
-      { title: 'Expiring Contracts',    value: '3 expiring',    desc: 'Renewals pending review',          icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
-    ];
+    const definitions = getDashboardCardDefinitions(activeModule);
 
-    switch (activeModule) {
-      case 'Retail':
-        return [
-          { title: "Today's Sales", value: kpiMoney(authoritativeKpis?.salesToday ?? 0, stats.totalSales), desc: authoritativeKpis ? String(authoritativeKpis.todayOrderCount) + " completed transactions" : (isOnline ? "Waiting for authoritative PostgreSQL snapshot" : String(stats.todayOrderCount) + " transactions · " + String(stats.completedOrders) + " completed"), icon: <DollarSign className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Gross Profit (Real)', value: kpiMoney(authoritativeKpis?.grossProfit ?? 0, stats.todayGrossProfit), desc: authoritativeKpis ? 'PostgreSQL completed-sales gross profit' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline gross profit'), icon: <TrendingUp className="h-5 w-5"/>, accent: '#10b981' },
-          { title: 'Avg Order Value (AOV)', value: kpiMoney(authoritativeKpis?.aov ?? 0, stats.todayAOV), desc: authoritativeKpis ? String(authoritativeKpis.todayOrderCount) + ' completed orders' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline AOV'), icon: <ShoppingCart className="h-5 w-5"/>, accent: '#6366f1' },
-          { title: 'Total Products', value: kpiCount(authoritativeKpis?.productCount ?? 0, products.length), desc: authoritativeKpis ? String(authoritativeKpis.supplierCount) + ' active suppliers' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : String(stats.activeVariantCount) + ' variants · ' + String(stats.supplierCount) + ' suppliers'), icon: <Package className="h-5 w-5"/>, accent: '#f59e0b' },
-          { title: 'Stock Alerts', value: kpiCount(authoritativeKpis?.stockAlerts ?? 0, stats.lowStockCount + stats.outOfStockCount), desc: authoritativeKpis ? String(authoritativeKpis.outOfStockCount) + ' out of stock · ' + String(authoritativeKpis.lowStockCount) + ' low' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline stock alerts'), icon: <AlertTriangle className="h-5 w-5"/>, accent: '#ef4444' },
-          { title: 'Customer Debts', value: kpiMoney(authoritativeKpis?.customerDebts ?? 0, stats.totalLoans), desc: authoritativeKpis ? String(authoritativeKpis.customerCount) + ' active customers' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : String(stats.customerCount) + ' registered customers'), icon: <Users className="h-5 w-5"/>, accent: '#8b5cf6' },
-          { title: 'Inventory Value', value: kpiMoney(authoritativeKpis?.inventoryValue ?? 0, stats.inventoryVal), desc: authoritativeKpis ? 'PostgreSQL stock valuation snapshot' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline inventory valuation'), icon: <PiggyBank className="h-5 w-5"/>, accent: '#ec4899' },
-          {
-            title: 'Pending Sync',
-            value: stats.unsyncedCount,
-            desc: stats.unsyncedCount > 0
-              ? `${stats.unsyncedCount} mutations queued · ${stats.conflictCount > 0 ? `${stats.conflictCount} conflict${stats.conflictCount > 1 ? 's' : ''}` : 'syncing…'}`
-              : stats.conflictCount > 0
-                ? `${stats.conflictCount} server conflict${stats.conflictCount > 1 ? 's' : ''} — tap ⟳ to resolve`
-                : 'All changes synced to cloud',
-            icon: <RefreshCw className="h-5 w-5"/>,
-            accent: stats.conflictCount > 0 ? '#ef4444' : '#f97316',
-            action: isOnline ? { label: 'Force Sync', onClick: forceBootstrap } : undefined,
-          },
-        ];
+    return definitions.map((definition) => {
+      let value: string | number = "—";
+      let desc = definition.description;
+      let action: KPICardProps["action"] | undefined;
 
-      case 'Restaurant': {
-        const activeTablesLabel = stats.activeTables > 0 ? `${stats.activeTables} active` : 'None active';
-        const kitchenQueueLabel = stats.todayPendingOrders > 0 ? `${stats.todayPendingOrders} orders` : 'Queue clear';
-        const kitchenTrend: 'up' | 'down' | null = stats.todayPendingOrders > 5 ? 'down' : stats.todayPendingOrders > 0 ? 'up' : null;
-        return [
-          { title: 'Sales Today', value: kpiMoney(authoritativeKpis?.salesToday ?? 0, stats.totalSales), desc: authoritativeKpis ? String(authoritativeKpis.todayOrderCount) + ' completed orders' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline sales'), icon: <DollarSign className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Active Service', value: activeTablesLabel,          desc: 'Live orders in service window (last 2h)',                  icon: <Layers className="h-5 w-5"/>,       accent: '#10b981' },
-          { title: 'Kitchen Queue',  value: kitchenQueueLabel,          desc: stats.todayPendingOrders > 0 ? 'Pending orders in prep' : 'All orders fulfilled', icon: <Clock className="h-5 w-5"/>,  accent: '#f59e0b', trend: kitchenTrend, trendLabel: stats.todayPendingOrders > 5 ? 'High load' : undefined },
-          { title: 'Low Ingredients', value: kpiCount(authoritativeKpis?.lowStockCount ?? 0, stats.lowStockCount), desc: authoritativeKpis ? 'PostgreSQL low-stock snapshot' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline stock alert'), icon: <AlertTriangle className="h-5 w-5"/>, accent: '#ef4444' },
-        ];
+      if (definition.systemKey === "pendingOutbox") {
+        const pending = syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount;
+        const conflicts = syncStatus.abandonedOutboxCount ?? 0;
+        value = pending;
+        desc = pending > 0
+          ? `${pending} mutations awaiting cloud synchronization${conflicts > 0 ? ` · ${conflicts} retry-exhausted conflicts` : ""}`
+          : conflicts > 0
+            ? `${conflicts} retry-exhausted conflicts require review`
+            : "All local mutations are synchronized";
+        action = isOnline
+          ? { label: "Force Sync", onClick: forceBootstrap }
+          : undefined;
+      } else if (definition.authoritativeKpiKey && authoritativeKpis) {
+        value = formatDashboardKpiValue(definition, authoritativeKpis);
+        desc = isOnline
+          ? definition.description
+          : `${definition.description} · Last authoritative snapshot`;
+      } else if (definition.authoritativeKpiKey) {
+        desc = isOnline
+          ? `${definition.description} · Waiting for authoritative PostgreSQL KPI`
+          : `${definition.description} · No cached authoritative snapshot`;
+      } else {
+        desc = `${definition.description} · Authoritative KPI not registered`;
       }
 
-      case 'Pharmacy': {
-        const pendingRx = stats.pendingOrders;
-        const rxTrend: 'up' | 'down' | null = pendingRx > 10 ? 'down' : pendingRx > 0 ? 'up' : null;
-        return [
-          { title: 'Sales Today', value: kpiMoney(authoritativeKpis?.salesToday ?? 0, stats.totalSales), desc: authoritativeKpis ? String(authoritativeKpis.todayOrderCount) + ' completed sales' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline sales'), icon: <DollarSign className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Pending Rx',           value: pendingRx > 0 ? `${pendingRx} pending` : 'Queue clear', desc: 'Orders awaiting pharmacist validation', icon: <Clock className="h-5 w-5"/>, accent: '#f59e0b', trend: rxTrend, trendLabel: pendingRx > 10 ? 'High queue' : undefined },
-          { title: 'Near-Expiry Alerts',   value: stats.nearExpiryCount,     desc: 'Medicines expiring within 90 days',                       icon: <AlertTriangle className="h-5 w-5"/>,accent: '#ef4444' },
-          { title: 'Critically Low Drugs', value: kpiCount(authoritativeKpis?.lowStockCount ?? 0, stats.lowStockCount), desc: authoritativeKpis ? 'PostgreSQL low-stock snapshot' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline stock alert'), icon: <Package className="h-5 w-5"/>, accent: '#8b5cf6' },
-        ];
-      }
-
-      case 'SACCO':
-        return [
-          { title: 'Deposits & Savings',   value: fmtCcy(stats.totalSavings),        desc: 'Member savings pool balance',     icon: <PiggyBank className="h-5 w-5"/>, accent: '#10b981', trend: 'up' },
-          { title: 'Outstanding Loans',    value: fmtCcy(stats.totalLoans),           desc: 'Active lending portfolio value',  icon: <Briefcase className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Interest Earned YTD',  value: fmtCcy(stats.totalLoans * 0.12),   desc: 'Accrued yield from lending',      icon: <TrendingUp className="h-5 w-5"/>, accent: '#f59e0b', trend: 'up' },
-          { title: 'SACCO Members',        value: stats.customerCount,                desc: 'Registered active savers',        icon: <Users className="h-5 w-5"/>,     accent: '#6366f1', trend: stats.customerTrend ?? undefined, trendLabel: stats.customerTrendPct },
-        ];
-
-      case 'Poultry':
-        return [
-          { title: 'Total Animals',        value: '520 animals',   desc: 'Livestock & poultry register',    icon: <Footprints className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Active Flocks',        value: '4 flocks',      desc: 'Egg-layer production batches',    icon: <Egg className="h-5 w-5"/>,        accent: '#10b981' },
-          { title: 'Daily Production',     value: '450 eggs',      desc: '90% production yield today',      icon: <TrendingUp className="h-5 w-5"/>, accent: '#f59e0b', trend: 'up' },
-          { title: 'Mortality Rate',       value: '1.2%',          desc: 'Target mortality <3.0%',          icon: <AlertTriangle className="h-5 w-5"/>, accent: '#ef4444' },
-        ];
-
-      default:
-        return [
-          { title: 'Sales Today', value: kpiMoney(authoritativeKpis?.salesToday ?? 0, stats.totalSales), desc: authoritativeKpis ? String(authoritativeKpis.todayOrderCount) + ' completed sales' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline sales'), icon: <DollarSign className="h-5 w-5"/>, accent: '#3b82f6' },
-          { title: 'Inventory Valuation', value: kpiMoney(authoritativeKpis?.inventoryValue ?? 0, stats.inventoryVal), desc: authoritativeKpis ? 'PostgreSQL stock valuation snapshot' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline inventory valuation'), icon: <Package className="h-5 w-5"/>, accent: '#10b981' },
-          { title: 'Active Contacts', value: kpiCount(authoritativeKpis?.customerCount ?? 0, stats.customerCount), desc: authoritativeKpis ? 'Active customers in branch scope' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline contacts'), icon: <Users className="h-5 w-5"/>, accent: '#6366f1' },
-          { title: 'System Alerts', value: kpiCount(authoritativeKpis?.stockAlerts ?? 0, stats.lowStockCount), desc: authoritativeKpis ? 'PostgreSQL stock alert snapshot' : (isOnline ? 'Waiting for authoritative PostgreSQL snapshot' : 'Local offline stock alerts'), icon: <AlertTriangle className="h-5 w-5"/>, accent: '#f59e0b' },
-        ];
-    }
-  }, [activeModule, stats, products, productVariants, authoritativeKpis, isOnline, kpiMoney, kpiCount]);
+      return {
+        title: definition.title,
+        value,
+        desc,
+        icon: React.createElement(definition.icon, { className: "h-5 w-5" }),
+        accent: definition.accent,
+        action,
+      };
+    });
+  }, [
+    activeModule,
+    authoritativeKpis,
+    forceBootstrap,
+    isOnline,
+    syncStatus.abandonedOutboxCount,
+    syncStatus.failedOutboxCount,
+    syncStatus.pendingOutboxCount,
+  ]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
