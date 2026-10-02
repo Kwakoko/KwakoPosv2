@@ -308,6 +308,7 @@ export class SyncEngine {
   }
 
   processDelta(ctx: TenantContext, req: SyncDeltaRequest): SyncDeltaResponse {
+    if (!ctx?.tenantId || !ctx?.branchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED: authenticated tenant and branch are required");
     const sinceDate = req.since ? new Date(req.since) : new Date(0);
     if (Number.isNaN(sinceDate.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid delta cursor");
     const anchor = new Date();
@@ -335,6 +336,7 @@ export class SyncEngine {
   }
 
   processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): SyncBootstrapResponse {
+    if (!ctx?.tenantId || !ctx?.branchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED: authenticated tenant and branch are required");
     const anchor = new Date().toISOString();
     const products = this.productRepo.getProducts(ctx);
     const variants = Array.from(this.store.variants.values()).filter(
@@ -342,7 +344,7 @@ export class SyncEngine {
     );
     const stockLedger = this.stockRepo.getLedger(ctx);
     const adjustments = Array.from(this.store.stockAdjustments.values()).filter(
-      (a) => a.tenantId === ctx.tenantId && (!ctx.branchId || !a.branchId || a.branchId === ctx.branchId)
+      (a) => a.tenantId === ctx.tenantId && (a.branchId === ctx.branchId)
     );
     const customers = this.commercialRepo.getCustomers(ctx);
     const suppliers = this.commercialRepo.getSuppliers(ctx);
@@ -419,7 +421,7 @@ export class SyncEngine {
     }
 
     const serverVariants = Array.from(this.store.variants.values()).filter(
-      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId)
+      (v) => v.tenantId === ctx.tenantId && (v.branchId === ctx.branchId)
     );
     for (const v of serverVariants) {
       if (!serverProductIds.has(v.productId)) {
