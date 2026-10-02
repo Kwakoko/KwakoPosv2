@@ -18,6 +18,8 @@ export interface DashboardKpiSnapshot {
   customerCount: number;
   productCount: number;
   supplierCount: number;
+  /** Keyed KPI values consumed by the dashboard card registry. Null means the metric is not implemented for this module. */
+  kpis: Record<string, number | null>;
 }
 
 /**
