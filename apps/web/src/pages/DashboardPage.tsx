@@ -19,6 +19,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../co
 import { apiFetch } from '../services/apiClient.js';
 import { fetchDashboardKpiSnapshot, type DashboardKpiSnapshot } from '../services/dashboardKpiService.js';
 import { DATA_CHANGED_EVENT } from '../services/dataChangeEvent.js';
+import { outboxMatchesScope } from '../indexedDb.js';
 import {
   TrendingUp, TrendingDown, DollarSign, Package, Users,
   AlertTriangle, Clock, PiggyBank, Briefcase,
@@ -473,6 +474,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   // 1. Ensure module loading state is tracked clearly
   const isChartEngineReady = !!rechartsModule && typeof AreaChart === "function";
 
+  // Local operational records are accepted only when they carry the
+  // authenticated tenant + exact branch scope. Missing/"all"/HQ scopes are not accepted.
+  const hasStrictScope = useCallback((record: any) => {
+    const recordTenantId = record?.tenantId ?? record?.tenant_id;
+    const recordBranchId = record?.branchId ?? record?.branch_id;
+    return Boolean(
+      tenantId &&
+      branchId &&
+      recordTenantId === tenantId &&
+      recordBranchId === branchId
+    );
+  }, [tenantId, branchId]);
+
   // ── Load Operational Data (IndexedDB + API) ────────────────────────────────
   const loadData = useCallback(async () => {
     try {
@@ -488,10 +502,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           const aMod = (activeModule || 'Retail').toLowerCase();
           const matchMod = pMod === aMod || pMod === 'all' || !pAny.module;
           const pBranch = pAny.branch_id || pAny.branchId;
-          const matchBranch = !pBranch || pBranch === branchId || pBranch === 'all' || !branchId || String(pBranch).toLowerCase().includes('hq') || String(branchId).toLowerCase().includes('hq');
           const pTenant = pAny.tenant_id || pAny.tenantId;
-          const matchTenant = !tenantId || !pTenant || pTenant === tenantId;
-          if (matchMod && matchBranch && matchTenant) {
+          const matchScope = hasStrictScope({ tenantId: pTenant, branchId: pBranch });
+          if (matchMod && matchScope) {
             const effectiveStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? pAny.quantity ?? 0);
             localProds.push({
               id: p.id,
@@ -515,7 +528,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       if (db.productVariants) {
         for (const v of db.productVariants.values()) {
           const vAny = v as any;
-          if (vAny.status !== 'Inactive' && !vAny.deletedAt && !vAny.deleted_at) {
+          if (vAny.status !== 'Inactive' && !vAny.deletedAt && !vAny.deleted_at && hasStrictScope(vAny)) {
             localVariants.push({
               id: v.id,
               productId: v.productId,
@@ -541,9 +554,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         for (const c of db.customers.values()) {
           const cAny = c as any;
           const matchType = !cAny.type || cAny.type.toLowerCase() === targetType.toLowerCase() || cAny.type.toLowerCase() === 'customer';
+          const cTenant = cAny.tenant_id || cAny.tenantId;
           const cBranch = cAny.branch_id || cAny.branchId;
-          const matchBranch = !branchId || !cBranch || cBranch === branchId || cBranch === 'all' || String(branchId).toLowerCase().includes('hq') || String(cBranch).toLowerCase().includes('hq');
-          if (matchBranch && matchType) {
+          const matchScope = hasStrictScope({ tenantId: cTenant, branchId: cBranch });
+          if (matchScope && matchType) {
             localCusts.push({
               id: c.id,
               name: c.name,
@@ -556,10 +570,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         }
       }
 
-      // Merge with customer creations from outbox
+      // Pending local customer mutations may support offline UI, but only inside exact scope.
       if (db.syncOutbox) {
         for (const item of db.syncOutbox.values()) {
-          if (item.entityType === 'Customer') {
+          if (item.entityType === 'Customer' && outboxMatchesScope(item, tenantId, branchId)) {
             const p = (item.payload || {}) as any;
             const pId = item.entityId || p.id;
             const existingIdx = localCusts.findIndex(c => c.id === pId);
@@ -584,7 +598,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       const localSupps: LocalSupplier[] = [];
       if (db.suppliers) {
         for (const s of db.suppliers.values()) {
-          localSupps.push({ id: s.id, name: s.name });
+          const sAny = s as any;
+          if (hasStrictScope(sAny)) {
+            localSupps.push({ id: s.id, name: s.name });
+          }
         }
       }
 
@@ -593,7 +610,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       try {
         const res = await apiFetch<{ success: boolean; data: any[] }>('/api/v1/pos/sales');
         if (res.success && Array.isArray(res.data)) {
-          parsedOrders = res.data.map((s: any) => ({
+          parsedOrders = res.data.filter((s: any) => hasStrictScope(s)).map((s: any) => ({
             id: s.id || s.saleNumber || s.receiptNumber || `ord_${Date.now()}`,
             timestamp: new Date(s.createdAt || s.soldAt || s.timestamp || Date.now()).getTime(),
             total: Number(s.totalAmount || s.grandTotal || s.total || 0),
@@ -620,6 +637,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       if (db.sales) {
         for (const s of db.sales.values()) {
           const sAny = s as any;
+          if (!hasStrictScope(sAny)) continue;
           const sId = sAny.id || sAny.saleNumber;
           if (!sId) continue;
           const existingIdx = parsedOrders.findIndex(o => o.id === sId);
@@ -654,10 +672,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         }
       }
 
-      // Merge with outbox pending sales
+      // Pending sales are operational-only and must remain exact-scope.
+      // They are never included in authoritative online KPI calculations.
       if (db.syncOutbox) {
         for (const item of db.syncOutbox.values()) {
-          if (item.entityType === 'Sale') {
+          if (item.entityType === 'Sale' && outboxMatchesScope(item, tenantId, branchId)) {
             const p = (item.payload || {}) as any;
             const pId = item.entityId || p.id || p.saleNumber;
             const existingIdx = parsedOrders.findIndex(o => o.id === pId);
@@ -702,7 +721,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     } catch {
       // Graceful fallback
     }
-  }, [db, activeModule, branchId, tenantId]);
+  }, [db, activeModule, branchId, tenantId, hasStrictScope]);
 
   useEffect(() => {
     void loadData();
