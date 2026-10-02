@@ -33,10 +33,5 @@ export const PLATFORM_INTELLIGENCE_CERTIFICATION_PILLARS: PlatformIntelligenceCe
   makePillar("INTEL-05", "Scenario evaluation models growth impact and stockout risk percentage", e => {
     const sc = e.evaluateScenario("CERT", "GROWTH_25", 25);
     return Boolean(sc.predictedRevenueImpactTzs > 0 && sc.predictedStockoutRiskPct > 0);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `INTEL-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Platform Intelligence OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

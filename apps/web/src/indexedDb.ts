@@ -1791,6 +1791,11 @@ export class LocalIndexedDbStore {
     this.setPersistenceStatus(item, "SYNC_PENDING");
   }
 
+  deleteSyncMetadata(key: string): void {
+    this.syncMetadata.delete(key);
+    if (this.nativeDb) this.persistDelete("syncMetadata", key);
+  }
+
   markOutboxSynced(operationId: string): void {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
@@ -1822,6 +1827,7 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "FAILED";
+    item.error = errorReason;
     item.retryCount = (item.retryCount ?? 0) + 1;
     // Permanently abandon items that have hit the server-rejection retry cap.
     // They will no longer be re-queued by retryFailedOutbox() and will be

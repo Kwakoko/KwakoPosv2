@@ -47,10 +47,5 @@ export const AUTONOMOUS_BUSINESS_CERTIFICATION_PILLARS: AutonomousBusinessCertif
       financialImpactTzs: 50000,
     });
     return Boolean(act.success === false && e.getHealthSummary("CERT").isGlobalKillSwitchActive === true);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `AUTO-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Autonomous Business OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

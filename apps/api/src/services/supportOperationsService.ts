@@ -10,7 +10,7 @@ const SLA_MINUTES: Record<SupportSeverity, number> = { P0: 15, P1: 60, P2: 240, 
 function assertTenant(tenantId: string): string { const value = String(tenantId || "").trim(); if (!value) throw new Error("TENANT_SCOPE_REQUIRED"); return value; }
 
 async function audit(tenantId: string | null, eventType: string, payload: Record<string, unknown>, ticketId?: string, incidentId?: string, actorId?: string) {
-  await prisma.$executeRawUnsafe(`INSERT INTO "SupportEvent" ("id","tenant_id","ticket_id","incident_id","actor_type","actor_id","event_type","payload") VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, randomUUID(), tenantId, ticketId ?? null, incidentId ?? null, actorId ? "USER" : "SYSTEM", actorId ?? null, eventType, JSON.stringify(payload));
+  await prisma.$executeRaw`INSERT INTO "SupportEvent" ("id","tenant_id","ticket_id","incident_id","actor_type","actor_id","event_type","payload") VALUES (${randomUUID()},${tenantId},${ticketId ?? null},${incidentId ?? null},${actorId ? "USER" : "SYSTEM"},${actorId ?? null},${eventType},${JSON.stringify(payload)}::jsonb)`;
 }
 // countByStatus is only used for "SupportTicket" which uses snake_case raw-SQL columns — tenant_id is correct
 async function countSupportTicketsByStatus(tenantId: string): Promise<Record<string, number>> {

@@ -1,10 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@kwakopos2/database";
-
-function isArbitrarySqlConsoleEnabled(): boolean {
-  // Production must never expose arbitrary SQL execution. Non-production access is opt-in.
-  return process.env.NODE_ENV !== "production" && process.env.SUPER_ADMIN_DB_SQL_CONSOLE_ENABLED === "true";
-}
 
 function requireSuperAdmin(req: any): string {
   const ctx = req.tenantContext;
@@ -53,40 +49,6 @@ function jsonSafe<T>(value: T): T {
 }
 
 export function superAdminDatabaseRoutes(server: FastifyInstance): void {
-  server.post("/api/v1/super-admin/db/query", async (req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      if (!isArbitrarySqlConsoleEnabled()) {
-        return reply.status(404).send({ success: false, error: { code: "DATABASE_SQL_CONSOLE_DISABLED", message: "Arbitrary SQL execution is disabled." } });
-      }
-      requireSuperAdmin(req);
-      const body = (req.body || {}) as any;
-      const query = String(body.query || "").trim();
-      const readOnly = body.readOnly !== false;
-      if (!query) return reply.status(400).send({ success: false, error: "SQL query cannot be empty." });
-
-      const isMutation = /^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE)\b/i.test(query);
-      if (readOnly && isMutation) {
-        return reply.status(403).send({ success: false, error: "Mutation rejected while in Read-Only mode." });
-      }
-
-      const started = performance.now();
-      const rows = await prisma.$queryRawUnsafe<any[]>(query);
-      const normalized = Array.isArray(rows) ? rows : [rows];
-      return reply.send({
-        success: true,
-        command: query.split(/\s+/)[0].toUpperCase(),
-        rowCount: normalized.length,
-        fields: normalized.length > 0 ? Object.keys(normalized[0]).map((name) => ({ name, dataTypeID: 25 })) : [],
-        rows: jsonSafe(normalized),
-        durationMs: Math.round(performance.now() - started),
-        source: "postgresql",
-      });
-    } catch (error: any) {
-      req.log.error({ err: error }, "PostgreSQL query failed");
-      return reply.status(500).send({ success: false, error: { code: "DATABASE_QUERY_FAILED", message: "PostgreSQL query execution failed." } });
-    }
-  });
-
   server.get("/api/v1/super-admin/db/tables", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       requireSuperAdmin(req);
@@ -117,14 +79,12 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
 
       const limit = Math.min(100, Math.max(1, Number.parseInt(String(query.limit || "50"), 10) || 50));
       const offset = Math.max(0, Number.parseInt(String(query.offset || "0"), 10) || 0);
-      const identifier = quoteIdentifier(table);
-      const rows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT * FROM ${identifier} ORDER BY 1 OFFSET $1 LIMIT $2`,
-        offset,
-        limit,
+      const identifier = Prisma.raw(table);
+      const rows = await prisma.$queryRaw<any[]>(
+        Prisma.sql`SELECT * FROM ${identifier} ORDER BY 1 OFFSET ${offset} LIMIT ${limit}`,
       );
-      const countRows = await prisma.$queryRawUnsafe<any[]>(
-        `SELECT COUNT(*)::bigint AS count FROM ${identifier}`,
+      const countRows = await prisma.$queryRaw<any[]>(
+        Prisma.sql`SELECT COUNT(*)::bigint AS count FROM ${identifier}`,
       );
       return reply.send({
         success: true,

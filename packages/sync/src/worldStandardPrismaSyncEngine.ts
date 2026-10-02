@@ -82,17 +82,70 @@ export class WorldStandardPrismaSyncEngine {
     localPayload: unknown; remotePayload: unknown; deviceId?: string;
   }): Promise<void> {
     await prisma.$transaction(async (tx: any) => {
+      const existing = await tx.$queryRawUnsafe(
+        "SELECT status, tenant_id, branch_id FROM sync_conflict_record WHERE id = $1 FOR UPDATE",
+        conflict.id,
+      ) as Array<{ status: string; tenant_id: string; branch_id: string }>;
+      if (existing[0] && (existing[0].tenant_id !== ctx.tenantId || existing[0].branch_id !== ctx.branchId)) {
+        throw new Error("SYNC_CONFLICT_ID_COLLISION");
+      }
+      if (existing[0]?.status && existing[0].status !== "OPEN") return;
+      if (existing[0]?.status === "OPEN") {
+        await tx.$executeRawUnsafe(
+          "UPDATE sync_conflict_record SET remote_payload = $1::jsonb WHERE id = $2 AND tenant_id = $3 AND branch_id = $4 AND status = 'OPEN'",
+          JSON.stringify(conflict.remotePayload || {}), conflict.id, ctx.tenantId, ctx.branchId,
+        );
+        return;
+      }
       await tx.$executeRawUnsafe(
-        "INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,'OPEN') ON CONFLICT (id) DO UPDATE SET remote_payload = EXCLUDED.remote_payload WHERE sync_conflict_record.status = 'OPEN'",
+        "INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,'OPEN') ON CONFLICT (id) DO NOTHING",
         conflict.id, ctx.tenantId, ctx.branchId, conflict.operationId, conflict.entityType, conflict.entityId, conflict.operationType,
         JSON.stringify(conflict.localPayload || {}), JSON.stringify(conflict.remotePayload || {})
       );
       await tx.auditEvent.create({
-        data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: conflict.deviceId || "sync-engine",
-          action: "SYNC_CONFLICT_DETECTED", entityType: conflict.entityType, entityId: conflict.entityId,
-          metadata: { conflictId: conflict.id, operationId: conflict.operationId, operationType: conflict.operationType, localPayload: conflict.localPayload, remotePayload: conflict.remotePayload } }
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: conflict.deviceId || "sync-engine", action: "SYNC_CONFLICT_DETECTED",
+          entityType: conflict.entityType, entityId: conflict.entityId,
+          metadata: {
+            conflictId: conflict.id, operationId: conflict.operationId,
+            operationType: conflict.operationType, localPayload: conflict.localPayload,
+            remotePayload: conflict.remotePayload,
+          },
+        },
       });
     });
+  }
+
+  public async registerConflict(ctx: TenantContext, input: {
+    conflictId: string;
+    operationId: string;
+    entityType: string;
+    entityId: string;
+    operationType?: string;
+    localPayload?: unknown;
+    remotePayload?: unknown;
+    deviceId?: string;
+  }): Promise<{ status: string; conflictId: string }> {
+    await this.ensureInfrastructure();
+    if (!input.conflictId || !input.operationId || !input.entityType || !input.entityId) {
+      throw new Error("SYNC_CONFLICT_REGISTRATION_INVALID");
+    }
+    await this.persistConflict(ctx, {
+      id: input.conflictId,
+      operationId: input.operationId,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      operationType: input.operationType || "UPDATE",
+      localPayload: input.localPayload || {},
+      remotePayload: input.remotePayload || {},
+      deviceId: input.deviceId,
+    });
+    const rows = await prisma.$queryRawUnsafe<Array<{ status: string }>>(
+      "SELECT status FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3",
+      input.conflictId, ctx.tenantId, ctx.branchId,
+    );
+    return { status: String(rows[0]?.status || "OPEN"), conflictId: input.conflictId };
   }
 
   private async scopedRecord(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<any> {
@@ -684,7 +737,12 @@ const now = new Date();
       const conflict = rows[0];
       if (!conflict) throw new Error("SYNC_CONFLICT_NOT_FOUND");
       if (conflict.status !== "OPEN") return { status: conflict.status };
-      const chosen = resolution === "ACCEPT_SERVER" ? conflict.remote_payload : resolution === "ACCEPT_LOCAL" ? conflict.local_payload : mergedPayload;
+
+      const chosen = resolution === "ACCEPT_SERVER"
+        ? conflict.remote_payload
+        : resolution === "ACCEPT_LOCAL"
+          ? conflict.local_payload
+          : mergedPayload;
       if (!chosen || typeof chosen !== "object") throw new Error("SYNC_CONFLICT_MERGED_PAYLOAD_REQUIRED");
       const entityType = String(conflict.entity_type);
       const resolverOperationId = "conflict-resolution:" + conflictId;

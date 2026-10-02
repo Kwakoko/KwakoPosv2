@@ -1,0 +1,95 @@
+name: Conflict Resolution Certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/sync/**"
+      - "apps/web/src/clientSyncEngine.ts"
+      - "apps/web/src/indexedDb.ts"
+      - "apps/web/src/components/SyncConflictResolutionModal.tsx"
+      - "apps/web/src/layouts/SystemAppShellLayout.tsx"
+      - "apps/api/src/server.ts"
+      - "scripts/certify-sync-conflict-resolution.ts"
+      - "tests/integration/sync-conflict-detection-convergence.test.ts"
+      - "docs/convergence/CONFLICT_RESOLUTION_MATRIX.md"
+      - "package.json"
+  push:
+    branches:
+      - conflict-remediation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conflict-certification:
+    name: Conflict Resolution — PostgreSQL Certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kwakopos_conflict_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_conflict_ci"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_conflict_ci?schema=public
+      NODE_ENV: test
+      CI: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Apply Prisma schema to ephemeral PostgreSQL
+        run: npm exec prisma db push --workspace=@kwakopos2/database --accept-data-loss --skip-generate
+
+      - name: Generate CI release manifest from authoritative generator
+        run: |
+          npx tsx scripts/release/generate-release-manifest.ts \
+            --version "$(node -p "require('./package.json').version")" \
+            --gitSha "$(git rev-parse HEAD)" \
+            --certification FAIL \
+            --environment ci \
+            --releaseChannel stable
+
+      - name: Build sync dependencies
+        run: |
+          npm run build --workspace=@kwakopos2/contracts
+          npm run build --workspace=@kwakopos2/config
+          npm run build --workspace=@kwakopos2/domain
+          npm run build --workspace=@kwakopos2/database
+
+      - name: Build sync engine
+        run: npm run build --workspace=@kwakopos2/sync
+
+      - name: Build web client
+        run: npm run build --workspace=@kwakopos2/web
+
+      - name: Run conflict resolution certification
+        run: npm run certify:conflicts
+
+      - name: Run deterministic client conflict test
+        run: npx vitest run tests/integration/sync-conflict-detection-convergence.test.ts tests/sync/super-strong-sync.test.ts --reporter=dot

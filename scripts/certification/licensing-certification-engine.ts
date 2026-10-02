@@ -34,10 +34,5 @@ export const LICENSING_CERTIFICATION_PILLARS: LicensingCertificationPillar[] = [
   }),
   makePillar("LIC-05", "Audit trail records license issuance and entitlement checks", e => {
     return e.getAuditTrail("CERT").length >= 3;
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `LIC-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Licensing OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

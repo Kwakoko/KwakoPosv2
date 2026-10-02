@@ -842,19 +842,19 @@ model Tax {
 
 model SyncOperation {
   id              String    @id @default(uuid())
-  tenantId        String
-  branchId        String
-  deviceId        String
-  operationId     String
-  entityType      String // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession
-  entityId        String
-  operationType   String // CREATE, UPDATE, DELETE
+  tenantId        String    @map("tenant_id")
+  branchId        String    @map("branch_id")
+  deviceId        String    @map("device_id")
+  operationId     String    @map("operation_id")
+  entityType      String    @map("entity_type") // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession
+  entityId        String    @map("entity_id")
+  operationType   String    @map("operation_type") // CREATE, UPDATE, DELETE
   payload         Json
   status          String    @default("PROCESSED")
-  idempotencyKey  String
-  clientCreatedAt DateTime
-  processedAt     DateTime?
-  createdAt       DateTime  @default(now())
+  idempotencyKey  String    @map("idempotency_key")
+  clientCreatedAt DateTime  @map("client_created_at")
+  processedAt     DateTime? @map("processed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
   tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch          Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
@@ -2922,3 +2922,130 @@ model SyncControlState {
 
   @@map("sync_control_state")
 }
+
+model RollbackRequest {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  branchId              String?
+  requestedBy           String
+  requesterEmail        String
+  requesterRole         String
+  approvedBy            String?
+  approverEmail         String?
+  executedBy            String?
+  rollbackScope         String
+  targetType            String
+  targetId              String
+  targetVersion         String   @default("HEAD")
+  sourceVersion         String   @default("PREVIOUS")
+  reason                String
+  incidentId            String?
+  businessImpact        String   @default("")
+  riskLevel             String
+  status                String   @default("REQUESTED")
+  authorizationState    String   @default("PENDING")
+  approvalTimestamp     DateTime?
+  executionTimestamp    DateTime?
+  verificationTimestamp DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  expiresAt             DateTime
+  requestHash           String
+  executionHash         String?
+  recoveryPointId       String?
+  snapshotReference     String?
+  syncEpochBefore      Int      @default(1000)
+  syncEpochAfter       Int?
+  policyVersion         String   @default("1.0.0")
+  impactReport          Json?
+  isEmergency           Boolean  @default(false)
+  postIncidentReviewTaskId String?
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, branchId])
+  @@map("rollback_requests")
+}
+
+model RollbackExecutionLock {
+  id                String   @id @default(uuid())
+  tenantId          String
+  branchId          String?
+  rollbackRequestId String
+  rollbackScope     String
+  scopeKey          String   @unique
+  lockOwner         String
+  acquiredAt        DateTime @default(now())
+  expiresAt         DateTime
+  releasedAt        DateTime?
+  holdingNodeId      String?
+  isExpired         Boolean  @default(false)
+
+  @@index([tenantId, rollbackScope])
+  @@index([expiresAt])
+  @@map("rollback_execution_locks")
+}
+
+model RollbackRecoveryPoint {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  branchId              String?
+  rollbackRequestId     String
+  databaseVersion       String   @default("2.13.0")
+  schemaVersion         String   @default("2.13.0")
+  applicationVersion    String   @default("2.13.0")
+  syncEpoch             Int
+  checksum              String
+  integrityStatus       String   @default("VALID")
+  createdAt             DateTime @default(now())
+  verifiedAt            DateTime?
+
+  @@index([tenantId, createdAt])
+  @@index([rollbackRequestId])
+  @@map("rollback_recovery_points")
+}
+
+model RollbackAuditEvent {
+  id                 String   @id @default(uuid())
+  eventType          String
+  rollbackRequestId  String
+  tenantId           String
+  branchId           String?
+  actorId            String
+  actorEmail         String
+  actorRole          String
+  scope              String
+  target             String
+  reason             String
+  riskLevel          String
+  previousState      String?
+  newState            String
+  approvalReference  String?
+  executionReference String?
+  result             String
+  errorCode          String?
+  clientIp            String   @default("127.0.0.1")
+  deviceId            String   @default("system")
+  timestamp          DateTime @default(now())
+  previousHash       String
+  eventHash          String
+
+  @@index([tenantId, rollbackRequestId, timestamp])
+  @@index([tenantId, timestamp])
+  @@map("rollback_audit_events")
+}
+
+model RollbackSyncState {
+  id                String   @id @default(uuid())
+  tenantId          String
+  branchId          String?
+  scopeKey          String   @unique
+  syncEpoch         Int      @default(1000)
+  barrierActive     Boolean  @default(false)
+  barrierEngagedAt  DateTime?
+  barrierReleasedAt DateTime?
+
+  @@index([tenantId, branchId])
+  @@map("rollback_sync_states")
+}
+

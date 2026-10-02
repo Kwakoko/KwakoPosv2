@@ -49,12 +49,7 @@ export const FULL_SYSTEM_CERTIFICATION_PILLARS: FullSystemCertificationPillar[] 
     } catch {
       return false;
     }
-  }),
-  ...Array.from({ length: 175 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `KFOS-${pNum.toString().padStart(3, "0")}`;
-    return makePillar(pId, `Kwakoko Business Operating System Certification Control #${pNum}`, e => e.getHealthSummary("SYSTEM").authorityOperational === true);
-  }),
+  })
   makePillar("KFOS-182", "Master Platform Certification Closure: System fully authorized, sealed, and ready for production operations", e => {
     return e.getHealthSummary("SYSTEM").authorityOperational === true;
   }),

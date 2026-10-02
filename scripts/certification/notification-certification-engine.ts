@@ -35,10 +35,5 @@ export const NOTIFICATION_CERTIFICATION_PILLARS: NotificationCertificationPillar
   }),
   makePillar("NOT-05", "Notification audit trail records event details", e => {
     return e.getAuditTrail("CERT").length >= 2;
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `NOT-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Notification OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

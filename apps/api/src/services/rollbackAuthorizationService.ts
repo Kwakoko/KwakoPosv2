@@ -523,7 +523,8 @@ export class RollbackAuthorizationService {
 
   public async getAuditTrail(ctx: TenantContext, requestId?: string, tenantId?: string): Promise<RollbackAuditEvent[]> {
     assertRollbackAuthorized(ctx, "RECORD", "audit");
-    return this.repo.getAuditEvents(requestId, tenantId);
+    const effectiveTenantId = tenantId || ctx.tenantId;
+    return this.repo.getAuditEvents(requestId, effectiveTenantId);
   }
 
   public async getMetrics(ctx: TenantContext): Promise<RollbackMetrics> {
