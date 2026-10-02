@@ -82,10 +82,13 @@ export class WorldStandardPrismaSyncEngine {
     localPayload: unknown; remotePayload: unknown; deviceId?: string;
   }): Promise<void> {
     await prisma.$transaction(async (tx: any) => {
-      const existing = await tx.$queryRawUnsafe<Array<{ status: string }>>(
-        "SELECT status FROM sync_conflict_record WHERE id = $1 FOR UPDATE",
+      const existing = await tx.$queryRawUnsafe<Array<{ status: string; tenant_id: string; branch_id: string }>>(
+        "SELECT status, tenant_id, branch_id FROM sync_conflict_record WHERE id = $1 FOR UPDATE",
         conflict.id,
       );
+      if (existing[0] && (existing[0].tenant_id !== ctx.tenantId || existing[0].branch_id !== ctx.branchId)) {
+        throw new Error("SYNC_CONFLICT_ID_COLLISION");
+      }
       if (existing[0]?.status && existing[0].status !== "OPEN") return;
       if (existing[0]?.status === "OPEN") {
         await tx.$executeRawUnsafe(
@@ -123,7 +126,7 @@ export class WorldStandardPrismaSyncEngine {
     localPayload?: unknown;
     remotePayload?: unknown;
     deviceId?: string;
-  }): Promise<{ status: "OPEN"; conflictId: string }> {
+  }): Promise<{ status: string; conflictId: string }> {
     if (!input.conflictId || !input.operationId || !input.entityType || !input.entityId) {
       throw new Error("SYNC_CONFLICT_REGISTRATION_INVALID");
     }
@@ -137,7 +140,11 @@ export class WorldStandardPrismaSyncEngine {
       remotePayload: input.remotePayload || {},
       deviceId: input.deviceId,
     });
-    return { status: "OPEN", conflictId: input.conflictId };
+    const rows = await prisma.$queryRawUnsafe<Array<{ status: string }>>(
+      "SELECT status FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3",
+      input.conflictId, ctx.tenantId, ctx.branchId,
+    );
+    return { status: String(rows[0]?.status || "OPEN"), conflictId: input.conflictId };
   }
 
   private async scopedRecord(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<any> {
