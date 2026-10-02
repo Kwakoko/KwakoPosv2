@@ -1827,6 +1827,7 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "FAILED";
+    item.error = errorReason;
     item.retryCount = (item.retryCount ?? 0) + 1;
     // Permanently abandon items that have hit the server-rejection retry cap.
     // They will no longer be re-queued by retryFailedOutbox() and will be
