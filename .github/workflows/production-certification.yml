@@ -57,8 +57,6 @@ jobs:
         run: npx tsx scripts/ops/synthetic-monitor.ts
       - name: Run foundation certification
         run: npm run certify
-      - name: Run full-system certification campaign
-        run: npm run certify:campaign
       - name: Run security certification
         run: npm run certify:security
       - name: Assert production mutation boundary

@@ -51,8 +51,6 @@ jobs:
         run: npm run certify:security
       - name: Gate E — Database Migration Contract
         run: npx tsx scripts/release/database-migration-gate.ts
-      - name: Gate F — Full-System Certification Campaign
-        run: npm run certify:campaign
       - name: Gate G — Release Candidate Approval Determination
         run: npx tsx scripts/release/release-candidate-engine.ts
       - name: Gate H — Assert no release mutation is performed here

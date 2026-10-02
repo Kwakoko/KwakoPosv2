@@ -36,10 +36,5 @@ export const DOCUMENT_CERTIFICATION_PILLARS: DocumentCertificationPillar[] = [
   makePillar("DOC-05", "Health summary tracks storage bytes and OCR count", e => {
     const hs = e.getHealthSummary("CERT");
     return Boolean(hs.totalDocumentsCount >= 1 && hs.ocrExtractedCount >= 1);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `DOC-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Document OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

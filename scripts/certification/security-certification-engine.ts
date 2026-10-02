@@ -36,10 +36,5 @@ export const SECURITY_CERTIFICATION_PILLARS: SecurityCertificationPillar[] = [
   makePillar("SEC-05", "IP blocking registers tenant-isolated block rule", e => {
     e.blockIp("CERT", "10.0.0.99", "USR-SOC-LEAD");
     return Boolean(e.isIpBlocked("CERT", "10.0.0.99") === true && e.isIpBlocked("OTHER", "10.0.0.99") === false);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `SEC-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Security OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

@@ -39,10 +39,5 @@ export const MULTISITE_CERTIFICATION_PILLARS: MultiSiteCertificationPillar[] = [
   }),
   makePillar("MS-05", "Audit trail logs multi-site node creation and metric consolidation", e => {
     return e.getAuditTrail("CERT").length >= 4;
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `MS-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Multi-Site OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

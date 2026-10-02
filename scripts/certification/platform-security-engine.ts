@@ -36,10 +36,5 @@ export const PLATFORM_SECURITY_CERTIFICATION_PILLARS: PlatformSecurityCertificat
   makePillar("SEC-05", "Activating security kill switch updates security posture and health summary", e => {
     e.activateKillSwitch("CERT", "AI", "USR-CISO");
     return Boolean(e.getHealthSummary("CERT").isKillSwitchActive === true);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `SEC-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Platform Security OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

@@ -21,6 +21,11 @@ import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
+  const safeRelative = (relativePath || "").replace(/^\/+/, "");
+  if (!safeRelative || safeRelative.includes("..") || path.isAbsolute(safeRelative)) {
+    return null;
+  }
+
   const candidateDirs = [
     path.resolve(process.cwd(), "apps/web/dist"),
     path.resolve(process.cwd(), "dist/apps/web/dist"),
@@ -30,10 +35,16 @@ function resolveWebDistFile(relativePath: string): string | null {
     path.resolve(process.cwd(), "../web/public"),
     path.resolve(process.cwd(), "../../apps/web/public"),
   ];
+
   for (const dir of candidateDirs) {
-    const full = path.join(dir, relativePath);
-    if (fs.existsSync(full)) return full;
+    const baseDir = path.resolve(dir);
+    const resolved = path.resolve(baseDir, safeRelative);
+
+    if (resolved === baseDir || resolved.startsWith(baseDir + path.sep)) {
+      if (fs.existsSync(resolved)) return resolved;
+    }
   }
+
   return null;
 }
 
@@ -3321,33 +3332,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data });
   });
 
-  // Phase 11 KPCP Certification Endpoints
-  server.get("/api/v1/certification/status", async (req, reply) => {
-    const mode = ((req.query as any)?.mode || "full") as any;
-    const cert = await globalReleaseService.runKpcpFullCertification(mode);
-    return reply.status(200).send({
-      success: true,
-      data: {
-        certificationId: cert.evidencePackage.certificationId,
-        overallStatus: cert.evidencePackage.overallStatus,
-        certificationScore: cert.evidencePackage.certificationScore,
-        evaluatedAt: cert.evidencePackage.timestamp,
-        version: cert.evidencePackage.appVersion,
-        gitSha: cert.evidencePackage.gitSha,
-        businessJourneys: cert.businessJourneys,
-        crossDomainProbes: cert.crossDomainProbes,
+  // Phase 11 KPCP Certification Endpoints are intentionally disabled.
+  // The former full-system campaign was synthetic and is not a release authority.
+  server.get("/api/v1/certification/status", async (_req, reply) => {
+    return reply.status(503).send({
+      success: false,
+      error: {
+        code: "CERTIFICATION_DISABLED",
+        message: "Synthetic full-system certification has been removed; use real certification suites and evidence gates.",
       },
     });
   });
 
-  server.get("/api/v1/certification/matrix", async (req, reply) => {
-    const cert = await globalReleaseService.runKpcpFullCertification("full");
-    return reply.status(200).send({
-      success: true,
-      data: {
-        totalDomains: 22,
-        domainsPassed: Object.values(cert.evidencePackage.domainScorecard).filter((d: any) => d.status === "PASS").length,
-        scorecard: cert.evidencePackage.domainScorecard,
+  server.get("/api/v1/certification/matrix", async (_req, reply) => {
+    return reply.status(503).send({
+      success: false,
+      error: {
+        code: "CERTIFICATION_DISABLED",
+        message: "Synthetic full-system certification has been removed; use real certification suites and evidence gates.",
       },
     });
   });
@@ -3357,13 +3359,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: history });
   });
 
-  server.post("/api/v1/certification/revalidate", async (req, reply) => {
-    const mode = ((req.body as any)?.mode || "full") as any;
-    const cert = await globalReleaseService.runKpcpFullCertification(mode);
-    return reply.status(200).send({
-      success: true,
-      message: "Certification revalidation complete",
-      data: cert,
+  server.post("/api/v1/certification/revalidate", async (_req, reply) => {
+    return reply.status(503).send({
+      success: false,
+      error: {
+        code: "CERTIFICATION_DISABLED",
+        message: "Synthetic full-system certification has been removed; use real certification suites and evidence gates.",
+      },
     });
   });
 

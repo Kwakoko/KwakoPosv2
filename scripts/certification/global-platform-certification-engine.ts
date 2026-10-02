@@ -39,10 +39,5 @@ export const GLOBAL_PLATFORM_CERTIFICATION_PILLARS: GlobalPlatformCertificationP
   makePillar("GLO-05", "Health summary calculates active country packs and residency compliance", e => {
     const hs = e.getHealthSummary("CERT");
     return Boolean(hs.activeCountryPacksCount >= 3 && hs.dataResidencyCompliant === true);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `GLO-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Global Platform OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

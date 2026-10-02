@@ -42,10 +42,5 @@ export const MARKETPLACE_CERTIFICATION_PILLARS: MarketplaceCertificationPillar[]
     const u = e.uninstallExtension("CERT", "LST-CERT-01");
     const hs = e.getHealthSummary("CERT");
     return Boolean(u.success && hs.auditEntryCount >= 4);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `MP-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Marketplace OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

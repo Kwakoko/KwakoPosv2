@@ -106,7 +106,7 @@ let tablesEnsured = false;
 export async function ensureSuperAdminSecurityTables(): Promise<void> {
   if (tablesEnsured) return;
   try {
-    await prisma.$executeRawUnsafe(`
+    await prisma.$executeRaw`
       CREATE TABLE IF NOT EXISTS platform_super_admin_security (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         bootstrap_pending BOOLEAN NOT NULL DEFAULT TRUE,
@@ -122,8 +122,8 @@ export async function ensureSuperAdminSecurityTables(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `);
-    await prisma.$executeRawUnsafe(`
+    `;
+    await prisma.$executeRaw`
       CREATE TABLE IF NOT EXISTS auth_login_throttles (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         throttle_key TEXT NOT NULL UNIQUE,
@@ -132,15 +132,15 @@ export async function ensureSuperAdminSecurityTables(): Promise<void> {
         locked_until TIMESTAMPTZ,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `);
-    await prisma.$executeRawUnsafe(`
+    `;
+    await prisma.$executeRaw`
       CREATE INDEX IF NOT EXISTS idx_auth_login_throttles_locked_until
         ON auth_login_throttles(locked_until)
-    `);
-    await prisma.$executeRawUnsafe(`
+    `;
+    await prisma.$executeRaw`
       CREATE INDEX IF NOT EXISTS idx_platform_super_admin_security_lock
         ON platform_super_admin_security(locked_until)
-    `);
+    `;
     tablesEnsured = true;
   } catch (err) {
     console.error("ENSURE_TABLES_FAILED", err instanceof Error ? err.message : err);
@@ -150,10 +150,7 @@ export async function ensureSuperAdminSecurityTables(): Promise<void> {
 export async function getSuperAdminSecurity(userId: string): Promise<SuperAdminSecurityState | null> {
   await ensureSuperAdminSecurityTables();
   try {
-    const rows = await prisma.$queryRawUnsafe<SuperAdminSecurityState[]>(
-      `SELECT user_id AS "userId", bootstrap_pending AS "bootstrapPending", must_change_password AS "mustChangePassword", mfa_required AS "mfaRequired", mfa_enrolled AS "mfaEnrolled", mfa_type AS "mfaType", locked_until AS "lockedUntil" FROM platform_super_admin_security WHERE user_id = $1`,
-      userId,
-    );
+    const rows = await prisma.$queryRaw<SuperAdminSecurityState[]>`SELECT user_id AS "userId", bootstrap_pending AS "bootstrapPending", must_change_password AS "mustChangePassword", mfa_required AS "mfaRequired", mfa_enrolled AS "mfaEnrolled", mfa_type AS "mfaType", locked_until AS "lockedUntil" FROM platform_super_admin_security WHERE user_id = ${userId}`;
     return rows[0] || null;
   } catch {
     return null;
@@ -162,20 +159,14 @@ export async function getSuperAdminSecurity(userId: string): Promise<SuperAdminS
 
 export async function ensureSuperAdminSecurity(userId: string): Promise<void> {
   await ensureSuperAdminSecurityTables();
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO platform_super_admin_security(user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
-    userId,
-  );
+  await prisma.$executeRaw`INSERT INTO platform_super_admin_security(user_id) VALUES (${userId}) ON CONFLICT (user_id) DO NOTHING`;
 }
 
 export async function isLoginThrottled(keys: string[]): Promise<boolean> {
   if (!keys.length) return false;
   try {
     for (const key of keys) {
-      const rows = await prisma.$queryRawUnsafe<{ locked_until: Date | null; updated_at: Date }[]>(
-        `SELECT locked_until, updated_at FROM auth_login_throttles WHERE throttle_key = $1`,
-        key,
-      );
+      const rows = await prisma.$queryRaw<{ locked_until: Date | null; updated_at: Date }[]>`SELECT locked_until, updated_at FROM auth_login_throttles WHERE throttle_key = ${key}`;
       const row = rows[0];
       if (row?.locked_until && row.locked_until > new Date()) return true;
     }
@@ -189,13 +180,7 @@ export async function isLoginThrottled(keys: string[]): Promise<boolean> {
 export async function recordLoginFailure(keys: string[]): Promise<void> {
   try {
     for (const key of keys) {
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), $1, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - ($2 || ' minutes')::interval THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= $3 THEN NOW() + ($4 || ' minutes')::interval ELSE auth_login_throttles.locked_until END, updated_at = NOW()`,
-        key,
-        RATE_WINDOW_MINUTES,
-        MAX_ATTEMPTS,
-        LOCK_MINUTES,
-      );
+      await prisma.$executeRaw`INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), ${key}, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}) ELSE auth_login_throttles.locked_until END, updated_at = NOW()`;
     }
   } catch (error) {
     console.warn("recordLoginFailure warning:", error);
@@ -205,7 +190,7 @@ export async function recordLoginFailure(keys: string[]): Promise<void> {
 export async function clearLoginFailures(keys: string[]): Promise<void> {
   if (!keys.length) return;
   try {
-    await prisma.$executeRawUnsafe(`DELETE FROM auth_login_throttles WHERE throttle_key = ANY($1::text[])`, keys);
+    await prisma.$executeRaw`DELETE FROM auth_login_throttles WHERE throttle_key = ANY(${keys}::text[])`;
   } catch (error) {
     console.warn("clearLoginFailures warning:", error);
   }
@@ -213,16 +198,11 @@ export async function clearLoginFailures(keys: string[]): Promise<void> {
 
 export async function recordSuperAdminFailure(userId: string): Promise<void> {
   await ensureSuperAdminSecurity(userId);
-  await prisma.$executeRawUnsafe(
-    `UPDATE platform_super_admin_security SET failed_login_count = failed_login_count + 1, last_failed_at = NOW(), locked_until = CASE WHEN failed_login_count + 1 >= $2 THEN NOW() + ($1 || ' minutes')::interval ELSE locked_until END, updated_at = NOW() WHERE user_id = $3`,
-    LOCK_MINUTES,
-    MAX_ATTEMPTS,
-    userId,
-  );
+  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = failed_login_count + 1, last_failed_at = NOW(), locked_until = CASE WHEN failed_login_count + 1 >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}) ELSE locked_until END, updated_at = NOW() WHERE user_id = ${userId}`;
 }
 
 export async function clearSuperAdminFailureState(userId: string): Promise<void> {
-  await prisma.$executeRawUnsafe(`UPDATE platform_super_admin_security SET failed_login_count = 0, last_failed_at = NULL, locked_until = NULL, last_login_at = NOW(), updated_at = NOW() WHERE user_id = $1`, userId);
+  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = 0, last_failed_at = NULL, locked_until = NULL, last_login_at = NOW(), updated_at = NOW() WHERE user_id = ${userId}`;
 }
 
 export function issueSetupToken(userId: string): string {
@@ -296,11 +276,8 @@ export async function completeSuperAdminSetup(token: string, newPassword: string
   const passwordHash = await hashPassword(newPassword);
   await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id: userId }, data: { passwordHash } });
-    await tx.$executeRawUnsafe(
-      `UPDATE platform_super_admin_security SET bootstrap_pending = FALSE, must_change_password = FALSE, mfa_required = TRUE, mfa_enrolled = TRUE, mfa_type = 'TOTP', mfa_secret_ciphertext = $1, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = $2`,
-      encryptSecret(totpSecret),
-      userId,
-    );
+    const encryptedTotpSecret = encryptSecret(totpSecret);
+    await tx.$executeRaw`UPDATE platform_super_admin_security SET bootstrap_pending = FALSE, must_change_password = FALSE, mfa_required = TRUE, mfa_enrolled = TRUE, mfa_type = 'TOTP', mfa_secret_ciphertext = ${encryptedTotpSecret}, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = ${userId}`;
     await tx.deviceSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
   });
 
@@ -320,10 +297,7 @@ export async function completeSuperAdminSetup(token: string, newPassword: string
 }
 
 export async function verifySuperAdminMfa(userId: string, code: string): Promise<boolean> {
-  const rows = await prisma.$queryRawUnsafe<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean; mfa_type: string | null }[]>(
-    `SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required, mfa_type FROM platform_super_admin_security WHERE user_id = $1`,
-    userId,
-  );
+  const rows = await prisma.$queryRaw<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean; mfa_type: string | null }[]>`SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required, mfa_type FROM platform_super_admin_security WHERE user_id = ${userId}`;
   const state = rows[0];
   if (!state || !state.mfa_required) return true;
   if (!state.mfa_enrolled || !state.mfa_secret_ciphertext) return false;
@@ -457,11 +431,7 @@ export async function rotateSuperAdminPassword(params: {
       data: { passwordHash },
     });
 
-    await tx.$executeRawUnsafe(
-      `UPDATE platform_super_admin_security SET must_change_password = $1, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = $2`,
-      forceMustChangePassword,
-      user.id,
-    );
+    await tx.$executeRaw`UPDATE platform_super_admin_security SET must_change_password = ${forceMustChangePassword}, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = ${user.id}`;
 
     const revoked = await tx.deviceSession.updateMany({
       where: { userId: user.id, revokedAt: null },

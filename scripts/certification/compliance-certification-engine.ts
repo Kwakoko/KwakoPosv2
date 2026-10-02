@@ -33,10 +33,5 @@ export const COMPLIANCE_CERTIFICATION_PILLARS: ComplianceCertificationPillar[] =
   }),
   makePillar("CMP-05", "Health summary tracks total evaluated compliance rules", e => {
     return e.getHealthSummary("CERT").totalRulesCount >= 1;
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `CMP-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Compliance OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

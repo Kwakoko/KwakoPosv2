@@ -38,10 +38,5 @@ export const AUTONOMOUS_OPERATIONS_CERTIFICATION_PILLARS: AutonomousOperationsCe
   makePillar("AUTO-OPS-05", "Independent action verification updates request state and health metrics", e => {
     e.verifyActionResult("REQ-01", true);
     return Boolean(e.getHealthSummary("CERT").verifiedActionsCount >= 1);
-  }),
-  ...Array.from({ length: 95 }).map((_, idx) => {
-    const pNum = 6 + idx;
-    const pId = `AUTO-OPS-${pNum.toString().padStart(2, "0")}`;
-    return makePillar(pId, `Autonomous Operations Platform OS Pillar #${pNum}`, e => e.getHealthSummary("CERT").engineOperational === true);
-  }),
+  })
 ];

@@ -238,8 +238,7 @@ export class ReleaseService {
   }
 
   async runCampaignCertification() {
-    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
-    return runFullSystemCertificationEngine();
+    throw new Error("CERTIFICATION_DISABLED: Synthetic full-system certification campaign has been removed from release authority.");
   }
 
   async runSecurityCertification() {
@@ -262,9 +261,8 @@ export class ReleaseService {
     return getEnterpriseSecurityRiskRegister();
   }
 
-  async runKpcpFullCertification(mode: "source" | "build" | "staging" | "deployed" | "full" = "full") {
-    const { runFullSystemCertificationEngine } = await import("../../../../scripts/certification/full-system-certification-engine.js");
-    return runFullSystemCertificationEngine(mode);
+  async runKpcpFullCertification(_mode: "source" | "build" | "staging" | "deployed" | "full" = "full") {
+    throw new Error("CERTIFICATION_DISABLED: Synthetic full-system certification campaign has been removed from release authority.");
   }
 
   async runResilienceCertification() {
