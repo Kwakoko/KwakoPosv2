@@ -220,7 +220,7 @@ export class ScopedPluginRepository {
 
   getRestaurantTables(ctx: TenantContext): RestaurantTable[] {
     return Array.from(this.restaurantTables.values()).filter(
-      (t) => t.tenantId === ctx.tenantId && (!ctx.branchId || t.branchId === ctx.branchId)
+      (t) => t.tenantId === ctx.tenantId && t.branchId === ctx.branchId
     );
   }
 
