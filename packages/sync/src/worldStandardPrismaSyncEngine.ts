@@ -737,7 +737,12 @@ const now = new Date();
       const conflict = rows[0];
       if (!conflict) throw new Error("SYNC_CONFLICT_NOT_FOUND");
       if (conflict.status !== "OPEN") return { status: conflict.status };
-      const chosen = resolution === "ACCEPT_SERVER" ? conflict.remote_payload : resolution === "ACCEPT_LOCAL" ? conflict.local_payload : mergedPayload;
+
+      const chosen = resolution === "ACCEPT_SERVER"
+        ? conflict.remote_payload
+        : resolution === "ACCEPT_LOCAL"
+          ? conflict.local_payload
+          : mergedPayload;
       if (!chosen || typeof chosen !== "object") throw new Error("SYNC_CONFLICT_MERGED_PAYLOAD_REQUIRED");
       const entityType = String(conflict.entity_type);
       const resolverOperationId = "conflict-resolution:" + conflictId;
