@@ -191,7 +191,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <ShieldAlert size={22} color="#f59e0b" />
             <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
-              Offline Sync & Oversell Conflicts ({conflicts.length})
+              Sync & Inventory Conflicts ({conflicts.length})
             </h3>
           </div>
           <button
