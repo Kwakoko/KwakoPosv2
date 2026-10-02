@@ -1,0 +1,530 @@
+import { chromium, expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { prisma } from "@kwakopos2/database";
+import { generateAccessToken, hashPassword } from "@kwakopos2/auth";
+
+const APP_URL = (process.env.KWAKOPOS_LOCAL_URL || "http://127.0.0.1:5173").trim().replace(/\/$/, "");
+
+type DashboardSnapshot = {
+  asOfRevision: string;
+  tenantId: string;
+  branchId: string;
+  salesToday: number;
+  grossProfit: number;
+  aov: number;
+  todayOrderCount: number;
+  completedOrders: number;
+  inventoryValue: number;
+  stockAlerts: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  customerDebts: number;
+  customerCount: number;
+  productCount: number;
+  supplierCount: number;
+  kpis: Record<string, number | null>;
+};
+
+async function readDashboardSnapshot(page: Page, tenantId: string, branchId: string): Promise<DashboardSnapshot> {
+  return page.evaluate(async ({ tenantId, branchId }) => {
+    const raw = localStorage.getItem("kwakopos:v2:session");
+    const session = raw ? JSON.parse(raw) : null;
+    const response = await fetch("/api/v1/dashboard/kpis", {
+      headers: {
+        Authorization: "Bearer " + String(session?.accessToken || ""),
+        "x-tenant-id": tenantId,
+        "x-branch-id": branchId,
+      },
+      credentials: "include",
+    });
+    const body = await response.json();
+    if (!response.ok || !body?.success || !body?.data) {
+      throw new Error("Dashboard KPI snapshot unavailable: HTTP " + response.status);
+    }
+    return body.data as DashboardSnapshot;
+  }, { tenantId, branchId });
+}
+
+async function readLocalSalesState(page: Page, tenantId: string, branchId: string) {
+  return page.evaluate(async ({ tenantId, branchId }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open("kwakopos-v2");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const readAll = (store: string) => new Promise<any[]>((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    const [sales, outbox] = await Promise.all([readAll("sales"), readAll("syncOutbox")]);
+    db.close();
+    return {
+      localSales: sales.filter((row) => row?.tenantId === tenantId && row?.branchId === branchId),
+      pendingOutbox: outbox.filter((row) =>
+        row?.tenantId === tenantId &&
+        row?.branchId === branchId &&
+        row?.status === "PENDING",
+      ),
+    };
+  }, { tenantId, branchId });
+}
+
+async function invokeProductionSync(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      window.dispatchEvent(new CustomEvent("kwakopos:context-sync-now", {
+        detail: { onComplete: () => resolve(), onError: (error: unknown) => reject(error) },
+      }));
+    });
+  });
+}
+
+async function loginThroughUi(page: Page, email: string, password: string): Promise<void> {
+  await expect(page.locator("#email")).toBeVisible({ timeout: 15000 });
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill(password);
+  const loginResponse = page.waitForResponse((response) =>
+    response.url().includes("/auth/login") && response.request().method() === "POST",
+  );
+  await page.locator("form").getByRole("button", { name: /sign in/i }).click();
+  expect((await loginResponse).status()).toBe(200);
+  await expect(page.getByText("Inventory").first()).toBeVisible({ timeout: 20000 });
+}
+
+async function readPostgresKpis(tenantId: string, branchId: string) {
+  const rows = await prisma.$queryRawUnsafe<Array<{
+    sales_today: unknown;
+    gross_profit: unknown;
+    order_count: bigint | number | string;
+    completed_orders: bigint | number | string;
+    inventory_value: unknown;
+    low_stock: bigint | number | string;
+    out_of_stock: bigint | number | string;
+    customer_debts: unknown;
+    customer_count: bigint | number | string;
+    product_count: bigint | number | string;
+    supplier_count: bigint | number | string;
+  }>>(
+    `SELECT
+       COALESCE((SELECT SUM(grand_total) FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
+            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS sales_today,
+       COALESCE((SELECT SUM(gross_profit) FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
+            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS gross_profit,
+       (SELECT COUNT(*) FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
+            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS order_count,
+       (SELECT COUNT(*) FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
+            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS completed_orders,
+       (SELECT COALESCE(SUM(stock_value), 0) FROM product_branch_stock
+          WHERE tenant_id = $1 AND branch_id = $2) AS inventory_value,
+       (SELECT COUNT(*) FROM product_branch_stock pbs
+          JOIN product_variants pv ON pv.id = pbs.variant_id
+          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
+          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
+            AND pv.is_active = TRUE AND pbs.current_quantity > 0
+            AND pbs.current_quantity <= pv.reorder_level) AS low_stock,
+       (SELECT COUNT(*) FROM product_branch_stock pbs
+          JOIN product_variants pv ON pv.id = pbs.variant_id
+          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
+          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
+            AND pv.is_active = TRUE AND pbs.current_quantity <= 0) AS out_of_stock,
+       (SELECT COALESCE(SUM(current_balance), 0) FROM customers
+          WHERE tenant_id = $1 AND branch_id = $2) AS customer_debts,
+       (SELECT COUNT(*) FROM customers
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS customer_count,
+       (SELECT COUNT(*) FROM products
+          WHERE tenant_id = $1 AND branch_id = $2 AND is_active = TRUE) AS product_count,
+       (SELECT COUNT(*) FROM suppliers
+          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS supplier_count`,
+    tenantId,
+    branchId,
+  );
+  const row = rows[0];
+  const num = (value: unknown) => Number(value ?? 0);
+  const orders = num(row.order_count);
+  const salesToday = num(row.sales_today);
+  const lowStockCount = num(row.low_stock);
+  const outOfStockCount = num(row.out_of_stock);
+  return {
+    salesToday,
+    grossProfit: num(row.gross_profit),
+    aov: orders > 0 ? salesToday / orders : 0,
+    todayOrderCount: orders,
+    completedOrders: num(row.completed_orders),
+    inventoryValue: num(row.inventory_value),
+    stockAlerts: lowStockCount + outOfStockCount,
+    lowStockCount,
+    outOfStockCount,
+    customerDebts: num(row.customer_debts),
+    customerCount: num(row.customer_count),
+    productCount: num(row.product_count),
+    supplierCount: num(row.supplier_count),
+  };
+}
+
+test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale + logout/login", async ({ browser }) => {
+  const tenantId = randomUUID();
+  const branchId = randomUUID();
+  const roleId = randomUUID();
+  const userId = randomUUID();
+  const productId = randomUUID();
+  const variantId = randomUUID();
+  const email = `dashboard-convergence-${tenantId.slice(0, 8)}@kwakopos.test`;
+  const password = "Dashboard-Convergence-Cert-2026!";
+  const deviceIds = ["DEVICE-A", "DEVICE-B", "DEVICE-C"] as const;
+  const contexts: BrowserContext[] = [];
+  const pages: Page[] = [];
+
+  try {
+    await prisma.tenant.create({
+      data: { id: tenantId, name: "Dashboard Convergence Tenant", slug: `dash-${tenantId.slice(0, 18)}` },
+    });
+    await prisma.branch.create({
+      data: { id: branchId, tenantId, name: "Main", code: `DASH-${branchId.slice(0, 8)}` },
+    });
+    await prisma.role.create({
+      data: { id: roleId, tenantId, name: "ADMIN", permissions: ["*"] },
+    });
+    await prisma.user.create({
+      data: {
+        id: userId,
+        tenantId,
+        branchId,
+        email,
+        passwordHash: await hashPassword(password),
+        name: "Dashboard Certification Admin",
+        roleId,
+        status: "ACTIVE",
+      },
+    });
+    await prisma.product.create({
+      data: {
+        id: productId,
+        tenantId,
+        branchId,
+        name: "Dashboard Convergence Product",
+        sku: "DASH-CONV-001",
+        category: "Certification",
+        buyingPrice: 1000,
+        sellingPrice: 1500,
+        hasVariants: true,
+        totalStock: 10,
+        availableStock: 10,
+      },
+    });
+    await prisma.productVariant.create({
+      data: {
+        id: variantId,
+        tenantId,
+        branchId,
+        productId,
+        name: "Standard",
+        sku: "DASH-CONV-001-STD",
+        price: 1500,
+        costPrice: 1000,
+        inventoryQuantity: 10,
+        reorderLevel: 2,
+      },
+    });
+    await prisma.stockLedger.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        productId,
+        variantId,
+        movementType: "OPENING_STOCK",
+        referenceType: "CERTIFICATION",
+        quantityBefore: 0,
+        quantityChange: 10,
+        quantity: 10,
+        quantityAfter: 10,
+        unitCost: 1000,
+        totalCost: 10000,
+        deviceId: "CERT-SETUP",
+        operationId: "CERT-SETUP-" + productId,
+        idempotencyKey: "CERT-SETUP-" + productId,
+        occurredAt: new Date(),
+      },
+    });
+    await prisma.productBranchStock.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        productId,
+        variantId,
+        currentQuantity: 10,
+        averageCost: 1000,
+        stockValue: 10000,
+      },
+    });
+
+    const preAuthToken = generateAccessToken({
+      userId,
+      tenantId,
+      branchId,
+      email,
+      roles: ["ADMIN"],
+      permissions: ["*"],
+      deviceId: "DEVICE-A",
+    });
+    const acceptance = await fetch(`${APP_URL}/api/legal/acceptance/accept-all`, {
+      method: "POST",
+      headers: { authorization: "Bearer " + preAuthToken },
+    });
+    expect(acceptance.ok).toBe(true);
+
+    const sessions = deviceIds.map((deviceId) => {
+      const accessToken = generateAccessToken({
+        userId,
+        tenantId,
+        branchId,
+        email,
+        roles: ["ADMIN"],
+        permissions: ["*"],
+        deviceId,
+      });
+      return {
+        accessToken,
+        session: {
+          sessionId: "dash-session-" + tenantId + "-" + deviceId,
+          accessToken,
+          user: { id: userId, name: "Dashboard Certification Admin", email, role: "ADMIN", tenantId, branchId },
+        },
+      };
+    });
+
+    for (let index = 0; index < deviceIds.length; index += 1) {
+      const context = await browser.newContext();
+      await context.addInitScript(({ session, deviceId }) => {
+        localStorage.setItem("kwakopos:v2:session", JSON.stringify(session));
+        localStorage.setItem("kwakopos:v2:device-id", deviceId);
+      }, { session: sessions[index].session, deviceId: deviceIds[index] });
+      const page = await context.newPage();
+      contexts.push(context);
+      pages.push(page);
+      await page.goto(APP_URL + "/dashboard", { waitUntil: "domcontentloaded" });
+      await expect(page.getByText("Business Dashboard").first()).toBeVisible({ timeout: 30000 });
+      await expect.poll(
+        async () => {
+          try {
+            return (await readDashboardSnapshot(page, tenantId, branchId)).productCount;
+          } catch {
+            return -1;
+          }
+        },
+        { timeout: 30000, intervals: [500, 1000, 2000] },
+      ).toBe(1);
+      await expect(page.getByText(/Data as of: Revision/).first()).toBeVisible({ timeout: 30000 });
+    }
+
+    const initial = await Promise.all(pages.map((page) => readDashboardSnapshot(page, tenantId, branchId)));
+    expect(initial.map((snapshot) => snapshot.salesToday)).toEqual([0, 0, 0]);
+    expect(new Set(initial.map((snapshot) => snapshot.asOfRevision)).size).toBe(1);
+
+    const initialPostgres = await readPostgresKpis(tenantId, branchId);
+    for (const snapshot of initial) {
+      expect(snapshot.tenantId).toBe(tenantId);
+      expect(snapshot.branchId).toBe(branchId);
+      expect(snapshot.salesToday).toBe(initialPostgres.salesToday);
+      expect(snapshot.grossProfit).toBe(initialPostgres.grossProfit);
+      expect(snapshot.aov).toBe(initialPostgres.aov);
+      expect(snapshot.todayOrderCount).toBe(initialPostgres.todayOrderCount);
+      expect(snapshot.completedOrders).toBe(initialPostgres.completedOrders);
+      expect(snapshot.inventoryValue).toBe(initialPostgres.inventoryValue);
+      expect(snapshot.stockAlerts).toBe(initialPostgres.stockAlerts);
+      expect(snapshot.lowStockCount).toBe(initialPostgres.lowStockCount);
+      expect(snapshot.outOfStockCount).toBe(initialPostgres.outOfStockCount);
+      expect(snapshot.customerDebts).toBe(initialPostgres.customerDebts);
+      expect(snapshot.customerCount).toBe(initialPostgres.customerCount);
+      expect(snapshot.productCount).toBe(initialPostgres.productCount);
+      expect(snapshot.supplierCount).toBe(initialPostgres.supplierCount);
+    }
+
+    const pageA = pages[0];
+    const pageB = pages[1];
+    const pageC = pages[2];
+
+    await pageA.goto(APP_URL + "/pos", { waitUntil: "domcontentloaded" });
+    await expect(pageA.getByText("Dashboard Convergence Product", { exact: true })).toBeVisible({ timeout: 30000 });
+
+    // Browser A goes offline, but it already has the authoritative catalog bootstrap.
+    await pageA.context().setOffline(true);
+
+    await pageA.getByText("Dashboard Convergence Product", { exact: true }).click();
+    await expect(pageA.getByRole("button", { name: "Add", exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await pageA.getByRole("button", { name: "Add", exact: true }).first().click();
+    await pageA.getByRole("button", { name: /Pay Now/i }).click();
+    await expect(pageA.getByRole("heading", { name: /Checkout/i })).toBeVisible({ timeout: 10000 });
+    await pageA.getByRole("button", { name: /Complete Sale/i }).click();
+
+    await expect.poll(
+      async () => (await readLocalSalesState(pageA, tenantId, branchId)).pendingOutbox.length,
+      { timeout: 15000, intervals: [250, 500, 1000] },
+    ).toBeGreaterThanOrEqual(1);
+
+    const localOfflineState = await readLocalSalesState(pageA, tenantId, branchId);
+    expect(localOfflineState.localSales.length).toBe(1);
+    expect(Number(localOfflineState.localSales[0]?.grandTotal)).toBe(1500);
+
+    const bWhileAOffline = await readDashboardSnapshot(pageB, tenantId, branchId);
+    expect(bWhileAOffline.salesToday).toBe(initialPostgres.salesToday);
+    expect(Number(localOfflineState.localSales[0]?.grandTotal)).not.toBe(bWhileAOffline.salesToday);
+
+    await pageA.context().setOffline(false);
+    await invokeProductionSync(pageA);
+
+    await expect.poll(
+      async () => prisma.sale.count({
+        where: { tenantId, branchId, status: "COMPLETED" },
+      }),
+      { timeout: 45000, intervals: [500, 1000, 2000] },
+    ).toBe(1);
+
+    const serverSale = await prisma.sale.findFirst({
+      where: { tenantId, branchId, status: "COMPLETED" },
+      select: { id: true, grandTotal: true, grossProfit: true, operationId: true },
+    });
+    expect(serverSale?.id).toBeTruthy();
+    expect(Number(serverSale?.grandTotal)).toBe(1500);
+
+    await Promise.all([pageB.reload({ waitUntil: "domcontentloaded" }), pageC.reload({ waitUntil: "domcontentloaded" })]);
+    await expect(pageB.getByText("Business Dashboard").first()).toBeVisible({ timeout: 30000 });
+    await expect(pageC.getByText("Business Dashboard").first()).toBeVisible({ timeout: 30000 });
+
+    const postgresAfterSale = await readPostgresKpis(tenantId, branchId);
+    expect(postgresAfterSale.salesToday).toBe(1500);
+    expect(postgresAfterSale.todayOrderCount).toBe(1);
+    expect(postgresAfterSale.completedOrders).toBe(1);
+    expect(postgresAfterSale.grossProfit).toBeGreaterThan(0);
+
+    await expect.poll(
+      async () => {
+        const [a, b, c] = await Promise.all([
+          readDashboardSnapshot(pageA, tenantId, branchId),
+          readDashboardSnapshot(pageB, tenantId, branchId),
+          readDashboardSnapshot(pageC, tenantId, branchId),
+        ]);
+        return JSON.stringify({
+          a: [a.salesToday, a.grossProfit, a.aov, a.todayOrderCount, a.completedOrders, a.inventoryValue, a.stockAlerts, a.lowStockCount, a.outOfStockCount, a.customerDebts, a.customerCount, a.productCount, a.supplierCount, a.asOfRevision],
+          b: [b.salesToday, b.grossProfit, b.aov, b.todayOrderCount, b.completedOrders, b.inventoryValue, b.stockAlerts, b.lowStockCount, b.outOfStockCount, b.customerDebts, b.customerCount, b.productCount, b.supplierCount, b.asOfRevision],
+          c: [c.salesToday, c.grossProfit, c.aov, c.todayOrderCount, c.completedOrders, c.inventoryValue, c.stockAlerts, c.lowStockCount, c.outOfStockCount, c.customerDebts, c.customerCount, c.productCount, c.supplierCount, c.asOfRevision],
+        });
+      },
+      { timeout: 45000, intervals: [500, 1000, 2000] },
+    ).toBe(JSON.stringify({
+      a: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageA, tenantId, branchId)).asOfRevision],
+      b: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageB, tenantId, branchId)).asOfRevision],
+      c: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageC, tenantId, branchId)).asOfRevision],
+    }));
+
+    const [finalA, finalB, finalC] = await Promise.all([
+      readDashboardSnapshot(pageA, tenantId, branchId),
+      readDashboardSnapshot(pageB, tenantId, branchId),
+      readDashboardSnapshot(pageC, tenantId, branchId),
+    ]);
+    const serverFinal = await readPostgresKpis(tenantId, branchId);
+    const kpiKeys = [
+      "SalesToday", "GrossProfitToday", "AovToday", "ProductCount", "StockAlerts",
+      "CustomerDebts", "InventoryValue", "CompletedOrders", "LowStock", "OutOfStock",
+      "CustomerCount", "SupplierCount",
+    ];
+    expect(finalA.kpis).toEqual(finalB.kpis);
+    expect(finalB.kpis).toEqual(finalC.kpis);
+    expect(finalA.kpis.SalesToday).toBe(serverFinal.salesToday);
+    expect(finalA.kpis.GrossProfitToday).toBe(serverFinal.grossProfit);
+    expect(finalA.kpis.AovToday).toBe(serverFinal.aov);
+    expect(finalA.kpis.ProductCount).toBe(serverFinal.productCount);
+    expect(finalA.kpis.StockAlerts).toBe(serverFinal.stockAlerts);
+    expect(finalA.kpis.CustomerDebts).toBe(serverFinal.customerDebts);
+    expect(finalA.kpis.InventoryValue).toBe(serverFinal.inventoryValue);
+    expect(finalA.kpis.CompletedOrders).toBe(serverFinal.completedOrders);
+    expect(finalA.kpis.LowStock).toBe(serverFinal.lowStockCount);
+    expect(finalA.kpis.OutOfStock).toBe(serverFinal.outOfStockCount);
+    expect(finalA.kpis.CustomerCount).toBe(serverFinal.customerCount);
+    expect(finalA.kpis.SupplierCount).toBe(serverFinal.supplierCount);
+    for (const key of kpiKeys) {
+      expect(finalA.kpis[key]).toBe(finalB.kpis[key]);
+      expect(finalB.kpis[key]).toBe(finalC.kpis[key]);
+    }
+    expect(finalA.asOfRevision).toBe(finalB.asOfRevision);
+    expect(finalB.asOfRevision).toBe(finalC.asOfRevision);
+    expect(BigInt(finalA.asOfRevision)).toBeGreaterThan(BigInt(initial[0].asOfRevision));
+
+    // Browser C: real logout -> login -> dashboard recovery.
+    await pageC.locator("#topbar-user-btn").click();
+    const signOutResponse = pageC.waitForResponse((response) =>
+      response.url().includes("/auth/logout") && response.request().method() === "POST",
+    );
+    await pageC.locator("#topbar-signout-btn").click();
+    expect((await signOutResponse).status()).toBe(200);
+    await expect(pageC.locator("#email")).toBeVisible({ timeout: 15000 });
+    expect((await pageC.evaluate(() => localStorage.getItem("kwakopos:v2:device-id")))).toBe("DEVICE-C");
+
+    await loginThroughUi(pageC, email, password);
+    await pageC.goto(APP_URL + "/dashboard", { waitUntil: "domcontentloaded" });
+    await expect(pageC.getByText("Business Dashboard").first()).toBeVisible({ timeout: 30000 });
+    await expect.poll(
+      async () => (await readDashboardSnapshot(pageC, tenantId, branchId)).salesToday,
+      { timeout: 30000, intervals: [500, 1000, 2000] },
+    ).toBe(1500);
+
+    const afterReloginC = await readDashboardSnapshot(pageC, tenantId, branchId);
+    expect(afterReloginC.kpis).toEqual(finalA.kpis);
+    expect(afterReloginC.asOfRevision).toBe(finalA.asOfRevision);
+
+    const evidence = {
+      status: "PASS",
+      test: "dashboard-convergence-offline-sale-three-browser",
+      tenantId,
+      branchId,
+      browsers: [...deviceIds],
+      assertions: {
+        initialDashboardEqualsPostgreSQL: true,
+        offlineBrowserALocalOperationalStateDiffersFromOnlineB: true,
+        postSyncDashboardAEqualsBEqualsC: true,
+        postSyncDashboardEqualsPostgreSQL: true,
+        sharedAsOfRevision: finalA.asOfRevision,
+        logoutLoginDashboardRecovery: true,
+      },
+      offline: {
+        localSaleGrandTotal: Number(localOfflineState.localSales[0]?.grandTotal ?? 0),
+        pendingOutboxCount: localOfflineState.pendingOutbox.length,
+        onlineBrowserBSalesToday: bWhileAOffline.salesToday,
+      },
+      finalKpis: finalA.kpis,
+      postgres: serverFinal,
+      timestamp: new Date().toISOString(),
+    };
+    await import("node:fs/promises").then(async (fs) => {
+      await fs.mkdir("artifacts/release-evidence", { recursive: true });
+      await fs.writeFile(
+        "artifacts/release-evidence/kwakopos-dashboard-convergence.json",
+        JSON.stringify(evidence, null, 2),
+        "utf8",
+      );
+    });
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+    await prisma.$executeRawUnsafe("DELETE FROM sync_change_journal WHERE tenant_id = $1", tenantId);
+    await prisma.$executeRawUnsafe("DELETE FROM sync_conflict_record WHERE tenant_id = $1", tenantId);
+    await prisma.payment.deleteMany({ where: { tenantId } });
+    await prisma.saleLine.deleteMany({ where: { sale: { tenantId } } });
+    await prisma.sale.deleteMany({ where: { tenantId } });
+    await prisma.productBranchStock.deleteMany({ where: { tenantId } });
+    await prisma.stockLedger.deleteMany({ where: { tenantId } });
+    await prisma.productVariant.deleteMany({ where: { tenantId } });
+    await prisma.product.deleteMany({ where: { tenantId } });
+    await prisma.deviceSession.deleteMany({ where: { tenantId } });
+    await prisma.user.deleteMany({ where: { tenantId } });
+    await prisma.role.deleteMany({ where: { tenantId } });
+    await prisma.branch.deleteMany({ where: { tenantId } });
+    await prisma.tenant.deleteMany({ where: { id: tenantId } });
+  }
+});
