@@ -152,6 +152,8 @@ async function applyRevisionedChanges(
       delete pendingMutation.error;
       outbox.put(pendingMutation, pendingMutation.id);
       metadata.delete("error_" + pendingMutation.id);
+      if (String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:")) metadata.delete("sync_conflict_" + String(pendingMutation.error).slice("SYNC_CONFLICT:".length));
+      metadata.delete("sync_conflict_" + pendingMutation.entityType + "_" + pendingMutation.entityId);
       const resolvedStatus = createPersistenceStatus(
         { tenantId, branchId, entityType: pendingMutation.entityType, entityId: pendingMutation.entityId, operationId: pendingMutation.id, operationType: pendingMutation.operationType },
         "SERVER_CONFIRMED", undefined, { serverRevision: change.revision },
@@ -160,7 +162,8 @@ async function applyRevisionedChanges(
       persistenceStatusEvents.push(resolvedStatus);
     } else if (pendingMutation) {
       const serverConflictId = String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:") ? String(pendingMutation.error).slice("SYNC_CONFLICT:".length) : "";
-      const conflictId = serverConflictId || ("CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision);      const rawStatus = await new Promise<any>((resolve) => {
+      const conflictId = serverConflictId || ("CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision);
+      const rawStatus = await new Promise<any>((resolve) => {
         const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => resolve(null);
