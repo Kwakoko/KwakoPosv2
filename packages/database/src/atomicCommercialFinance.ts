@@ -31,7 +31,12 @@ export class PrismaAtomicCommercialFinanceService {
   async createSale(ctx: TenantContext, req: any) {
     return this.db.$transaction(async (tx: any) => {
       const existing = await tx.sale.findUnique({ where: { idempotencyKey: req.idempotencyKey }, include: { lines: true, payments: true } });
-      if (existing) return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }) };
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) {
+          throw new Error("FINANCE_SALE_BOUNDARY_VIOLATION");
+        }
+        return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }) };
+      }
       for (const item of req.items) {
         let v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
         if (!v && (item.variantId.endsWith("-default") || item.variantId === `${item.productId}-default`)) {
