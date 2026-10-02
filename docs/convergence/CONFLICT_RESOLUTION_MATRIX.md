@@ -38,7 +38,7 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 - **Resolution Rule:** Hard referential integrity validation. If parent entity is inactive or deleted, mutation fails closed with descriptive business error code.
 
 ## 2. Audit Trail
-All resolved and rejected conflicts are logged to `ProductionAuditStream` with full details including `operationId`, `idempotencyKey`, `tenantId`, `actorId`, and affected payload diffs.
+All conflict detection and resolution events are persisted transactionally in PostgreSQL `audit_events` with the tenant, branch, actor, operation, conflict id and payload metadata. The in-memory `ProductionAuditStream` is not the authoritative conflict audit store.
 
 ## 3. Specialized Business Incidents
 
