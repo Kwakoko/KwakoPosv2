@@ -66,6 +66,21 @@ jobs:
       - name: Apply Prisma schema to ephemeral PostgreSQL
         run: npm exec prisma db push --workspace=@kwakopos2/database --accept-data-loss --skip-generate
 
+      - name: Generate CI release manifest from authoritative generator
+        run: |
+          npx tsx scripts/release/generate-release-manifest.ts \
+            --version "$(node -p "require('./package.json').version")" \
+            --gitSha "$(git rev-parse HEAD)" \
+            --certification FAIL \
+            --environment ci \
+            --releaseChannel stable
+
+      - name: Build sync engine
+        run: npm run build --workspace=@kwakopos2/sync
+
+      - name: Build web client
+        run: npm run build --workspace=@kwakopos2/web
+
       - name: Run conflict resolution certification
         run: npm run certify:conflicts
 
