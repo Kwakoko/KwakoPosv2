@@ -34,7 +34,7 @@ import { KokoCompanion } from '../components/KokoCompanion.js';
 import { ToggleSwitch } from '../components/UI/ToggleSwitch.js';
 import { useToast } from '../components/UI/Toast.js';
 import type { TraVfdIntegrationStatus } from '@kwakopos2/contracts';
-import { useAuthoritativeSyncStatus } from '../services/syncStatusService.js';
+import { syncStatusService, useAuthoritativeSyncStatus } from '../services/syncStatusService.js';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -393,6 +393,38 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     if (onNavigate) onNavigate(tab.toLowerCase());
   };
 
+  const dashboardFreshness = useMemo(() => {
+    const serverRevision = authoritativeKpis?.asOfRevision ?? syncStatus.serverRevision;
+    const localRevision = syncStatus.localRevision || "0";
+    let isBehind = false;
+
+    if (serverRevision && /^\\d+$/.test(serverRevision) && /^\\d+$/.test(localRevision)) {
+      try {
+        isBehind = BigInt(localRevision) < BigInt(serverRevision);
+      } catch {
+        isBehind = false;
+      }
+    }
+
+    const syncedAt = syncStatus.lastSyncedAt
+      ? fmtTime(syncStatus.lastSyncedAt)
+      : null;
+
+    return {
+      serverRevision: serverRevision || null,
+      localRevision,
+      isBehind,
+      syncedAt,
+      syncEpoch: syncStatus.syncEpoch,
+    };
+  }, [
+    authoritativeKpis?.asOfRevision,
+    syncStatus.lastSyncedAt,
+    syncStatus.localRevision,
+    syncStatus.serverRevision,
+    syncStatus.syncEpoch,
+  ]);
+
   const refreshAuthoritativeKpis = useCallback(async () => {
     if (!tenantId || !branchId || !isOnline) {
       setAuthoritativeKpis(null);
@@ -408,6 +440,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         throw new Error("Dashboard KPI scope mismatch");
       }
       setAuthoritativeKpis(snapshot);
+      syncStatusService.recordAuthoritativeServerRevision(
+        { tenantId, branchId },
+        snapshot.asOfRevision,
+      );
       setAuthoritativeKpiError(null);
     } catch (error: any) {
       setAuthoritativeKpis(null);
@@ -1844,9 +1880,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         </div>
       )}
       {isOnline && authoritativeKpis && (
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/70 px-4 py-2 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-          <span>Authoritative PostgreSQL snapshot · Tenant {authoritativeKpis.tenantId.slice(0, 8)} · Branch {authoritativeKpis.branchId.slice(0, 8)}</span>
-          <span>asOfRevision: {authoritativeKpis.asOfRevision}</span>
+        <div className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/70 px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Data as of: Revision {dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision}
+              {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : ""}
+            </span>
+            <span>
+              Sync epoch: {dashboardFreshness.syncEpoch ? dashboardFreshness.syncEpoch.slice(0, 8) : "unknown"}
+            </span>
+          </div>
+          {dashboardFreshness.isBehind && (
+            <div className="rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              Dashboard data is behind server · Local revision: {dashboardFreshness.localRevision} · Server revision: {dashboardFreshness.serverRevision}
+            </div>
+          )}
+        </div>
+      )}
+      {!isOnline && (
+        <div className="rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+          Data as of: Local revision {dashboardFreshness.localRevision}
+          {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : " · Sync time unavailable"}
+          {dashboardFreshness.syncEpoch ? ` · Sync epoch: ${dashboardFreshness.syncEpoch.slice(0, 8)}` : ""}
         </div>
       )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
