@@ -19,6 +19,8 @@ export interface DashboardKpiSnapshot {
   customerCount: number;
   productCount: number;
   supplierCount: number;
+  /** Stable KPI-key map. Missing/NULL values are explicitly unavailable, never fabricated. */
+  kpis: Record<string, number | null>;
 }
 
 function numberValue(value: unknown): number {
@@ -147,6 +149,43 @@ export async function getDashboardKpiSnapshot(ctx: TenantContext): Promise<Dashb
       customerCount: numberValue(customers.customer_count),
       productCount: numberValue(productRows[0]?.product_count),
       supplierCount: numberValue(supplierRows[0]?.supplier_count),
+      kpis: {
+        SalesToday: salesToday,
+        GrossProfitToday: numberValue(sales.gross_profit),
+        AovToday: orderCount > 0 ? salesToday / orderCount : 0,
+        ProductCount: numberValue(productRows[0]?.product_count),
+        StockAlerts: lowStockCount + outOfStockCount,
+        CustomerDebts: numberValue(customers.customer_debts),
+        InventoryValue: numberValue(inventory.inventory_value),
+        CompletedOrders: numberValue(sales.completed_orders),
+        LowStock: lowStockCount,
+        OutOfStock: outOfStockCount,
+        CustomerCount: numberValue(customers.customer_count),
+        SupplierCount: numberValue(supplierRows[0]?.supplier_count),
+
+        // Vertical KPIs remain null until an authoritative module service is registered.
+        RestaurantActiveService: null,
+        RestaurantKitchenQueue: null,
+        RestaurantKitchenStatus: null,
+        PharmacyPendingRx: null,
+        PharmacyNearExpiry: null,
+        SaccoDepositsSavings: null,
+        SaccoOutstandingLoans: null,
+        SaccoInterestEarned: null,
+        SaccoMembers: null,
+        PoultryAnimals: null,
+        PoultryFlocks: null,
+        PoultryEggsToday: null,
+        PoultryMortalityRate: null,
+        ConsultantClients: null,
+        ConsultantEngagements: null,
+        ConsultantRevenue: null,
+        ConsultantUtilization: null,
+        ConsultantBillableHours: null,
+        ConsultantProposalConversion: null,
+        ConsultantUpcomingMeetings: null,
+        ConsultantExpiringContracts: null,
+      },
     };
   }, { isolationLevel: "RepeatableRead" });
 }
