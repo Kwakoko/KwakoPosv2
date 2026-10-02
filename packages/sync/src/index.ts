@@ -317,11 +317,11 @@ export class SyncEngine {
       return t >= sinceDate.getTime() && t <= maxTime;
     }).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const variants = Array.from(this.store.variants.values()).filter(
-      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId) && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= maxTime
+      (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId && new Date(v.updatedAt).getTime() >= sinceDate.getTime() && new Date(v.updatedAt).getTime() <= maxTime
     ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const stockLedger = this.stockRepo.getLedger(ctx).filter((l) => new Date(l.createdAt).getTime() >= sinceDate.getTime() && new Date(l.createdAt).getTime() <= maxTime).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
     const adjustments = Array.from(this.store.stockAdjustments.values()).filter(
-      (a) => a.tenantId === ctx.tenantId && (!ctx.branchId || !a.branchId || a.branchId === ctx.branchId) && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= maxTime
+      (a) => a.tenantId === ctx.tenantId && a.branchId === ctx.branchId && new Date(a.updatedAt).getTime() >= sinceDate.getTime() && new Date(a.updatedAt).getTime() <= maxTime
     ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const customers = this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const suppliers = this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
@@ -338,7 +338,7 @@ export class SyncEngine {
     const anchor = new Date().toISOString();
     const products = this.productRepo.getProducts(ctx);
     const variants = Array.from(this.store.variants.values()).filter(
-      (v) => v.tenantId === ctx.tenantId && (!ctx.branchId || !v.branchId || v.branchId === ctx.branchId)
+      (v) => v.tenantId === ctx.tenantId && v.branchId === ctx.branchId
     );
     const stockLedger = this.stockRepo.getLedger(ctx);
     const adjustments = Array.from(this.store.stockAdjustments.values()).filter(
