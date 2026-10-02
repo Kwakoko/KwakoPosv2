@@ -795,8 +795,8 @@ export class WorldStandardPrismaSyncEngine {
       } else {
         const current = await this.scopedRecord(tx, ctx, entityType, String(conflict.entity_id));
         const payload: any = stripSyncControlFields(chosen as Record<string, unknown>);
-        const effective: any = { ...current, ...payload };
-        const deleting = String(conflict.operation_type || "UPDATE") === "DELETE";
+        const effective: any = resolution === "ACCEPT_SERVER" ? { ...current } : { ...current, ...payload };
+        const deleting = resolution === "ACCEPT_LOCAL" && String(conflict.operation_type || "UPDATE") === "DELETE";
 
         switch (entityType) {
           case "Product":
