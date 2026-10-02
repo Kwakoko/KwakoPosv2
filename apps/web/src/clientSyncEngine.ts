@@ -71,10 +71,11 @@ export async function applyRevisionedChanges(
   tenantId: string,
   branchId: string,
   syncEpoch?: string,
+  dbName = DB_NAME,
 ): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME);
+    const request = indexedDB.open(dbName);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
   });
