@@ -45,15 +45,18 @@ describe("Conflict detection convergence lifecycle", () => {
       "sync-epoch-test",
     );
 
+    db.close();
+    const reopened = new LocalIndexedDbStore(6, dbName);
+    await reopened.ready;
     const stored = JSON.parse(
-      db.syncMetadata.get("sync_conflict_" + "conflict:" + operationId) || "{}",
+      reopened.syncMetadata.get("sync_conflict_" + "conflict:" + operationId) || "{}",
     );
 
     expect(stored.conflictId).toBe("conflict:" + operationId);
     expect(stored.operationId).toBe(operationId);
     expect(stored.operationType).toBe("UPDATE");
-    expect(db.syncOutbox.get(operationId)?.status).toBe("PENDING");
+    expect(reopened.syncOutbox.get(operationId)?.status).toBe("PENDING");
 
-    db.close();
+    reopened.close();
   });
 });
