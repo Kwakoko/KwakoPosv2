@@ -82,10 +82,10 @@ export class WorldStandardPrismaSyncEngine {
     localPayload: unknown; remotePayload: unknown; deviceId?: string;
   }): Promise<void> {
     await prisma.$transaction(async (tx: any) => {
-      const existing = await tx.$queryRawUnsafe<Array<{ status: string; tenant_id: string; branch_id: string }>>(
+      const existing = await tx.$queryRawUnsafe(
         "SELECT status, tenant_id, branch_id FROM sync_conflict_record WHERE id = $1 FOR UPDATE",
         conflict.id,
-      );
+      ) as Array<{ status: string; tenant_id: string; branch_id: string }>;
       if (existing[0] && (existing[0].tenant_id !== ctx.tenantId || existing[0].branch_id !== ctx.branchId)) {
         throw new Error("SYNC_CONFLICT_ID_COLLISION");
       }
