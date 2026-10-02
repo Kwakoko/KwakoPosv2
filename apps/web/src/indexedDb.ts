@@ -67,9 +67,11 @@ export interface OutboxItem {
   payload: Record<string, unknown>;
   clientCreatedAt: string;
   idempotencyKey: string;
-  status: "PENDING" | "SYNCED" | "FAILED";
+  status: "PENDING" | "SYNCED" | "FAILED" | "CONFLICT_RESOLVED";
   tenantId?: string;
   branchId?: string;
+  error?: string;
+  resolution?: string;
   /** Number of times this item has been attempted and rejected by the server. */
   retryCount?: number;
   /** ISO timestamp when this item was permanently abandoned (retryCount >= MAX_OUTBOX_RETRIES). */
@@ -1805,10 +1807,23 @@ export class LocalIndexedDbStore {
     }
   }
 
+  markOutboxConflictResolved(operationId: string, resolution: string): void {
+    const item = this.syncOutbox.get(operationId);
+    if (!item) return;
+    item.status = "CONFLICT_RESOLVED";
+    item.resolution = resolution;
+    delete item.error;
+    this.persist("syncOutbox", operationId, item);
+    this.syncMetadata.delete("error_" + operationId);
+    this.persistDelete("syncMetadata", "error_" + operationId);
+    this.setPersistenceStatus(item, "SERVER_CONFIRMED");
+  }
+
   markOutboxFailed(operationId: string, errorReason: string): void {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "FAILED";
+    item.error = errorReason;
     item.retryCount = (item.retryCount ?? 0) + 1;
     // Permanently abandon items that have hit the server-rejection retry cap.
     // They will no longer be re-queued by retryFailedOutbox() and will be
@@ -1858,7 +1873,7 @@ export class LocalIndexedDbStore {
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
     let purged = 0;
     for (const [id, item] of this.syncOutbox.entries()) {
-      if (item.status === "SYNCED") continue; // never touch successfully synced items
+      if (item.status === "SYNCED" || item.status === "CONFLICT_RESOLVED") continue; // preserve resolved conflict history
       const isWrongScope =
         item.tenantId && item.tenantId !== activeTenantId;
       const isAbandonedStale =
