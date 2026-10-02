@@ -137,6 +137,9 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       journalLine: {
         create: async ({ data }: any) => data,
       },
+      auditEvent: {
+        create: async () => ({ id: randomUUID() }),
+      },
       $executeRawUnsafe: async (sql: string, ...params: any[]) => {
         if (sql.includes("sync_conflict_record")) {
           mockStore.conflicts.push({ sql, params });
