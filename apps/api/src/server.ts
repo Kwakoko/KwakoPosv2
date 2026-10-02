@@ -1238,10 +1238,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
         return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching requires Super Admin authorization." } });
       }
-
-      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
-        throw new Error("FORBIDDEN: Cross-tenant access denied");
-      }
       if (requestedBranchId && requestedBranchId !== ctx.branchId && !canSwitchBranch) {
         return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Branch switching permission is required." } });
       }
