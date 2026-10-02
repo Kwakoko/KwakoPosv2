@@ -62,6 +62,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
 
@@ -73,9 +77,6 @@ jobs:
 
       - name: Validate version consistency
         run: npx tsx scripts/release/version-consistency-gate.ts
-
-      - name: Generate Prisma client
-        run: npm run db:generate
 
       - name: Build all workspaces
         run: npm run build
