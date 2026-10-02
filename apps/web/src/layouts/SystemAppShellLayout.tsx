@@ -2477,13 +2477,17 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
       setSyncConflictCount(0);
       return;
     }
-    let count = 0;
-    for (const key of db.syncMetadata.keys()) {
-      if (key.startsWith("sync_conflict_")) {
-        count++;
+    const ids = new Set<string>();
+    for (const [key, value] of db.syncMetadata.entries()) {
+      if (!key.startsWith("sync_conflict_")) continue;
+      try {
+        const parsed = JSON.parse(value);
+        ids.add(String(parsed?.conflictId || key.replace("sync_conflict_", "")));
+      } catch {
+        ids.add(key.replace("sync_conflict_", ""));
       }
     }
-    setSyncConflictCount(count);
+    setSyncConflictCount(ids.size);
   }, [db]);
 
   useEffect(() => {
