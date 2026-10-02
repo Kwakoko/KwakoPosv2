@@ -404,6 +404,37 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(postgresAfterSale.completedOrders).toBe(1);
     expect(postgresAfterSale.grossProfit).toBeGreaterThan(0);
 
+    const expectedCore = [
+      postgresAfterSale.salesToday,
+      postgresAfterSale.grossProfit,
+      postgresAfterSale.aov,
+      postgresAfterSale.todayOrderCount,
+      postgresAfterSale.completedOrders,
+      postgresAfterSale.inventoryValue,
+      postgresAfterSale.stockAlerts,
+      postgresAfterSale.lowStockCount,
+      postgresAfterSale.outOfStockCount,
+      postgresAfterSale.customerDebts,
+      postgresAfterSale.customerCount,
+      postgresAfterSale.productCount,
+      postgresAfterSale.supplierCount,
+    ];
+    const coreFromSnapshot = (snapshot: DashboardSnapshot) => [
+      snapshot.salesToday,
+      snapshot.grossProfit,
+      snapshot.aov,
+      snapshot.todayOrderCount,
+      snapshot.completedOrders,
+      snapshot.inventoryValue,
+      snapshot.stockAlerts,
+      snapshot.lowStockCount,
+      snapshot.outOfStockCount,
+      snapshot.customerDebts,
+      snapshot.customerCount,
+      snapshot.productCount,
+      snapshot.supplierCount,
+    ];
+
     await expect.poll(
       async () => {
         const [a, b, c] = await Promise.all([
@@ -411,18 +442,19 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
           readDashboardSnapshot(pageB, tenantId, branchId),
           readDashboardSnapshot(pageC, tenantId, branchId),
         ]);
-        return JSON.stringify({
-          a: [a.salesToday, a.grossProfit, a.aov, a.todayOrderCount, a.completedOrders, a.inventoryValue, a.stockAlerts, a.lowStockCount, a.outOfStockCount, a.customerDebts, a.customerCount, a.productCount, a.supplierCount, a.asOfRevision],
-          b: [b.salesToday, b.grossProfit, b.aov, b.todayOrderCount, b.completedOrders, b.inventoryValue, b.stockAlerts, b.lowStockCount, b.outOfStockCount, b.customerDebts, b.customerCount, b.productCount, b.supplierCount, b.asOfRevision],
-          c: [c.salesToday, c.grossProfit, c.aov, c.todayOrderCount, c.completedOrders, c.inventoryValue, c.stockAlerts, c.lowStockCount, c.outOfStockCount, c.customerDebts, c.customerCount, c.productCount, c.supplierCount, c.asOfRevision],
-        });
+        return { a: coreFromSnapshot(a), b: coreFromSnapshot(b), c: coreFromSnapshot(c) };
       },
       { timeout: 45000, intervals: [500, 1000, 2000] },
-    ).toBe(JSON.stringify({
-      a: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageA, tenantId, branchId)).asOfRevision],
-      b: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageB, tenantId, branchId)).asOfRevision],
-      c: [1500, postgresAfterSale.grossProfit, 1500, 1, 1, postgresAfterSale.inventoryValue, postgresAfterSale.stockAlerts, postgresAfterSale.lowStockCount, postgresAfterSale.outOfStockCount, postgresAfterSale.customerDebts, postgresAfterSale.customerCount, postgresAfterSale.productCount, postgresAfterSale.supplierCount, (await readDashboardSnapshot(pageC, tenantId, branchId)).asOfRevision],
-    }));
+    ).toEqual({ a: expectedCore, b: expectedCore, c: expectedCore });
+
+    const convergedRevisions = await Promise.all([
+      readDashboardSnapshot(pageA, tenantId, branchId),
+      readDashboardSnapshot(pageB, tenantId, branchId),
+      readDashboardSnapshot(pageC, tenantId, branchId),
+    ]);
+    expect(convergedRevisions[0].asOfRevision).toBe(convergedRevisions[1].asOfRevision);
+    expect(convergedRevisions[1].asOfRevision).toBe(convergedRevisions[2].asOfRevision);
+    expect(BigInt(convergedRevisions[0].asOfRevision)).toBeGreaterThan(BigInt(initial[0].asOfRevision));
 
     const [finalA, finalB, finalC] = await Promise.all([
       readDashboardSnapshot(pageA, tenantId, branchId),
@@ -517,6 +549,7 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.saleLine.deleteMany({ where: { sale: { tenantId } } });
     await prisma.sale.deleteMany({ where: { tenantId } });
+    await prisma.syncOperation.deleteMany({ where: { tenantId } });
     await prisma.productBranchStock.deleteMany({ where: { tenantId } });
     await prisma.stockLedger.deleteMany({ where: { tenantId } });
     await prisma.productVariant.deleteMany({ where: { tenantId } });
