@@ -233,8 +233,13 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       await prisma.customer.deleteMany({ where: { tenantId } });
       await prisma.category.deleteMany({ where: { tenantId } });
       await prisma.brand.deleteMany({ where: { tenantId } });
-      await prisma.branch.deleteMany({ where: { tenantId } });
-      await prisma.tenant.deleteMany({ where: { id: tenantId } });
+      // audit_events is append-only in production. Deleting the tenant/branch would
+      // cascade into audit_events and correctly fail. Test IDs are random, so preserve
+      // the parent evidence and remove only mutable fixture rows.
+      await prisma.branch.updateMany({
+        where: { id: branchId, tenantId },
+        data: { name: "Conflict Resolution Test (retained for audit evidence)" },
+      });
     }
   });
 });

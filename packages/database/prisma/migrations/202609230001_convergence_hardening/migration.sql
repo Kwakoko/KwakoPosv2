@@ -15,10 +15,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS stock_adjustments_tenant_branch_idempotency_uq
   ON stock_adjustments("tenantId", "branchId", "idempotencyKey");
 
 CREATE UNIQUE INDEX IF NOT EXISTS sync_operations_tenant_branch_idempotency_uq
-  ON sync_operations("tenantId", "branchId", "idempotencyKey");
+  ON sync_operations("tenant_id", "branch_id", "idempotency_key");
 
 CREATE UNIQUE INDEX IF NOT EXISTS sync_operations_tenant_branch_device_operation_uq
-  ON sync_operations("tenantId", "branchId", "deviceId", "operationId");
+  ON sync_operations("tenant_id", "branch_id", "device_id", "operation_id");
 
 CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq
   ON sync_change_journal(tenant_id, branch_id, operation_id);

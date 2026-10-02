@@ -1,26 +1,35 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { buildServer } from "../../apps/api/src/server.js";
 import { loadConfig } from "../../packages/config/src/index.js";
+import { prisma } from "../../packages/database/src/client.js";
+import { randomUUID } from "node:crypto";
 
 describe("KwakoPos Rollback Authorization Platform - Integration Tests", () => {
   let server: any;
+  const tenantId = randomUUID();
+  const branchId = randomUUID();
 
   beforeAll(async () => {
+    await prisma.tenant.create({
+      data: {
+        id: tenantId,
+        name: "Rollback Authorization Test Tenant",
+        slug: "rollback-" + tenantId.slice(0, 8),
+        branches: { create: { id: branchId, name: "Rollback Test Branch", code: "RB-" + branchId.slice(0, 8) } },
+      },
+    });
     const config = loadConfig({
-      APP_VERSION: "2.12.5",
+      APP_VERSION: "2.13.0",
       NODE_ENV: "test",
       PORT: "3005",
     });
-    server = buildServer({ config, productionPersistence: false });
+    server = buildServer({ config, productionPersistence: true });
     await server.ready();
   });
 
   afterAll(async () => {
     if (server) await server.close();
   });
-
-  const tenantId = "tenant-rollback-test";
-  const branchId = "branch-rollback-test";
 
   const requesterHeaders = {
     "x-tenant-id": tenantId,

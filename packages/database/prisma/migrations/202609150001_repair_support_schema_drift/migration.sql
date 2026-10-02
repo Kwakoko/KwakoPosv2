@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS "SupportEvent_ticket_created_idx" ON "SupportEvent" (
 CREATE INDEX IF NOT EXISTS "SupportIncident_status_created_idx" ON "SupportIncident" ("status", "created_at");
 CREATE INDEX IF NOT EXISTS "SupportIncidentTenant_tenant_idx" ON "SupportIncidentTenant" ("tenant_id", "last_seen_at");
 CREATE INDEX IF NOT EXISTS "SupportRemediation_tenant_created_idx" ON "SupportRemediation" ("tenant_id", "created_at");
-CREATE INDEX IF NOT EXISTS "sync_operations_tenant_status_created_idx" ON "sync_operations" ("tenantId", "status", "createdAt");
+CREATE INDEX IF NOT EXISTS "sync_operations_tenant_status_created_idx" ON "sync_operations" ("tenant_id", "status", "created_at");
 
 
 CREATE OR REPLACE FUNCTION enforce_support_ticket_resolution_verification()
