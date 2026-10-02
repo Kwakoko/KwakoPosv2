@@ -96,6 +96,7 @@ async function applyRevisionedChanges(
 
   let applied = 0;
   const persistenceStatusEvents: PersistenceStatusRecord[] = [];
+  const detectedConflicts: any[] = [];
   const initialRevisionRaw = await new Promise<any>((resolve) => {
     const request = metadata.get(revisionKey);
     request.onsuccess = () => resolve(request.result);
@@ -147,8 +148,11 @@ async function applyRevisionedChanges(
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation) {
-      const conflictId = "CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision;
-      metadata.put(JSON.stringify({ conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
+      const conflictId = "conflict:" + pendingMutation.id;
+      const conflictRecord = { conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, operationType: pendingMutation.operationType, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" };
+      metadata.put(JSON.stringify(conflictRecord), "sync_conflict_" + conflictId);
+      metadata.put(JSON.stringify(conflictRecord), "sync_conflict_" + change.entityType + "_" + change.entityId);
+      detectedConflicts.push(conflictRecord);
       const rawStatus = await new Promise<any>((resolve) => {
         const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
         request.onsuccess = () => resolve(request.result);
@@ -282,6 +286,13 @@ async function applyRevisionedChanges(
   });
   db.close();
   for (const status of persistenceStatusEvents) emitPersistenceStatusChanged(status);
+  for (const conflict of detectedConflicts) {
+    try {
+      await apiFetch("/sync/conflicts/register", { method: "POST", body: JSON.stringify({ ...conflict, deviceId: "web-client" }) });
+    } catch {
+      console.warn("[SYNC] Conflict detected locally; authoritative registration will retry.");
+    }
+  }
   return applied;
 }
 
