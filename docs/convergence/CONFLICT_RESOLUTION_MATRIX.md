@@ -17,9 +17,9 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 ```
 
 ### Class 1: Safe Merge (Independent Non-Overlapping Attributes)
-- **Applies to:** Customer profiles, Supplier contact details, Product metadata (description, barcode) where attributes do not overlap.
-- **Resolution Rule:** Server merges non-conflicting field values into the target record. The resultant record receives an updated monotonic server timestamp.
-- **Example:** Device A updates customer phone number while Device B updates customer delivery address. Both fields are retained.
+- **Applies to:** Customer profiles, Supplier contact details, and Product metadata where the selected fields can be safely combined.
+- **Resolution Rule:** Normal stale writes are rejected. An operator-selected MERGE combines the current authoritative server record with the explicit merged payload inside a single PostgreSQL transaction and publishes a new journal revision.
+- **Example:** Device A updates customer phone number while Device B updates customer delivery address; an operator can merge both changes into one authoritative revision.
 
 ### Class 2: Sequential Business Operations (Additive / Ledger Mutations)
 - **Applies to:** Sales, Stock Movements, Payments, Expenses, Returns.
@@ -38,4 +38,4 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 - **Resolution Rule:** Hard referential integrity validation. If parent entity is inactive or deleted, mutation fails closed with descriptive business error code.
 
 ## 2. Audit Trail
-All resolved and rejected conflicts are logged to `ProductionAuditStream` with full details including `operationId`, `idempotencyKey`, `tenantId`, `actorId`, and affected payload diffs.
+Conflict detection and resolution are recorded in the persistent PostgreSQL `audit_events` table with tenant, branch, actor/device, operation and conflict metadata. `ProductionAuditStream` remains operational in-process telemetry and is not the durable conflict authority.
