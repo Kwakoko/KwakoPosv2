@@ -146,11 +146,21 @@ async function applyRevisionedChanges(
 
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
-    if (pendingMutation) {
+    if (pendingMutation && change.source === "conflict-resolution") {
+      pendingMutation.status = "CONFLICT_RESOLVED";
+      pendingMutation.resolution = "SERVER_APPLIED";
+      delete pendingMutation.error;
+      outbox.put(pendingMutation, pendingMutation.id);
+      metadata.delete("error_" + pendingMutation.id);
+      const resolvedStatus = createPersistenceStatus(
+        { tenantId, branchId, entityType: pendingMutation.entityType, entityId: pendingMutation.entityId, operationId: pendingMutation.id, operationType: pendingMutation.operationType },
+        "SERVER_CONFIRMED", undefined, { serverRevision: change.revision },
+      );
+      metadata.put(JSON.stringify(resolvedStatus), persistenceStatusKey(tenantId, branchId, pendingMutation.entityType, pendingMutation.entityId));
+      persistenceStatusEvents.push(resolvedStatus);
+    } else if (pendingMutation) {
       const serverConflictId = String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:") ? String(pendingMutation.error).slice("SYNC_CONFLICT:".length) : "";
-      const conflictId = serverConflictId || ("CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision);
-      metadata.put(JSON.stringify({ conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
-      const rawStatus = await new Promise<any>((resolve) => {
+      const conflictId = serverConflictId || ("CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision);      const rawStatus = await new Promise<any>((resolve) => {
         const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => resolve(null);
