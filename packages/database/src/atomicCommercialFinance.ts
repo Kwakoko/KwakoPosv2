@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering } from "@kwakopos2/domain";
