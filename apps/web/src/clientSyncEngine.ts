@@ -64,7 +64,7 @@ async function defaultBootstrapApi(req: SyncBootstrapRequest): Promise<SyncBoots
   return body.data || body;
 }
 
-async function applyRevisionedChanges(
+export async function applyRevisionedChanges(
   changes: RevisionedChange[],
   serverRevision: string,
   serverTimestamp: string,
