@@ -29,7 +29,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const loadConflicts = () => {
+  const loadConflicts = async () => {
     if (!localDb) return;
     const items: SyncConflictItem[] = [];
     for (const [key, value] of localDb.syncMetadata.entries()) {
@@ -57,49 +57,52 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
         }
       }
     }
-    setConflicts(items);
+    try {
+      const response = await apiFetch<any>("/sync/conflicts?status=OPEN");
+      const serverConflicts = Array.isArray(response?.data) ? response.data : [];
+      const merged = new Map<string, SyncConflictItem>();
+      for (const item of items) merged.set(item.id, item);
+      for (const item of serverConflicts) merged.set(item.id, item);
+      setConflicts(Array.from(merged.values()));
+    } catch {
+      setConflicts(items);
+    }
   };
 
   useEffect(() => {
     if (isOpen) loadConflicts();
   }, [isOpen]);
 
-  const handleResolve = async (conflict: SyncConflictItem, action: "ACCEPT_SERVER" | "ACCEPT_LOCAL" | "DISMISS") => {
+  const handleResolve = async (conflict: SyncConflictItem, action: "ACCEPT_SERVER" | "ACCEPT_LOCAL" | "MERGE") => {
     setResolvingId(conflict.id);
     setMessage(null);
     try {
-      if (action !== "DISMISS") {
-        await apiFetch(`/sync/conflicts/${conflict.id}/resolve`, {
-          method: "POST",
-          body: JSON.stringify({ resolution: action }),
-        }).catch(() => {});
+      let mergedPayload: Record<string, unknown> | undefined;
+      if (action === "MERGE") {
+        const seed = { ...(conflict.remoteRecord || {}), ...(conflict.localPayload || {}) };
+        const raw = window.prompt("Edit merged JSON payload", JSON.stringify(seed, null, 2));
+        if (raw === null) return;
+        mergedPayload = JSON.parse(raw);
       }
-
-      if (action === "ACCEPT_SERVER" && conflict.operationId && localDb?.outboxQueue) {
-        localDb.outboxQueue.delete(conflict.operationId);
+      const result = await apiFetch<any>("/sync/conflicts/" + encodeURIComponent(conflict.id) + "/resolve", {
+        method: "POST",
+        body: JSON.stringify({ resolution: action, ...(mergedPayload ? { mergedPayload } : {}) }),
+      });
+      if (!result?.success || !result?.data) throw new Error(result?.error || "Conflict resolution was not committed");
+      if (conflict.operationId && localDb?.markOutboxConflictResolved) {
+        localDb.markOutboxConflictResolved(conflict.operationId, action);
       }
-
-      localDb.syncMetadata?.delete(`sync_conflict_${conflict.id}`);
-      localDb.syncMetadata?.delete(`sync_conflict_${conflict.entityType}_${conflict.entityId}`);
-      await localDb?.flushPersistence?.().catch(() => {});
-
+      localDb.syncMetadata?.delete("sync_conflict_" + conflict.id);
+      localDb.syncMetadata?.delete("sync_conflict_" + conflict.entityType + "_" + conflict.entityId);
+      await localDb?.flushPersistence?.();
       if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("kwakopos:sync-conflict-resolved", {
-            detail: { conflictId: conflict.id, action },
-          }),
-        );
-        window.dispatchEvent(
-          new CustomEvent("kwakopos:context-sync-now", {
-            detail: { force: true },
-          }),
-        );
+        window.dispatchEvent(new CustomEvent("kwakopos:sync-conflict-resolved", { detail: { conflictId: conflict.id, action } }));
+        window.dispatchEvent(new CustomEvent("kwakopos:context-sync-now", { detail: { force: true } }));
       }
-
-      setMessage(`Conflict ${conflict.id} successfully resolved. Replication resumed.`);
-      loadConflicts();
+      setMessage("Conflict " + conflict.id + " resolved and replication resumed.");
+      await loadConflicts();
     } catch (err: any) {
-      setMessage(`Failed to resolve conflict: ${err?.message || String(err)}`);
+      setMessage("Failed to resolve conflict: " + (err?.message || String(err)));
     } finally {
       setResolvingId(null);
     }
@@ -148,7 +151,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <ShieldAlert size={22} color="#f59e0b" />
             <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
-              Offline Sync & Oversell Conflicts ({conflicts.length})
+              Sync & Inventory Conflicts ({conflicts.length})
             </h3>
           </div>
           <button
@@ -291,7 +294,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
                   <button
                     type="button"
                     disabled={resolvingId === c.id}
-                    onClick={() => handleResolve(c, "DISMISS")}
+                    onClick={() => handleResolve(c, "MERGE")}
                     style={{
                       padding: "0.4rem 0.75rem",
                       borderRadius: "0.375rem",
@@ -303,7 +306,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
                       cursor: "pointer",
                     }}
                   >
-                    Acknowledge
+                    Merge
                   </button>
                 </div>
               </div>
