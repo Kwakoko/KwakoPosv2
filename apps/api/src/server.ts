@@ -1817,6 +1817,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
+  server.get("/sync/conflicts", async (req) => {
+    const query = z.object({ status: z.enum(["OPEN", "ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE", "ALL"]).optional() }).parse(req.query || {});
+    const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
+    return { success: true, data: result };
+  });
+
   server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
