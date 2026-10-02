@@ -46,7 +46,7 @@ export class ContinuousReconciliationEngine {
     }
 
     for (const v of variants) {
-      if (v.tenantId === tenantId && (!v.branchId || v.branchId === branchId)) {
+      if (v.tenantId === tenantId && v.branchId === branchId) {
         const variantLedgers = ledgerByVariant.get(v.id) || [];
         const calculated = calculateAvailableStock(variantLedgers);
         const reported = reportedStockMap?.get(v.id) ?? calculated;
