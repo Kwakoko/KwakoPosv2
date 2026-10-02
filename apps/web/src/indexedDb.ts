@@ -1791,6 +1791,11 @@ export class LocalIndexedDbStore {
     this.setPersistenceStatus(item, "SYNC_PENDING");
   }
 
+  deleteSyncMetadata(key: string): void {
+    this.syncMetadata.delete(key);
+    if (this.nativeDb) this.persistDelete("syncMetadata", key);
+  }
+
   markOutboxSynced(operationId: string): void {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
