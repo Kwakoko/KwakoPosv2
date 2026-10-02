@@ -10,6 +10,21 @@ import {
   isChunkLoadError,
 } from "../../apps/web/src/components/UI/ProductionErrorBoundary.js";
 
+vi.mock("@kwakopos2/database", () => {
+  const model = () => ({
+    count: vi.fn(async () => 0),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+  });
+  const tx = new Proxy({}, { get: () => model() });
+  return {
+    prisma: new Proxy({}, {
+      get: (_target: any, property: string) => property === "$transaction"
+        ? vi.fn(async (fn: any) => fn(tx))
+        : model(),
+    }),
+  };
+});
+
 // Mock minimal in-memory LocalIndexedDbStore
 class MockIndexedDbStore {
   products = new Map<string, any>();
@@ -242,6 +257,16 @@ describe("System UI & Production Cleanliness Suite", () => {
       );
 
       const app = Fastify();
+      app.addHook("preHandler", async (req: any) => {
+        if (req.headers["x-admin-role"]) {
+          req.tenantContext = {
+            tenantId: "tenant-store-1",
+            userId: "usr-admin-test",
+            roles: [String(req.headers["x-admin-role"]).toUpperCase()],
+            permissions: ["*"],
+          };
+        }
+      });
       productionCleanlinessRoutes(app);
       await app.ready();
 
@@ -252,7 +277,7 @@ describe("System UI & Production Cleanliness Suite", () => {
         payload: { tenantId: "tenant-store-1", scope: "products" },
       });
       expect(unauthRes.statusCode).toBe(403);
-      expect(JSON.parse(unauthRes.payload).error).toContain("FORBIDDEN");
+      expect(JSON.parse(unauthRes.payload).error?.code).toBe("FORBIDDEN");
 
       // Authorized call with x-admin-role header succeeds
       const authRes = await app.inject({
@@ -277,6 +302,16 @@ describe("System UI & Production Cleanliness Suite", () => {
       );
 
       const app = Fastify();
+      app.addHook("preHandler", async (req: any) => {
+        if (String(req.headers["x-admin-role"] || "").toUpperCase() === "SUPER_ADMIN") {
+          req.tenantContext = {
+            tenantId: "tenant-platform",
+            userId: "usr-admin-test",
+            roles: ["SUPER_ADMIN"],
+            permissions: ["*"],
+          };
+        }
+      });
       productionCleanlinessRoutes(app);
       await app.ready();
 
@@ -297,8 +332,8 @@ describe("System UI & Production Cleanliness Suite", () => {
       const data = JSON.parse(authRes.payload);
       expect(data.success).toBe(true);
       expect(Array.isArray(data.preserved)).toBe(true);
-      expect(data.preserved).toContain("Super Admin (admin@kwakoko.co.tz)");
-      expect(data.preserved).toContain("Core SaaS Subscription Plans");
+      expect(data.preserved).toContain("Users/Roles");
+      expect(data.preserved).toContain("Subscription Plans");
 
       // Readiness endpoint returns readiness checklist
       const readinessRes = await app.inject({

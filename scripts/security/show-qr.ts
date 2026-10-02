@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const secret = "A75BM3WEJIOOMCJW75BRIMK7XNOA4XWQ";
+const secret = String(process.env.SUPER_ADMIN_TOTP_SECRET || "").trim().toUpperCase();
+if (!secret) throw new Error("SUPER_ADMIN_TOTP_SECRET must be provided through the environment; credentials are never stored in source control.");
 const email = "admin@kwakoko.co.tz";
 const issuer = "KwakoPos";
 const otpUri = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(email)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;

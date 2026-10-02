@@ -18,7 +18,7 @@ export async function setRlsTenantContext(
   if (!ctx.tenantId) {
     throw new Error("RLS_CONTEXT_ERROR: tenantId is required to set RLS context");
   }
-  await (tx as any).$executeRawUnsafe(`SELECT set_config('kwakopos.tenant_id', '${ctx.tenantId}', TRUE)`);
+  await (tx as any).$executeRaw`SELECT set_config('kwakopos.tenant_id', ${ctx.tenantId}, TRUE)`;
 }
 
 /**
@@ -33,5 +33,5 @@ export async function clearRlsTenantContext(
   if (!isSuperAdmin) {
     throw new Error("RLS_CLEAR_FORBIDDEN: Only SUPER_ADMIN can clear the RLS tenant context");
   }
-  await (tx as any).$executeRawUnsafe(`SELECT set_config('kwakopos.tenant_id', '', TRUE)`);
+  await (tx as any).$executeRaw`SELECT set_config('kwakopos.tenant_id', '', TRUE)`;
 }

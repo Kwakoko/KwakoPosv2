@@ -28,17 +28,17 @@ describe("Two-till stock delta convergence", () => {
       id: variantId, tenantId, branchId, productId, name: "Default", sku: `VAR-${variantId}`,
       price: 10, costPrice: 5, inventoryQuantity: 0, isActive: true,
     }});
-    await push("seed", "SEED-STOCK", "StockAdjustment", randomUUID(), {
+
+    const seed = await push("seed", "SEED-STOCK", "StockAdjustment", randomUUID(), {
       variantId, adjustmentType: "INCREASE", quantityChange: 100, reason: "Opening Stock",
     });
-
+    expect(seed.results[0].status).toBe("SUCCESS");
     const rejectedAbsoluteStock = await push("till-A", "BAD-VARIANT-UPDATE", "ProductVariant", variantId, {
       name: "Default", inventoryQuantity: 999, stock: 999,
     }, "UPDATE");
     expect(rejectedAbsoluteStock.results[0].status).toBe("FAILED");
     expect(rejectedAbsoluteStock.results[0].error).toContain("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
 
-    // Till B reaches the server first, then Till A. Delivery order must not change the result.
     const saleBId = randomUUID();
     const saleAId = randomUUID();
     const saleB = await push("till-B", "SALE-B", "StockAdjustment", saleBId, {
@@ -53,9 +53,12 @@ describe("Two-till stock delta convergence", () => {
     const ledgers = await prisma.stockLedger.findMany({ where: { tenantId, branchId, variantId } });
     expect(ledgers.map((row: any) => Number(row.quantityChange)).sort((a, b) => a - b)).toEqual([-60, -40, 100]);
     expect(ledgers.reduce((sum: number, row: any) => sum + Number(row.quantityChange), 0)).toBe(0);
-    expect(Number((await prisma.productVariant.findUnique({ where: { id: variantId } }))?.inventoryQuantity ?? 0)).toBe(0);
+    const persistedVariant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+    expect(Number(persistedVariant?.inventoryQuantity ?? 0)).toBe(0);
+    const branchStock = await prisma.productBranchStock.findFirst({ where: { tenantId, branchId, variantId, warehouseId: null } });
+    expect(Number(branchStock?.currentQuantity ?? 0)).toBe(0);
+    expect(Number((await prisma.stockLedger.aggregate({ where: { tenantId, branchId, variantId }, _sum: { quantityChange: true } }))._sum.quantityChange ?? 0)).toBe(Number(persistedVariant?.inventoryQuantity ?? 0));
 
-    // Re-delivery of either offline operation must be a durable no-op.
     const replayB = await push("till-B", "SALE-B", "StockAdjustment", saleBId, {
       variantId, adjustmentType: "DECREASE", quantityChange: 60, reason: "Offline Till B Sale",
     });

@@ -1037,6 +1037,9 @@ export const CashSessionSchema = z.object({
   cashRefundsTotal: z.number().default(0),
   cashExpensesTotal: z.number().default(0),
   variance: z.number().nullable().optional(),
+  countSealedAt: z.string().or(z.date()).nullable().optional(),
+  countSealedById: z.string().uuid().nullable().optional(),
+  countSealedDeviceId: z.string().nullable().optional(),
   status: CashSessionStatusEnum,
   notes: z.string().nullable().optional(),
   createdAt: z.string().or(z.date()),
@@ -1050,8 +1053,13 @@ export const OpenCashSessionRequestSchema = z.object({
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
 
-export const CloseCashSessionRequestSchema = z.object({
+export const SealCashSessionCountRequestSchema = z.object({
   actualCash: z.number().nonnegative(),
+  deviceId: z.string().min(1).max(128).optional(),
+});
+export type SealCashSessionCountRequest = z.infer<typeof SealCashSessionCountRequestSchema>;
+
+export const CloseCashSessionRequestSchema = z.object({
   notes: z.string().optional(),
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;

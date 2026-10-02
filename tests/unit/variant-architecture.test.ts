@@ -42,6 +42,39 @@ describe("Variant-First Architecture Core Unit Tests", () => {
       reorderLevel: 10,
     });
 
+    // StockLedger is the inventory authority; seed the opening movements that
+    // establish the 25 + 40 quantities represented by the variants.
+    store.stockLedgers.set("ledger-v1-opening", {
+      id: "ledger-v1-opening",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      productId: product.id,
+      variantId: v1.id,
+      movementType: "OPENING",
+      quantityChange: 25,
+      quantity: 25,
+      occurredAt: new Date().toISOString(),
+      deviceId: "VARIANT-CERT",
+      operationId: "VARIANT-CERT-V1",
+      idempotencyKey: "VARIANT-CERT-V1",
+      createdAt: new Date().toISOString(),
+    });
+    store.stockLedgers.set("ledger-v2-opening", {
+      id: "ledger-v2-opening",
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      productId: product.id,
+      variantId: v2.id,
+      movementType: "OPENING",
+      quantityChange: 40,
+      quantity: 40,
+      occurredAt: new Date().toISOString(),
+      deviceId: "VARIANT-CERT",
+      operationId: "VARIANT-CERT-V2",
+      idempotencyKey: "VARIANT-CERT-V2",
+      createdAt: new Date().toISOString(),
+    });
+
     const freshProduct = repo.getProductById(ctx, product.id)!;
     expect(freshProduct.totalStock).toBe(65);
     expect(freshProduct.availableStock).toBe(65);

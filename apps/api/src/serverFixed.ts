@@ -29,7 +29,9 @@ import {
 } from "./services/superAdminSecurityService.js";
 
 function isProduction(config: ReturnType<typeof loadConfig>): boolean {
-  return config.NODE_ENV === "production" || config.NODE_ENV === "production-certification";
+  return config.NODE_ENV === "production" ||
+    config.NODE_ENV === "production-certification" ||
+    process.env.K_SERVICE != null;
 }
 
 const REFRESH_COOKIE = "kwakopos_refresh";
@@ -74,6 +76,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   const password = String(body.password || "");
   const deviceId = String(body.deviceId || "device-client").trim();
   const mfaCode = String(body.mfaCode || "").trim();
+  const config = loadConfig();
   const ip = clientAddress(req);
   if (!email || !password) {
     reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email and password are required" } });
@@ -87,7 +90,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   }
 
   let user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
-  if (!user && process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "production-certification") {
+  if (!user && !isProduction(config)) {
     // In dev / non-prod mode, auto-provision user in Prisma so that subsequent logins permanently persist
     try {
       const baseSlug = (email.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 32);
@@ -207,7 +210,12 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 
 export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>; productionPersistence?: boolean } = {}) {
   const config = opts.config ?? loadConfig();
-  const productionPersistence = opts.productionPersistence ?? (process.env.KWAKOPOS_MOCK_AUTH === "true" ? false : true);
+  const productionPersistence = isProduction(config)
+    ? true
+    : (opts.productionPersistence ?? (process.env.KWAKOPOS_MOCK_AUTH === "true" ? false : true));
+  if (isProduction(config) && process.env.KWAKOPOS_MOCK_AUTH === "true") {
+    throw new Error("PERSISTENCE_FATAL: Production authentication cannot run with KWAKOPOS_MOCK_AUTH=true.");
+  }
   if (productionPersistence) {
     configurePersistentSessions();
     requireSecuritySecrets();

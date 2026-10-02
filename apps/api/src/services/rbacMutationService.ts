@@ -28,8 +28,10 @@ type UserCreateInput = {
   firstName: string;
   lastName?: string;
   email: string;
+  phone?: string;
   password: string;
-  roleId: string;
+  roleId?: string;
+  roleName?: string;
   branchId: string;
 };
 
@@ -37,6 +39,7 @@ type UserUpdateInput = {
   firstName?: string;
   lastName?: string;
   email?: string;
+  phone?: string;
   password?: string;
   roleId?: string;
   branchId?: string;
@@ -102,17 +105,6 @@ export class PrivilegedRbacMutationService {
   }
 
   private async resolveActor(tx: any, actor: Actor) {
-    const roles = new Set((actor.roles || []).map((value) => String(value).trim().toUpperCase()));
-    if (roles.has("SUPER_ADMIN") || roles.has("SUPERADMIN")) {
-      return {
-        userId: actor.userId,
-        tenantId: actor.tenantId,
-        branchId: actor.branchId,
-        roleName: "SUPER_ADMIN",
-        permissions: new Set(["*"]),
-      };
-    }
-
     const user = await tx.user.findFirst({
       where: {
         id: actor.userId,
@@ -123,6 +115,10 @@ export class PrivilegedRbacMutationService {
     });
     if (!user) {
       throw new RbacMutationError("ACTOR_NOT_FOUND", "The authenticated administrator is not an active tenant user.", 403);
+    }
+
+    if (String(user.branchId) !== String(actor.branchId)) {
+      throw new RbacMutationError("ACTOR_BRANCH_MISMATCH", "The authenticated branch context does not match the persisted user.", 403);
     }
 
     const dbPermissions = new Set(
@@ -137,6 +133,19 @@ export class PrivilegedRbacMutationService {
       roleName: dbRoleName,
       permissions: dbPermissions,
     };
+  }
+
+  private async requireAnyPermission(tx: any, actor: Actor, permissions: Array<"users.manage" | "roles.manage">) {
+    const resolved = await this.resolveActor(tx, actor);
+    const allowed =
+      isOwnerActor(resolved.roleName) ||
+      resolved.permissions.has("*") ||
+      permissions.some((permission) => resolved.permissions.has(permission)) ||
+      resolved.permissions.has("admin:*");
+    if (!allowed) {
+      throw new RbacMutationError("FORBIDDEN", "Administrative permission required.", 403);
+    }
+    return resolved;
   }
 
   private async requirePermission(tx: any, actor: Actor, permission: "users.manage" | "roles.manage") {
@@ -207,7 +216,7 @@ export class PrivilegedRbacMutationService {
   }
 
   async listRoles(actor: Actor) {
-    await this.requirePermission(this.prisma, actor, "roles.manage");
+    await this.requireAnyPermission(this.prisma, actor, ["users.manage", "roles.manage"]);
     return this.prisma.role.findMany({
       where: { tenantId: actor.tenantId },
       orderBy: [{ name: "asc" }],
@@ -254,7 +263,9 @@ export class PrivilegedRbacMutationService {
           id: randomUUID(),
           tenantId: actor.tenantId,
           name,
+          description: String(input.description || "").trim() || null,
           permissions,
+          isSystemRole: false,
         },
       });
 
@@ -289,6 +300,7 @@ export class PrivilegedRbacMutationService {
         where: { id: roleId },
         data: {
           name,
+          description: String(input.description || "").trim() || null,
           permissions,
         },
       });
@@ -341,7 +353,9 @@ export class PrivilegedRbacMutationService {
       const branch = await tx.branch.findFirst({ where: { id: input.branchId, tenantId: actor.tenantId } });
       if (!branch) throw new RbacMutationError("USER_BRANCH_INVALID", "A valid tenant branch is required.", 400);
 
-      const role = await tx.role.findFirst({ where: { id: input.roleId, tenantId: actor.tenantId } });
+      const role = input.roleId
+        ? await tx.role.findFirst({ where: { id: input.roleId, tenantId: actor.tenantId } })
+        : await tx.role.findFirst({ where: { tenantId: actor.tenantId, name: normalizeRoleName(String(input.roleName || "")) } });
       if (!role) throw new RbacMutationError("USER_ROLE_INVALID", "A valid tenant role is required.", 400);
       await this.assertTargetRoleAllowed(tx, actorResolved, role);
 
@@ -353,6 +367,7 @@ export class PrivilegedRbacMutationService {
             tenantId: actor.tenantId,
             branchId: branch.id,
             email,
+            phone: input.phone ? String(input.phone).trim() : null,
             passwordHash,
             name: [firstName, lastName].filter(Boolean).join(" "),
             roleId: role.id,
@@ -419,6 +434,7 @@ export class PrivilegedRbacMutationService {
       const data: any = {
         name: nextName,
         email: input.email !== undefined ? String(input.email).trim().toLowerCase() : existing.email,
+        phone: input.phone !== undefined ? (String(input.phone).trim() || null) : existing.phone,
         roleId: nextRole.id,
         branchId: nextBranch.id,
         status: input.status || existing.status,

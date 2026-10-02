@@ -36,6 +36,7 @@ import {
   assertAdjustmentAuditable,
   assertPriceHistoryImmutability,
 } from "@kwakopos2/domain";
+import { rejectAbsoluteInventoryMutation, rejectNonZeroAbsoluteInventoryMutation } from "./inventoryAuthority.js";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -74,6 +75,22 @@ function assertTenantBranchContext(ctx: TenantContext): void {
   }
 }
 
+function ledgerStockForVariant(
+  store: InMemoryStore,
+  ctx: TenantContext,
+  variantId: string,
+): number {
+  assertTenantBranchContext(ctx);
+  return Array.from(store.stockLedgers.values())
+    .filter(
+      (ledger) =>
+        ledger.tenantId === ctx.tenantId &&
+        ledger.branchId === ctx.branchId &&
+        ledger.variantId === variantId,
+    )
+    .reduce((sum, ledger) => sum + Number(ledger.quantityChange ?? 0), 0);
+}
+
 export class ScopedProductRepository {
   private store: InMemoryStore;
   constructor(store: InMemoryStore = globalInMemoryStore) {
@@ -94,7 +111,7 @@ export class ScopedProductRepository {
 
     for (const v of variants) {
       if (!v.isActive) continue;
-      const vStock = Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0);
+      const vStock = ledgerStockForVariant(this.store, ctx, v.id);
       const vReserved = Number(v.reservedQuantity ?? 0);
       const vAvail = Math.max(0, vStock - vReserved);
       const vReorder = Number(v.reorderLevel ?? 0);
@@ -123,6 +140,12 @@ export class ScopedProductRepository {
     }
 
     this.store.products.set(productId, product);
+  }
+
+  private ledgerStockForVariant(ctx: TenantContext, variantId: string): number {
+    return Array.from(this.store.stockLedgers.values())
+      .filter((l) => l.tenantId === ctx.tenantId && l.branchId === ctx.branchId && l.variantId === variantId)
+      .reduce((sum, l) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
   }
 
   private attachEffectivePrices(product: Product, variant: ProductVariant): ProductVariant {
@@ -537,6 +560,7 @@ export class ScopedProductRepository {
   }
 
   updateVariant(ctx: TenantContext, variantId: string, req: UpdateVariantRequest): ProductVariant {
+    rejectAbsoluteInventoryMutation(req);
     const existing = this.store.variants.get(variantId);
     if (!existing) throw new Error(`Variant ${variantId} not found`);
     assertTenantIsolation(ctx, existing.tenantId, existing.branchId);
@@ -550,7 +574,7 @@ export class ScopedProductRepository {
     const inheritSelling = req.inheritSellingPrice !== undefined ? req.inheritSellingPrice : (existing.inheritSellingPrice ?? true);
     const costPrice = req.costPrice ?? existing.costPrice;
     const price = req.price ?? existing.price;
-    const stock = req.inventoryQuantity !== undefined ? Number(req.inventoryQuantity) : (req.stock !== undefined ? Number(req.stock) : existing.stock);
+    const stock = Number(existing.inventoryQuantity ?? existing.stock ?? 0);
     const reserved = req.reservedQuantity !== undefined ? Number(req.reservedQuantity) : existing.reservedQuantity;
 
     const effBuy = inheritBuying ? buyingPrice : costPrice;
@@ -633,7 +657,7 @@ export class ScopedStockRepository {
     const movementTime = req.occurredAt ? new Date(req.occurredAt).toISOString() : now;
 
     // 3. Compute Stock Lineage: quantityBefore -> quantityChange -> quantityAfter
-    const quantityBefore = this.getAvailableStock(ctx, req.variantId);
+    const quantityBefore = ledgerStockForVariant(this.store, ctx, req.variantId);
     const quantityChange = req.quantityChange;
     const quantityAfter = quantityBefore + quantityChange;
 
@@ -813,16 +837,7 @@ export class ScopedStockRepository {
   }
 
   getAvailableStock(ctx: TenantContext, variantId: string): number {
-    const cache = Array.from(this.store.productBranchStock.values()).find(
-      (c) => c.tenantId === ctx.tenantId && c.branchId === ctx.branchId && c.variantId === variantId
-    );
-    if (cache !== undefined) {
-      return cache.currentQuantity;
-    }
-    const ledgers = Array.from(this.store.stockLedgers.values()).filter(
-      (l) => l.tenantId === ctx.tenantId && l.branchId === ctx.branchId && l.variantId === variantId
-    );
-    return calculateAvailableStock(ledgers);
+    return calculateAvailableStock(this.getLedger(ctx, variantId));
   }
 
   getProductBranchStockCache(ctx: TenantContext, variantId: string): ProductBranchStock | null {
@@ -1447,3 +1462,5 @@ export {
   PrismaTelecomRepository,
   PrismaMonetizationRepository,
 } from "./prismaProductionRepositories.js";
+
+export * from "./inventoryAuthority.js";

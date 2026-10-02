@@ -1,4 +1,4 @@
-import { chromium, expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 import { generateAccessToken, hashPassword } from "@kwakopos2/auth";
@@ -66,6 +66,12 @@ async function readLocalSalesState(page: Page, tenantId: string, branchId: strin
         row?.tenantId === tenantId &&
         row?.branchId === branchId &&
         row?.status === "PENDING",
+      ),
+      pendingSaleOutbox: outbox.filter((row) =>
+        row?.tenantId === tenantId &&
+        row?.branchId === branchId &&
+        row?.status === "PENDING" &&
+        row?.entityType === "Sale",
       ),
     };
   }, { tenantId, branchId });
@@ -365,7 +371,7 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await pageA.getByRole("button", { name: /Complete Sale/i }).click();
 
     await expect.poll(
-      async () => (await readLocalSalesState(pageA, tenantId, branchId)).pendingOutbox.length,
+      async () => (await readLocalSalesState(pageA, tenantId, branchId)).pendingSaleOutbox.length,
       { timeout: 15000, intervals: [250, 500, 1000] },
     ).toBeGreaterThanOrEqual(1);
 

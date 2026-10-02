@@ -13,8 +13,8 @@ async function audit(tenantId: string | null, eventType: string, payload: Record
   await prisma.$executeRawUnsafe(`INSERT INTO "SupportEvent" ("id","tenant_id","ticket_id","incident_id","actor_type","actor_id","event_type","payload") VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, randomUUID(), tenantId, ticketId ?? null, incidentId ?? null, actorId ? "USER" : "SYSTEM", actorId ?? null, eventType, JSON.stringify(payload));
 }
 // countByStatus is only used for "SupportTicket" which uses snake_case raw-SQL columns — tenant_id is correct
-async function countByStatus(table: string, tenantId: string): Promise<Record<string, number>> {
-  const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT "status", COUNT(*)::int AS count FROM ${table} WHERE "tenant_id"=$1 GROUP BY "status"`, tenantId);
+async function countSupportTicketsByStatus(tenantId: string): Promise<Record<string, number>> {
+  const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT "status", COUNT(*)::int AS count FROM "SupportTicket" WHERE "tenant_id"=$1 GROUP BY "status"`, tenantId);
   return Object.fromEntries(rows.map((r) => [String(r.status), Number(r.count)]));
 }
 
@@ -81,7 +81,7 @@ export class SupportOperationsService {
     // sync_operations uses Prisma camelCase: tenantId, status
     // stock_ledgers uses Prisma camelCase: tenantId
     const [ticketRows, syncRows, ledgerRows] = await Promise.all([
-      countByStatus('"SupportTicket"', t),
+      countSupportTicketsByStatus(t),
       prisma.$queryRawUnsafe<any[]>(`SELECT "status",COUNT(*)::int AS count FROM "sync_operations" WHERE "tenantId"=$1 GROUP BY "status"`, t),
       prisma.$queryRawUnsafe<any[]>(`SELECT COUNT(*)::int AS count FROM "stock_ledgers" WHERE "tenantId"=$1`, t),
     ]);

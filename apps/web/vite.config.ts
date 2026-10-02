@@ -70,6 +70,7 @@ export default defineConfig({
     alias: {
       "node:crypto": browserCryptoPath,
       "crypto": browserCryptoPath,
+      "@node-rs/argon2": path.resolve(__dirname, "src/utils/serverOnlyArgon2.ts"),
     },
   },
   define: {

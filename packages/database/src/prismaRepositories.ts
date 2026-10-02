@@ -25,6 +25,13 @@ import {
   assertTenantIsolation,
 } from "@kwakopos2/domain";
 import { prisma } from "./client.js";
+import {
+  projectProductBranchStock,
+  projectProductStockSummary,
+  projectVariantInventory,
+  rejectAbsoluteInventoryMutation,
+  rejectNonZeroAbsoluteInventoryMutation,
+} from "./inventoryAuthority.js";
 
 export const productShape = (row: any): Product => {
   const buyingPrice = Number(row.buyingPrice ?? 0);
@@ -211,7 +218,10 @@ export class PrismaProductRepository {
             inheritSellingPrice: v.inheritSellingPrice ?? true,
             price: v.price ?? req.sellingPrice ?? 0,
             costPrice: v.costPrice ?? v.buyingPrice ?? req.buyingPrice ?? 0,
-            inventoryQuantity: v.inventoryQuantity ?? v.stock ?? 0,
+            inventoryQuantity: (() => {
+              rejectNonZeroAbsoluteInventoryMutation(v);
+              return 0;
+            })(),
             reservedQuantity: v.reservedQuantity ?? 0,
             reorderLevel: v.reorderLevel ?? 0,
             imageUrl: v.imageUrl ?? null,
@@ -292,7 +302,10 @@ export class PrismaProductRepository {
         inheritSellingPrice: req.inheritSellingPrice ?? true,
         price: req.price ?? 0,
         costPrice: req.costPrice ?? 0,
-        inventoryQuantity: req.inventoryQuantity ?? req.stock ?? 0,
+        inventoryQuantity: (() => {
+          rejectNonZeroAbsoluteInventoryMutation(req);
+          return 0;
+        })(),
         reservedQuantity: req.reservedQuantity ?? 0,
         reorderLevel: req.reorderLevel ?? 0,
         imageUrl: req.imageUrl ?? null,
@@ -304,6 +317,7 @@ export class PrismaProductRepository {
   }
 
   async updateVariant(ctx: TenantContext, id: string, req: UpdateVariantRequest): Promise<ProductVariant> {
+    rejectAbsoluteInventoryMutation(req);
     const existing = await prisma.productVariant.findUnique({ where: { id } });
     if (!existing) throw new Error(`Variant ${id} not found`);
     assertTenantIsolation(ctx, existing.tenantId, existing.branchId);
@@ -317,7 +331,7 @@ export class PrismaProductRepository {
         inheritSellingPrice: req.inheritSellingPrice,
         price: req.price,
         costPrice: req.costPrice,
-        inventoryQuantity: req.inventoryQuantity ?? req.stock,
+
         reservedQuantity: req.reservedQuantity,
         reorderLevel: req.reorderLevel,
         imageUrl: req.imageUrl,
@@ -490,6 +504,9 @@ export class PrismaStockRepository {
       const row = await tx.stockLedger.create({
         data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, req.variantId);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, req.variantId, req.warehouseId ?? null);
+      await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return row;
     });
     return ledgerShape(result);
@@ -640,13 +657,9 @@ export class PrismaStockRepository {
         },
       });
 
-      const ledgerRowsAfter = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId } });
-      const newStock = calculateAvailableStock(ledgerRowsAfter.map(ledgerShape));
-      await tx.productVariant.update({ where: { id: resolvedVariantId }, data: { inventoryQuantity: newStock } });
-      const siblingVariants = await tx.productVariant.findMany({ where: { productId: variant.productId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      const totalStock = siblingVariants.filter((v:any)=>v.isActive).reduce((sum:number,v:any)=>sum+Number(v.inventoryQuantity),0);
-      const reservedStock = siblingVariants.filter((v:any)=>v.isActive).reduce((sum:number,v:any)=>sum+Number(v.reservedQuantity),0);
-      await tx.product.update({ where: { id: variant.productId }, data: { totalStock, reservedStock, availableStock: Math.max(0,totalStock-reservedStock), lowStockVariantsCount: siblingVariants.filter((v:any)=>v.isActive && Number(v.inventoryQuantity)<=Number(v.reorderLevel)).length } });
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, resolvedVariantId);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, resolvedVariantId, null);
+      await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return { adjustment, ledger };
     });
 
@@ -688,5 +701,6 @@ export class PrismaStockRepository {
     return Math.max(0, ledgerBalance - Number(variant?.reservedQuantity || 0));
   }
 }
+
 
 

@@ -43,7 +43,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: DollarSign,
     accent: "#3b82f6",
     format: "currency",
-    authoritativeKpiKey: "salesToday",
   },
   GrossProfitToday: {
     key: "GrossProfitToday",
@@ -53,7 +52,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: TrendingUp,
     accent: "#10b981",
     format: "currency",
-    authoritativeKpiKey: "grossProfit",
   },
   AovToday: {
     key: "AovToday",
@@ -63,7 +61,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: ShoppingCart,
     accent: "#6366f1",
     format: "currency",
-    authoritativeKpiKey: "aov",
   },
   ProductCount: {
     key: "ProductCount",
@@ -73,7 +70,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Package,
     accent: "#f59e0b",
     format: "count",
-    authoritativeKpiKey: "productCount",
   },
   StockAlerts: {
     key: "StockAlerts",
@@ -83,7 +79,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: AlertTriangle,
     accent: "#ef4444",
     format: "count",
-    authoritativeKpiKey: "stockAlerts",
   },
   CustomerDebts: {
     key: "CustomerDebts",
@@ -93,7 +88,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Users,
     accent: "#8b5cf6",
     format: "currency",
-    authoritativeKpiKey: "customerDebts",
   },
   InventoryValue: {
     key: "InventoryValue",
@@ -103,7 +97,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: PiggyBank,
     accent: "#ec4899",
     format: "currency",
-    authoritativeKpiKey: "inventoryValue",
   },
   CompletedOrders: {
     key: "CompletedOrders",
@@ -113,7 +106,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Banknote,
     accent: "#0ea5e9",
     format: "count",
-    authoritativeKpiKey: "completedOrders",
   },
   LowStock: {
     key: "LowStock",
@@ -123,7 +115,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: AlertTriangle,
     accent: "#f97316",
     format: "count",
-    authoritativeKpiKey: "lowStockCount",
   },
   OutOfStock: {
     key: "OutOfStock",
@@ -133,7 +124,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Package,
     accent: "#dc2626",
     format: "count",
-    authoritativeKpiKey: "outOfStockCount",
   },
   CustomerCount: {
     key: "CustomerCount",
@@ -143,7 +133,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Users,
     accent: "#6366f1",
     format: "count",
-    authoritativeKpiKey: "customerCount",
   },
   SupplierCount: {
     key: "SupplierCount",
@@ -153,7 +142,6 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     icon: Briefcase,
     accent: "#64748b",
     format: "count",
-    authoritativeKpiKey: "supplierCount",
   },
   PendingSync: {
     key: "PendingSync",

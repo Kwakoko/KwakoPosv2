@@ -484,7 +484,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     amount: 10000,
     reason: "Cleaning Supplies",
   });
-  const closedSessionL = commercialRepo.closeCashSession(ctx, sessionL.id, { actualCash: 140000 });
+  commercialRepo.sealCashSessionCount(ctx, sessionL.id, { actualCash: 140000, deviceId: "synthetic-monitor" });
+  const closedSessionL = commercialRepo.closeCashSession(ctx, sessionL.id, {});
   const passL = closedSessionL.status === "CLOSED" && closedSessionL.expectedCash === 140000 && closedSessionL.variance === 0;
   results.push({
     testSuite: "SYNTHETIC_TEST_L_CASH_SESSION_RECONCILIATION",
@@ -606,7 +607,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const startF05 = Date.now();
   const sesF05 = commercialRepo.openCashSession(ctx, { openingCash: 100000 });
   sesF05.cashSalesTotal = 20000;
-  const closedF05 = commercialRepo.closeCashSession(ctx, sesF05.id, { actualCash: 115000 }); // 5k short
+  commercialRepo.sealCashSessionCount(ctx, sesF05.id, { actualCash: 115000, deviceId: "synthetic-monitor" });
+  const closedF05 = commercialRepo.closeCashSession(ctx, sesF05.id, {}); // 5k short
   const varianceResultF05 = FinancialBridge.mapCashSessionVarianceToJournal(ctx, closedF05, accountLookup);
   const passF05 = varianceResultF05 !== null && varianceResultF05.journal.totalDebit === 5000;
   results.push({

@@ -1,6 +1,7 @@
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering } from "@kwakopos2/domain";
+import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
@@ -35,7 +36,21 @@ export class PrismaAtomicCommercialFinanceService {
         if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) {
           throw new Error("FINANCE_SALE_BOUNDARY_VIOLATION");
         }
-        return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }) };
+        const drawerOperations: any[] = [];
+        const existingPayments = Array.isArray(existing.payments) ? existing.payments : [];
+        for (const payment of existingPayments.filter((p: any) => p.paymentMethod === "CASH" && p.status === "COMPLETED")) {
+          const current = await tx.drawerOperation.findUnique({ where: { paymentId: payment.id } }).catch(() => null);
+          if (current) { drawerOperations.push(current); continue; }
+          const operation = await tx.drawerOperation.create({ data: {
+            id: `drawer:${payment.id}`, tenantId: ctx.tenantId, branchId: ctx.branchId,
+            cashSessionId: existing.cashSessionId ?? null, paymentId: payment.id, saleId: existing.id,
+            operationType: "PAYMENT", status: "PENDING", attempts: 0, deviceId: existing.deviceId,
+            requestedById: ctx.userId, metadata: { amount: Number(payment.amount), paymentMethod: payment.paymentMethod },
+          } });
+          await tx.payment.update({ where: { id: payment.id }, data: { drawerOperationId: operation.id } });
+          drawerOperations.push(operation);
+        }
+        return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
       for (const item of req.items) {
         let v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
@@ -70,6 +85,20 @@ export class PrismaAtomicCommercialFinanceService {
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: totals.subtotal, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: totals.grossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
+      // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
+      const drawerOperations: any[] = [];
+      const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;
+      for (const payment of salePayments.filter((p: any) => p.paymentMethod === "CASH" && p.status === "COMPLETED")) {
+        const operation = await tx.drawerOperation.create({ data: {
+          id: `drawer:${payment.id}`, tenantId: ctx.tenantId, branchId: ctx.branchId,
+          cashSessionId: req.cashSessionId ?? null, paymentId: payment.id, saleId: sale.id,
+          operationType: "PAYMENT", status: "PENDING", attempts: 0, deviceId: req.deviceId,
+          requestedById: ctx.userId, metadata: { amount: Number(payment.amount), paymentMethod: payment.paymentMethod },
+        } });
+        await tx.payment.update({ where: { id: payment.id }, data: { drawerOperationId: operation.id } });
+        drawerOperations.push(operation);
+      }
+
       // Update inventory and stock ledgers atomically
       const ledgers: any[] = [];
       const impactedProductIds = new Set<string>();
@@ -83,13 +112,9 @@ export class PrismaAtomicCommercialFinanceService {
         }
         const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
         if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        let qtyBefore = 0;
-        if (typeof (tx.stockLedger as any)?.aggregate === "function") {
-          const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
-          qtyBefore = Number(ledgerBefore._sum.quantityChange ?? (variantBefore as any).inventoryQuantity ?? 0);
-        } else {
-          qtyBefore = Number((variantBefore as any).inventoryQuantity ?? (variantBefore as any).stock ?? 0);
-        }
+        const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
+        const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
+
         const isOversell = qtyBefore < qtySold;
         const shortfall = isOversell ? qtySold - qtyBefore : 0;
         const qtyAfter = Math.max(0, qtyBefore - qtySold);
@@ -143,36 +168,20 @@ export class PrismaAtomicCommercialFinanceService {
         });
         ledgers.push(ledger);
 
-        await tx.productVariant.update({
-          where: { id: l.variantId },
-          data: { inventoryQuantity: qtyAfter },
-        });
-
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, l.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, l.variantId, null);
         impactedProductIds.add(l.productId);
       }
 
       for (const prodId of impactedProductIds) {
-        const siblingVars = await tx.productVariant.findMany({
-          where: { productId: prodId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-        });
-        const totalStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity), 0);
-        const reservedStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.reservedQuantity || 0), 0);
-        await tx.product.update({
-          where: { id: prodId },
-          data: {
-            totalStock,
-            reservedStock,
-            availableStock: Math.max(0, totalStock - reservedStock),
-            lowStockVariantsCount: siblingVars.filter((v: any) => v.isActive && Number(v.inventoryQuantity) <= Number(v.reorderLevel || 0)).length,
-          },
-        });
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, prodId);
       }
 
       const lookup = await this.accounts(tx, ctx);
       const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
       const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       await this.writeJournal(tx, ctx, built);
-      return { sale, lines: sale.lines, ledgers };
+      return { sale, lines: sale.lines, ledgers, drawerOperations };
     });
   }
 
@@ -221,30 +230,16 @@ export class PrismaAtomicCommercialFinanceService {
         });
         ledgers.push(ledger);
 
-        await tx.productVariant.update({
-          where: { id: i.variantId },
-          data: { inventoryQuantity: qtyAfter },
-        });
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, i.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, i.variantId, null);
 
         impactedProdIds.add(prodId);
       }
 
       for (const prodId of impactedProdIds) {
-        const siblingVars = await tx.productVariant.findMany({
-          where: { productId: prodId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-        });
-        const totalStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity), 0);
-        const reservedStock = siblingVars.filter((v: any) => v.isActive).reduce((sum: number, v: any) => sum + Number(v.reservedQuantity || 0), 0);
-        await tx.product.update({
-          where: { id: prodId },
-          data: {
-            totalStock,
-            reservedStock,
-            availableStock: Math.max(0, totalStock - reservedStock),
-            lowStockVariantsCount: siblingVars.filter((v: any) => v.isActive && Number(v.inventoryQuantity) <= Number(v.reorderLevel || 0)).length,
-          },
-        });
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, prodId);
       }
+
       const lookup = await this.accounts(tx, ctx); const built = FinancialBridge.mapGoodsReceiptToJournal(ctx, { ...(receipt as any), items: receipt.items.map((x: any) => ({ ...x, totalCost: Number(x.totalCost) })) }, lookup as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1); await this.writeJournal(tx, ctx, built);
       return { receipt, ledgers };
     });

@@ -1,4 +1,5 @@
 import type { DrawerOutboxItem, LocalIndexedDbStore, TenantScopedContext } from "../indexedDb.js";
+import { apiFetch } from "./apiClient.js";
 
 export interface CashDrawerHardwareDriver {
   kick(timeoutMs: number): Promise<void>;
@@ -13,8 +14,10 @@ export function registerCashDrawerHardwareDriver(driver: CashDrawerHardwareDrive
 }
 
 export function createDrawerOutboxItem(params: {
-  saleId: string;
-  paymentId: string;
+  saleId?: string;
+  paymentId?: string;
+  operationId?: string;
+  operationType?: "PAYMENT" | "NO_SALE";
   tenantId: string;
   branchId: string;
   deviceId: string;
@@ -22,10 +25,20 @@ export function createDrawerOutboxItem(params: {
   payload?: Record<string, unknown>;
 }): DrawerOutboxItem {
   const requestedAt = params.requestedAt || new Date().toISOString();
-  const operationId = `drawer:${params.paymentId}`;
-  return { id: operationId, operationId, saleId: params.saleId, paymentId: params.paymentId,
-    tenantId: params.tenantId, branchId: params.branchId, deviceId: params.deviceId,
-    status: "PENDING", attempts: 0, requestedAt, payload: params.payload || {} };
+  const operationId = params.operationId || (params.paymentId ? `drawer:${params.paymentId}` : `drawer:${crypto.randomUUID()}`);
+  return {
+    id: operationId,
+    operationId,
+    saleId: params.saleId || "",
+    paymentId: params.paymentId || "",
+    tenantId: params.tenantId,
+    branchId: params.branchId,
+    deviceId: params.deviceId,
+    status: "PENDING",
+    attempts: 0,
+    requestedAt,
+    payload: { operationType: params.operationType || "PAYMENT", ...(params.payload || {}) },
+  };
 }
 
 async function withTimeout(work: Promise<void>, timeoutMs: number): Promise<void> {
@@ -55,17 +68,40 @@ export async function dispatchDrawerOutbox(db: LocalIndexedDbStore, ctx: TenantS
       .filter((item) => item.status === "PENDING")
       .sort((a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt));
     for (const item of pending) {
-      const executing: DrawerOutboxItem = { ...item, status: "EXECUTING",
-        attempts: item.attempts + 1, startedAt: new Date().toISOString() };
+      // The authoritative PostgreSQL operation must be EXECUTING before hardware is touched.
+      // If the payment transaction has not committed yet, leave this local item pending.
+      let claim: any;
+      try {
+        const response = await apiFetch<any>(`/api/v1/drawer-operations/${encodeURIComponent(item.operationId)}/execute`, { method: "POST" });
+        claim = response?.data || response;
+      } catch {
+        continue;
+      }
+      if (claim?.status !== "EXECUTING") continue;
+
+      const executing: DrawerOutboxItem = {
+        ...item,
+        status: "EXECUTING",
+        attempts: item.attempts + 1,
+        startedAt: new Date().toISOString(),
+      };
       persist(db, executing);
       await db.flushPersistence?.();
       try {
         await withTimeout(driver.kick(DRAWER_TIMEOUT_MS), DRAWER_TIMEOUT_MS);
         persist(db, { ...executing, status: "SUCCEEDED", completedAt: new Date().toISOString() });
+        await apiFetch(`/api/v1/drawer-operations/${encodeURIComponent(item.operationId)}/result`, {
+          method: "POST", body: JSON.stringify({ status: "SUCCEEDED" }),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        persist(db, { ...executing, status: message === "CASH_DRAWER_TIMEOUT" ? "TIMEOUT" : "FAILED",
-          completedAt: new Date().toISOString(), lastError: message });
+        const status = message === "CASH_DRAWER_TIMEOUT" ? "TIMEOUT" : "FAILED";
+        persist(db, { ...executing, status, completedAt: new Date().toISOString(), lastError: message });
+        try {
+          await apiFetch(`/api/v1/drawer-operations/${encodeURIComponent(item.operationId)}/result`, {
+            method: "POST", body: JSON.stringify({ status, error: message }),
+          });
+        } catch { /* authoritative reconciliation can retry later */ }
       }
       await db.flushPersistence?.();
     }
@@ -77,19 +113,33 @@ export async function dispatchDrawerOutbox(db: LocalIndexedDbStore, ctx: TenantS
 export function recoverInterruptedDrawerOutbox(db: LocalIndexedDbStore): void {
   for (const item of db.drawerOutbox.values()) {
     if (item.status !== "EXECUTING") continue;
-    persist(db, { ...item, status: "UNKNOWN", completedAt: new Date().toISOString(),
-      lastError: "PROCESS_INTERRUPTED_AFTER_HARDWARE_DISPATCH" });
+    const unknown = {
+      ...item,
+      status: "UNKNOWN" as const,
+      completedAt: new Date().toISOString(),
+      lastError: "PROCESS_INTERRUPTED_AFTER_HARDWARE_DISPATCH",
+    };
+    persist(db, unknown);
+    void apiFetch(`/api/v1/drawer-operations/${encodeURIComponent(item.operationId)}/result`, {
+      method: "POST",
+      body: JSON.stringify({ status: "UNKNOWN", error: unknown.lastError }),
+    }).catch(() => undefined);
   }
 }
 
 export function createEscPosSerialCashDrawerDriver(port: any, baudRate = 9600): CashDrawerHardwareDriver {
-  return { kick: async (timeoutMs: number) => {
-    const work = (async () => {
-      if (!port.readable || !port.writable) await port.open({ baudRate });
-      const writer = port.writable.getWriter();
-      try { await writer.write(new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa])); }
-      finally { writer.releaseLock(); }
-    })();
-    await withTimeout(work, timeoutMs);
-  }};
+  return {
+    kick: async (timeoutMs: number) => {
+      const work = (async () => {
+        if (!port.readable || !port.writable) await port.open({ baudRate });
+        const writer = port.writable.getWriter();
+        try {
+          await writer.write(new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa]));
+        } finally {
+          writer.releaseLock();
+        }
+      })();
+      await withTimeout(work, timeoutMs);
+    },
+  };
 }

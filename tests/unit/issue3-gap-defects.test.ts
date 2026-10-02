@@ -89,9 +89,11 @@ describe('Issue #3 Gap Analysis Defect Eliminator Suite', () => {
       });
     }).toThrow(/CASH_SESSION_ALREADY_OPEN/i);
 
-    commercial.closeCashSession(tenantA, session1.id, {
+    commercial.sealCashSessionCount(tenantA, session1.id, {
       actualCash: 50000,
+      deviceId: "ISSUE3-CERT",
     });
+    commercial.closeCashSession(tenantA, session1.id, {});
 
     const session2 = commercial.openCashSession(tenantA, {
       openingCash: 60000,

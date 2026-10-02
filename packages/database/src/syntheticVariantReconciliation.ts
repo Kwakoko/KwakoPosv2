@@ -1,5 +1,6 @@
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
+import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 export interface SyntheticReconciliationReport {
   scanned: number;
@@ -65,20 +66,11 @@ export async function reconcileSyntheticVariants(
         data: { variantId: canonical.id },
       });
 
-      // Transfer any inventory quantity
-      const transferredQty = Number(synVar.inventoryQuantity ?? 0);
-      if (transferredQty > 0) {
-        await tx.productVariant.update({
-          where: { id: canonical.id },
-          data: { inventoryQuantity: { increment: transferredQty } },
-        });
-      }
-
-      // Mark synthetic variant inactive
-      await tx.productVariant.update({
-        where: { id: synVar.id },
-        data: { isActive: false, inventoryQuantity: 0 },
-      });
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, canonical.id);
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, synVar.id);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, canonical.id, null);
+      await tx.productVariant.update({ where: { id: synVar.id }, data: { isActive: false } });
+      await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, synVar.productId);
 
       report.merged += 1;
       report.details.push({

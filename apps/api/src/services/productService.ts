@@ -264,35 +264,33 @@ export class ProductService {
       if (!variant) continue;
 
       if (req.action === "UPDATE_PRICES" && req.priceData) {
-        const updated = this.updateVariant(ctx, vId, {
+        this.updateVariant(ctx, vId, {
           inheritBuyingPrice: req.priceData.inheritBuyingPrice,
           inheritSellingPrice: req.priceData.inheritSellingPrice,
           costPrice: req.priceData.costPrice,
           price: req.priceData.price,
         });
-        updatedVariants.push(updated);
+        const updatedProduct = this.getProductById(ctx, productId);
+        const updated = updatedProduct?.variants?.find((v) => v.id === vId);
+        if (updated) updatedVariants.push(updated);
       } else if (req.action === "UPDATE_STOCK" && req.stockData) {
-        const currentStock = variant.stock || 0;
-        const newStock =
-          req.stockData.mode === "ADD" ? currentStock + req.stockData.quantity : req.stockData.quantity;
-
-        const updated = this.updateVariant(ctx, vId, {
-          inventoryQuantity: Math.max(0, newStock),
-          stock: Math.max(0, newStock),
-        });
+        const currentStock = this.stockRepo.getAvailableStock(ctx, vId);
+        const targetQuantity = req.stockData.mode === "ADD" ? currentStock + req.stockData.quantity : req.stockData.quantity;
 
         // Record stock adjustment ledger entry for audit trail
         this.stockRepo.recordStockAdjustment(ctx, {
           variantId: vId,
           adjustmentType: "SET",
-          quantityChange: Math.max(0, newStock),
+          quantityChange: Math.max(0, targetQuantity),
           reason: "BULK_STOCK_UPDATE",
           deviceId: "SYSTEM_CONSOLE",
           operationId: randomUUID(),
           idempotencyKey: `bulk-stock-${vId}-${Date.now()}`,
         });
 
-        updatedVariants.push(updated);
+        const updatedProduct = this.getProductById(ctx, productId);
+        const updated = updatedProduct?.variants?.find((v) => v.id === vId);
+        if (updated) updatedVariants.push(updated);
       } else if (req.action === "SET_STATUS" && req.isActive !== undefined) {
         const updated = this.updateVariant(ctx, vId, {
           isActive: req.isActive,

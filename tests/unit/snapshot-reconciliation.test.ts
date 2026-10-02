@@ -32,6 +32,8 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
 
     const initialVariant: ProductVariant = {
       id: variantId,
+      tenantId: "tenant-001",
+      branchId: "branch-001",
       productId,
       name: "500g Roasted Beans",
       sku: "COF-500G",
@@ -43,6 +45,15 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
       updatedAt: new Date().toISOString(),
     };
     db.saveVariantLocal(initialVariant);
+    db.stockLedger.set("opening-" + variantId, {
+      id: "opening-" + variantId,
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      variantId,
+      quantityChange: 50,
+      quantity: 50,
+    });
 
     expect(db.productVariants.get(variantId)?.inventoryQuantity).toBe(50);
 
@@ -62,6 +73,8 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
         entityId: saleId,
         operationType: "CREATE",
         payload: { id: saleId, total: 30000, items: [{ variantId, qty: 2 }] },
+        tenantId: "tenant-001",
+        branchId: "branch-001",
       },
       db
     );
@@ -124,6 +137,8 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
 
     const variant: ProductVariant = {
       id: variantId,
+      tenantId: "tenant-001",
+      branchId: "branch-001",
       productId,
       name: "Fresh Milk 1L",
       sku: "MILK-1L",
@@ -135,6 +150,15 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
       updatedAt: new Date().toISOString(),
     };
     db.saveVariantLocal(variant);
+    db.stockLedger.set("opening-" + variantId, {
+      id: "opening-" + variantId,
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      variantId,
+      quantityChange: 20,
+      quantity: 20,
+    });
 
     // Offline sale of 5 units
     await recordPosSaleDeductions(db, {

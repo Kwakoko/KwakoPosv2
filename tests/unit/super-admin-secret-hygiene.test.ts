@@ -23,51 +23,57 @@ describe("KwakoPos v2 — Super Admin Secret Hygiene & Password Policy", () => {
       if (fs.existsSync(full)) {
         const content = fs.readFileSync(full, "utf8");
         // Must not contain hardcoded bootstrap password string
-        expect(content).not.toContain("Argon2id2@");
+        expect(content).not.toContain("TestOnly-StrongPass-2026!");
       }
     }
   });
 
   it("2. Password policy validator enforces strict complexity standards", () => {
     // Valid password (10+ chars, uppercase, lowercase, digit, symbol)
-    const validResult = validatePasswordStrength("Argon2id2@");
+    const validResult = validatePasswordStrength("TestOnly-StrongPass-2026!");
     expect(validResult.valid).toBe(true);
 
     const strongResult = validatePasswordStrength("SuperMasterKey2026!#");
     expect(strongResult.valid).toBe(true);
 
     // Too short (< 10 chars)
-    const shortResult = validatePasswordStrength("Argon2@");
+    const shortResult = validatePasswordStrength("Short-1!");
     expect(shortResult.valid).toBe(false);
     expect(shortResult.reason).toContain("at least 10 characters");
 
     // Missing uppercase
-    const noUpperResult = validatePasswordStrength("argon2id2@secret");
+    const noUpperResult = validatePasswordStrength("testonlysecret2026!");
     expect(noUpperResult.valid).toBe(false);
     expect(noUpperResult.reason).toContain("uppercase");
 
     // Missing lowercase
-    const noLowerResult = validatePasswordStrength("ARGON2ID2@SECRET");
+    const noLowerResult = validatePasswordStrength("TESTONLYSECRET2026!");
     expect(noLowerResult.valid).toBe(false);
     expect(noLowerResult.reason).toContain("lowercase");
 
     // Missing digit
-    const noDigitResult = validatePasswordStrength("ArgonPassSecret@");
+    const noDigitResult = validatePasswordStrength("TestPasswordSecret@");
     expect(noDigitResult.valid).toBe(false);
     expect(noDigitResult.reason).toContain("digit");
 
     // Missing special character
-    const noSpecialResult = validatePasswordStrength("Argon2id2Secret");
+    const noSpecialResult = validatePasswordStrength("TestPasswordSecret2");
     expect(noSpecialResult.valid).toBe(false);
     expect(noSpecialResult.reason).toContain("special character");
   });
 
   it("3. Argon2id derives secure hash and verifies correctly", async () => {
-    const bootstrapCandidate = "Argon2id2@";
+    const bootstrapCandidate = "TestOnly-StrongPass-2026!";
     const hash = await hashPassword(bootstrapCandidate);
 
     expect(hash).toMatch(/^\$argon2id\$/);
     expect(await comparePassword(bootstrapCandidate, hash)).toBe(true);
     expect(await comparePassword("WrongPassword123!", hash)).toBe(false);
+  });
+  it("4. TOTP setup must not return a live OTP and the legacy TOTP dump script must be absent", () => {
+    const service = fs.readFileSync(path.join(rootDir, "apps/api/src/services/superAdminSecurityService.ts"), "utf8");
+    expect(service).not.toContain("currentOtp");
+    expect(fs.existsSync(path.join(rootDir, "scripts/security/show-totp.ts"))).toBe(false);
   });
+
 });

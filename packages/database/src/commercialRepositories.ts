@@ -717,10 +717,28 @@ export class ScopedCommercialRepository {
     return expense;
   }
 
+  sealCashSessionCount(ctx: TenantContext, sessionId: string, req: { actualCash: number; deviceId?: string }): CashSession {
+    const session = this.cashSessions.get(sessionId);
+    if (!session) throw new Error(`Cash session ${sessionId} not found`);
+    assertTenantIsolation(ctx, session.tenantId, session.branchId);
+    if (session.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
+    if (session.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
+    if (session.countSealedAt) throw new Error("CASH_COUNT_ALREADY_SEALED");
+    const actualCash = Number(req.actualCash);
+    if (!Number.isFinite(actualCash) || actualCash < 0) throw new Error("INVALID_CASH_COUNT");
+    const now = new Date().toISOString();
+    session.actualCash = actualCash; session.closingCash = actualCash; session.countSealedAt = now;
+    session.countSealedById = ctx.userId; session.countSealedDeviceId = req.deviceId || null; session.updatedAt = now;
+    return session;
+  }
+
   closeCashSession(ctx: TenantContext, sessionId: string, req: CloseCashSessionRequest): CashSession {
     const session = this.cashSessions.get(sessionId);
     if (!session) throw new Error(`Cash session ${sessionId} not found`);
     assertTenantIsolation(ctx, session.tenantId, session.branchId);
+
+    const actualCash = session.actualCash;
+    if (actualCash === null || actualCash === undefined || !session.countSealedAt) throw new Error("CASH_COUNT_NOT_SEALED");
 
     const varianceResult = CashSessionEngine.calculateVariance(
       {
@@ -730,13 +748,13 @@ export class ScopedCommercialRepository {
         cashRefundsTotal: session.cashRefundsTotal || 0,
         cashExpensesTotal: session.cashExpensesTotal || 0,
       },
-      req.actualCash
+      actualCash
     );
 
     const now = new Date().toISOString();
     session.closedAt = now;
-    session.closingCash = req.actualCash;
-    session.actualCash = req.actualCash;
+    session.closingCash = actualCash;
+    session.actualCash = actualCash;
     session.expectedCash = varianceResult.expectedCash;
     session.variance = varianceResult.variance;
     session.status = "CLOSED";

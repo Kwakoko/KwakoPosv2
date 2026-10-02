@@ -17,6 +17,7 @@ import { superAdminDatabaseRoutes } from "./routes/superAdminDatabaseRoutes.js";
 import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoutes.js";
 import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
+import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -78,6 +79,7 @@ import {
   CreatePosSaleRequestSchema,
   CreateSaleReturnRequestSchema,
   OpenCashSessionRequestSchema,
+  SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
   CreateExpenseRequestSchema,
   CreateAccountRequestSchema,
@@ -131,27 +133,32 @@ interface InMemoryAuthRecord {
 const inMemoryAuthRegistry = new Map<string, InMemoryAuthRecord>();
 
 import {
+  prisma,
   ScopedProductRepository,
   ScopedStockRepository,
   ScopedCommercialRepository,
   ScopedFinanceRepository,
   ScopedWorkforceRepository,
   ScopedPluginRepository,
-  globalCommercialRepository,
+  globalCommercialRepository as legacyGlobalCommercialRepository,
   globalFinanceRepository,
-  globalWorkforceRepository,
-  globalPluginRepository,
-  globalTelecomRepository,
-  globalMonetizationRepository,
+  globalWorkforceRepository as legacyGlobalWorkforceRepository,
+  globalPluginRepository as legacyGlobalPluginRepository,
+  globalTelecomRepository as legacyGlobalTelecomRepository,
+  globalMonetizationRepository as legacyGlobalMonetizationRepository,
   globalReleaseRepository,
   ScopedMonetizationRepository,
   PrismaProductRepository,
   PrismaStockRepository,
   PrismaCatalogRepository,
   PrismaFinanceRepository,
+  PrismaCommercialRepository,
+  PrismaWorkforceRepository,
+  PrismaPluginRepository,
+  PrismaTelecomRepository,
+  PrismaMonetizationRepository,
   PrismaAtomicCommercialFinanceService,
   globalInMemoryStore,
-  prisma,
 } from "@kwakopos2/database";
 import {
   PluginRegistryEngine,
@@ -217,7 +224,9 @@ declare module "fastify" {
 }
 
 function isProductionEnv(cfg: ReturnType<typeof loadConfig>) {
-  return cfg.NODE_ENV === "production" || cfg.NODE_ENV === "production-certification";
+  return cfg.NODE_ENV === "production" ||
+    cfg.NODE_ENV === "production-certification" ||
+    process.env.K_SERVICE != null;
 }
 
 function requireTenantContext(req: FastifyRequest): TenantContext {
@@ -268,7 +277,9 @@ export interface BuildServerOptions {
 export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const config = opts.config ?? loadConfig();
   const server = Fastify({ logger: true });
-  const productionPersistence = opts.productionPersistence ?? (isProductionEnv(config) || process.env.SYNC_CERTIFICATION_PRISMA === "true");
+  const productionPersistence = isProductionEnv(config)
+    ? true
+    : (opts.productionPersistence ?? process.env.SYNC_CERTIFICATION_PRISMA === "true");
 
   // H-007: Hardened CORS configuration
   // - credentials: true  → allows cookies & Authorization headers cross-origin
@@ -336,9 +347,32 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
   const syncEngine = productionPersistence
     ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
-    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, globalCommercialRepository, globalInMemoryStore);
+    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, legacyGlobalCommercialRepository, globalInMemoryStore);
 
   const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;
+  const commercialRepository: any = productionPersistence ? new PrismaCommercialRepository() : legacyGlobalCommercialRepository;
+  const workforceRepository: any = productionPersistence ? new PrismaWorkforceRepository() : legacyGlobalWorkforceRepository;
+  const pluginRepository: any = productionPersistence ? new PrismaPluginRepository() : legacyGlobalPluginRepository;
+  const telecomRepository: any = productionPersistence ? new PrismaTelecomRepository() : legacyGlobalTelecomRepository;
+  const monetizationRepository: any = productionPersistence ? new PrismaMonetizationRepository() : legacyGlobalMonetizationRepository;
+
+  if (productionPersistence) {
+    const requiredPersistenceAuthorities = [
+      financeRepository,
+      commercialRepository,
+      workforceRepository,
+      pluginRepository,
+      telecomRepository,
+      monetizationRepository,
+    ];
+    const invalidAuthorities = requiredPersistenceAuthorities.filter(
+      (repository) => !String(repository?.constructor?.name || "").startsWith("Prisma"),
+    );
+    if (invalidAuthorities.length > 0) {
+      throw new Error("PERSISTENCE_FATAL: Production API repository authority must be PostgreSQL-backed.");
+    }
+  }
+
   const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
   // User/Role identity mutations are privileged PostgreSQL operations; never route them through syncOutbox or in-memory fallbacks.
   const rbacMutationService = productionPersistence ? new PrivilegedRbacMutationService(prisma) : null;
@@ -913,6 +947,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   receiptRoutes(server);
   traVfdRoutes(server);
+  if (rbacMutationService) {
+    rbacRoutes(server, { service: rbacMutationService });
+  }
 
   server.get("/admin/operations/freeze", async () => {
     return { success: true, data: ReleaseGovernancePolicy.getFreezeState() };
@@ -1312,140 +1349,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
   });
 
-  // Privileged identity routes — PostgreSQL only; no syncOutbox/in-memory fallback.
-  const requireRbacService = (reply: FastifyReply) => {
-    if (!rbacMutationService) {
-      reply.status(503).send({ success: false, error: { code: "RBAC_PERSISTENCE_REQUIRED", message: "User and role administration requires PostgreSQL persistence." } });
-      return false;
-    }
-    return true;
-  };
-  const rbacActor = (req: FastifyRequest) => {
-    const ctx = requireAdminContext(req);
-    return { ...ctx, deviceId: String(req.headers["x-device-id"] || "").trim() || null };
-  };
-
-  server.get("/api/v1/users", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      return { success: true, data: await rbacMutationService!.listUsers(rbacActor(req)) };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.post("/api/v1/users", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const body = (req.body || {}) as any;
-      const actor = rbacActor(req);
-      const tenantId = actor.tenantId;
-      const branchId = String(body.branchId || "").trim();
-      const roleId = String(body.roleId || "").trim();
-      if (!branchId || !roleId) return reply.status(400).send({ success: false, error: { code: "USER_ROLE_BRANCH_REQUIRED", message: "roleId and branchId are required." } });
-      const created = await rbacMutationService!.createUser(actor, {
-        firstName: String(body.firstName || "").trim(),
-        lastName: String(body.lastName || "").trim(),
-        email: String(body.email || "").trim(),
-        password: String(body.password || ""),
-        roleId,
-        branchId,
-      });
-      return reply.status(201).send({ success: true, data: created });
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.patch("/api/v1/users/:id", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const actor = rbacActor(req);
-      const body = (req.body || {}) as any;
-      const updated = await rbacMutationService!.updateUser(actor, String((req.params as any).id), {
-        firstName: body.firstName,
-        lastName: body.lastName,
-        email: body.email,
-        password: body.password,
-        roleId: body.roleId,
-        branchId: body.branchId,
-        status: body.status,
-      });
-      return { success: true, data: updated };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.delete("/api/v1/users/:id", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const actor = rbacActor(req);
-      const id = String((req.params as any).id);
-      const result = await rbacMutationService!.deactivateUser(actor, id);
-      return { success: true, data: result };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.get("/api/v1/roles", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      return { success: true, data: await rbacMutationService!.listRoles(rbacActor(req)) };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.post("/api/v1/roles", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const body = (req.body || {}) as any;
-      const created = await rbacMutationService!.createRole(rbacActor(req), {
-        name: String(body.name || "").trim(),
-        description: body.description == null ? null : String(body.description),
-        permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : [],
-      });
-      return reply.status(201).send({ success: true, data: created });
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.put("/api/v1/roles/:id", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const body = (req.body || {}) as any;
-      const updated = await rbacMutationService!.updateRole(rbacActor(req), String((req.params as any).id), {
-        name: String(body.name || "").trim(),
-        description: body.description == null ? null : String(body.description),
-        permissions: Array.isArray(body.permissions) ? body.permissions.map(String) : [],
-      });
-      return { success: true, data: updated };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
-  server.delete("/api/v1/roles/:id", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const result = await rbacMutationService!.deleteRole(rbacActor(req), String((req.params as any).id));
-      return { success: true, data: result };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
-  });
-
   server.get("/api/v1/auth/sessions", async (req, reply) => {
     if (!productionPersistence) return reply.status(503).send({ success: false, error: { code: "SECURITY_PERSISTENCE_REQUIRED", message: "Session inspection requires PostgreSQL persistence." } });
     const ctx = requireAdminContext(req);
@@ -1466,17 +1369,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!session) return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
     await prisma.deviceSession.update({ where: { id }, data: { revokedAt: new Date() } });
     return { success: true, data: { id, revoked: true } };
-  });
-
-  server.get("/api/v1/audit/logs", async (req, reply) => {
-    if (!requireRbacService(reply)) return;
-    try {
-      const events = await rbacMutationService!.listAuditEvents(rbacActor(req));
-      return { success: true, data: events.map((event: any) => ({ id: event.id, action: event.action, userName: event.userId, details: event.metadata, timestamp: event.createdAt, ipAddress: null })) };
-    } catch (error) {
-      if (error instanceof RbacMutationError) return reply.status(error.statusCode).send({ success: false, error: { code: error.code, message: error.message } });
-      throw error;
-    }
   });
 
   // Product routes (examples using schema parsing & tenant context)
@@ -1817,6 +1709,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
+  server.get("/sync/conflicts", async (req) => {
+    const query = z.object({ status: z.enum(["OPEN", "ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE", "ALL"]).optional() }).parse(req.query || {});
+    const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
+    return { success: true, data: result };
+  });
   server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
@@ -1872,8 +1769,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Product Search
   server.get("/api/v1/products/search", async (req) => {
     const q = ((req.query as any)?.q || "").toLowerCase().trim();
+    if (!q) return { success: true, data: await productRepo.getProducts(req.tenantContext!) };
+
+    const barcodeHit = await prisma.productVariant.findFirst({
+      where: {
+        tenantId: req.tenantContext!.tenantId,
+        branchId: req.tenantContext!.branchId,
+        barcode: q,
+        isActive: true,
+      },
+      select: { productId: true },
+    });
+    if (barcodeHit) {
+      const product = await productRepo.getProductById(req.tenantContext!, barcodeHit.productId);
+      if (product) return { success: true, data: [product] };
+    }
+
     const allProducts = await productRepo.getProducts(req.tenantContext!);
-    if (!q) return { success: true, data: allProducts };
 
     const filtered = allProducts.filter((p) => {
       if (p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)) return true;
@@ -1885,63 +1797,61 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Customer Management
   server.get("/api/v1/customers", async (req) => {
-    const customers = globalCommercialRepository.getCustomers(req.tenantContext!);
+    const customers = await commercialRepository.getCustomers(req.tenantContext!);
     return { success: true, data: customers };
   });
 
   server.post("/api/v1/customers", async (req, reply) => {
     const validated = CreateCustomerRequestSchema.parse(req.body);
-    const customer = globalCommercialRepository.createCustomer(req.tenantContext!, validated);
+    const customer = await commercialRepository.createCustomer(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: customer });
   });
 
   server.get("/api/v1/customers/:id", async (req, reply) => {
-    const customer = globalCommercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
+    const customer = await commercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
     if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
     return { success: true, data: customer };
   });
 
   server.put("/api/v1/customers/:id", async (req) => {
     const validated = UpdateCustomerRequestSchema.parse(req.body);
-    const updated = globalCommercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
+    const updated = await commercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
   // Supplier Management
   server.get("/api/v1/suppliers", async (req) => {
-    const suppliers = globalCommercialRepository.getSuppliers(req.tenantContext!);
+    const suppliers = await commercialRepository.getSuppliers(req.tenantContext!);
     return { success: true, data: suppliers };
   });
 
   server.post("/api/v1/suppliers", async (req, reply) => {
     const validated = CreateSupplierRequestSchema.parse(req.body);
-    const supplier = globalCommercialRepository.createSupplier(req.tenantContext!, validated);
+    const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.get("/api/v1/suppliers/:id", async (req, reply) => {
-    const supplier = globalCommercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
+    const supplier = await commercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
     if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
     return { success: true, data: supplier };
   });
 
   server.put("/api/v1/suppliers/:id", async (req) => {
     const validated = UpdateSupplierRequestSchema.parse(req.body);
-    const updated = globalCommercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
+    const updated = await commercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
   // Purchasing & Goods Receipt
   server.get("/api/v1/purchases", async (req) => {
-    const pos = Array.from(globalCommercialRepository.purchaseOrders.values()).filter(
-      (po) => po.tenantId === req.tenantContext!.tenantId && po.branchId === req.tenantContext!.branchId
-    );
+    const pos = await commercialRepository.getPurchaseOrders(req.tenantContext!);
     return { success: true, data: pos };
   });
 
   server.post("/api/v1/purchases", async (req, reply) => {
     const validated = CreatePurchaseOrderRequestSchema.parse(req.body);
-    const po = globalCommercialRepository.createPurchaseOrder(req.tenantContext!, validated);
+    const po = await commercialRepository.createPurchaseOrder(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: po });
   });
 
@@ -1949,15 +1859,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreatePurchaseReceiptRequestSchema.parse(req.body);
     const result = atomicCommercialFinance
       ? await atomicCommercialFinance.createPurchaseReceipt(req.tenantContext!, validated)
-      : globalCommercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
+      : await commercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   // POS Sales Engine
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = Array.from(globalCommercialRepository.sales.values()).filter(
-      (s) => s.tenantId === req.tenantContext!.tenantId && s.branchId === req.tenantContext!.branchId
-    );
+    const sales = await commercialRepository.getSales(req.tenantContext!);
     return { success: true, data: sales };
   });
 
@@ -1965,37 +1873,34 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreatePosSaleRequestSchema.parse(req.body);
     const result = atomicCommercialFinance
       ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : globalCommercialRepository.createPosSale(req.tenantContext!, validated);
+      : await commercialRepository.createPosSale(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = globalCommercialRepository.sales.get((req.params as any).id);
-    if (!sale || sale.tenantId !== req.tenantContext!.tenantId) {
+    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
-    const lines = globalCommercialRepository.saleLines.get(sale.id) || [];
-    return { success: true, data: { ...sale, lines } };
+    return { success: true, data: sale };
   });
 
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = globalCommercialRepository.createSaleReturn(req.tenantContext!, validated);
+    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   // Cash Sessions & Drawer Reconciliation
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     const validated = OpenCashSessionRequestSchema.parse(req.body);
-    const session = globalCommercialRepository.openCashSession(req.tenantContext!, validated);
+    const session = await commercialRepository.openCashSession(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: session });
   });
 
   server.get("/api/v1/cash-sessions/active", async (req) => {
-    const session = Array.from(globalCommercialRepository.cashSessions.values()).find(
-      (s) => s.tenantId === req.tenantContext!.tenantId && s.branchId === req.tenantContext!.branchId && s.status === "OPEN"
-    );
+    const session = await commercialRepository.getActiveCashSession(req.tenantContext!);
     return { success: true, data: session || null };
   });
 
@@ -2003,43 +1908,87 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreateExpenseRequestSchema.parse(req.body);
     const expense = atomicCommercialFinance
       ? await atomicCommercialFinance.recordExpense(req.tenantContext!, validated)
-      : globalCommercialRepository.recordExpense(req.tenantContext!, validated);
+      : await commercialRepository.recordExpense(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: expense });
   });
 
 
+  server.post("/api/v1/cash-sessions/:id/count", async (req, reply) => {
+    const validated = SealCashSessionCountRequestSchema.parse(req.body);
+    const session = await commercialRepository.sealCashSessionCount(req.tenantContext!, (req.params as any).id, validated);
+    return { success: true, data: session };
+  });
+
+  server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+    if (!roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("*") && !permissions.includes("cashdrawer.open") && !permissions.includes("cashdrawer.close")) {
+      throw new Error("FORBIDDEN: Cash drawer operation permission required");
+    }
+    if (!productionPersistence) throw new Error("DRAWER_OPERATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    const operation = await commercialRepository.claimDrawerOperation(ctx, (req.params as any).id);
+    return { success: true, data: operation };
+  });
+
+  server.post("/api/v1/drawer-operations/:id/result", async (req) => {
+    const ctx = requireTenantContext(req);
+    if (!productionPersistence) throw new Error("DRAWER_OPERATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ status: z.enum(["SUCCEEDED", "FAILED", "TIMEOUT", "UNKNOWN"]), error: z.string().max(1000).optional() }).parse(req.body);
+    const operation = await commercialRepository.completeDrawerOperation(ctx, (req.params as any).id, body.status, body.error);
+    return { success: true, data: operation };
+  });
+
+  server.post("/api/v1/drawer-operations/no-sale", async (req) => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+    const authorized = roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes("cashdrawer.open");
+    if (!authorized) throw new Error("FORBIDDEN: No-sale drawer authority required");
+    if (!productionPersistence) throw new Error("DRAWER_OPERATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ cashSessionId: z.string().min(1), deviceId: z.string().min(1), reason: z.string().trim().min(3).max(500), id: z.string().optional() }).parse(req.body);
+    return { success: true, data: await commercialRepository.createNoSaleDrawerOperation(ctx, body) };
+  });
+
   server.post("/api/v1/cash-sessions/:id/close", async (req) => {
     const validated = CloseCashSessionRequestSchema.parse(req.body);
-    const session = globalCommercialRepository.closeCashSession(req.tenantContext!, (req.params as any).id, validated);
+    const session = await commercialRepository.closeCashSession(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: session };
   });
 
   // Commercial Reports & Executive Dashboard
   server.get("/api/v1/reports/summary", async (req) => {
-    const summary = globalCommercialRepository.getDashboardSummary(req.tenantContext!);
+    const summary = await commercialRepository.getDashboardSummary(req.tenantContext!);
     return { success: true, data: summary };
   });
 
   server.get("/api/v1/dashboard/executive", async (req) => {
-    const summary = globalCommercialRepository.getDashboardSummary(req.tenantContext!);
+    const summary = await commercialRepository.getDashboardSummary(req.tenantContext!);
     return { success: true, data: summary };
   });
 
   // Super Admin Commercial Operations
   server.get("/admin/commercial/overview", async () => {
+    if (productionPersistence) {
+      const { prisma } = await import("@kwakopos2/database");
+      const [totalTenants, totalSales, totalPurchases, totalReceipts] = await Promise.all([
+        prisma.tenant.count(),
+        prisma.sale.count(),
+        prisma.purchaseOrder.count(),
+        prisma.purchaseReceipt.count(),
+      ]);
+      return {
+        success: true,
+        data: { totalTenants, totalSales, totalPurchases, totalReceipts, status: "HEALTHY" },
+      };
+    }
     const totalTenants = 1;
-    const totalSales = globalCommercialRepository.sales.size;
-    const totalPurchases = globalCommercialRepository.purchaseOrders.size;
-    const totalReceipts = globalCommercialRepository.purchaseReceipts.size;
+    const totalSales = commercialRepository.sales.size;
+    const totalPurchases = commercialRepository.purchaseOrders.size;
+    const totalReceipts = commercialRepository.purchaseReceipts.size;
     return {
       success: true,
-      data: {
-        totalTenants,
-        totalSales,
-        totalPurchases,
-        totalReceipts,
-        status: "HEALTHY",
-      },
+      data: { totalTenants, totalSales, totalPurchases, totalReceipts, status: "HEALTHY" },
     };
   });
 
@@ -2225,42 +2174,42 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Departments
   server.get("/api/v1/workforce/departments", async (req) => {
-    const departments = globalWorkforceRepository.getDepartments(req.tenantContext!);
+    const departments = await workforceRepository.getDepartments(req.tenantContext!);
     return { success: true, data: departments };
   });
 
   server.post("/api/v1/workforce/departments", async (req, reply) => {
     const validated = CreateDepartmentRequestSchema.parse(req.body);
-    const department = globalWorkforceRepository.createDepartment(req.tenantContext!, validated);
+    const department = await workforceRepository.createDepartment(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: department });
   });
 
   // Job Positions
   server.get("/api/v1/workforce/positions", async (req) => {
-    const positions = globalWorkforceRepository.getJobPositions(req.tenantContext!);
+    const positions = await workforceRepository.getJobPositions(req.tenantContext!);
     return { success: true, data: positions };
   });
 
   server.post("/api/v1/workforce/positions", async (req, reply) => {
     const validated = CreateJobPositionRequestSchema.parse(req.body);
-    const position = globalWorkforceRepository.createJobPosition(req.tenantContext!, validated);
+    const position = await workforceRepository.createJobPosition(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: position });
   });
 
   // Employees & Employment Records
   server.get("/api/v1/workforce/employees", async (req) => {
-    const employees = globalWorkforceRepository.getEmployees(req.tenantContext!);
+    const employees = await workforceRepository.getEmployees(req.tenantContext!);
     return { success: true, data: employees };
   });
 
   server.post("/api/v1/workforce/employees", async (req, reply) => {
     const validated = CreateEmployeeRequestSchema.parse(req.body);
-    const result = globalWorkforceRepository.createEmployee(req.tenantContext!, validated);
+    const result = await workforceRepository.createEmployee(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/workforce/employees/:id", async (req, reply) => {
-    const employee = globalWorkforceRepository.getEmployeeById(req.tenantContext!, (req.params as any).id);
+    const employee = await workforceRepository.getEmployeeById(req.tenantContext!, (req.params as any).id);
     if (!employee) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Employee not found" } });
     return { success: true, data: employee };
   });
@@ -2268,217 +2217,217 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.put("/api/v1/workforce/employees/:id", async (req) => {
     const validated = UpdateEmployeeRequestSchema.parse(req.body);
     const reason = (req.body as any)?.reason;
-    const updated = globalWorkforceRepository.updateEmployee(req.tenantContext!, (req.params as any).id, validated, reason);
+    const updated = await workforceRepository.updateEmployee(req.tenantContext!, (req.params as any).id, validated, reason);
     return { success: true, data: updated };
   });
 
   server.get("/api/v1/workforce/employees/:id/employment-history", async (req) => {
-    const history = globalWorkforceRepository.getEmploymentHistory(req.tenantContext!, (req.params as any).id);
+    const history = await workforceRepository.getEmploymentHistory(req.tenantContext!, (req.params as any).id);
     return { success: true, data: history };
   });
 
   // Shift Templates & Schedules
   server.get("/api/v1/workforce/shifts/templates", async (req) => {
-    const templates = globalWorkforceRepository.getShiftTemplates(req.tenantContext!);
+    const templates = await workforceRepository.getShiftTemplates(req.tenantContext!);
     return { success: true, data: templates };
   });
 
   server.post("/api/v1/workforce/shifts/templates", async (req, reply) => {
     const validated = CreateShiftTemplateRequestSchema.parse(req.body);
-    const template = globalWorkforceRepository.createShiftTemplate(req.tenantContext!, validated);
+    const template = await workforceRepository.createShiftTemplate(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: template });
   });
 
   server.get("/api/v1/workforce/schedules", async (req) => {
-    const schedules = globalWorkforceRepository.getSchedules(req.tenantContext!);
+    const schedules = await workforceRepository.getSchedules(req.tenantContext!);
     return { success: true, data: schedules };
   });
 
   server.post("/api/v1/workforce/schedules", async (req, reply) => {
     const validated = CreateWorkforceScheduleRequestSchema.parse(req.body);
-    const schedule = globalWorkforceRepository.createSchedule(req.tenantContext!, validated);
+    const schedule = await workforceRepository.createSchedule(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: schedule });
   });
 
   // Attendance & Time Tracking
   server.get("/api/v1/workforce/attendance", async (req) => {
-    const records = globalWorkforceRepository.getAttendanceRecords(req.tenantContext!);
+    const records = await workforceRepository.getAttendanceRecords(req.tenantContext!);
     return { success: true, data: records };
   });
 
   server.post("/api/v1/workforce/attendance/clock-in", async (req, reply) => {
     const validated = ClockInRequestSchema.parse(req.body);
-    const record = globalWorkforceRepository.clockIn(req.tenantContext!, validated);
+    const record = await workforceRepository.clockIn(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/attendance/:id/clock-out", async (req) => {
     const validated = ClockOutRequestSchema.parse(req.body);
-    const record = globalWorkforceRepository.clockOut(req.tenantContext!, (req.params as any).id, validated);
+    const record = await workforceRepository.clockOut(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: record };
   });
 
   // Timesheets
   server.get("/api/v1/workforce/timesheets", async (req) => {
-    const timesheets = globalWorkforceRepository.getTimesheets(req.tenantContext!);
+    const timesheets = await workforceRepository.getTimesheets(req.tenantContext!);
     return { success: true, data: timesheets };
   });
 
   server.post("/api/v1/workforce/timesheets", async (req, reply) => {
     const validated = CreateTimesheetRequestSchema.parse(req.body);
-    const timesheet = globalWorkforceRepository.generateTimesheet(req.tenantContext!, validated);
+    const timesheet = await workforceRepository.generateTimesheet(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: timesheet });
   });
 
   server.post("/api/v1/workforce/timesheets/:id/approve", async (req) => {
-    const approved = globalWorkforceRepository.approveTimesheet(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveTimesheet(req.tenantContext!, (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Leave Management
   server.get("/api/v1/workforce/leave/types", async (req) => {
-    const types = globalWorkforceRepository.getLeaveTypes(req.tenantContext!);
+    const types = await workforceRepository.getLeaveTypes(req.tenantContext!);
     return { success: true, data: types };
   });
 
   server.post("/api/v1/workforce/leave/types", async (req, reply) => {
     const body = (req.body as any) || {};
-    const type = globalWorkforceRepository.createLeaveType(req.tenantContext!, body);
+    const type = await workforceRepository.createLeaveType(req.tenantContext!, body);
     return reply.status(201).send({ success: true, data: type });
   });
 
   server.get("/api/v1/workforce/leave/requests", async (req) => {
-    const requests = globalWorkforceRepository.getLeaveRequests(req.tenantContext!);
+    const requests = await workforceRepository.getLeaveRequests(req.tenantContext!);
     return { success: true, data: requests };
   });
 
   server.post("/api/v1/workforce/leave/requests", async (req, reply) => {
     const validated = CreateLeaveRequestSchema.parse(req.body);
-    const request = globalWorkforceRepository.requestLeave(req.tenantContext!, validated);
+    const request = await workforceRepository.requestLeave(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: request });
   });
 
   server.post("/api/v1/workforce/leave/requests/:id/approve", async (req) => {
     const { approved, reason } = (req.body as any) || {};
-    const updated = globalWorkforceRepository.approveLeave(req.tenantContext!, (req.params as any).id, approved !== false, reason);
+    const updated = await workforceRepository.approveLeave(req.tenantContext!, (req.params as any).id, approved !== false, reason);
     return { success: true, data: updated };
   });
 
   // Tasks & Work Orders
   server.get("/api/v1/workforce/tasks", async (req) => {
-    const tasks = globalWorkforceRepository.getTasks(req.tenantContext!);
+    const tasks = await workforceRepository.getTasks(req.tenantContext!);
     return { success: true, data: tasks };
   });
 
   server.post("/api/v1/workforce/tasks", async (req, reply) => {
     const validated = CreateWorkforceTaskRequestSchema.parse(req.body);
-    const task = globalWorkforceRepository.createTask(req.tenantContext!, validated);
+    const task = await workforceRepository.createTask(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: task });
   });
 
   server.put("/api/v1/workforce/tasks/:id", async (req) => {
     const validated = UpdateWorkforceTaskRequestSchema.parse(req.body);
-    const updated = globalWorkforceRepository.updateTask(req.tenantContext!, (req.params as any).id, validated);
+    const updated = await workforceRepository.updateTask(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
   server.get("/api/v1/workforce/work-orders", async (req) => {
-    const workOrders = globalWorkforceRepository.getWorkOrders(req.tenantContext!);
+    const workOrders = await workforceRepository.getWorkOrders(req.tenantContext!);
     return { success: true, data: workOrders };
   });
 
   server.post("/api/v1/workforce/work-orders", async (req, reply) => {
     const validated = CreateWorkOrderRequestSchema.parse(req.body);
-    const wo = globalWorkforceRepository.createWorkOrder(req.tenantContext!, validated);
+    const wo = await workforceRepository.createWorkOrder(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: wo });
   });
 
   server.put("/api/v1/workforce/work-orders/:id", async (req) => {
     const validated = UpdateWorkOrderRequestSchema.parse(req.body);
-    const updated = globalWorkforceRepository.updateWorkOrder(req.tenantContext!, (req.params as any).id, validated);
+    const updated = await workforceRepository.updateWorkOrder(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
   // Skills & Certifications
   server.post("/api/v1/workforce/employees/:id/skills", async (req, reply) => {
     const validated = CreateEmployeeSkillRequestSchema.parse(req.body);
-    const skill = globalWorkforceRepository.addSkill(req.tenantContext!, (req.params as any).id, validated);
+    const skill = await workforceRepository.addSkill(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: skill });
   });
 
   server.get("/api/v1/workforce/employees/:id/skills", async (req) => {
-    const skills = globalWorkforceRepository.getSkills(req.tenantContext!, (req.params as any).id);
+    const skills = await workforceRepository.getSkills(req.tenantContext!, (req.params as any).id);
     return { success: true, data: skills };
   });
 
   server.post("/api/v1/workforce/employees/:id/certifications", async (req, reply) => {
     const validated = CreateEmployeeCertificationRequestSchema.parse(req.body);
-    const cert = globalWorkforceRepository.addCertification(req.tenantContext!, (req.params as any).id, validated);
+    const cert = await workforceRepository.addCertification(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: cert });
   });
 
   server.get("/api/v1/workforce/certifications", async (req) => {
     const employeeId = (req.query as any)?.employeeId;
-    const certs = globalWorkforceRepository.getCertifications(req.tenantContext!, employeeId);
+    const certs = await workforceRepository.getCertifications(req.tenantContext!, employeeId);
     return { success: true, data: certs };
   });
 
   // Performance Reviews
   server.get("/api/v1/workforce/performance", async (req) => {
     const employeeId = (req.query as any)?.employeeId;
-    const reviews = globalWorkforceRepository.getPerformanceReviews(req.tenantContext!, employeeId);
+    const reviews = await workforceRepository.getPerformanceReviews(req.tenantContext!, employeeId);
     return { success: true, data: reviews };
   });
 
   server.post("/api/v1/workforce/performance", async (req, reply) => {
     const validated = CreatePerformanceReviewRequestSchema.parse(req.body);
-    const review = globalWorkforceRepository.createPerformanceReview(req.tenantContext!, validated);
+    const review = await workforceRepository.createPerformanceReview(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: review });
   });
 
   // Commissions
   server.get("/api/v1/workforce/commissions", async (req) => {
-    const commissions = globalWorkforceRepository.getCommissions(req.tenantContext!);
+    const commissions = await workforceRepository.getCommissions(req.tenantContext!);
     return { success: true, data: commissions };
   });
 
   server.post("/api/v1/workforce/commissions", async (req, reply) => {
     const validated = CreateCommissionRecordRequestSchema.parse(req.body);
-    const record = globalWorkforceRepository.recordCommission(req.tenantContext!, validated);
+    const record = await workforceRepository.recordCommission(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/commissions/:id/approve", async (req) => {
-    const approved = globalWorkforceRepository.approveCommission(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveCommission(req.tenantContext!, (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Payroll Inputs
   server.get("/api/v1/workforce/payroll-inputs", async (req) => {
-    const inputs = globalWorkforceRepository.getPayrollInputs(req.tenantContext!);
+    const inputs = await workforceRepository.getPayrollInputs(req.tenantContext!);
     return { success: true, data: inputs };
   });
 
   server.post("/api/v1/workforce/payroll-inputs/from-timesheet", async (req, reply) => {
     const { employeeId, timesheetId } = (req.body as any) || {};
-    const input = globalWorkforceRepository.generatePayrollInputFromTimesheet(req.tenantContext!, employeeId, timesheetId);
+    const input = await workforceRepository.generatePayrollInputFromTimesheet(req.tenantContext!, employeeId, timesheetId);
     return reply.status(201).send({ success: true, data: input });
   });
 
   server.post("/api/v1/workforce/payroll-inputs/:id/approve", async (req) => {
-    const approved = globalWorkforceRepository.approvePayrollInput(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approvePayrollInput(req.tenantContext!, (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Workforce Dashboard & Analytics
   server.get("/api/v1/workforce/dashboard", async (req) => {
-    const dashboard = globalWorkforceRepository.getDashboardSummary(req.tenantContext!);
+    const dashboard = await workforceRepository.getDashboardSummary(req.tenantContext!);
     return { success: true, data: dashboard };
   });
 
   server.get("/api/v1/workforce/analytics", async (req) => {
     const period = (req.query as any)?.period || "2026-08";
-    const report = globalWorkforceRepository.getAnalyticsReport(req.tenantContext!, period);
+    const report = await workforceRepository.getAnalyticsReport(req.tenantContext!, period);
     return { success: true, data: report };
   });
 
@@ -2502,7 +2451,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.get("/api/v1/plugins", async (req) => {
     const catalog = pluginRegistryEngine.getAllManifests();
     const activeActivations = req.tenantContext
-      ? globalPluginRepository.getTenantActivations(req.tenantContext)
+      ? await pluginRepository.getTenantActivations(req.tenantContext)
       : [];
     return {
       success: true,
@@ -2520,7 +2469,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       reply.status(404);
       return { success: false, error: { code: "NOT_FOUND", message: `Plugin ${pluginId} not found in catalog` } };
     }
-    const isActive = req.tenantContext ? globalPluginRepository.isPluginActive(req.tenantContext, pluginId) : false;
+    const isActive = req.tenantContext ? await pluginRepository.isPluginActive(req.tenantContext, pluginId) : false;
     return { success: true, data: { manifest, isActive } };
   });
 
@@ -2532,7 +2481,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return { success: false, error: { code: "NOT_FOUND", message: `Plugin ${pluginId} not found in catalog` } };
     }
     const { initialConfig } = (req.body as any) || {};
-    const activation = globalPluginRepository.activatePlugin(
+    const activation = await pluginRepository.activatePlugin(
       req.tenantContext!,
       pluginId,
       manifest.version,
@@ -2543,7 +2492,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.post("/api/v1/plugins/:pluginId/deactivate", async (req) => {
     const { pluginId } = req.params as { pluginId: string };
-    const deactivation = globalPluginRepository.deactivatePlugin(req.tenantContext!, pluginId);
+    const deactivation = await pluginRepository.deactivatePlugin(req.tenantContext!, pluginId);
     return { success: true, data: deactivation };
   });
 
@@ -2560,10 +2509,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // 2. Dynamic Navigation
   server.get("/api/v1/plugins/navigation", async (req) => {
-    const activations = globalPluginRepository.getTenantActivations(req.tenantContext!);
+    const activations = await pluginRepository.getTenantActivations(req.tenantContext!);
     const activeManifests = activations
-      .map((a) => pluginRegistryEngine.getManifest(a.pluginId))
-      .filter((m): m is NonNullable<typeof m> => m !== undefined);
+      .map((a: any) => pluginRegistryEngine.getManifest(a.pluginId))
+      .filter((m: any): m is NonNullable<typeof m> => m !== undefined);
     const navItems = pluginNavigationEngine.composeNavigation(activeManifests, req.tenantContext!);
     return { success: true, data: navItems };
   });
@@ -2572,7 +2521,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.get("/api/v1/plugins/:pluginId/config", async (req) => {
     const { pluginId } = req.params as { pluginId: string };
     const key = (req.query as any)?.key || "";
-    const entries = globalPluginRepository.getConfigEntries(pluginId);
+    const entries = productionPersistence
+      ? await pluginRepository.getConfigEntries(req.tenantContext!, pluginId)
+      : await pluginRepository.getConfigEntries(pluginId);
     const value = pluginConfigEngine.resolveConfiguration(key, entries, {
       tenantId: req.tenantContext?.tenantId,
       branchId: req.tenantContext?.branchId,
@@ -2584,7 +2535,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/plugins/:pluginId/config", async (req, reply) => {
     const { pluginId } = req.params as { pluginId: string };
     const { scope, key, value } = (req.body as any) || {};
-    const entry = globalPluginRepository.setConfigEntry(req.tenantContext!, {
+    const entry = await pluginRepository.setConfigEntry(req.tenantContext!, {
       pluginId,
       scope: scope || "TENANT",
       key,
@@ -2622,18 +2573,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // RESTAURANT
   server.post("/api/v1/plugins/restaurant/tables", async (req, reply) => {
-    const table = globalPluginRepository.createRestaurantTable(req.tenantContext!, req.body as any);
+    const table = await pluginRepository.createRestaurantTable(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: table };
   });
 
   server.get("/api/v1/plugins/restaurant/tables", async (req) => {
-    const tables = globalPluginRepository.getRestaurantTables(req.tenantContext!);
+    const tables = await pluginRepository.getRestaurantTables(req.tenantContext!);
     return { success: true, data: tables };
   });
 
   server.post("/api/v1/plugins/restaurant/kitchen-tickets", async (req, reply) => {
-    const ticket = globalPluginRepository.createKitchenTicket(req.tenantContext!, req.body as any);
+    const ticket = await pluginRepository.createKitchenTicket(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: ticket };
   });
@@ -2646,39 +2597,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // PHARMACY
   server.post("/api/v1/plugins/pharmacy/prescriptions", async (req, reply) => {
-    const pres = globalPluginRepository.createPrescription(req.tenantContext!, req.body as any);
+    const pres = await pluginRepository.createPrescription(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: pres };
   });
 
   server.get("/api/v1/plugins/pharmacy/prescriptions", async (req) => {
-    const list = globalPluginRepository.getPrescriptions(req.tenantContext!);
+    const list = await pluginRepository.getPrescriptions(req.tenantContext!);
     return { success: true, data: list };
   });
 
   // GARAGE
   server.post("/api/v1/plugins/garage/vehicles", async (req, reply) => {
-    const veh = globalPluginRepository.createGarageVehicle(req.tenantContext!, req.body as any);
+    const veh = await pluginRepository.createGarageVehicle(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: veh };
   });
 
   server.post("/api/v1/plugins/garage/work-orders", async (req, reply) => {
-    const wo = globalPluginRepository.createGarageWorkOrder(req.tenantContext!, req.body as any);
+    const wo = await pluginRepository.createGarageWorkOrder(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: wo };
   });
 
   // CONSTRUCTION
   server.post("/api/v1/plugins/construction/projects", async (req, reply) => {
-    const proj = globalPluginRepository.createConstructionProject(req.tenantContext!, req.body as any);
+    const proj = await pluginRepository.createConstructionProject(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: proj };
   });
 
   // TELECOM
   server.post("/api/v1/plugins/telecom/sites", async (req, reply) => {
-    const site = globalPluginRepository.createTelecomSite(req.tenantContext!, req.body as any);
+    const site = await pluginRepository.createTelecomSite(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: site };
   });
@@ -2707,14 +2658,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // WHOLESALE
   server.post("/api/v1/plugins/wholesale/tier-rules", async (req, reply) => {
-    const rule = globalPluginRepository.setWholesaleTierRule(req.tenantContext!, req.body as any);
+    const rule = await pluginRepository.setWholesaleTierRule(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: rule };
   });
 
   server.post("/api/v1/plugins/wholesale/calculate-price", async (req) => {
     const { quantity, basePrice, variantId } = (req.body as any) || {};
-    const tierRule = variantId ? globalPluginRepository.wholesaleTierRules.get(variantId) : null;
+    const tierRule = variantId ? await pluginRepository.getWholesaleTierRule(req.tenantContext!, variantId) : null;
     const pricingTiers = tierRule?.tiers
       ? tierRule.tiers.map((t: any) => ({ minQuantity: t.minQuantity, productId: variantId || "", unitPriceUsd: t.unitPrice }))
       : [];
@@ -2729,30 +2680,30 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Contracts
   server.post("/api/v1/telecom/contracts", async (req, reply) => {
-    const contract = globalTelecomRepository.createContract(req.tenantContext!, req.body as any);
+    const contract = await telecomRepository.createContract(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: contract };
   });
 
   server.get("/api/v1/telecom/contracts", async (req) => {
-    const contracts = globalTelecomRepository.getContracts(req.tenantContext!);
+    const contracts = await telecomRepository.getContracts(req.tenantContext!);
     return { success: true, data: contracts };
   });
 
   // Projects
   server.post("/api/v1/telecom/projects", async (req, reply) => {
-    const project = globalTelecomRepository.createProject(req.tenantContext!, req.body as any);
+    const project = await telecomRepository.createProject(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: project };
   });
 
   server.get("/api/v1/telecom/projects", async (req) => {
-    const projects = globalTelecomRepository.getProjects(req.tenantContext!);
+    const projects = await telecomRepository.getProjects(req.tenantContext!);
     return { success: true, data: projects };
   });
 
   server.get("/api/v1/telecom/projects/:id", async (req, reply) => {
-    const project = globalTelecomRepository.getProjectById(req.tenantContext!, (req.params as any).id);
+    const project = await telecomRepository.getProjectById(req.tenantContext!, (req.params as any).id);
     if (!project) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Project not found" } });
     }
@@ -2761,18 +2712,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Sites & Geospatial Search
   server.post("/api/v1/telecom/sites", async (req, reply) => {
-    const site = globalTelecomRepository.createSite(req.tenantContext!, req.body as any);
+    const site = await telecomRepository.createSite(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: site };
   });
 
   server.get("/api/v1/telecom/sites", async (req) => {
-    const sites = globalTelecomRepository.getSites(req.tenantContext!);
+    const sites = await telecomRepository.getSites(req.tenantContext!);
     return { success: true, data: sites };
   });
 
   server.get("/api/v1/telecom/sites/:id", async (req, reply) => {
-    const site = globalTelecomRepository.getSiteById(req.tenantContext!, (req.params as any).id);
+    const site = await telecomRepository.getSiteById(req.tenantContext!, (req.params as any).id);
     if (!site) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Site not found" } });
     }
@@ -2781,7 +2732,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/telecom/sites/near", async (req) => {
     const { lat, lon, radiusKm } = (req.query as any) || {};
-    const results = globalTelecomRepository.searchSitesNear(
+    const results = await telecomRepository.searchSitesNear(
       req.tenantContext!,
       parseFloat(lat) || 0,
       parseFloat(lon) || 0,
@@ -2792,27 +2743,27 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // RAN Sectors
   server.post("/api/v1/telecom/ran/sectors", async (req, reply) => {
-    const sector = globalTelecomRepository.createRanSector(req.tenantContext!, req.body as any);
+    const sector = await telecomRepository.createRanSector(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: sector };
   });
 
   server.get("/api/v1/telecom/ran/sectors", async (req) => {
     const { siteId } = (req.query as any) || {};
-    if (!siteId) return { success: true, data: Array.from(globalTelecomRepository.ranSectors.values()).filter((s) => s.tenantId === req.tenantContext!.tenantId) };
-    const sectors = globalTelecomRepository.getRanSectorsBySite(req.tenantContext!, siteId);
+    if (!siteId) return { success: true, data: await telecomRepository.getRanSectors(req.tenantContext!) };
+    const sectors = await telecomRepository.getRanSectorsBySite(req.tenantContext!, siteId);
     return { success: true, data: sectors };
   });
 
   // Microwave Links & Calculation
   server.post("/api/v1/telecom/microwave/links", async (req, reply) => {
-    const link = globalTelecomRepository.createMicrowaveLink(req.tenantContext!, req.body as any);
+    const link = await telecomRepository.createMicrowaveLink(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: link };
   });
 
   server.get("/api/v1/telecom/microwave/links", async (req) => {
-    const links = globalTelecomRepository.getMicrowaveLinks(req.tenantContext!);
+    const links = await telecomRepository.getMicrowaveLinks(req.tenantContext!);
     return { success: true, data: links };
   });
 
@@ -2823,44 +2774,44 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Work Orders & Checklists
   server.post("/api/v1/telecom/work-orders", async (req, reply) => {
-    const wo = globalTelecomRepository.createWorkOrder(req.tenantContext!, req.body as any);
+    const wo = await telecomRepository.createWorkOrder(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: wo };
   });
 
   server.get("/api/v1/telecom/work-orders", async (req) => {
-    const orders = Array.from(globalTelecomRepository.workOrders.values()).filter((w) => w.tenantId === req.tenantContext!.tenantId);
+    const orders = await telecomRepository.getWorkOrders(req.tenantContext!);
     return { success: true, data: orders };
   });
 
   server.post("/api/v1/telecom/work-orders/:id/complete", async (req) => {
     const { completionNotes } = (req.body as any) || {};
-    const wo = globalTelecomRepository.completeWorkOrder(req.tenantContext!, (req.params as any).id, completionNotes);
+    const wo = await telecomRepository.completeWorkOrder(req.tenantContext!, (req.params as any).id, completionNotes);
     return { success: true, data: wo };
   });
 
   // Testing, Commissioning & Site Acceptance (SAT)
   server.post("/api/v1/telecom/tests", async (req, reply) => {
-    const test = globalTelecomRepository.recordTest(req.tenantContext!, req.body as any);
+    const test = await telecomRepository.recordTest(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: test };
   });
 
   server.post("/api/v1/telecom/acceptance", async (req, reply) => {
-    const acceptance = globalTelecomRepository.createSiteAcceptance(req.tenantContext!, req.body as any);
+    const acceptance = await telecomRepository.createSiteAcceptance(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: acceptance };
   });
 
   // Maintenance & Service Tickets
   server.post("/api/v1/telecom/maintenance/tickets", async (req, reply) => {
-    const ticket = globalTelecomRepository.createMaintenanceTicket(req.tenantContext!, req.body as any);
+    const ticket = await telecomRepository.createMaintenanceTicket(req.tenantContext!, req.body as any);
     reply.status(201);
     return { success: true, data: ticket };
   });
 
   server.get("/api/v1/telecom/maintenance/tickets", async (req) => {
-    const tickets = globalTelecomRepository.getMaintenanceTickets(req.tenantContext!);
+    const tickets = await telecomRepository.getMaintenanceTickets(req.tenantContext!);
     return { success: true, data: tickets };
   });
 
@@ -2871,15 +2822,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "kmlContent required" } });
     }
     const parseResult = KmlKmzParserEngine.parseKmlString(kmlContent, fileName || "import.kml");
-    const record = KmlKmzParserEngine.createImportRecord(req.tenantContext!, parseResult, fileName || "import.kml", "KML");
-    globalTelecomRepository.kmlImports.set(record.id, record);
+    const parsedRecord = KmlKmzParserEngine.createImportRecord(req.tenantContext!, parseResult, fileName || "import.kml", "KML");
+    const record = productionPersistence
+      ? await telecomRepository.createKmlImport(req.tenantContext!, parsedRecord)
+      : (() => {
+          telecomRepository.kmlImports.set(parsedRecord.id, parsedRecord);
+          return parsedRecord;
+        })();
     reply.status(201);
     return { success: true, data: record };
   });
 
   server.post("/api/v1/telecom/imports/kml/generate-sites", async (req) => {
     const { importRecordId, selectedPlacemarkIds } = (req.body as any) || {};
-    const result = globalTelecomRepository.importKmlPlacemarksAsSites(
+    const result = await telecomRepository.importKmlPlacemarksAsSites(
       req.tenantContext!,
       importRecordId,
       selectedPlacemarkIds || []
@@ -3084,50 +3040,50 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // 1. Subscription Plans
   server.get("/api/v1/billing/plans", async (req, reply) => {
-    const plans = globalMonetizationRepository.getPlans();
+    const plans = await monetizationRepository.getPlans();
     return reply.status(200).send({ success: true, data: plans });
   });
 
   server.get("/api/v1/billing/plans/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const plan = globalMonetizationRepository.getPlanById(id);
+    const plan = await monetizationRepository.getPlanById(id);
     if (!plan) return reply.status(404).send({ success: false, error: "Plan not found" });
     return reply.status(200).send({ success: true, data: plan });
   });
 
   server.post("/api/v1/billing/plans", async (req, reply) => {
-    const plan = globalMonetizationRepository.createPlan(req.body as any);
+    const plan = await monetizationRepository.createPlan(req.body as any);
     return reply.status(201).send({ success: true, data: plan });
   });
 
   // 2. Subscriptions
   server.get("/api/v1/billing/subscriptions/current", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const sub = globalMonetizationRepository.getSubscription(ctx);
+    const sub = await monetizationRepository.getSubscription(ctx);
     return reply.status(200).send({ success: true, data: sub });
   });
 
   server.post("/api/v1/billing/subscriptions", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const sub = globalMonetizationRepository.createSubscription(ctx, req.body as any);
+    const sub = await monetizationRepository.createSubscription(ctx, req.body as any);
     return reply.status(201).send({ success: true, data: sub });
   });
 
   server.post("/api/v1/billing/subscriptions/change-plan", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
     const body = req.body as any;
-    const sub = globalMonetizationRepository.getSubscription(ctx);
+    const sub = await monetizationRepository.getSubscription(ctx);
     if (!sub) return reply.status(404).send({ success: false, error: "Active subscription not found" });
-    const updated = globalMonetizationRepository.changePlan(ctx, sub.id, body);
+    const updated = await monetizationRepository.changePlan(ctx, sub.id, body);
     return reply.status(200).send({ success: true, data: updated });
   });
 
   server.post("/api/v1/billing/subscriptions/cancel", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
     const body = req.body as any;
-    const sub = globalMonetizationRepository.getSubscription(ctx);
+    const sub = await monetizationRepository.getSubscription(ctx);
     if (!sub) return reply.status(404).send({ success: false, error: "Active subscription not found" });
-    const cancelled = globalMonetizationRepository.cancelSubscription(ctx, sub.id, body.reason || "Customer requested");
+    const cancelled = await monetizationRepository.cancelSubscription(ctx, sub.id, body.reason || "Customer requested");
     return reply.status(200).send({ success: true, data: cancelled });
   });
 
@@ -3136,21 +3092,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = (req as any).tenantContext as TenantContext;
     const { featureKey, currentUsage } = req.query as { featureKey: string; currentUsage?: string };
     const usageNum = currentUsage !== undefined ? Number(currentUsage) : undefined;
-    const result = globalMonetizationRepository.checkEntitlement(ctx, featureKey, usageNum);
+    const result = await monetizationRepository.checkEntitlement(ctx, featureKey, usageNum);
     return reply.status(200).send({ success: true, data: result });
   });
 
   // 4. Usage Metering
   server.post("/api/v1/billing/usage/record", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const event = globalMonetizationRepository.recordUsage(ctx, req.body as any);
+    const event = await monetizationRepository.recordUsage(ctx, req.body as any);
     return reply.status(201).send({ success: true, data: event });
   });
 
   server.get("/api/v1/billing/usage/aggregates", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
     const { meterType } = req.query as { meterType: any };
-    const aggregate = globalMonetizationRepository.getUsageAggregate(ctx, meterType || "SALES_TRANSACTIONS");
+    const aggregate = await monetizationRepository.getUsageAggregate(ctx, meterType || "SALES_TRANSACTIONS");
     return reply.status(200).send({ success: true, data: aggregate });
   });
 
@@ -3158,20 +3114,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/billing/invoices/generate", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
     const { subscriptionId, couponCode } = req.body as any;
-    const invoice = globalMonetizationRepository.createInvoice(ctx, subscriptionId, couponCode);
+    const invoice = await monetizationRepository.createInvoice(ctx, subscriptionId, couponCode);
     return reply.status(201).send({ success: true, data: invoice });
   });
 
   server.get("/api/v1/billing/invoices", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const invoices = globalMonetizationRepository.getInvoices(ctx);
+    const invoices = await monetizationRepository.getInvoices(ctx);
     return reply.status(200).send({ success: true, data: invoices });
   });
 
   server.get("/api/v1/billing/invoices/:id", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
     const { id } = req.params as { id: string };
-    const invoice = globalMonetizationRepository.getInvoiceById(ctx, id);
+    const invoice = await monetizationRepository.getInvoiceById(ctx, id);
     if (!invoice) return reply.status(404).send({ success: false, error: "Invoice not found" });
     return reply.status(200).send({ success: true, data: invoice });
   });
@@ -3179,13 +3135,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // 6. Payments
   server.post("/api/v1/billing/payments/process", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const payment = globalMonetizationRepository.processPayment(ctx, req.body as any);
+    const payment = await monetizationRepository.processPayment(ctx, req.body as any);
     return reply.status(201).send({ success: true, data: payment });
   });
 
   server.get("/api/v1/billing/payments", async (req, reply) => {
     const ctx = (req as any).tenantContext as TenantContext;
-    const payments = globalMonetizationRepository.getPayments(ctx);
+    const payments = await monetizationRepository.getPayments(ctx);
     return reply.status(200).send({ success: true, data: payments });
   });
 
@@ -3200,7 +3156,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // 8. SaaS Analytics & KPIs
   server.get("/api/v1/billing/reports/kpis", async (req, reply) => {
-    const kpis = globalMonetizationRepository.getSaaSKpis();
+    const kpis = await monetizationRepository.getSaaSKpis();
     return reply.status(200).send({ success: true, data: kpis });
   });
 

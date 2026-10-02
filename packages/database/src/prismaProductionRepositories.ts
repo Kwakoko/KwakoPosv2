@@ -3,6 +3,7 @@ import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
 import { assertTenantIsolation, EmployeeEngine } from "@kwakopos2/domain";
+import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 const db: any = prisma;
 
@@ -138,6 +139,41 @@ export class PrismaCommercialRepository {
     return normalize(await this.atomic.createSale(ctx, req));
   }
 
+  async claimDrawerOperation(ctx: TenantContext, id: string) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const row = await tx.drawerOperation.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!row) throw new Error("DRAWER_OPERATION_NOT_FOUND");
+      if (row.status === "UNKNOWN") throw new Error("DRAWER_OPERATION_UNKNOWN_REQUIRES_RECONCILIATION");
+      if (!["PENDING", "FAILED", "TIMEOUT"].includes(row.status)) return row;
+      const updated = await tx.drawerOperation.update({ where: { id }, data: { status: "EXECUTING", attempts: { increment: 1 }, startedAt: new Date(), completedAt: null, lastError: null } });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: updated.deviceId, action: "CASH_DRAWER_EXECUTING", entityType: "DrawerOperation", entityId: updated.id, metadata: { operationType: updated.operationType, attempt: updated.attempts } } });
+      return updated;
+    }));
+  }
+
+  async completeDrawerOperation(ctx: TenantContext, id: string, status: string, error?: string) {
+    const allowed = ["SUCCEEDED", "FAILED", "TIMEOUT", "UNKNOWN"];
+    if (!allowed.includes(status)) throw new Error("INVALID_DRAWER_OPERATION_STATUS");
+    return normalize(await db.$transaction(async (tx: any) => {
+      const row = await tx.drawerOperation.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!row) throw new Error("DRAWER_OPERATION_NOT_FOUND");
+      if (row.status !== "EXECUTING" && status !== "UNKNOWN") throw new Error("DRAWER_OPERATION_NOT_EXECUTING");
+      const updated = await tx.drawerOperation.update({ where: { id }, data: { status, completedAt: new Date(), lastError: error ?? null } });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: updated.deviceId, action: "CASH_DRAWER_" + status, entityType: "DrawerOperation", entityId: updated.id, metadata: { operationType: updated.operationType, attempts: updated.attempts, error: error ?? null } } });
+      return updated;
+    }));
+  }
+
+  async createNoSaleDrawerOperation(ctx: TenantContext, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const session = await tx.cashSession.findFirst({ where: { id: req.cashSessionId, ...tenantWhere(ctx), status: { not: "CLOSED" } } });
+      if (!session || session.cashierId !== ctx.userId) throw new Error("CASH_DRAWER_SESSION_AUTHORIZATION_REQUIRED");
+      const operation = await tx.drawerOperation.create({ data: { id: req.id || "drawer:" + randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: session.id, operationType: "NO_SALE", status: "PENDING", deviceId: req.deviceId, requestedById: ctx.userId, metadata: { reason: req.reason } } });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CASH_DRAWER_NO_SALE_REQUESTED", entityType: "DrawerOperation", entityId: operation.id, metadata: { reason: req.reason, cashSessionId: session.id } } });
+      return operation;
+    }));
+  }
+
   async createSaleReturn(ctx: TenantContext, req: any) {
     return normalize(await db.$transaction(async (tx: any) => {
       const original = req.originalSaleId ? await tx.sale.findFirst({ where: { id: req.originalSaleId, ...tenantWhere(ctx) }, include: { lines: true } }) : null;
@@ -160,16 +196,22 @@ export class PrismaCommercialRepository {
       for (const line of lines) {
         const variant = await tx.productVariant.findFirst({ where: { id: line.variantId, ...tenantWhere(ctx) } });
         if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
-        const before = Number(variant.inventoryQuantity || 0);
-        const after = before + Number(line.quantityReturned);
-        await tx.productVariant.update({ where: { id: variant.id }, data: { inventoryQuantity: after } });
+        const beforeRow = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: variant.id } });
+        const before = Number(beforeRow._sum.quantityChange ?? 0);
+        const change = Number(line.quantityReturned);
+        const after = before + change;
+        if (after < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
+
         await tx.stockLedger.create({ data: {
           tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: variant.id,
-          movementType: "RETURN", quantityChange: Number(line.quantityReturned), quantity: Number(line.quantityReturned),
+          movementType: "RETURN", quantityChange: change, quantity: change,
           quantityBefore: before, quantityAfter: after, unitCost: 0, totalCost: 0, referenceType: "RETURN",
           referenceId: record.id, occurredAt: new Date(), deviceId: req.deviceId || "web",
           operationId: req.operationId || record.id, idempotencyKey: `${req.idempotencyKey || record.id}-${variant.id}`,
         }});
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, variant.id);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       }
       return record;
     }));
@@ -196,19 +238,47 @@ export class PrismaCommercialRepository {
     return normalize(row);
   }
 
+  async sealCashSessionCount(ctx: TenantContext, id: string, req: any) {
+    const actualCash = Number(req.actualCash);
+    if (!Number.isFinite(actualCash) || actualCash < 0) throw new Error("INVALID_CASH_COUNT");
+    return normalize(await db.$transaction(async (tx: any) => {
+      const session = await tx.cashSession.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!session) throw new Error("Cash session not found");
+      if (session.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
+      if (session.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
+      if (session.countSealedAt) throw new Error("CASH_COUNT_ALREADY_SEALED");
+      const sealed = await tx.cashSession.update({ where: { id: session.id }, data: { actualCash, closingCash: actualCash, countSealedAt: new Date(), countSealedById: ctx.userId, countSealedDeviceId: req.deviceId || null } });
+      return { id: sealed.id, status: sealed.status, actualCash: Number(sealed.actualCash), countSealedAt: sealed.countSealedAt, countSealedById: sealed.countSealedById };
+    }));
+  }
+
   async recordExpense(ctx: TenantContext, req: any) {
     return normalize(await this.atomic.recordExpense(ctx, req));
   }
 
   async closeCashSession(ctx: TenantContext, id: string, req: any) {
-    const existing = await db.cashSession.findFirst({ where: { id, ...tenantWhere(ctx) } });
-    if (!existing) throw new Error("Cash session not found");
-    const closingCash = req.closingCash ?? req.actualCash ?? 0;
-    const expectedCash = Number(existing.openingCash) + Number(existing.cashSalesTotal) - Number(existing.cashRefundsTotal) - Number(existing.cashExpensesTotal);
-    return normalize(await db.cashSession.update({ where: { id }, data: {
-      closingCash, actualCash: closingCash, expectedCash,
-      variance: Number(closingCash) - expectedCash, closedAt: new Date(), status: "CLOSED", notes: req.notes ?? existing.notes,
-    }}));
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.cashSession.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!existing) throw new Error("Cash session not found");
+      if (existing.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
+      if (existing.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
+      if (!existing.countSealedAt || existing.actualCash === null) throw new Error("CASH_COUNT_NOT_SEALED");
+      const [cashSales, cashRefunds, cashExpenses] = await Promise.all([
+        tx.payment.aggregate({ where: { ...tenantWhere(ctx), paymentMethod: "CASH", status: "COMPLETED", sale: { cashSessionId: id } }, _sum: { amount: true } }),
+        tx.return.aggregate({ where: { ...tenantWhere(ctx), refundType: "CASH", status: "COMPLETED", originalSale: { cashSessionId: id } }, _sum: { totalRefundAmount: true } }),
+        tx.expense.aggregate({ where: { ...tenantWhere(ctx), cashSessionId: id }, _sum: { amount: true } }),
+      ]);
+      const cashSalesTotal = Number(cashSales._sum.amount || 0);
+      const cashRefundsTotal = Number(cashRefunds._sum.totalRefundAmount || 0);
+      const cashExpensesTotal = Number(cashExpenses._sum.amount || 0);
+      const expectedCash = Number(existing.openingCash) + cashSalesTotal - cashRefundsTotal - cashExpensesTotal;
+      const actualCash = Number(existing.actualCash);
+      const variance = actualCash - expectedCash;
+      const closedAt = new Date();
+      const closed = await tx.cashSession.update({ where: { id: existing.id }, data: { closingCash: actualCash, expectedCash, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, variance, closedAt, status: "CLOSED", notes: req.notes ?? existing.notes } });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: existing.countSealedDeviceId || "server", action: "CASH_SESSION_CLOSED", entityType: "CashSession", entityId: existing.id, metadata: { sessionNumber: existing.sessionNumber, openingCash: Number(existing.openingCash), actualCash, expectedCash, variance, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, countSealedAt: existing.countSealedAt.toISOString() } } });
+      return closed;
+    }));
   }
 
   async getDashboardSummary(ctx: TenantContext) {
@@ -389,8 +459,60 @@ export class PrismaTelecomRepository {
   async createSiteAcceptance(ctx:TenantContext,input:any){return this.create("telecomAcceptanceRecordModel",ctx,input);}
   async createMaintenanceTicket(ctx:TenantContext,input:any){return this.create("telecomMaintenanceTicketRecord",ctx,input);}
   async getMaintenanceTickets(ctx:TenantContext){return normalize(await db.telecomMaintenanceTicketRecord.findMany({where:this.where(ctx),orderBy:{createdAt:"desc"}}));}
-  async createKmlImport(ctx:TenantContext,input:any){return this.create("telecomKmlImportRecord",ctx,input);}
+  async createKmlImport(ctx:TenantContext,input:any){
+    const parsedPlacemarks = Array.isArray(input?.parsedPlacemarks) ? input.parsedPlacemarks : [];
+    return normalize(await db.telecomKmlImportRecord.create({
+      data: {
+        id: input?.id || randomUUID(),
+        tenantId: ctx.tenantId,
+        fileName: input?.fileName || "import.kml",
+        fileType: input?.fileType || "KML",
+        fileSizeBytes: Number(input?.fileSizeBytes || 0),
+        sha256Hash: String(input?.sha256Hash || ""),
+        totalPlacemarksParsed: Number(input?.totalPlacemarksParsed ?? parsedPlacemarks.length),
+        sitesCreated: Number(input?.sitesCreated || 0),
+        parsedPlacemarks,
+        importedById: ctx.userId,
+        importedAt: input?.importedAt ? new Date(input.importedAt) : new Date(),
+        status: input?.status || "PARSED_PREVIEW",
+        errorMessage: input?.errorMessage ?? null,
+      },
+    }));
+  }
   async getKmlImport(ctx:TenantContext,id:string){return normalize(await db.telecomKmlImportRecord.findFirst({where:{id,tenantId:ctx.tenantId}}));}
+  async importKmlPlacemarksAsSites(ctx:TenantContext,importRecordId:string,selectedPlacemarkIds:string[]){
+    const record = await db.telecomKmlImportRecord.findFirst({ where: { id: importRecordId, tenantId: ctx.tenantId } });
+    if (!record) throw new Error(`KML import record ${importRecordId} not found.`);
+    const placemarks = Array.isArray(record.parsedPlacemarks) ? record.parsedPlacemarks as any[] : [];
+    const selected = new Set((selectedPlacemarkIds || []).map(String));
+    const createdSites: any[] = [];
+    for (const p of placemarks.filter((item:any) => selected.has(String(item.id)))) {
+      const coords = Array.isArray(p.coordinates) ? p.coordinates : p.coordinate ? [p.coordinate] : [];
+      if (!coords.length) continue;
+      const coord = coords[0];
+      createdSites.push(await this.createSite(ctx, {
+        siteCode: `SITE-${randomUUID().slice(0, 5).toUpperCase()}`,
+        name: p.name,
+        siteType: "GREENFIELD_TOWER",
+        status: "PLANNED",
+        latitude: coord.latitude,
+        longitude: coord.longitude,
+        elevationMeters: coord.elevationMeters || 0,
+        towerHeightMeters: 45,
+        region: "National",
+        district: p.layerName || "General",
+        address: p.description || "",
+        powerSource: "GRID_COMMERCIAL",
+        photos: [],
+        documents: [],
+      }));
+    }
+    const updated = await db.telecomKmlImportRecord.update({
+      where: { id: importRecordId },
+      data: { sitesCreated: Number(record.sitesCreated || 0) + createdSites.length, status: "IMPORTED" },
+    });
+    return { createdSites, importRecord: normalize(updated) };
+  }
 }
 
 export class PrismaMonetizationRepository {

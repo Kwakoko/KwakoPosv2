@@ -43,6 +43,11 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       },
       payment: {
         count: async () => 0,
+        update: async ({ where, data }: any) => ({ id: where.id, ...data }),
+      },
+      drawerOperation: {
+        findUnique: async () => null,
+        create: async ({ data }: any) => data,
       },
       product: {
         findUnique: async ({ where }: any) => mockStore.products.get(where.id) || null,
@@ -51,6 +56,20 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
           const updated = { ...p, ...data };
           mockStore.products.set(where.id, updated);
           return updated;
+        },
+        updateMany: async ({ where, data }: any) => {
+          let count = 0;
+          for (const [id, existing] of mockStore.products.entries()) {
+            if (
+              (!where?.id || id === where.id) &&
+              (!where?.tenantId || existing.tenantId === where.tenantId) &&
+              (!where?.branchId || existing.branchId === where.branchId)
+            ) {
+              mockStore.products.set(id, { ...existing, ...data });
+              count += 1;
+            }
+          }
+          return { count };
         },
       },
       productVariant: {
@@ -63,9 +82,45 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
           mockStore.variants.set(where.id, updated);
           return updated;
         },
+        updateMany: async ({ where, data }: any) => {
+          let count = 0;
+          for (const [id, existing] of mockStore.variants.entries()) {
+            if (
+              (!where?.id || id === where.id) &&
+              (!where?.tenantId || existing.tenantId === where.tenantId) &&
+              (!where?.branchId || existing.branchId === where.branchId)
+            ) {
+              mockStore.variants.set(id, { ...existing, ...data });
+              count += 1;
+            }
+          }
+          return { count };
+        },
+        findFirst: async ({ where }: any) =>
+          Array.from(mockStore.variants.values()).find((v) =>
+            v.id === where.id &&
+            v.tenantId === where.tenantId &&
+            v.branchId === where.branchId
+          ) || null,
+      },
+      productBranchStock: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => data,
+        update: async ({ where, data }: any) => ({ id: where.id, ...data }),
       },
       stockLedger: {
-        findMany: async () => [],
+        findMany: async () => mockStore.ledgers,
+        aggregate: async ({ where }: any) => ({
+          _sum: {
+            quantityChange: mockStore.ledgers
+              .filter((row: any) =>
+                (!where?.tenantId || row.tenantId === where.tenantId) &&
+                (!where?.branchId || row.branchId === where.branchId) &&
+                (!where?.variantId || row.variantId === where.variantId),
+              )
+              .reduce((sum: number, row: any) => sum + Number(row.quantityChange || 0), 0),
+          },
+        }),
         create: async ({ data }: any) => {
           mockStore.ledgers.push(data);
           return data;
@@ -122,6 +177,23 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       isActive: true,
     });
 
+    // StockLedger is the inventory authority. Seed the opening balance in the
+    // ledger rather than relying on the derived ProductVariant projection.
+    mockStore.ledgers.push({
+      id: randomUUID(),
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
+      productId,
+      variantId,
+      quantityChange: 3,
+      quantity: 3,
+      quantityBefore: 0,
+      quantityAfter: 3,
+      movementType: "OPENING_STOCK",
+      referenceType: "CERTIFICATION",
+      idempotencyKey: "OPENING-" + variantId,
+    });
+
     // Attempt to sell 5 units offline (2 units oversold)
     const saleId = randomUUID();
     const saleReq = {
@@ -155,7 +227,9 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
     expect(loggedConflict.params).toContain(variantId);
 
     // Verification Metric 2: Stock ledger contains explicit OVERSELL DETECTED note with shortfall
-    const saleLedgers = mockStore.ledgers.filter((l) => l.variantId === variantId);
+    const saleLedgers = mockStore.ledgers.filter(
+      (l) => l.variantId === variantId && Number(l.quantityChange) < 0,
+    );
     expect(saleLedgers.length).toBe(1);
     expect(saleLedgers[0].notes).toContain("OVERSELL DETECTED: shortfall 2");
 

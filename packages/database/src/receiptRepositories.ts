@@ -373,7 +373,7 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
 export class PrismaReceiptRepository implements ScopedReceiptRepository {
   private inMemory = new InMemoryReceiptRepository();
 
-  constructor(private prisma?: PrismaClient) {}
+  constructor(private prisma: PrismaClient = new PrismaClient()) {}
 
   async createReceipt(
     ctx: TenantContext,
@@ -458,8 +458,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       });
 
       return this.mapPrismaReceipt(created);
-    } catch {
-      return this.inMemory.createReceipt(ctx, req);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -471,8 +471,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
-    } catch {
-      return this.inMemory.getReceiptById(ctx, id);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -484,8 +484,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
-    } catch {
-      return this.inMemory.getReceiptByNumber(ctx, receiptNumber);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -527,8 +527,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         page,
         limit,
       };
-    } catch {
-      return this.inMemory.searchReceipts(ctx, filter);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -557,8 +557,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         },
       });
       return { success: true, reprintCount: updated.reprintCount };
-    } catch {
-      return this.inMemory.recordReprint(ctx, receiptId, printedBy, reason);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -586,8 +586,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         },
       });
       return true;
-    } catch {
-      return this.inMemory.recordShare(ctx, receiptId, channel, recipient, sharedBy);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -609,8 +609,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         include: { items: true },
       });
       return this.mapPrismaReceipt(updated);
-    } catch {
-      return this.inMemory.updateReceiptStatus(ctx, receiptId, status, reason, actorId);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -640,8 +640,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         createdAt: t.createdAt.toISOString(),
         updatedAt: t.updatedAt.toISOString(),
       }));
-    } catch {
-      return this.inMemory.getReceiptTemplates(ctx);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -690,8 +690,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         createdAt: saved.createdAt.toISOString(),
         updatedAt: saved.updatedAt.toISOString(),
       };
-    } catch {
-      return this.inMemory.saveReceiptTemplate(ctx, template);
+    } catch (error) {
+      throw error;
     }
   }
 
@@ -761,8 +761,8 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         byCashier: Array.from(cashierMap.entries()).map(([k, v]) => ({ cashierId: k, cashierName: v.cashierName, count: v.count, total: v.total })),
         byBranch: Array.from(branchMap.entries()).map(([k, v]) => ({ branchId: k, count: v.count, total: v.total })),
       };
-    } catch {
-      return this.inMemory.getReceiptAnalytics(ctx);
+    } catch (error) {
+      throw error;
     }
   }
 

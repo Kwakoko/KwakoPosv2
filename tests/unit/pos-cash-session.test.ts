@@ -42,15 +42,24 @@ describe("POS Sales & Cash Session Engine", () => {
 
     // 4. Expected cash = 50,000 + 20,000 - 5,000 = 65,000
     // If cashier counts 65,000 -> variance 0
-    const closedSession = commercialRepo.closeCashSession(ctx, session.id, { actualCash: 65000 });
+    commercialRepo.sealCashSessionCount(ctx, session.id, { actualCash: 65000, deviceId: "POS-CASH-CERT" });
+    const closedSession = commercialRepo.closeCashSession(ctx, session.id, {});
     expect(closedSession.status).toBe("CLOSED");
     expect(closedSession.expectedCash).toBe(65000);
     expect(closedSession.actualCash).toBe(65000);
     expect(closedSession.variance).toBe(0);
 
-    // If actual cash was 64,000 -> variance -1,000 (shortage)
-    session.status = "OPEN";
-    const shortSession = commercialRepo.closeCashSession(ctx, session.id, { actualCash: 64000 });
+    // A second completed session can be closed only after its own physical count is sealed.
+    const shortSessionOpen = commercialRepo.openCashSession(ctx, { openingCash: 50000 });
+    shortSessionOpen.cashSalesTotal = 20000;
+    commercialRepo.recordExpense(ctx, {
+      cashSessionId: shortSessionOpen.id,
+      category: "SUPPLIES",
+      amount: 5000,
+      reason: "Receipt Rolls",
+    });
+    commercialRepo.sealCashSessionCount(ctx, shortSessionOpen.id, { actualCash: 64000, deviceId: "POS-CASH-CERT" });
+    const shortSession = commercialRepo.closeCashSession(ctx, shortSessionOpen.id, {});
     expect(shortSession.variance).toBe(-1000);
   });
 

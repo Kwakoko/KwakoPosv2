@@ -257,15 +257,33 @@ export function verifyStepUpToken(token: string, expectedAction?: string): { use
   return { userId: payload.sub, action: payload.action };
 }
 
-export async function beginSuperAdminSetup(token: string): Promise<{ userId: string; totpSecret: string; issuer: string; account: string; currentOtp?: string }> {
+export async function beginSuperAdminSetup(token: string): Promise<{ userId: string; totpSecret: string; issuer: string; account: string }> {
   const userId = verifySetupToken(token);
   const state = await getSuperAdminSecurity(userId);
   if (!state) throw new Error("Super Admin security state not found.");
   if (!state.bootstrapPending && !state.mustChangePassword && state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
   const secret = generateTotpSecret();
-  const counter = Math.floor(Date.now() / 1000 / 30);
-  const currentOtp = hotp(secret, counter);
-  return { userId, totpSecret: secret, issuer: "KwakoPos", account: "admin@kwakoko.co.tz", currentOtp };
+  return { userId, totpSecret: secret, issuer: "KwakoPos", account: "admin@kwakoko.co.tz" };
+}
+
+export async function rotateSuperAdminTotp(userId: string, newTotpSecret: string, verificationCode: string): Promise<void> {
+  const secret = String(newTotpSecret || "").toUpperCase().replace(/\s+/g, "");
+  if (!/^[A-Z2-7]{16,64}$/.test(secret)) throw new Error("Invalid TOTP secret format.");
+  if (!/^\d{6}$/.test(String(verificationCode || "")) || !verifyTotpCode(secret, verificationCode)) {
+    throw new Error("New TOTP secret verification failed.");
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+  const roleName = String(user?.role?.name || "").toUpperCase();
+  if (!user || (roleName !== "SUPER_ADMIN" && roleName !== "PLATFORM_SUPER_ADMIN")) throw new Error("Target user is not a platform SUPER_ADMIN.");
+  let sessionsRevoked = 0;
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`UPDATE platform_super_admin_security SET bootstrap_pending = FALSE, mfa_required = TRUE, mfa_enrolled = TRUE, mfa_type = 'TOTP', mfa_secret_ciphertext = $1, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = $2`, encryptSecret(secret), userId);
+    const result = await tx.deviceSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    sessionsRevoked = result.count;
+    try {
+      await tx.auditEvent.create({ data: { tenantId: user.tenantId, branchId: user.branchId, userId, deviceId: "cli-totp-rotation", action: "SUPER_ADMIN_MFA_ROTATED", entityType: "SUPER_ADMIN_SECURITY", entityId: userId, metadata: { mfaType: "TOTP", sessionsRevoked, actor: "CLI_TOTP_ROTATION", timestamp: new Date().toISOString() } } });
+    } catch { /* audit table may be unavailable during early migrations */ }
+  });
 }
 
 export async function completeSuperAdminSetup(token: string, newPassword: string, totpSecret: string, totpCode: string): Promise<void> {

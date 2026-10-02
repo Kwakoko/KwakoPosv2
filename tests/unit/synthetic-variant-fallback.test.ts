@@ -42,6 +42,20 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
       },
       payment: {
         count: async () => 0,
+        update: async ({ where, data }: any) => {
+          for (const sale of mockStore.sales.values()) {
+            if (Array.isArray(sale.payments)) {
+              sale.payments = sale.payments.map((payment: any) =>
+                payment.id === where.id ? { ...payment, ...data } : payment,
+              );
+            }
+          }
+          return { id: where.id, ...data };
+        },
+      },
+      drawerOperation: {
+        findUnique: async () => null,
+        create: async ({ data }: any) => data,
       },
       product: {
         findUnique: async ({ where }: any) => mockStore.products.get(where.id) || null,
@@ -50,6 +64,20 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
           const updated = { ...existing, ...data };
           mockStore.products.set(where.id, updated);
           return updated;
+        },
+        updateMany: async ({ where, data }: any) => {
+          let count = 0;
+          for (const [id, existing] of mockStore.products.entries()) {
+            if (
+              (!where?.id || id === where.id) &&
+              (!where?.tenantId || existing.tenantId === where.tenantId) &&
+              (!where?.branchId || existing.branchId === where.branchId)
+            ) {
+              mockStore.products.set(id, { ...existing, ...data });
+              count += 1;
+            }
+          }
+          return { count };
         },
       },
       productVariant: {
@@ -66,9 +94,45 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
           mockStore.variants.set(where.id, updated);
           return updated;
         },
+        updateMany: async ({ where, data }: any) => {
+          let count = 0;
+          for (const [id, existing] of mockStore.variants.entries()) {
+            if (
+              (!where?.id || id === where.id) &&
+              (!where?.tenantId || existing.tenantId === where.tenantId) &&
+              (!where?.branchId || existing.branchId === where.branchId)
+            ) {
+              mockStore.variants.set(id, { ...existing, ...data });
+              count += 1;
+            }
+          }
+          return { count };
+        },
+        findFirst: async ({ where }: any) =>
+          Array.from(mockStore.variants.values()).find((v) =>
+            v.id === where.id &&
+            v.tenantId === where.tenantId &&
+            v.branchId === where.branchId
+          ) || null,
+      },
+      productBranchStock: {
+        findFirst: async () => null,
+        create: async ({ data }: any) => data,
+        update: async ({ where, data }: any) => ({ id: where.id, ...data }),
       },
       stockLedger: {
-        findMany: async () => [],
+        findMany: async () => Array.from(mockStore.ledgers.values()),
+        aggregate: async ({ where }: any) => ({
+          _sum: {
+            quantityChange: Array.from(mockStore.ledgers.values())
+              .filter((row: any) =>
+                (!where?.tenantId || row.tenantId === where.tenantId) &&
+                (!where?.branchId || row.branchId === where.branchId) &&
+                (!where?.variantId || row.variantId === where.variantId),
+              )
+              .reduce((sum: number, row: any) => sum + Number(row.quantityChange || 0), 0),
+          },
+        }),
         create: async ({ data }: any) => {
           mockStore.ledgers.set(data.idempotencyKey, data);
           return data;

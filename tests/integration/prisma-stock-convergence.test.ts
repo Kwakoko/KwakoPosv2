@@ -34,6 +34,9 @@ describe("PostgreSQL multi-device stock convergence", () => {
       const product = await prisma.product.findUnique({ where: { id: productId } });
       expect(Number(product?.totalStock)).toBe(100);
       expect(Number(product?.availableStock)).toBe(100);
+      const branchStock = await prisma.productBranchStock.findFirst({ where: { tenantId, branchId, variantId, warehouseId: null } });
+      expect(Number(branchStock?.currentQuantity ?? 0)).toBe(100);
+      expect(Number((await prisma.stockLedger.aggregate({ where: { tenantId, branchId, variantId }, _sum: { quantityChange: true } }))._sum.quantityChange ?? 0)).toBe(Number(persisted?.inventoryQuantity ?? 0));
       const replay = await engineA.processPush(ctx, { deviceId: "DEVICE-A", operations: [opA] });
       expect(replay.results[0].status).toBe("ALREADY_PROCESSED");
       const rowsAfterReplay = await prisma.stockLedger.findMany({ where: { tenantId, branchId, variantId } });

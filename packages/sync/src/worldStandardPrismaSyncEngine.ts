@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
+import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
 
 const MAX_DELTA = 500;
 
@@ -69,11 +71,45 @@ export class WorldStandardPrismaSyncEngine {
       await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
-      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ)`);
+       await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ)`);
+       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
     })();
     return this.infrastructureReady!;
   }
 
+  private async persistConflict(ctx: TenantContext, conflict: {
+    id: string; operationId: string; entityType: string; entityId: string; operationType: string;
+    localPayload: unknown; remotePayload: unknown; deviceId?: string;
+  }): Promise<void> {
+    await prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe(
+        "INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,'OPEN') ON CONFLICT (id) DO UPDATE SET remote_payload = EXCLUDED.remote_payload WHERE sync_conflict_record.status = 'OPEN'",
+        conflict.id, ctx.tenantId, ctx.branchId, conflict.operationId, conflict.entityType, conflict.entityId, conflict.operationType,
+        JSON.stringify(conflict.localPayload || {}), JSON.stringify(conflict.remotePayload || {})
+      );
+      await tx.auditEvent.create({
+        data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: conflict.deviceId || "sync-engine",
+          action: "SYNC_CONFLICT_DETECTED", entityType: conflict.entityType, entityId: conflict.entityId,
+          metadata: { conflictId: conflict.id, operationId: conflict.operationId, operationType: conflict.operationType, localPayload: conflict.localPayload, remotePayload: conflict.remotePayload } }
+      });
+    });
+  }
+
+  private async scopedRecord(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<any> {
+    let record: any = null;
+    switch (entityType) {
+      case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
+      case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
+      case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
+      case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
+      case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
+      case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
+      default: return null;
+    }
+    if (!record) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
+    if (record.tenantId !== ctx.tenantId || record.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+    return record;
+  }
   private async latestRevision(ctx: TenantContext, db: any = prisma): Promise<string> {
     const rows = await db.$queryRawUnsafe(
       `SELECT COALESCE(MAX(revision), 0) AS revision FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2`,
@@ -432,32 +468,9 @@ export class WorldStandardPrismaSyncEngine {
       const adjustment = await tx.stockAdjustment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId, adjustmentType: payload.adjustmentType, quantityChange: changeQty, reason: payload.reason, referenceNote: payload.referenceNote ?? null, status: "COMPLETED", createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
       await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt: new Date(), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
 
-      const nextVariantQty = quantityAfter
-      await tx.productVariant.update({
-        where: { id: payload.variantId },
-        data: { inventoryQuantity: nextVariantQty },
-      });
-
-      // Recalculate parent product available and total stock
-      const siblingVars = await tx.productVariant.findMany({
-        where: { productId: variant.productId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-      });
-      const totalStock = siblingVars
-        .filter((v: any) => v.isActive)
-        .reduce((sum: number, v: any) => sum + (v.id === payload.variantId ? nextVariantQty : Number(v.inventoryQuantity ?? 0)), 0);
-      const reservedStock = siblingVars
-        .filter((v: any) => v.isActive)
-        .reduce((sum: number, v: any) => sum + Number(v.reservedQuantity || 0), 0);
-
-      await tx.product.update({
-        where: { id: variant.productId },
-        data: {
-          totalStock,
-          reservedStock,
-          availableStock: Math.max(0, totalStock - reservedStock),
-          lowStockVariantsCount: siblingVars.filter((v: any) => v.isActive && (v.id === payload.variantId ? nextVariantQty : Number(v.inventoryQuantity ?? 0)) <= Number(v.reorderLevel || 0)).length,
-        },
-      });
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, payload.variantId);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, payload.variantId, null);
+      await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return;
     }
 
@@ -474,41 +487,17 @@ export class WorldStandardPrismaSyncEngine {
 
       const parentUnitsDeducted = Number(payload.parentUnitsDeducted);
       const childUnitsProduced = Number(payload.childUnitsProduced);
-      const parentCurrentQty = Number(parentVariant.inventoryQuantity ?? 0);
+      const parentCurrentQty = await calculateAuthoritativeStock(tx, ctx.tenantId, ctx.branchId, parentVariant.id);
+      const childCurrentQty = await calculateAuthoritativeStock(tx, ctx.tenantId, ctx.branchId, childVariant.id);
 
       if (parentCurrentQty < parentUnitsDeducted) {
-        const conflictId = `conflict:conversion:${op.operationId}`;
-        try {
-          await tx.$executeRawUnsafe(
-            `INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, 'OPEN')
-             ON CONFLICT (id) DO NOTHING`,
-            conflictId,
-            ctx.tenantId,
-            ctx.branchId,
-            op.operationId,
-            "UnitConversionConflict",
-            payload.parentVariantId,
-            JSON.stringify(payload),
-            JSON.stringify({ availableParentStock: parentCurrentQty, required: parentUnitsDeducted }),
-          );
-        } catch {}
-        throw new Error(`CONVERSION_CONFLICT: INSUFFICIENT_PARENT_STOCK (Available: ${parentCurrentQty}, Required: ${parentUnitsDeducted})`);
+        throw new Error("CONVERSION_CONFLICT: INSUFFICIENT_PARENT_STOCK (Available: " + parentCurrentQty + ", Required: " + parentUnitsDeducted + ")");
       }
 
       const parentNextQty = Math.max(0, parentCurrentQty - parentUnitsDeducted);
-      const childNextQty = Number(childVariant.inventoryQuantity ?? 0) + childUnitsProduced;
+      const childNextQty = childCurrentQty + childUnitsProduced;
 
-      await tx.productVariant.update({
-        where: { id: payload.parentVariantId },
-        data: { inventoryQuantity: parentNextQty },
-      });
-      await tx.productVariant.update({
-        where: { id: payload.childVariantId },
-        data: { inventoryQuantity: childNextQty },
-      });
-
-      const now = new Date();
+const now = new Date();
       await tx.stockLedger.create({
         data: {
           tenantId: ctx.tenantId,
@@ -541,7 +530,7 @@ export class WorldStandardPrismaSyncEngine {
           movementType: "ADJUSTMENT",
           quantityChange: childUnitsProduced,
           quantity: childUnitsProduced,
-          quantityBefore: Number(childVariant.inventoryQuantity ?? 0),
+          quantityBefore: childCurrentQty,
           quantityAfter: childNextQty,
           unitCost: Number(childVariant.costPrice || 0),
           totalCost: childUnitsProduced * Number(childVariant.costPrice || 0),
@@ -554,6 +543,12 @@ export class WorldStandardPrismaSyncEngine {
           notes: `Converted from parent variant ${parentVariant.sku} (${parentUnitsDeducted} units)`,
         },
       });
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, parentVariant.id);
+      await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, childVariant.id);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, parentVariant.id, null);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, childVariant.id, null);
+      await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, parentVariant.productId);
+      if (childVariant.productId !== parentVariant.productId) await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, childVariant.productId);
       return;
     }
 
@@ -647,11 +642,18 @@ export class WorldStandardPrismaSyncEngine {
         if (String(err?.message || "").startsWith("STALE_WRITE_CONFLICT:")) {
           const conflictId = "conflict:" + op.operationId;
           const remote = await this.snapshot(ctx, op);
-          await prisma.$executeRawUnsafe("INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,'OPEN') ON CONFLICT (id) DO NOTHING", conflictId, ctx.tenantId, ctx.branchId, op.operationId, op.entityType, op.entityId, JSON.stringify(op.payload), JSON.stringify(remote ?? {}));
+          await this.persistConflict(ctx, { id: conflictId, operationId: op.operationId, entityType: op.entityType, entityId: op.entityId, operationType: op.operationType, localPayload: op.payload, remotePayload: remote, deviceId: req.deviceId });
           results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_CONFLICT:" + conflictId });
           continue;
         }
-        if (err?.code === "P2002" || err?.code === "23505") {
+        if (String(err?.message || "").startsWith("CONVERSION_CONFLICT:")) {
+          const conflictId = "conflict:conversion:" + op.operationId;
+          const payload = op.payload;
+          const available = await calculateAuthoritativeStock(prisma, ctx.tenantId, ctx.branchId, String(payload.parentVariantId)).catch(() => 0);
+          await this.persistConflict(ctx, { id: conflictId, operationId: op.operationId, entityType: "UnitConversionConflict", entityId: String(payload.parentVariantId), operationType: op.operationType, localPayload: payload, remotePayload: { availableParentStock: available, required: Number(payload.parentUnitsDeducted || 0) }, deviceId: req.deviceId });
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_CONFLICT:" + conflictId });
+          continue;
+        }        if (err?.code === "P2002" || err?.code === "23505") {
           const committed = await prisma.syncOperation.findFirst({
             where: {
               tenantId: ctx.tenantId,
@@ -675,34 +677,122 @@ export class WorldStandardPrismaSyncEngine {
   async resolveConflict(ctx: TenantContext, conflictId: string, resolution: "ACCEPT_SERVER" | "ACCEPT_LOCAL" | "MERGE", mergedPayload?: Record<string, unknown>): Promise<{ status: string; operationId?: string; revision?: string }> {
     await this.ensureInfrastructure();
     return prisma.$transaction(async (tx: any) => {
-      const rows = await tx.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE", conflictId, ctx.tenantId, ctx.branchId);
+      const rows = await tx.$queryRawUnsafe(
+        "SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE",
+        conflictId, ctx.tenantId, ctx.branchId,
+      );
       const conflict = rows[0];
       if (!conflict) throw new Error("SYNC_CONFLICT_NOT_FOUND");
       if (conflict.status !== "OPEN") return { status: conflict.status };
       const chosen = resolution === "ACCEPT_SERVER" ? conflict.remote_payload : resolution === "ACCEPT_LOCAL" ? conflict.local_payload : mergedPayload;
       if (!chosen || typeof chosen !== "object") throw new Error("SYNC_CONFLICT_MERGED_PAYLOAD_REQUIRED");
+      const entityType = String(conflict.entity_type);
+      const resolverOperationId = "conflict-resolution:" + conflictId;
+      let revision: string | undefined;
       const payload: any = stripSyncControlFields(chosen as Record<string, unknown>);
-      const operationId = "conflict-resolution:" + conflictId;
-      switch (conflict.entity_type) {
-        case "Product": await tx.product.update({ where: { id: conflict.entity_id }, data: { name: payload.name, description: payload.description ?? null, sku: payload.sku, category: payload.category ?? "General", isActive: payload.isActive ?? true } }); break;
-        case "ProductVariant": {
-          if (payload.inventoryQuantity !== undefined || payload.stock !== undefined) {
-            throw new Error("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
-          }
-          await tx.productVariant.update({ where: { id: conflict.entity_id }, data: { name: payload.name, sku: payload.sku, barcode: payload.barcode ?? null, price: payload.price, costPrice: payload.costPrice, reservedQuantity: payload.reservedQuantity ?? 0, reorderLevel: payload.reorderLevel ?? 0, attributes: payload.attributes ?? {}, isActive: payload.isActive ?? true } });
-          break;
+
+      if (entityType === "SaleOversell") {
+        // Committed business incident: resolution acknowledges the incident without rewriting sale/ledger history.
+      } else if (entityType === "UnitConversionConflict") {
+        if (resolution !== "ACCEPT_SERVER") {
+          const op: any = {
+            operationId: resolverOperationId,
+            entityType: "UnitConversionTransaction",
+            entityId: String(payload.id || conflict.operation_id),
+            operationType: "CREATE",
+            payload,
+            clientCreatedAt: new Date().toISOString(),
+            idempotencyKey: resolverOperationId,
+          };
+          await this.applyOperationInTransaction(ctx, { deviceId: "conflict-resolver:" + ctx.userId, operations: [op] } as any, op, tx);
+          const snapshot = await this.snapshot(ctx, op, tx);
+          await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType: op.entityType, entityId: op.entityId, operationType: op.operationType, payload: op.payload, status: "PROCESSED", idempotencyKey: op.idempotencyKey, clientCreatedAt: new Date(), processedAt: new Date() } });
+          revision = await this.journal(ctx, op, snapshot, "conflict-resolution", tx);
         }
-        case "Customer": await tx.customer.update({ where: { id: conflict.entity_id }, data: { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } }); break;
-        case "Supplier": await tx.supplier.update({ where: { id: conflict.entity_id }, data: { supplierCode: payload.supplierCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, taxPin: payload.taxPin ?? null, status: payload.status ?? "ACTIVE" } }); break;
-        default: throw new Error("SYNC_CONFLICT_RESOLUTION_UNSUPPORTED:" + conflict.entity_type);
+      } else {
+        const current = await this.scopedRecord(tx, ctx, entityType, String(conflict.entity_id));
+        const effective: any = { ...current, ...payload };
+        const deleting = String(conflict.operation_type || "UPDATE") === "DELETE";
+        switch (entityType) {
+          case "Product":
+            await tx.product.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, description: effective.description ?? null, sku: effective.sku, categoryId: effective.categoryId ?? null, brandId: effective.brandId ?? effective.brand_id ?? null, supplierId: effective.supplierId ?? null, taxId: effective.taxId ?? null, category: effective.category ?? current.category, buyingPrice: effective.buyingPrice ?? current.buyingPrice, sellingPrice: effective.sellingPrice ?? current.sellingPrice, isActive: deleting ? false : (effective.isActive ?? true) } });
+            break;
+          case "ProductVariant":
+            if (effective.inventoryQuantity !== undefined || effective.stock !== undefined) throw new Error("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
+            await tx.productVariant.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, sku: effective.sku, barcode: effective.barcode ?? null, price: effective.price ?? current.price, costPrice: effective.costPrice ?? current.costPrice, reservedQuantity: effective.reservedQuantity ?? current.reservedQuantity, reorderLevel: effective.reorderLevel ?? current.reorderLevel, attributes: effective.attributes ?? current.attributes, isActive: deleting ? false : (effective.isActive ?? true) } });
+            break;
+          case "Customer":
+            await tx.customer.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { customerCode: effective.customerCode ?? current.customerCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, creditLimit: effective.creditLimit ?? current.creditLimit, openingBalance: effective.openingBalance ?? current.openingBalance, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            break;
+          case "Supplier":
+            await tx.supplier.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { supplierCode: effective.supplierCode ?? current.supplierCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, taxPin: effective.taxPin ?? null, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            break;
+          case "Category":
+            if (deleting) {
+              const replacementId = effective.replacementId;
+              const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: conflict.entity_id, isActive: true } });
+              if (count > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
+              if (replacementId) {
+                const replacement = await tx.category.findUnique({ where: { id: String(replacementId) } });
+                if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement category is invalid");
+                await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: conflict.entity_id }, data: { categoryId: replacement.id, category: replacement.name } });
+              }
+              await tx.category.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isActive: false } });
+            } else {
+              await tx.category.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, code: effective.code ?? current.code, parentId: effective.parentId ?? null, description: effective.description ?? null, color: effective.color ?? null, isActive: effective.isActive ?? true } });
+            }
+            break;
+          case "Brand":
+            if (deleting) {
+              const replacementId = effective.replacementId;
+              const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: conflict.entity_id, isActive: true } });
+              if (count > 0 && !replacementId) throw new Error("Brand has assigned products; replacementId is required");
+              if (replacementId) {
+                const replacement = await tx.brand.findUnique({ where: { id: String(replacementId) } });
+                if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement brand is invalid");
+                await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: conflict.entity_id }, data: { brandId: replacement.id } });
+              }
+              await tx.brand.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isActive: false } });
+            } else {
+              await tx.brand.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, code: effective.code ?? current.code, origin: effective.origin ?? null, notes: effective.notes ?? null, isActive: effective.isActive ?? true } });
+            }
+            break;
+          default:
+            throw new Error("SYNC_CONFLICT_RESOLUTION_UNSUPPORTED:" + entityType);
+        }
+
+        const op: any = {
+          operationId: resolverOperationId,
+          entityType,
+          entityId: String(conflict.entity_id),
+          operationType: "UPDATE",
+          payload: effective,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: resolverOperationId,
+        };
+        const snapshot = await this.snapshot(ctx, op, tx);
+        await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType, entityId: String(conflict.entity_id), operationType: "UPDATE", payload: effective, status: "PROCESSED", idempotencyKey: resolverOperationId, clientCreatedAt: new Date(), processedAt: new Date() } });
+        revision = await this.journal(ctx, op, snapshot, "conflict-resolution", tx);
       }
-      const op: any = { operationId, entityType: conflict.entity_type, entityId: conflict.entity_id, operationType: "UPDATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId };
-      const snapshot = await this.snapshot(ctx, op, tx);
-      await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId, entityType: conflict.entity_type, entityId: conflict.entity_id, operationType: "UPDATE", payload, status: "PROCESSED", idempotencyKey: operationId, clientCreatedAt: new Date(), processedAt: new Date() } });
-      const revision = await this.journal(ctx, op, snapshot, "conflict-resolution", tx);
+
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "conflict-resolver:" + ctx.userId, action: "SYNC_CONFLICT_RESOLVED",
+        entityType, entityId: String(conflict.entity_id),
+        metadata: { conflictId, operationId: conflict.operation_id, resolution, resolutionOperationId: resolverOperationId,
+          mergedPayload: resolution === "MERGE" ? mergedPayload : undefined },
+      }});
       await tx.$executeRawUnsafe("UPDATE sync_conflict_record SET status = $1, resolved_at = now() WHERE id = $2 AND tenant_id = $3 AND branch_id = $4", resolution, conflictId, ctx.tenantId, ctx.branchId);
-      return { status: "RESOLVED", operationId, revision };
+      return { status: "RESOLVED", operationId: resolverOperationId, revision };
     });
+  }
+
+  async listConflicts(ctx: TenantContext, status: string = "OPEN"): Promise<any[]> {
+    await this.ensureInfrastructure();
+    const rows = status === "ALL"
+      ? await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
+      : await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
+    return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
   }
 
   async processBootstrap(ctx: TenantContext, req: any): Promise<any> {

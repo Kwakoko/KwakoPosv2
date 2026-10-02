@@ -83,7 +83,7 @@ export async function reconcileLocalInventoryToOutbox(
     });
     const outboxItems: OutboxItem[] = [makeOutbox("Product", prodId, productPayload, `PROD-RECON-${prodId}`)];
     for (const v of effectiveVariants) {
-      const variantPayload = normalizeProductVariantPayload(v, { entityId: v.id });
+      const variantPayload = normalizeProductVariantPayload({ ...v, stock: 0, inventoryQuantity: 0 }, { entityId: v.id });
       outboxItems.push(makeOutbox("ProductVariant", v.id, variantPayload, `VAR-RECON-${v.id}`));
       const vStock = Number(v.stock ?? v.inventoryQuantity ?? 0);
       if (vStock > 0) {

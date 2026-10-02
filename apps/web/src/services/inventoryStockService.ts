@@ -417,15 +417,13 @@ export async function recordPosSaleDeductions(
     if (!targetVariant) for (const v of db.productVariants.values()) if (v.productId === prod.id && (!item.variantId || v.id === item.variantId)) { targetVariant = v; break; }
     const resolvedVariantId = targetVariant?.id || item.variantId || `${prod.id}-default`;
     const priorLedger = [...db.stockLedger.values()].filter((entry: any) => (!tenantId || entry.tenantId === tenantId) && (!branchId || entry.branchId === branchId) && entry.variantId === resolvedVariantId);
-    const hasBaselineInLedger = priorLedger.some((entry: any) => ["PURCHASE_RECEIPT", "INITIAL_STOCK", "INVENTORY_COUNT", "AUDIT_RECOVERY", "RESTOCK"].includes(entry.movementType));
     const ledgerSum = priorLedger.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
-    const initialVariantQty = Number(targetVariant?.inventoryQuantity ?? targetVariant?.stock ?? prod?.availableStock ?? prod?.stock ?? 0);
-    const quantityBefore = hasBaselineInLedger ? ledgerSum : initialVariantQty;
+    const quantityBefore = ledgerSum;
     if (quantityBefore < qty) throw new Error(`INSUFFICIENT_LOCAL_STOCK:${resolvedVariantId}`);
     const quantityAfter = quantityBefore - qty;
     const variant = targetVariant || { id: resolvedVariantId, productId: prod.id, name: "Standard", sku: `${prod.sku || prod.id}-STD`, price: Number(prod.sellingPrice || prod.price || 0), costPrice: Number(prod.buyingPrice || prod.costPrice || 0), isActive: true };
     const updatedVariant = { ...variant, tenantId: tenantId || variant.tenantId, branchId: branchId || variant.branchId, inventoryQuantity: quantityAfter, stock: quantityAfter, updatedAt: occurredAt };
-    const productBefore = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? initialVariantQty);
+    const productBefore = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? quantityBefore);
     const productAfter = Math.max(0, productBefore - qty);
     const updatedProd = { ...prod, tenantId: tenantId || prod.tenantId, branchId: branchId || prod.branchId, availableStock: productAfter, totalStock: productAfter, stock: productAfter, updatedAt: occurredAt };
     const unitCost = Number(item.unitCost || prod.costPrice || prod.buyingPrice || 0);

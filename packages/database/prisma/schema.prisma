@@ -145,11 +145,13 @@ model Branch {
 }
 
 model Role {
-  id          String   @id @default(uuid())
-  tenantId    String
-  name        String
-  permissions String[]
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  description  String?
+  permissions  String[]
+  isSystemRole Boolean  @default(false)
+  createdAt    DateTime @default(now())
   updatedAt   DateTime @updatedAt
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users       User[]
@@ -163,6 +165,7 @@ model User {
   tenantId     String
   branchId     String
   email        String
+  phone        String?
   passwordHash String
   name         String
   roleId       String
@@ -174,6 +177,7 @@ model User {
   role         Role            @relation(fields: [roleId], references: [id])
   sessions     DeviceSession[]
   cashSessions CashSession[]
+  cashCountSeals CashSession[] @relation("CashSessionCountSealedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, branchId])
@@ -398,6 +402,7 @@ model ProductVariant {
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId, branchId, productId])
+  @@index([tenantId, branchId, barcode])
   @@map("product_variants")
 }
 
@@ -758,6 +763,9 @@ model CashSession {
   closingCash       Decimal?  @db.Decimal(12, 2)
   expectedCash      Decimal   @default(0) @db.Decimal(12, 2)
   actualCash        Decimal?  @db.Decimal(12, 2)
+  countSealedAt     DateTime?
+  countSealedById   String?
+  countSealedDeviceId String?
   cashSalesTotal    Decimal   @default(0) @db.Decimal(12, 2)
   cashRefundsTotal  Decimal   @default(0) @db.Decimal(12, 2)
   cashExpensesTotal Decimal   @default(0) @db.Decimal(12, 2)
@@ -769,6 +777,7 @@ model CashSession {
   tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch            Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashier           User      @relation(fields: [cashierId], references: [id], onDelete: Cascade)
+  countSealedBy     User?     @relation("CashSessionCountSealedBy", fields: [countSealedById], references: [id], onDelete: SetNull)
   sales             Sale[]
   expenses          Expense[]
 
