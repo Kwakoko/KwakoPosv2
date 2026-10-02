@@ -1221,76 +1221,99 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: { loggedOut: true } });
   });
 
-  // Switch tenant / branch authorization context
+  // Switch tenant / branch authorization context.
+  // Cross-tenant switching is reserved for Super Admin; branch switching requires branch.switch.
   server.post("/auth/switch-context", async (req, reply) => {
-    const ctx = req.tenantContext;
-    const { targetTenantId, targetBranchId } = (req.body as any) || {};
-    const newTenantId = targetTenantId || ctx?.tenantId || "TNT-TZ-001";
-    const newBranchId = targetBranchId || ctx?.branchId || "BR-DSM-01";
-    const userId = ctx?.userId || randomUUID();
-    const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+    try {
+      const ctx = requireTenantContext(req);
+      const { targetTenantId, targetBranchId } = (req.body as any) || {};
+      const requestedTenantId = targetTenantId == null ? "" : String(targetTenantId).trim();
+      const requestedBranchId = targetBranchId == null ? "" : String(targetBranchId).trim();
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+      const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN");
+      const canSwitchBranch = isSuperAdmin || permissions.includes("*") || permissions.includes("branch.switch");
 
-    const tokenPayload = {
-      sub: userId,
-      tenantId: newTenantId,
-      branchId: newBranchId,
-      email: userEmail,
-      roles: ctx?.roles || ["ADMIN"],
-      permissions: ctx?.permissions || ["*"],
-      deviceId: (ctx as any)?.deviceId || "device-server-01",
-    };
+      const newTenantId = requestedTenantId || ctx.tenantId;
+      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching requires Super Admin authorization." } });
+      }
 
-    const accessToken = generateAccessToken(tokenPayload);
-    const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
+      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
+        throw new Error("FORBIDDEN: Cross-tenant access denied");
+      }
+      if (requestedBranchId && requestedBranchId !== ctx.branchId && !canSwitchBranch) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Branch switching permission is required." } });
+      }
 
-    let targetTenantName: string | undefined;
-    let targetTenantSlug: string | undefined;
-    let targetBranchName: string | undefined;
-    let targetBranchCode: string | undefined;
+      let targetTenantName: string | undefined;
+      let targetTenantSlug: string | undefined;
+      let targetBranchName: string | undefined;
+      let targetBranchCode: string | undefined;
+      let resolvedBranchId = requestedBranchId || ctx.branchId;
 
-    if (productionPersistence && newTenantId && newTenantId !== "PLATFORM_SUPER_ADMIN") {
-      try {
-        const { prisma } = await import("@kwakopos2/database");
+      if (productionPersistence && newTenantId !== "PLATFORM_SUPER_ADMIN") {
         const foundTenant = await prisma.tenant.findUnique({
           where: { id: newTenantId },
           include: { branches: true },
         });
-        if (foundTenant) {
-          targetTenantName = foundTenant.name;
-          targetTenantSlug = foundTenant.slug;
-          const foundBranch = foundTenant.branches.find((b) => b.id === newBranchId) || foundTenant.branches[0];
-          if (foundBranch) {
-            targetBranchName = foundBranch.name;
-            targetBranchCode = foundBranch.code;
-          }
+        if (!foundTenant) {
+          return reply.status(404).send({ success: false, error: { code: "TENANT_NOT_FOUND", message: "Requested tenant was not found." } });
         }
-      } catch {
-        /* ignore */
-      }
-    }
+        targetTenantName = foundTenant.name;
+        targetTenantSlug = foundTenant.slug;
 
-    return reply.send({
-      success: true,
-      data: {
-        accessToken,
-        refreshToken: session.refreshToken,
-        sessionId: session.sessionId,
-        tenantName: targetTenantName,
-        branchName: targetBranchName,
-        user: {
-          id: userId,
-          tenantId: newTenantId,
-          branchId: newBranchId,
-          email: userEmail,
-          name: "Admin User",
-          role: ctx?.roles?.[0] || "ADMIN",
+        const foundBranch = foundTenant.branches.find((b) => b.id === resolvedBranchId);
+        if (!foundBranch) {
+          return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Requested branch is not authorized for this tenant." } });
+        }
+        targetBranchName = foundBranch.name;
+        targetBranchCode = foundBranch.code;
+        resolvedBranchId = foundBranch.id;
+      }
+
+      const userId = ctx.userId;
+      const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+      const tokenPayload = {
+        sub: userId,
+        tenantId: newTenantId,
+        branchId: resolvedBranchId,
+        email: userEmail,
+        roles: ctx.roles || [],
+        permissions: ctx.permissions || [],
+        deviceId: (ctx as any)?.deviceId || "device-server-01",
+      };
+
+      const accessToken = generateAccessToken(tokenPayload);
+      const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
+
+      return reply.send({
+        success: true,
+        data: {
+          accessToken,
+          refreshToken: session.refreshToken,
+          sessionId: session.sessionId,
           tenantName: targetTenantName,
-          tenantSlug: targetTenantSlug,
           branchName: targetBranchName,
-          branchCode: targetBranchCode,
+          user: {
+            id: userId,
+            tenantId: newTenantId,
+            branchId: resolvedBranchId,
+            email: userEmail,
+            name: "Admin User",
+            role: ctx.roles?.[0] || "ADMIN",
+            tenantName: targetTenantName,
+            tenantSlug: targetTenantSlug,
+            branchName: targetBranchName,
+            branchCode: targetBranchCode,
+          },
         },
-      },
-    });
+      });
+    } catch (error: any) {
+      const message = error?.message || "Context switch failed";
+      const status = message.includes("FORBIDDEN") ? 403 : 401;
+      return reply.status(status).send({ success: false, error: { code: status === 403 ? "FORBIDDEN" : "UNAUTHORIZED", message } });
+    }
   });
 
   // Privileged identity routes — PostgreSQL only; no syncOutbox/in-memory fallback.
