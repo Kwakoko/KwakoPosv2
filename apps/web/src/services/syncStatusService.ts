@@ -17,6 +17,12 @@ export interface SyncStatusScope {
 
 export interface SyncStatusSnapshot extends SyncStatusScope {
   state: SyncStatusState;
+  /** Client's durable sync cursor for the active tenant/branch scope. */
+  localRevision: string;
+  /** Latest authoritative server revision observed for the active scope. */
+  serverRevision: string | null;
+  /** Durable sync epoch observed by the existing sync engine. */
+  syncEpoch: string | null;
   pendingOutboxCount: number;
   failedOutboxCount: number;
   /** Items permanently abandoned after exceeding the server-rejection retry cap. */
@@ -34,6 +40,9 @@ const emptySnapshot = (): SyncStatusSnapshot => ({
   tenantId: null,
   branchId: null,
   state: "IDLE",
+  localRevision: "0",
+  serverRevision: null,
+  syncEpoch: null,
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
@@ -138,6 +147,15 @@ export class SyncStatusService {
       const tenantId = scope?.tenantId ?? this.snapshot.tenantId ?? undefined;
       const branchId = scope?.branchId ?? this.snapshot.branchId ?? undefined;
       const pending = this.db.getPendingOutbox(tenantId, branchId).length;
+      const localRevision = tenantId && branchId
+        ? String(this.db.syncMetadata.get(`syncScope:${tenantId}:${branchId}:lastSyncRevision`) ?? "0")
+        : "0";
+      const syncEpoch = tenantId && branchId
+        ? (() => {
+            const value = this.db.syncMetadata.get(`syncScope:${tenantId}:${branchId}:syncEpoch`);
+            return value == null ? null : String(value);
+          })()
+        : null;
       // Retriable failures (will be re-queued on next heartbeat)
       const failed = this.db.getRetriableFailedOutbox
         ? this.db.getRetriableFailedOutbox(tenantId, branchId).length
@@ -148,11 +166,36 @@ export class SyncStatusService {
       const abandoned = this.db.getAbandonedOutbox
         ? this.db.getAbandonedOutbox(tenantId, branchId).length
         : 0;
-      this.update({ pendingOutboxCount: pending, failedOutboxCount: failed, abandonedOutboxCount: abandoned });
+      this.update({
+        pendingOutboxCount: pending,
+        failedOutboxCount: failed,
+        abandonedOutboxCount: abandoned,
+        localRevision,
+        syncEpoch,
+      });
     } catch (error) {
       this.failSync(error);
     }
     return this.getSnapshot();
+  }
+
+  /**
+   * Record the latest server revision observed by an authoritative consumer.
+   * This is status metadata only; all synchronization remains owned by the existing sync engine.
+   */
+  recordAuthoritativeServerRevision(
+    scope: SyncStatusScope,
+    serverRevision: string,
+    syncEpoch?: string | null,
+  ): void {
+    if (!scope.tenantId || !scope.branchId || !serverRevision) return;
+    if (this.snapshot.tenantId !== scope.tenantId || this.snapshot.branchId !== scope.branchId) {
+      this.setScope(scope);
+    }
+    this.update({
+      serverRevision: String(serverRevision),
+      ...(syncEpoch !== undefined ? { syncEpoch: syncEpoch ? String(syncEpoch) : null } : {}),
+    });
   }
 
   dispose(): void {
