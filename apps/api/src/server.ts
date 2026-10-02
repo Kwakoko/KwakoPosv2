@@ -1714,6 +1714,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
     return { success: true, data: result };
   });
+  server.post("/sync/conflicts/register", async (req) => {
+    const body = z.object({
+      conflictId: z.string().min(1),
+      operationId: z.string().min(1),
+      entityType: z.string().min(1),
+      entityId: z.string().min(1),
+      operationType: z.enum(["CREATE", "UPDATE", "DELETE"]).optional(),
+      localPayload: z.unknown().optional(),
+      remotePayload: z.unknown().optional(),
+      deviceId: z.string().max(128).optional(),
+    }).parse(req.body || {});
+    const result = await (syncEngine as any).registerConflict(requireTenantContext(req), body);
+    return { success: true, data: result };
+  });
   server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
