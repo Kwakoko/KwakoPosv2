@@ -92,7 +92,7 @@ async function applyRevisionedChanges(
     const request = outbox.getAll();
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error || new Error("Outbox read failed"));
-  })).filter((item) => item?.status === "PENDING" && outboxMatchesScope(item, tenantId, branchId));
+  })).filter((item) => outboxMatchesScope(item, tenantId, branchId) && (item?.status === "PENDING" || (item?.status === "FAILED" && String(item?.error || "").startsWith("SYNC_CONFLICT:"))));
 
   let applied = 0;
   const persistenceStatusEvents: PersistenceStatusRecord[] = [];
@@ -147,7 +147,8 @@ async function applyRevisionedChanges(
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation) {
-      const conflictId = "CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision;
+      const serverConflictId = String(pendingMutation.error || "").startsWith("SYNC_CONFLICT:") ? String(pendingMutation.error).slice("SYNC_CONFLICT:".length) : "";
+      const conflictId = serverConflictId || ("CONFLICT-" + change.entityType + "-" + change.entityId + "-" + change.revision);
       metadata.put(JSON.stringify({ conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" }), "sync_conflict_" + change.entityType + "_" + change.entityId);
       const rawStatus = await new Promise<any>((resolve) => {
         const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
@@ -495,7 +496,17 @@ export class ClientSyncEngine {
             if (res.status === "SUCCESS") pushedCount += 1;
           } else if (res.status === "FAILED") {
             hadServerRejections = true;
-            this.localDb.markOutboxFailed(res.operationId, res.error || "Server rejected operation");
+            const serverError = res.error || "Server rejected operation";
+            if (serverError.startsWith("SYNC_CONFLICT:")) {
+              const conflictId = serverError.slice("SYNC_CONFLICT:".length);
+              const item = batch.find((candidate) => candidate.id === res.operationId);
+              if (item) {
+                const conflict = { conflictId, operationId: item.id, entityType: item.entityType, entityId: item.entityId, localPayload: item.payload, detectedAt: new Date().toISOString(), status: "OPEN" };
+                this.localDb.setSyncMetadata("sync_conflict_" + conflictId, JSON.stringify(conflict));
+                this.localDb.setSyncMetadata("sync_conflict_" + item.entityType + "_" + item.entityId, JSON.stringify(conflict));
+              }
+            }
+            this.localDb.markOutboxFailed(res.operationId, serverError);
           } else throw new Error("SYNC_PROTOCOL_VIOLATION: unknown operation status");
         }
         await this.localDb.flushPersistence();
