@@ -274,14 +274,16 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
           setLedger([]);
         }
 
-        setCashSales(cSales);
+        // Cash-session financial truth is server-owned; local IndexedDB sales are not authoritative here.
+        setCashSales(Number(activeShift.cashSalesTotal || 0));
+        setCashRefunds(Number(activeShift.cashRefundsTotal || 0));
+        setCashExpenses(Number(activeShift.cashExpensesTotal || 0));
         setMpesaSales(mSales);
         setAirtelSales(aSales);
         setCardSales(crdSales);
         setCashIn(cIn);
         setCashOut(cOut);
         setSafeDrops(sDrops);
-        setCashExpenses(cExp);
       } else {
         setShiftStatus("CLOSED");
         setShiftId("");
