@@ -1,6 +1,55 @@
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "@kwakopos2/database";
 
+export interface DashboardRevenuePoint {
+  name: string;
+  fullLabel: string;
+  Revenue: number;
+  Profit: number;
+  COGS: number;
+  PriorRevenue: number;
+  ordersCount: number;
+  marginPct: string;
+}
+
+export interface DashboardPaymentChannel {
+  name: string;
+  volume: number;
+  count: number;
+  volumeShare: number;
+  countShare: number;
+  aov: number;
+}
+
+export interface DashboardTopProduct {
+  productId: string;
+  name: string;
+  revenue: number;
+  units: number;
+  stock: number;
+  category: string;
+  rank: number;
+}
+
+export interface DashboardAnalyticsSnapshot {
+  timeframe: "today" | "7d" | "30d" | "month";
+  chartPoints: DashboardRevenuePoint[];
+  totalRevenue: number;
+  totalCOGS: number;
+  totalProfit: number;
+  marginPct: string;
+  revenueDeltaPct: string | null;
+  profitDeltaPct: string | null;
+  priorTotalRevenue: number;
+  peakHour: { hour: string; revenue: number; ordersCount: number } | null;
+  paymentChannels: DashboardPaymentChannel[];
+  paymentTotalVolume: number;
+  paymentTotalCount: number;
+  paymentOverallAov: number;
+  topProducts: DashboardTopProduct[];
+  topProductsTotalTracked: number;
+}
+
 export interface DashboardKpiSnapshot {
   asOfRevision: string;
   capturedAt: string;
@@ -21,6 +70,7 @@ export interface DashboardKpiSnapshot {
   supplierCount: number;
   /** Stable KPI-key map. Missing/NULL values are explicitly unavailable, never fabricated. */
   kpis: Record<string, number | null>;
+  analytics: DashboardAnalyticsSnapshot;
 }
 
 function numberValue(value: unknown): number {
@@ -38,7 +88,10 @@ function numberValue(value: unknown): number {
  * head is read inside that same snapshot, so asOfRevision identifies exactly
  * the server state used for every metric returned by this call.
  */
-export async function getDashboardKpiSnapshot(ctx: TenantContext): Promise<DashboardKpiSnapshot> {
+export async function getDashboardKpiSnapshot(
+  ctx: TenantContext,
+  timeframe: DashboardAnalyticsSnapshot["timeframe"] = "7d",
+): Promise<DashboardKpiSnapshot> {
   if (!ctx?.tenantId || !ctx?.branchId) {
     throw new Error("Authenticated tenant and branch context are required");
   }
@@ -126,6 +179,138 @@ export async function getDashboardKpiSnapshot(ctx: TenantContext): Promise<Dashb
     const stock = stockRows[0] ?? {};
     const customers = customerRows[0] ?? {};
 
+    // Dashboard analytics are derived from the same PostgreSQL transaction snapshot
+    // as the core KPIs. Browser/IndexedDB state is never used for online analytics.
+    const now = new Date();
+    const windowDays = timeframe === "today" ? 1 : timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : now.getDate();
+    const windowStart = new Date(now);
+    windowStart.setHours(0, 0, 0, 0);
+    windowStart.setDate(windowStart.getDate() - (windowDays - 1));
+    const priorStart = new Date(windowStart);
+    priorStart.setDate(priorStart.getDate() - windowDays);
+
+    const [dailyRows, paymentRows, topProductRows, hourlyRows] = await Promise.all([
+      tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
+        `SELECT DATE(sold_at) AS day,
+                COALESCE(SUM(grand_total),0) AS revenue,
+                COALESCE(SUM(gross_profit),0) AS profit,
+                COALESCE(SUM(total_cost),0) AS cogs,
+                COUNT(*) AS orders_count
+           FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2
+            AND status = 'COMPLETED'
+            AND sold_at >= $3
+            AND sold_at < $4
+          GROUP BY DATE(sold_at)
+          ORDER BY DATE(sold_at)`,
+        ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
+      ),
+      tx.$queryRawUnsafe<Array<{ payment_method: string; volume: unknown; count: bigint | number | string }>>(
+        `SELECT COALESCE(payment_method, 'CASH') AS payment_method,
+                COALESCE(SUM(p.amount),0) AS volume,
+                COUNT(*) AS count
+           FROM payments p
+           JOIN sales s ON s.id = p.sale_id
+          WHERE p.tenant_id = $1 AND p.branch_id = $2
+            AND p.status = 'COMPLETED' AND s.status = 'COMPLETED'
+            AND s.sold_at >= $3 AND s.sold_at < $4
+          GROUP BY COALESCE(payment_method, 'CASH')
+          ORDER BY volume DESC`,
+        ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
+      ),
+      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
+        `SELECT sl.product_id,
+                p.name,
+                COALESCE(SUM(sl.line_total),0) AS revenue,
+                COALESCE(SUM(sl.quantity),0) AS units,
+                COALESCE((SELECT SUM(pbs.current_quantity)
+                            FROM product_branch_stock pbs
+                           WHERE pbs.tenant_id = sl.tenant_id
+                             AND pbs.branch_id = sl.branch_id
+                             AND pbs.product_id = sl.product_id),0) AS stock,
+                COALESCE(p.category,'General') AS category
+           FROM sale_lines sl
+           JOIN sales s ON s.id = sl.sale_id
+           JOIN products p ON p.id = sl.product_id
+          WHERE sl.tenant_id = $1 AND sl.branch_id = $2
+            AND s.status = 'COMPLETED'
+            AND s.sold_at >= $3 AND s.sold_at < $4
+          GROUP BY sl.product_id, p.name, p.category, sl.tenant_id, sl.branch_id
+          ORDER BY revenue DESC
+          LIMIT 20`,
+        ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
+      ),
+      tx.$queryRawUnsafe<Array<{ hour: number; revenue: unknown; orders_count: bigint | number | string }>>(
+        `SELECT EXTRACT(HOUR FROM sold_at)::int AS hour,
+                COALESCE(SUM(grand_total),0) AS revenue,
+                COUNT(*) AS orders_count
+           FROM sales
+          WHERE tenant_id = $1 AND branch_id = $2
+            AND status = 'COMPLETED'
+            AND sold_at >= $3 AND sold_at < $4
+          GROUP BY EXTRACT(HOUR FROM sold_at)::int
+          ORDER BY revenue DESC
+          LIMIT 1`,
+        ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
+      ),
+    ]);
+
+    const dayMap = new Map(dailyRows.map(r => [new Date(r.day).toISOString().slice(0,10), r]));
+    const priorDayMap = new Map(dailyRows.filter(r => new Date(r.day) < windowStart).map(r => [new Date(r.day).toISOString().slice(0,10), r]));
+    const chartPoints: DashboardRevenuePoint[] = [];
+    let totalRevenue = 0, totalCOGS = 0, totalProfit = 0, priorTotalRevenue = 0, priorTotalProfit = 0;
+    for (let i = 0; i < windowDays; i++) {
+      const d = new Date(windowStart); d.setDate(d.getDate() + i);
+      const key = d.toISOString().slice(0,10);
+      const row = dayMap.get(key);
+      const prior = new Date(d); prior.setDate(prior.getDate() - windowDays);
+      const priorRow = priorDayMap.get(prior.toISOString().slice(0,10));
+      const revenue = numberValue(row?.revenue);
+      const profit = numberValue(row?.profit);
+      const cogs = numberValue(row?.cogs);
+      const priorRevenue = numberValue(priorRow?.revenue);
+      const priorProfit = numberValue(priorRow?.profit);
+      totalRevenue += revenue; totalCOGS += cogs; totalProfit += profit;
+      priorTotalRevenue += priorRevenue; priorTotalProfit += priorProfit;
+      chartPoints.push({
+        name: timeframe === "today" ? "Today" : timeframe === "month" ? String(d.getDate()) : `${d.getDate()} ${d.toLocaleString("en", { month: "short" })}`,
+        fullLabel: d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" }),
+        Revenue: revenue, Profit: profit, COGS: cogs, PriorRevenue: priorRevenue,
+        ordersCount: numberValue(row?.orders_count),
+        marginPct: revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : "0.0",
+      });
+    }
+    const paymentTotalVolume = paymentRows.reduce((n,r)=>n+numberValue(r.volume),0);
+    const paymentTotalCount = paymentRows.reduce((n,r)=>n+numberValue(r.count),0);
+    const paymentChannels = paymentRows.map(r => {
+      const volume = numberValue(r.volume), count = numberValue(r.count);
+      return {
+        name: r.payment_method, volume, count,
+        volumeShare: paymentTotalVolume > 0 ? Math.round(volume/paymentTotalVolume*100) : 0,
+        countShare: paymentTotalCount > 0 ? Math.round(count/paymentTotalCount*100) : 0,
+        aov: count > 0 ? Math.round(volume/count) : 0,
+      };
+    });
+    const topProductsTotalTracked = topProductRows.length;
+    const maxRevenue = Math.max(...topProductRows.map(r=>numberValue(r.revenue)),1);
+    const maxUnits = Math.max(...topProductRows.map(r=>numberValue(r.units)),1);
+    const topProducts = topProductRows.slice(0,5).map((r,i)=>({
+      productId:r.product_id, name:r.name, revenue:numberValue(r.revenue), units:numberValue(r.units),
+      stock:numberValue(r.stock), category:r.category || "General", rank:i+1,
+    }));
+    const peak = hourlyRows[0];
+    const analytics: DashboardAnalyticsSnapshot = {
+      timeframe, chartPoints, totalRevenue, totalCOGS, totalProfit,
+      marginPct: totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) : "0.0",
+      revenueDeltaPct: priorTotalRevenue > 0 ? (((totalRevenue-priorTotalRevenue)/priorTotalRevenue)*100).toFixed(1) : null,
+      profitDeltaPct: priorTotalProfit > 0 ? (((totalProfit-priorTotalProfit)/priorTotalProfit)*100).toFixed(1) : null,
+      priorTotalRevenue,
+      peakHour: peak ? { hour: `${String(Number(peak.hour)).padStart(2,"0")}:00`, revenue:numberValue(peak.revenue), ordersCount:numberValue(peak.orders_count) } : null,
+      paymentChannels, paymentTotalVolume, paymentTotalCount,
+      paymentOverallAov: paymentTotalCount > 0 ? Math.round(paymentTotalVolume/paymentTotalCount) : 0,
+      topProducts, topProductsTotalTracked,
+    };
+
     const salesToday = numberValue(sales.sales_today);
     const orderCount = numberValue(sales.order_count);
     const lowStockCount = numberValue(stock.low_stock);
@@ -149,6 +334,7 @@ export async function getDashboardKpiSnapshot(ctx: TenantContext): Promise<Dashb
       customerCount: numberValue(customers.customer_count),
       productCount: numberValue(productRows[0]?.product_count),
       supplierCount: numberValue(supplierRows[0]?.supplier_count),
+      analytics,
       kpis: {
         SalesToday: salesToday,
         GrossProfitToday: numberValue(sales.gross_profit),
