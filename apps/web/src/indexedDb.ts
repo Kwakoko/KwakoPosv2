@@ -1663,6 +1663,9 @@ export class LocalIndexedDbStore {
     const adjustments = this.getStockAdjustmentsLocal(tenantId, branchId);
     const customers = this.getCustomersLocal(tenantId, branchId);
     const suppliers = this.getSuppliersLocal(tenantId, branchId);
+    const expenses = (Array.isArray(this.getConfigurationLocal("expenses", tenantId && branchId ? { tenantId, branchId } : undefined))
+      ? this.getConfigurationLocal("expenses", { tenantId: tenantId || "", branchId: branchId || "" })
+      : []) as any[];
 
     const stockBalances: Record<string, number> = {};
     for (const entry of ledger) {
@@ -1687,11 +1690,13 @@ export class LocalIndexedDbStore {
         stockAdjustments: adjustments.length,
         customers: customers.length,
         suppliers: suppliers.length,
+        expenses: expenses.length,
         syncOutbox: this.getPendingOutbox(tenantId, branchId).length,
       },
       productIds: products.map((p) => p.id),
       variantIds: variants.map((v) => v.id),
       ledgerIds: ledger.map((l) => l.id),
+      expenseIds: expenses.map((e: any) => String(e.id)),
       stockBalances,
     };
   }
