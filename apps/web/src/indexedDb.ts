@@ -1409,7 +1409,7 @@ export class LocalIndexedDbStore {
       return appliedCount;
     }
 
-    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata"].filter(
+    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "configuration"].filter(
       (s) => this.nativeDb!.objectStoreNames.contains(s),
     );
     const tx = this.nativeDb.transaction(txStores, "readwrite");
@@ -1419,7 +1419,7 @@ export class LocalIndexedDbStore {
     const adjustmentsStore = tx.objectStore("stockAdjustments");
     const customersStore = tx.objectStore("customers");
     const suppliersStore = tx.objectStore("suppliers");
-    const configStore = tx.objectStore("configuration");
+    const configStore = this.nativeDb!.objectStoreNames.contains("configuration") ? tx.objectStore("configuration") : null;
 
     for (const product of products) {
       if (
@@ -1479,7 +1479,9 @@ export class LocalIndexedDbStore {
         merged.set(String(expense.id), expense);
         appliedCount += 1;
       }
-      configStore.put(toIndexedDbCloneable({ key: "expenses", value: Array.from(merged.values()), tenantId: ctxTenant, branchId: ctxBranch, updatedAt: delta.serverTimestamp }), configKey);
+      if (configStore) {
+        configStore.put(toIndexedDbCloneable({ key: "expenses", value: Array.from(merged.values()), tenantId: ctxTenant, branchId: ctxBranch, updatedAt: delta.serverTimestamp }), configKey);
+      }
       this.configuration.set(configKey, { key: "expenses", value: Array.from(merged.values()), tenantId: ctxTenant, branchId: ctxBranch, updatedAt: delta.serverTimestamp });
     }
     for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
