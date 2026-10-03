@@ -72,31 +72,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
   const isProductionLocked = productionCleanupService.isProductionLocked();
 
-  const exportCurrentReportCsv = useCallback(() => {
-    const rows = activeTab === "sales" || activeTab === "profit" || activeTab === "cashier" || activeTab === "branch"
-      ? validSales
-      : activeTab === "expenses" ? expenses
-      : activeTab === "purchasing" ? purchaseOrders
-      : activeTab === "movements" ? stockMovements
-      : activeTab === "aging" ? arAgingCustomers
-      : activeTab === "returns" ? returnedSales
-      : activeTab === "customers" ? customers
-      : activeTab === "inventory" ? products
-      : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
-      : discountedSales;
-    const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
-    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r))));
-    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const csv = [headers.map(esc).join(","), ...flat.map((r: any) => headers.map((h) => esc(r[h])).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales]);
-
   const selectReportTab = useCallback((tab: ReportTab) => {
     setActiveTab(tab);
     const globalTab: Record<ReportTab, string> = {
@@ -256,6 +231,31 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       <p className="v2-text-xs v2-text-muted v2-mt-1" style={{ maxWidth: 380, margin: ".25rem auto 0" }}>{desc}</p>
     </div>
   );
+
+  const exportCurrentReportCsv = useCallback(() => {
+    const rows = activeTab === "sales" || activeTab === "profit" || activeTab === "cashier" || activeTab === "branch"
+      ? validSales
+      : activeTab === "expenses" ? expenses
+      : activeTab === "purchasing" ? purchaseOrders
+      : activeTab === "movements" ? stockMovements
+      : activeTab === "aging" ? arAgingCustomers
+      : activeTab === "returns" ? returnedSales
+      : activeTab === "customers" ? customers
+      : activeTab === "inventory" ? products
+      : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
+      : discountedSales;
+    const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
+    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r))));
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [headers.map(esc).join(","), ...flat.map((r: any) => headers.map((h) => esc(r[h])).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales]);
 
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
