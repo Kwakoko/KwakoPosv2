@@ -53,13 +53,18 @@ export class PrismaAtomicCommercialFinanceService {
         }
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
+      const authoritativeVariantProductIds = new Map<string, string>();
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || v.productId !== item.productId || v.isActive === false) {
+        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
+        if (item.productId && v.productId !== item.productId) {
+          throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
+        authoritativeVariantProductIds.set(item.variantId, v.productId);
       }
-      const lines = req.items.map((item: any) => { const c = PricingTaxEngine.calculateLineItem({ unitPrice: item.unitPrice, unitCost: item.unitCost || 0, quantity: item.quantity, discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined }); return { id: crypto.randomUUID(), productId: item.productId, variantId: item.variantId, quantity: item.quantity, unitPrice: c.unitPrice, unitCost: c.unitCost, discountAmount: c.discountAmount, taxAmount: c.taxAmount, lineTotal: c.lineTotal }; });
+      const lines = req.items.map((item: any) => { const c = PricingTaxEngine.calculateLineItem({ unitPrice: item.unitPrice, unitCost: item.unitCost || 0, quantity: item.quantity, discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined }); return { id: crypto.randomUUID(), productId: authoritativeVariantProductIds.get(item.variantId)!, variantId: item.variantId, quantity: item.quantity, unitPrice: c.unitPrice, unitCost: c.unitCost, discountAmount: c.discountAmount, taxAmount: c.taxAmount, lineTotal: c.lineTotal }; });
       const totals = PricingTaxEngine.calculateSaleTotals(lines.map((l: any) => ({ lineTotal: l.lineTotal, totalCost: l.unitCost * l.quantity, discountAmount: l.discountAmount, taxAmount: l.taxAmount })), req.discountTotal || 0);
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
