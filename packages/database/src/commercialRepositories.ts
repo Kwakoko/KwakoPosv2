@@ -357,9 +357,13 @@ export class ScopedCommercialRepository {
     for (const item of req.items) {
       const variant = this.store.variants.get(item.variantId);
       if (!variant) throw new Error(`POS_VARIANT_NOT_FOUND:${item.variantId}`);
-      if (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId || variant.productId !== item.productId || variant.isActive === false) {
+      if (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId || variant.isActive === false) {
         throw new Error(`POS_VARIANT_BOUNDARY_VIOLATION:${item.variantId}`);
       }
+      if (item.productId && variant.productId !== item.productId) {
+        throw new Error(`POS_VARIANT_BOUNDARY_VIOLATION:${item.variantId}`);
+      }
+      item.productId = variant.productId;
     }
 
     // Validate Variants exist
