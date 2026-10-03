@@ -60,6 +60,12 @@ export interface DashboardKpiSnapshot {
   aov: number;
   todayOrderCount: number;
   completedOrders: number;
+  grossSalesToday: number;
+  discountsToday: number;
+  refundsToday: number;
+  netSalesToday: number;
+  cogsToday: number;
+  grossMarginToday: number;
   inventoryValue: number;
   stockAlerts: number;
   lowStockCount: number;
@@ -107,10 +113,13 @@ export async function getDashboardKpiSnapshot(
     const asOfRevision = String(revisionRows[0]?.revision ?? "0");
 
     const [salesRows, inventoryRows, stockRows, customerRows, productRows, supplierRows] = await Promise.all([
-      tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_profit: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
+      tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_sales_today: unknown; discounts_today: unknown; gross_profit: unknown; cogs_today: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
         `SELECT
            COALESCE(SUM(grand_total) FILTER (WHERE status = 'COMPLETED'), 0) AS sales_today,
+           COALESCE(SUM(subtotal) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_sales_today,
+           COALESCE(SUM(discount_total) FILTER (WHERE status = 'COMPLETED'), 0) AS discounts_today,
            COALESCE(SUM(gross_profit) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_profit,
+           COALESCE(SUM(total_cost) FILTER (WHERE status = 'COMPLETED'), 0) AS cogs_today,
            COUNT(*) FILTER (WHERE status = 'COMPLETED') AS order_count,
            COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed_orders
          FROM sales
@@ -311,7 +320,21 @@ export async function getDashboardKpiSnapshot(
       topProducts, topProductsTotalTracked,
     };
 
+    const refundRows = await tx.$queryRawUnsafe<Array<{ refunds_today: unknown }>>(
+      `SELECT COALESCE(SUM(total_refund_amount),0) AS refunds_today
+         FROM returns
+        WHERE tenant_id = $1 AND branch_id = $2
+          AND status = 'COMPLETED'
+          AND created_at >= CURRENT_DATE
+          AND created_at < CURRENT_DATE + INTERVAL '1 day'`,
+      ctx.tenantId, ctx.branchId,
+    );
+    const refundsToday = numberValue(refundRows[0]?.refunds_today);
     const salesToday = numberValue(sales.sales_today);
+    const grossSalesToday = numberValue(sales.gross_sales_today);
+    const discountsToday = numberValue(sales.discounts_today);
+    const cogsToday = numberValue(sales.cogs_today);
+    const grossProfitToday = numberValue(sales.gross_profit);
     const orderCount = numberValue(sales.order_count);
     const lowStockCount = numberValue(stock.low_stock);
     const outOfStockCount = numberValue(stock.out_of_stock);
@@ -322,7 +345,13 @@ export async function getDashboardKpiSnapshot(
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
       salesToday,
-      grossProfit: numberValue(sales.gross_profit),
+      grossProfit: grossProfitToday,
+      grossSalesToday,
+      discountsToday,
+      refundsToday,
+      netSalesToday: salesToday,
+      cogsToday,
+      grossMarginToday: salesToday > 0 ? (grossProfitToday / salesToday) * 100 : 0,
       aov: orderCount > 0 ? salesToday / orderCount : 0,
       todayOrderCount: orderCount,
       completedOrders: numberValue(sales.completed_orders),
@@ -337,7 +366,13 @@ export async function getDashboardKpiSnapshot(
       analytics,
       kpis: {
         SalesToday: salesToday,
-        GrossProfitToday: numberValue(sales.gross_profit),
+        GrossProfitToday: grossProfitToday,
+        GrossSalesToday: grossSalesToday,
+        DiscountsToday: discountsToday,
+        RefundsToday: refundsToday,
+        NetSalesToday: salesToday,
+        CogsToday: cogsToday,
+        GrossMarginToday: salesToday > 0 ? (grossProfitToday / salesToday) * 100 : 0,
         AovToday: orderCount > 0 ? salesToday / orderCount : 0,
         ProductCount: numberValue(productRows[0]?.product_count),
         StockAlerts: lowStockCount + outOfStockCount,
