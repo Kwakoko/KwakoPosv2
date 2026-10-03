@@ -279,17 +279,17 @@ export class WorldStandardPrismaSyncEngine {
   private async reconcileJournal(ctx: TenantContext): Promise<void> {
     await this.ensureInfrastructure();
     const rows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
-      `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
-              so."operationType" AS "operationType", so.payload
+      `SELECT so.operation_id AS "operationId", so.entity_type AS "entityType", so.entity_id AS "entityId",
+              so.operation_type AS "operationType", so.payload
          FROM sync_operations so
         WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
              WHERE cj.tenant_id = so.tenant_id
                AND cj.branch_id = so.branch_id
-               AND cj.operation_id = so."operationId"
+               AND cj.operation_id = so.operation_id
           )
-        ORDER BY so."createdAt" ASC LIMIT 1000`,
+        ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
     );
     for (const row of rows) {
@@ -307,19 +307,19 @@ export class WorldStandardPrismaSyncEngine {
     }
 
     const generatedLedgerRows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
-      `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
-              so."operationType" AS "operationType", so.payload
+      `SELECT so.operation_id AS "operationId", so.entity_type AS "entityType", so.entity_id AS "entityId",
+              so.operation_type AS "operationType", so.payload
          FROM sync_operations so
-        WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
-          AND so."operationType" = 'CREATE'
-          AND so."entityType" IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
+        WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
+          AND so.operation_type = 'CREATE'
+          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
-             WHERE cj.tenant_id = so."tenantId"
-               AND cj.branch_id = so."branchId"
+             WHERE cj.tenant_id = so.tenant_id
+               AND cj.branch_id = so.branch_id
                AND cj.operation_id LIKE so.operation_id || ':ledger:%'
           )
-        ORDER BY so."createdAt" ASC LIMIT 1000`,
+        ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
     );
     for (const row of generatedLedgerRows) {
