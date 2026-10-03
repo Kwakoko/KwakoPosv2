@@ -94,6 +94,7 @@ export async function applyRevisionedChanges(
   const syncEpochKey = scopedSyncKey(tenantId, branchId, "syncEpoch");
   const categoryKey = tenantId + ":" + branchId + ":inventory_categories_meta";
   const brandKey = tenantId + ":" + branchId + ":inventory_brands_meta";
+  const expenseKey = tenantId + ":" + branchId + ":expenses";
   const metadata = tx.objectStore("syncMetadata");
   const configuration = tx.objectStore("configuration");
   const outbox = tx.objectStore("syncOutbox");
