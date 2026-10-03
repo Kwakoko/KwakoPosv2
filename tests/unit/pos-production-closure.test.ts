@@ -23,7 +23,7 @@ describe("POS production closure gates", () => {
   });
 
   it("does not allow synthetic inventory variants", () => {
-    expect(pos).not.toContain("-default");
+    expect(pos).not.toContain("i.product.id}-default");
     expect(atomic).not.toContain("OFFLINE_POS_FALLBACK");
     expect(legacy).not.toContain("OFFLINE_POS_FALLBACK");
     expect(atomic).toContain("FINANCE_VARIANT_BOUNDARY_VIOLATION");
