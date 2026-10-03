@@ -34,6 +34,15 @@ describe("Production-Grade Receipt Management Module Test Suite", () => {
       expect(num1).toBe("TN1-BR1-RCPT-20260902-000001");
     });
 
+    it("must reject process-local sequence allocation", () => {
+      expect(() => ReceiptNumberGenerator.generate({
+        tenantPrefix: "TN1",
+        branchPrefix: "BR1",
+        sequenceType: "DAILY",
+        date: new Date(2026, 8, 2),
+      })).toThrow("RECEIPT_SEQUENCE_MUST_BE_DATABASE_ALLOCATED");
+    });
+
     it("should pad sequence numbers up to 6 digits", () => {
       const num = ReceiptNumberGenerator.generate({
         tenantPrefix: "HQ",
