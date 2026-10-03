@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { Prisma } from "@prisma/client";
 
 export const INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER =
   "INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER";
@@ -39,13 +38,13 @@ export async function projectProductVariantBalance(tx: any, tenantId: string, br
   if (!variant) throw new Error("STOCK_VARIANT_NOT_FOUND");
 
   const projectionId = randomUUID();
-  await tx.$executeRaw(Prisma.sql`
-    INSERT INTO "product_variant_balances" (
+  await tx.$executeRawUnsafe(
+    `INSERT INTO "product_variant_balances" (
       "id", "tenantId", "branchId", "productId", "variantId",
       "currentQuantity", "averageCost", "stockValue", "updatedAt"
     )
     SELECT
-      ${projectionId},
+      $1,
       "tenantId", "branchId", "productId", "variantId",
       COALESCE(SUM("quantityChange"), 0)::numeric(15,4),
       COALESCE(
@@ -62,17 +61,18 @@ export async function projectProductVariantBalance(tx: any, tenantId: string, br
       )::numeric(15,2),
       CURRENT_TIMESTAMP
     FROM "stock_ledgers"
-    WHERE "tenantId" = ${tenantId}
-      AND "branchId" = ${branchId}
-      AND "variantId" = ${variantId}
+    WHERE "tenantId" = $2
+      AND "branchId" = $3
+      AND "variantId" = $4
     GROUP BY "tenantId", "branchId", "productId", "variantId"
     ON CONFLICT ("tenantId", "branchId", "variantId") DO UPDATE SET
       "productId" = EXCLUDED."productId",
       "currentQuantity" = EXCLUDED."currentQuantity",
       "averageCost" = EXCLUDED."averageCost",
       "stockValue" = EXCLUDED."stockValue",
-      "updatedAt" = CURRENT_TIMESTAMP
-  `);
+      "updatedAt" = CURRENT_TIMESTAMP`,
+    projectionId, tenantId, branchId, variantId,
+  );
 }
 
 export async function projectVariantInventory(tx: any, tenantId: string, branchId: string, variantId: string): Promise<number> {
