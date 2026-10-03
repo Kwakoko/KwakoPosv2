@@ -141,8 +141,10 @@ describe("Expenses — authoritative API, PostgreSQL sync and bootstrap", () => 
     expect(Number(journal?.totalDebit)).toBe(33000);
     expect(Number(journal?.totalCredit)).toBe(33000);
 
-    const bankLine = journal?.lines.find((line: any) => line.accountId);
+    const bankAccount = await prisma.account.findFirst({ where: { tenantId, branchId, accountCode: "1210" } });
+    const bankLine = journal?.lines.find((line: any) => line.accountId === bankAccount?.id);
     expect(bankLine).toBeTruthy();
+    expect(Number(bankLine?.credit)).toBe(33000);
   });
 
   it("includes Expenses in authoritative bootstrap and revisioned delta", async () => {
