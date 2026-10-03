@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
@@ -614,6 +613,7 @@ const now = new Date();
       return;
     }
 
+<<<<<<< HEAD
     if (op.entityType === "Receipt" && op.operationType === "CREATE") {
       const sale = await tx.sale.findFirst({
         where: {
@@ -1373,6 +1373,8 @@ const now = new Date();
       return;
     }
 
+=======
+>>>>>>> origin/main
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
