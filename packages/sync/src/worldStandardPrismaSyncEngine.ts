@@ -754,6 +754,8 @@ const now = new Date();
     }
 
     if (op.entityType === "Expense" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      if (op.operationType === "DELETE") throw new Error("EXPENSE_DELETE_FORBIDDEN: use governed Expense void/reversal");
+
       const payload: any = stripSyncControlFields(op.payload as any);
       const existing = await tx.expense.findUnique({ where: { id: op.entityId } });
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
