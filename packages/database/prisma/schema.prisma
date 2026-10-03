@@ -18,6 +18,12 @@ model Tenant {
   branches               Branch[]
   users                  User[]
   roles                  Role[]
+  rollbackRequests       RollbackRequest[]
+  rollbackRecoveryPoints RollbackRecoveryPoint[]
+  rollbackExecutionLocks RollbackExecutionLock[]
+  rollbackAuditEvents    RollbackAuditEvent[]
+  rollbackSyncStates     RollbackSyncState[]
+  productVariantBalances ProductVariantBalance[]
   products               Product[]
   productVariants        ProductVariant[]
   categories             Category[]
@@ -89,6 +95,11 @@ model Branch {
   updatedAt            DateTime              @updatedAt
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users                User[]
+  rollbackRequests       RollbackRequest[]
+  rollbackRecoveryPoints RollbackRecoveryPoint[]
+  rollbackAuditEvents    RollbackAuditEvent[]
+  rollbackSyncStates     RollbackSyncState[]
+  productVariantBalances ProductVariantBalance[]
   products             Product[]
   productVariants      ProductVariant[]
   categories           Category[]
@@ -148,7 +159,9 @@ model Role {
   id          String   @id @default(uuid())
   tenantId    String
   name        String
+  description String?
   permissions String[]
+  isSystemRole Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -165,6 +178,7 @@ model User {
   email        String
   passwordHash String
   name         String
+  phone        String?
   roleId       String
   status       String          @default("ACTIVE")
   createdAt    DateTime        @default(now())
@@ -350,6 +364,7 @@ model Product {
   categoryRel             Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   brandRel                Brand?                @relation(fields: [brandId], references: [id], onDelete: SetNull)
   variants                ProductVariant[]
+  variantBalances         ProductVariantBalance[]
   stockLedgers            StockLedger[]
   priceHistories          ProductPriceHistory[]
   branchStocks            ProductBranchStock[]
@@ -386,6 +401,7 @@ model ProductVariant {
   tenant                  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch                  Branch                @relation(fields: [branchId], references: [id], onDelete: Cascade)
   product                 Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantBalances         ProductVariantBalance[]
   stockLedgers            StockLedger[]
   stockAdjustments        StockAdjustment[]
   priceHistories          ProductPriceHistory[]
@@ -916,6 +932,167 @@ model SyncOperation {
   @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, createdAt])
   @@map("sync_operations")
+}
+
+
+model RollbackRequest {
+  id                      String                 @id
+  tenantId                String
+  branchId                String?
+  requestedBy             String
+  requesterEmail          String
+  requesterRole           String
+  approvedBy              String?
+  approverEmail           String?
+  executedBy              String?
+  rollbackScope           String
+  targetType              String
+  targetId                String
+  targetVersion           String                 @default("HEAD")
+  sourceVersion           String                 @default("PREVIOUS")
+  reason                  String
+  incidentId              String?
+  businessImpact          String                 @default("")
+  riskLevel               String
+  status                  String                 @default("REQUESTED")
+  authorizationState      String                 @default("PENDING")
+  approvalTimestamp       DateTime?
+  executionTimestamp      DateTime?
+  verificationTimestamp   DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  expiresAt               DateTime
+  requestHash             String
+  executionHash           String?
+  recoveryPointId         String?
+  snapshotReference       String?
+  syncEpochBefore        Int                    @default(1000)
+  syncEpochAfter         Int?
+  policyVersion            String                 @default("1.0.0")
+  impactReport             Json?
+  isEmergency             Boolean                @default(false)
+  postIncidentReviewTaskId String?
+  tenant                   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                   Branch?                @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  recoveryPoint            RollbackRecoveryPoint?
+  executionLocks           RollbackExecutionLock[]
+  auditEvents              RollbackAuditEvent[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, expiresAt])
+  @@map("rollback_requests")
+}
+
+model RollbackRecoveryPoint {
+  id                String          @id
+  tenantId          String
+  branchId          String?
+  rollbackRequestId String          @unique
+  databaseVersion   String          @default("2.13.0")
+  schemaVersion     String          @default("2.13.0")
+  applicationVersion String         @default("2.13.0")
+  syncEpoch         Int
+  checksum          String
+  integrityStatus   String          @default("VALID")
+  createdAt         DateTime        @default(now())
+  verifiedAt        DateTime?
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch             Branch?         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  rollbackRequest    RollbackRequest @relation(fields: [rollbackRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, createdAt])
+  @@map("rollback_recovery_points")
+}
+
+model RollbackExecutionLock {
+  id               String          @id
+  tenantId         String
+  branchId         String?
+  rollbackRequestId String
+  rollbackScope    String
+  lockOwner        String
+  scopeKey         String          @unique
+  acquiredAt       DateTime        @default(now())
+  expiresAt        DateTime
+  releasedAt       DateTime?
+  holdingNodeId    String?
+  isExpired        Boolean         @default(false)
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rollbackRequest   RollbackRequest @relation(fields: [rollbackRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, rollbackScope, expiresAt])
+  @@map("rollback_execution_locks")
+}
+
+model RollbackAuditEvent {
+  id                String          @id
+  eventType         String
+  rollbackRequestId String
+  tenantId          String
+  branchId          String?
+  actorId           String
+  actorEmail        String
+  actorRole         String
+  scope             String
+  target            String
+  reason            String
+  riskLevel         String
+  previousState     String?
+  newState          String
+  approvalReference String?
+  executionReference String?
+  result            String
+  errorCode         String?
+  clientIp          String          @default("127.0.0.1")
+  deviceId          String          @default("system")
+  timestamp         DateTime        @default(now())
+  previousHash      String
+  eventHash         String          @unique
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch?         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  rollbackRequest   RollbackRequest @relation(fields: [rollbackRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, rollbackRequestId, timestamp])
+  @@index([tenantId, branchId, timestamp])
+  @@map("rollback_audit_events")
+}
+
+model RollbackSyncState {
+  id                 String    @id
+  tenantId           String
+  branchId           String?
+  scopeKey           String    @unique
+  syncEpoch          Int       @default(1000)
+  barrierActive      Boolean   @default(false)
+  barrierEngagedAt   DateTime?
+  barrierReleasedAt  DateTime?
+  updatedAt          DateTime  @updatedAt
+  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch             Branch?   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId])
+  @@map("rollback_sync_states")
+}
+
+model ProductVariantBalance {
+  id              String         @id
+  tenantId        String
+  branchId        String
+  productId       String
+  variantId       String
+  currentQuantity Decimal        @default(0) @db.Decimal(15, 4)
+  averageCost     Decimal        @default(0) @db.Decimal(15, 2)
+  stockValue      Decimal        @default(0) @db.Decimal(15, 2)
+  updatedAt       DateTime       @updatedAt
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product         Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, branchId, variantId])
+  @@index([tenantId, branchId, productId])
+  @@map("product_variant_balances")
 }
 
 model AuditEvent {
