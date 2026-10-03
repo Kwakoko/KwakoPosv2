@@ -154,6 +154,37 @@ export async function applyRevisionedChanges(
     configuration.put({ key: entityType === "Category" ? "inventory_categories_meta" : "inventory_brands_meta", value: Array.from(map.values()).filter((item: any) => item.isActive !== false), tenantId, updatedAt: serverTimestamp }, key);
   };
 
+  const upsertExpenseConfig = async (change: RevisionedChange, deleted: boolean) => {
+    const key = expenseKey;
+    const currentRecord = await new Promise<any>((resolve, reject) => {
+      const request = configuration.get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("Expense configuration read failed"));
+    });
+    const existing = Array.isArray(currentRecord?.value) ? currentRecord.value : [];
+    const map = new Map(existing.map((item: any) => [String(item.id), item]));
+    if (deleted) {
+      map.delete(change.entityId);
+    } else {
+      const record: any = change.record || {};
+      map.set(change.entityId, {
+        ...record,
+        id: change.entityId,
+        tenantId,
+        branchId,
+        amount: Number(record.amount || 0),
+        date: record.incurredAt ? String(record.incurredAt).slice(0, 10) : record.date,
+        description: record.description || record.reason || "",
+        payee: record.payee || "Unspecified Payee",
+        paymentMethod: record.paymentMethod || "CASH",
+        status: record.status || "PAID",
+        taxDeductible: Boolean(record.taxDeductible),
+        updatedAt: record.updatedAt || serverTimestamp,
+      });
+    }
+    configuration.put({ key: "expenses", value: Array.from(map.values()), tenantId, branchId, updatedAt: serverTimestamp }, key);
+  };
+
   for (const change of sorted) {
     const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
     if (pendingMutation) {
@@ -208,6 +239,11 @@ export async function applyRevisionedChanges(
     const deleted = change.operationType === "DELETE" || Boolean(change.record?._deleted);
     if (change.entityType === "Category" || change.entityType === "Brand") {
       await upsertCatalogConfig(change.entityType, change, deleted);
+    } else if (change.entityType === "Expense") {
+      await upsertExpenseConfig(change, deleted);
+      if (deleted) {
+        metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + change.entityType + ":" + change.entityId);
+      }
     } else if (deleted) {
       if (storeName) await waitRequest(tx.objectStore(storeName).delete(change.entityId));
       const tombstonedAt = new Date().toISOString();
