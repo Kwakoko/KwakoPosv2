@@ -384,7 +384,18 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       playSuccessChime(); toast.success("Payment Posted", `Paid ${fmt(debtPayAmount)} to ${payingSupplier.name}.`);
       setPayingSupplier(null); setDebtPayAmount(0); setDebtPayRef("");
     } catch (err: any) {
-      toast.error("Payment Not Posted", err?.message || "Supplier payment could not be committed.");
+      if (currentTenantId && currentBranchId) {
+        const operationId = safeUUID();
+        await db.executeAtomicMutation({
+          writes: [],
+          outboxItem: { id: operationId, entityType: "Payment", entityId: operationId, operationType: "CREATE", payload: { supplierId: payingSupplier.id, amount: debtPayAmount, paymentMethod: debtPayMethod, providerReference: debtPayRef || undefined }, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+        });
+        setPayingSupplier(null); setDebtPayAmount(0); setDebtPayRef("");
+        toast.info("Payment Queued", "Supplier payment is durably queued and will settle against PostgreSQL when connectivity returns.");
+      } else {
+        toast.error("Payment Not Posted", err?.message || "Supplier payment could not be committed.");
+      }
     }
   };
 
