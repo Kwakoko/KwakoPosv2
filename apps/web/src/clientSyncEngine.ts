@@ -64,6 +64,14 @@ async function defaultBootstrapApi(req: SyncBootstrapRequest): Promise<SyncBoots
   return body.data || body;
 }
 
+async function defaultReconcileApi(manifest: SyncStateManifest): Promise<SyncReconciliationResponse> {
+  const body = await apiFetch<any>("/sync/reconcile", {
+    method: "POST",
+    body: JSON.stringify(manifest),
+  });
+  return body.data || body;
+}
+
 export async function applyRevisionedChanges(
   changes: RevisionedChange[],
   serverRevision: string,
@@ -370,14 +378,20 @@ export class ClientSyncEngine {
   async reconcileWithServer(
     reconcileApiFn: (manifest: SyncStateManifest) => Promise<SyncReconciliationResponse>,
     tenantId?: string,
+    branchId?: string,
   ): Promise<SyncReconciliationResponse> {
     await this.localDb.ready;
-    const branchId = this.defaultBranchId || "branch-default";
-    const manifest = this.localDb.generateStateManifest(this.deviceId, tenantId, branchId);
+    const effectiveTenantId = tenantId || this.defaultTenantId || "";
+    const effectiveBranchId = branchId || this.defaultBranchId || "branch-default";
+    if (!effectiveTenantId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId is required for replica reconciliation");
+    const manifest = this.localDb.generateStateManifest(this.deviceId, effectiveTenantId, effectiveBranchId);
     const report = await reconcileApiFn(manifest);
     this.lastReconciliationStatus = report.inSync ? "IN_SYNC" : "DIVERGENT";
-    this.localDb.setSyncMetadata("reconciliationStatus", this.lastReconciliationStatus);
-    this.localDb.setSyncMetadata("lastReconciliationTime", report.evaluatedAt);
+    const prefix = scopedSyncKey(effectiveTenantId, effectiveBranchId, "");
+    this.localDb.setSyncMetadata(prefix + "reconciliationStatus", this.lastReconciliationStatus);
+    this.localDb.setSyncMetadata(prefix + "lastReconciliationTime", report.evaluatedAt);
+    this.localDb.setSyncMetadata(prefix + "lastReconciliationChecksum", report.integrityChecksum);
+    if (report.serverRevision) this.localDb.setSyncMetadata(prefix + "lastServerRevision", report.serverRevision);
     return report;
   }
 
@@ -387,7 +401,9 @@ export class ClientSyncEngine {
     const failedOutbox = this.localDb.getFailedOutbox(tenantId, branch);
     const scopedTenant = tenantId || this.defaultTenantId || "tenant-default";
     const lastSync = this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "lastSyncTime")) || null;
+    const syncCursor = String(this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "lastSyncRevision")) || "0");
     const lastBootstrap = this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "lastBootstrapTime")) || null;
+    const reconciliationStatus = this.localDb.syncMetadata.get(scopedSyncKey(scopedTenant, branch, "reconciliationStatus")) || this.lastReconciliationStatus;
     const isBootstrapped = Boolean(lastBootstrap || lastSync);
 
     return {
@@ -396,16 +412,16 @@ export class ClientSyncEngine {
       pendingOutboxCount: pendingOutbox.length,
       failedOperationsCount: failedOutbox.length,
       retryCount: this.retryCount,
-      syncCursor: lastSync,
+      syncCursor,
       serverVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
       clientVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
       schemaVersion: this.localDb.schemaVersion,
       serviceWorkerVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.pwaVersion,
       conflictCount: Array.from(this.localDb.syncMetadata.keys()).filter((k) => k.startsWith("sync_conflict_")).length,
-      reconciliationStatus: this.lastReconciliationStatus,
+      reconciliationStatus: reconciliationStatus === "IN_SYNC" ? "IN_SYNC" : reconciliationStatus === "DIVERGENT" ? "DIVERGENT" : "UNKNOWN",
       bootstrapStatus: isBootstrapped ? "BOOTSTRAPPED" : "NOT_BOOTSTRAPPED",
       lastAuthoritativeSnapshot: lastBootstrap,
-      integrityStatus: "VERIFIED",
+      integrityStatus: reconciliationStatus === "IN_SYNC" ? "VERIFIED" : reconciliationStatus === "DIVERGENT" ? "FAILED" : "PENDING",
     };
   }
 
@@ -414,6 +430,7 @@ export class ClientSyncEngine {
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
     branchId?: string,
+    reconcileApiFn?: (manifest: SyncStateManifest) => Promise<SyncReconciliationResponse>,
   ): Promise<{ pushed: number; pulled: number }> {
     if (globalClientCoordination.isClientQuiesced()) {
       console.info("[SYNC] Client is quiesced for PWA migration; deferring synchronization cycle.");
@@ -421,7 +438,7 @@ export class ClientSyncEngine {
     }
 
     if (this.syncInFlight) return this.syncInFlight;
-    this.syncInFlight = this.runSync(pushApiFn, deltaApiFn, tenantId, branchId).finally(() => {
+    this.syncInFlight = this.runSync(pushApiFn, deltaApiFn, tenantId, branchId, reconcileApiFn).finally(() => {
       this.syncInFlight = null;
     });
     return this.syncInFlight;
@@ -432,6 +449,7 @@ export class ClientSyncEngine {
     deltaApiFn?: (since?: string) => Promise<SyncDeltaResponse>,
     tenantId?: string,
     branchId?: string,
+    reconcileApiFn?: (manifest: SyncStateManifest) => Promise<SyncReconciliationResponse>,
   ): Promise<{ pushed: number; pulled: number }> {
     const effectivePush = pushApiFn || this.pushApiFn || defaultPushApi;
     const effectiveDelta = deltaApiFn || this.deltaApiFn || defaultDeltaApi;
@@ -528,16 +546,18 @@ export class ClientSyncEngine {
       if (!deltaRes || typeof deltaRes.serverTimestamp !== "string")
         throw new Error("SYNC_PROTOCOL_VIOLATION: delta response is missing serverTimestamp");
 
+      let totalPulled = 0;
       if (deltaRes.requiresBootstrap) {
         console.info(
           `[SYNC] Journal compaction gap detected (client cursor rev:${lastRevision} was pruned; journal min is rev:${deltaRes.compactionMinRevision}). Initiating authoritative snapshot bootstrap.`
         );
         const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
-        return { pushed: pushedCount, pulled: bootstrapRes.applied };
-      }
-
-      let totalPulled = 0;
-      if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
+        totalPulled = bootstrapRes.applied;
+        await this.localDb.refreshStoresFromNative([
+          "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
+          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+        ]);
+      } else if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
         totalPulled = await applyRevisionedChanges(
           deltaRes.changes as RevisionedChange[],
           deltaRes.serverRevision,
@@ -590,6 +610,38 @@ export class ClientSyncEngine {
         }
       } else {
         totalPulled = await this.localDb.applyServerDelta(deltaRes);
+      }
+
+      // HTTP success does not prove replica convergence. Verify the complete
+      // tenant/branch inventory replica and bootstrap once when it diverges.
+      const reconcile = reconcileApiFn || defaultReconcileApi;
+      let reconciliation = await this.reconcileWithServer(
+        reconcile,
+        effectiveTenantId,
+        effectiveBranchId,
+      );
+      if (!reconciliation.inSync) {
+        console.warn("[SYNC] Replica divergence detected; executing authoritative bootstrap", reconciliation);
+        const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
+        totalPulled += bootstrapRes.applied;
+        await this.localDb.refreshStoresFromNative([
+          "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
+          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+        ]);
+        reconciliation = await this.reconcileWithServer(
+          reconcile,
+          effectiveTenantId,
+          effectiveBranchId,
+        );
+        if (!reconciliation.inSync) {
+          throw new Error("SYNC_REPLICA_DIVERGENT: authoritative bootstrap did not converge (" + reconciliation.totalDiscrepancies + " discrepancies)");
+        }
+      }
+
+      const remainingPending = this.localDb.getPendingOutbox(effectiveTenantId, effectiveBranchId).length;
+      const remainingFailed = this.localDb.getFailedOutbox(effectiveTenantId, effectiveBranchId).length;
+      if (hadServerRejections || remainingPending > 0 || remainingFailed > 0) {
+        throw new Error("SYNC_NOT_VERIFIED: pending=" + remainingPending + " failed=" + remainingFailed);
       }
 
       globalRumCollector.recordSyncMetrics({

@@ -1309,6 +1309,7 @@ export const SyncReconciliationResponseSchema = z.object({
   tenantId: z.string(),
   branchId: z.string().nullable().optional(),
   evaluatedAt: z.string(),
+  serverRevision: z.string().optional(),
   inSync: z.boolean(),
   totalDiscrepancies: z.number(),
   discrepancies: z.array(SyncReconciliationDiscrepancySchema),

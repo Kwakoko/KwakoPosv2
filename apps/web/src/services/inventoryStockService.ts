@@ -85,6 +85,32 @@ export interface PosRefundStockParams {
 /**
  * Derives the authoritative stock for a variant or product in local IndexedDB.
  */
+export interface StockBalanceProjection {
+  byVariant: Map<string, number>;
+  byProduct: Map<string, number>;
+}
+
+/** Build the inventory balance projection exclusively from Stock Ledger. */
+export function buildStockBalanceProjection(
+  db?: LocalIndexedDbStore | null,
+  tenantId?: string | null,
+  branchId?: string | null,
+): StockBalanceProjection {
+  const byVariant = new Map<string, number>();
+  const byProduct = new Map<string, number>();
+  if (!db?.stockLedger || !tenantId || !branchId) return { byVariant, byProduct };
+
+  for (const entry of db.stockLedger.values()) {
+    const l = entry as any;
+    if (l.tenantId !== tenantId || l.branchId !== branchId) continue;
+    const change = Number(l.quantityChange ?? l.quantity ?? 0);
+    if (!Number.isFinite(change)) continue;
+    if (l.variantId) byVariant.set(String(l.variantId), (byVariant.get(String(l.variantId)) || 0) + change);
+    if (l.productId) byProduct.set(String(l.productId), (byProduct.get(String(l.productId)) || 0) + change);
+  }
+  return { byVariant, byProduct };
+}
+
 export function getEffectiveStock(
   db?: LocalIndexedDbStore | null,
   variantId?: string | null,
@@ -92,29 +118,22 @@ export function getEffectiveStock(
   tenantId?: string | null,
   branchId?: string | null,
 ): { stock: number; inventoryQuantity: number; ledgerBalance: number } {
-  let ledgerBalance = 0;
-  if (db?.stockLedger) {
-    for (const entry of db.stockLedger.values()) {
-      const l = entry as any;
-      if (tenantId && l.tenantId && l.tenantId !== tenantId) continue;
-      if (branchId && l.branchId && l.branchId !== branchId) continue;
-      if (variantId && l.variantId === variantId) {
-        ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
-      } else if (!variantId && productId && l.productId === productId) {
-        ledgerBalance += Number(l.quantityChange ?? l.quantity ?? 0);
-      }
-    }
-  }
+  const projection = buildStockBalanceProjection(db, tenantId, branchId);
+  const ledgerBalance = variantId
+    ? Number(projection.byVariant.get(String(variantId)) || 0)
+    : productId
+      ? Number(projection.byProduct.get(String(productId)) || 0)
+      : 0;
 
   let inventoryQuantity = 0;
   if (variantId && db?.productVariants) {
     const variant = db.productVariants.get(variantId) as any;
-    if (variant) {
+    if (variant && variant.tenantId === tenantId && variant.branchId === branchId) {
       inventoryQuantity = Number(variant.inventoryQuantity ?? variant.stock ?? 0);
     }
   } else if (productId && db?.products) {
     const prod = db.products.get(productId) as any;
-    if (prod) {
+    if (prod && prod.tenantId === tenantId && prod.branchId === branchId) {
       inventoryQuantity = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? 0);
     }
   }

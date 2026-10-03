@@ -897,14 +897,22 @@ export class LocalIndexedDbStore {
     this.saveConfigurationLocal("inventory_brands_meta", Array.from(map.values()), ctx);
   }
 
-  getProductsLocal(tenantId?: string): Product[] {
+  getProductsLocal(tenantId?: string, branchId?: string): Product[] {
     const all = [...this.products.values()];
-    return tenantId ? all.filter((p) => p.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((p) => p.tenantId === tenantId && p.branchId === branchId)
+      : tenantId
+        ? all.filter((p) => p.tenantId === tenantId)
+        : all;
   }
 
-  getProductVariantsLocal(tenantId?: string): ProductVariant[] {
+  getProductVariantsLocal(tenantId?: string, branchId?: string): ProductVariant[] {
     const all = [...this.productVariants.values()];
-    return tenantId ? all.filter((v: any) => v.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((v: any) => v.tenantId === tenantId && v.branchId === branchId)
+      : tenantId
+        ? all.filter((v: any) => v.tenantId === tenantId)
+        : all;
   }
 
   getSalesLocal(tenantId?: string): any[] {
@@ -917,24 +925,40 @@ export class LocalIndexedDbStore {
     return tenantId ? all.filter((p) => p.tenantId === tenantId) : all;
   }
 
-  getCustomersLocal(tenantId?: string): any[] {
+  getCustomersLocal(tenantId?: string, branchId?: string): any[] {
     const all = [...this.customers.values()];
-    return tenantId ? all.filter((c) => c.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((c) => c.tenantId === tenantId && c.branchId === branchId)
+      : tenantId
+        ? all.filter((c) => c.tenantId === tenantId)
+        : all;
   }
 
-  getSuppliersLocal(tenantId?: string): any[] {
+  getSuppliersLocal(tenantId?: string, branchId?: string): any[] {
     const all = [...this.suppliers.values()];
-    return tenantId ? all.filter((s) => s.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((s) => s.tenantId === tenantId && s.branchId === branchId)
+      : tenantId
+        ? all.filter((s) => s.tenantId === tenantId)
+        : all;
   }
 
-  getStockLedgerLocal(tenantId?: string): StockLedger[] {
+  getStockLedgerLocal(tenantId?: string, branchId?: string): StockLedger[] {
     const all = [...this.stockLedger.values()];
-    return tenantId ? all.filter((l) => l.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((l) => l.tenantId === tenantId && l.branchId === branchId)
+      : tenantId
+        ? all.filter((l) => l.tenantId === tenantId)
+        : all;
   }
 
-  getStockAdjustmentsLocal(tenantId?: string): StockAdjustment[] {
+  getStockAdjustmentsLocal(tenantId?: string, branchId?: string): StockAdjustment[] {
     const all = [...this.stockAdjustments.values()];
-    return tenantId ? all.filter((a) => a.tenantId === tenantId) : all;
+    return tenantId && branchId
+      ? all.filter((a) => a.tenantId === tenantId && a.branchId === branchId)
+      : tenantId
+        ? all.filter((a) => a.tenantId === tenantId)
+        : all;
   }
 
   getReceiptsLocal(tenantId?: string): any[] {
@@ -1452,13 +1476,25 @@ export class LocalIndexedDbStore {
     const product = this.products.get(productId);
     if (!product) return;
     const variants: ProductVariant[] = [];
+    const ledgerStockByVariant = new Map<string, number>();
+    for (const entry of this.stockLedger.values()) {
+      const l = entry as any;
+      if (l.tenantId !== product.tenantId || l.branchId !== product.branchId) continue;
+      if (!l.variantId) continue;
+      const change = Number(l.quantityChange ?? l.quantity ?? 0);
+      if (Number.isFinite(change)) ledgerStockByVariant.set(String(l.variantId), (ledgerStockByVariant.get(String(l.variantId)) || 0) + change);
+    }
     for (const v of this.productVariants.values()) {
-      if (v.productId === productId) {
-        variants.push(v);
+      if (v.productId === productId && v.tenantId === product.tenantId && v.branchId === product.branchId) {
+        const projectedStock = Math.max(0, ledgerStockByVariant.get(v.id) || 0);
+        const projectedVariant = { ...v, inventoryQuantity: projectedStock, stock: projectedStock } as any;
+        variants.push(projectedVariant);
+        this.productVariants.set(v.id, projectedVariant);
+        this.persist("productVariants", v.id, projectedVariant);
       }
     }
     const activeVars = variants.filter((v: any) => v.isActive !== false);
-    const sumStock = activeVars.reduce((acc, v) => acc + Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0), 0);
+    const sumStock = activeVars.reduce((acc, v) => acc + Number((v as any).inventoryQuantity ?? 0), 0);
     const updatedProduct = {
       ...product,
       variants,
@@ -1574,19 +1610,27 @@ export class LocalIndexedDbStore {
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapChecksum"), String(snapshot.integrityChecksum || ""));
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastSyncRevision"), serverRevision);
+    await this.flushPersistence();
     return { applied: Object.values(records).reduce((sum, rows) => sum + rows.length, 0) };
   }
   generateStateManifest(deviceId: string, tenantId?: string, branchId?: string): SyncStateManifest {
-    const products = this.getProductsLocal(tenantId);
-    const variants = this.getProductVariantsLocal(tenantId);
-    const ledger = this.getStockLedgerLocal(tenantId);
-    const adjustments = this.getStockAdjustmentsLocal(tenantId);
-    const customers = this.getCustomersLocal(tenantId);
-    const suppliers = this.getSuppliersLocal(tenantId);
+    const products = this.getProductsLocal(tenantId, branchId);
+    const variants = this.getProductVariantsLocal(tenantId, branchId);
+    const ledger = this.getStockLedgerLocal(tenantId, branchId);
+    const adjustments = this.getStockAdjustmentsLocal(tenantId, branchId);
+    const customers = this.getCustomersLocal(tenantId, branchId);
+    const suppliers = this.getSuppliersLocal(tenantId, branchId);
 
     const stockBalances: Record<string, number> = {};
+    for (const entry of ledger) {
+      const l = entry as any;
+      if (!l.variantId) continue;
+      const change = Number(l.quantityChange ?? l.quantity ?? 0);
+      if (!Number.isFinite(change)) continue;
+      stockBalances[String(l.variantId)] = (stockBalances[String(l.variantId)] || 0) + change;
+    }
     for (const v of variants) {
-      stockBalances[v.id] = Number((v as any).inventoryQuantity ?? (v as any).stock ?? 0);
+      if (!(v.id in stockBalances)) stockBalances[v.id] = 0;
     }
 
     return {

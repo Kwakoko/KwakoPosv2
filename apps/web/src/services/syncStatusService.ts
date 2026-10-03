@@ -157,6 +157,12 @@ export class SyncStatusService {
             return value == null ? null : String(value);
           })()
         : null;
+      const authoritativeServerRevision = scopePrefix
+        ? (() => {
+            const value = this.db!.syncMetadata.get(scopePrefix + "lastServerRevision");
+            return value == null ? null : String(value);
+          })()
+        : null;
       const durableLastSync = scopePrefix ? this.db.syncMetadata.get(scopePrefix + "lastSyncTime") : null;
       const durableLastSyncedAt = (() => {
         if (typeof durableLastSync === "number" && Number.isFinite(durableLastSync)) return durableLastSync;
@@ -182,6 +188,7 @@ export class SyncStatusService {
         abandonedOutboxCount: abandoned,
         localRevision,
         syncEpoch,
+        ...(authoritativeServerRevision !== null ? { serverRevision: authoritativeServerRevision } : {}),
         ...(durableLastSyncedAt !== null ? { lastSyncedAt: durableLastSyncedAt } : {}),
       });
     } catch (error) {

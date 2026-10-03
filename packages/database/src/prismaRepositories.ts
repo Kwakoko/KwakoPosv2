@@ -492,7 +492,7 @@ export class PrismaStockRepository {
     const result = await prisma.$transaction(async (tx: any) => {
       const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
       if (existing) return existing;
-      await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, req.variantId, ctx.tenantId, ctx.branchId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "product_variants" WHERE id = ${req.variantId} AND "tenantId" = ${ctx.tenantId} AND "branchId" = ${ctx.branchId} FOR UPDATE`);
       const variant = await tx.productVariant.findUnique({ where: { id: req.variantId } });
       if (!variant) throw new Error(`Variant ${req.variantId} not found`);
       assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
@@ -568,7 +568,7 @@ export class PrismaStockRepository {
     }
 
     const result = await prisma.$transaction(async (tx: any) => {
-      await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE`, resolvedVariantId, ctx.tenantId, ctx.branchId);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "product_variants" WHERE id = ${resolvedVariantId} AND "tenantId" = ${ctx.tenantId} AND "branchId" = ${ctx.branchId} FOR UPDATE`);
       const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
       const currentStock = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
       const quantityBefore = currentStock;

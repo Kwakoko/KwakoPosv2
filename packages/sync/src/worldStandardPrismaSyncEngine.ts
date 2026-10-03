@@ -853,6 +853,100 @@ const now = new Date();
     return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
   }
 
+  async reconcileState(ctx: TenantContext, manifest: import("@kwakopos2/contracts").SyncStateManifest): Promise<import("@kwakopos2/contracts").SyncReconciliationResponse> {
+    await this.ensureInfrastructure();
+    return prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+
+      const [serverProducts, serverVariants, serverLedger] = await Promise.all([
+        tx.product.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true } }),
+        tx.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, productId: true } }),
+        tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, variantId: true, quantityChange: true } }),
+      ]);
+
+    const discrepancies: import("@kwakopos2/contracts").SyncReconciliationDiscrepancy[] = [];
+    const serverProductIds = new Set(serverProducts.map((row) => row.id));
+    const compareIds = (entityType: string, serverIds: string[], clientIds: string[]) => {
+      const serverSet = new Set(serverIds.map(String));
+      const clientSet = new Set(clientIds.map(String));
+      for (const id of serverSet) {
+        if (!clientSet.has(id)) discrepancies.push({
+          entityType,
+          entityId: id,
+          kind: "MISSING_ON_CLIENT",
+          remediation: "Client replica is missing an authoritative record; execute bootstrap.",
+        });
+      }
+      for (const id of clientSet) {
+        if (!serverSet.has(id)) discrepancies.push({
+          entityType,
+          entityId: id,
+          kind: "EXTRA_ON_CLIENT",
+          remediation: "Client replica contains a record absent from the authoritative tenant/branch state; purge via bootstrap after resolving pending mutations.",
+        });
+      }
+    };
+
+    compareIds("Product", serverProducts.map((row) => row.id), manifest.productIds || []);
+    compareIds("ProductVariant", serverVariants.map((row) => row.id), manifest.variantIds || []);
+    compareIds("StockLedger", serverLedger.map((row) => row.id), manifest.ledgerIds || []);
+
+    const serverBalances = new Map<string, number>();
+    for (const row of serverLedger) {
+      const variantId = String(row.variantId);
+      serverBalances.set(variantId, (serverBalances.get(variantId) || 0) + Number(row.quantityChange || 0));
+    }
+    const clientBalances = manifest.stockBalances || {};
+    const balanceVariantIds = new Set([...serverBalances.keys(), ...Object.keys(clientBalances)]);
+    for (const variantId of balanceVariantIds) {
+      const serverQty = Number(serverBalances.get(variantId) || 0);
+      const clientQty = Number(clientBalances[variantId] || 0);
+      if (Math.abs(serverQty - clientQty) > 0.0001) discrepancies.push({
+        entityType: "StockBalance",
+        entityId: variantId,
+        kind: "STOCK_MISMATCH",
+        serverValue: serverQty,
+        clientValue: clientQty,
+        remediation: "Client must rebuild stock balance from the authoritative Stock Ledger.",
+      });
+    }
+
+    for (const variant of serverVariants) {
+      if (!serverProductIds.has(variant.productId)) discrepancies.push({
+        entityType: "ProductVariant",
+        entityId: variant.id,
+        kind: "ORPHANED_VARIANT",
+        remediation: "Authoritative variant has no valid parent product in the same tenant/branch.",
+      });
+    }
+
+    const serverCounts = {
+      products: serverProducts.length,
+      variants: serverVariants.length,
+      stockLedger: serverLedger.length,
+    };
+      const serverRevision = await this.latestRevision(ctx, tx);
+
+      return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      evaluatedAt: new Date().toISOString(),
+      serverRevision,
+      inSync: discrepancies.length === 0,
+      totalDiscrepancies: discrepancies.length,
+      discrepancies,
+      serverCounts,
+      integrityChecksum: computePayloadChecksum({
+        serverCounts,
+        serverProducts: serverProducts.map((row) => row.id).sort(),
+        serverVariants: serverVariants.map((row) => row.id).sort(),
+        serverLedger: serverLedger.map((row) => row.id).sort(),
+        serverBalances: Object.fromEntries([...serverBalances.entries()].sort()),
+      }),
+      };
+    });
+  }
+
   async processBootstrap(ctx: TenantContext, req: any): Promise<any> {
     await this.ensureInfrastructure();
     return prisma.$transaction(async (tx: any) => {

@@ -864,6 +864,18 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         },
         targetTenantId,
         targetBranchId,
+        async (manifest) => {
+          const body = await apiFetch<any>("/sync/reconcile", {
+            method: "POST",
+            headers: {
+              "x-tenant-id": targetTenantId,
+              "x-branch-id": targetBranchId,
+              "x-user-id": targetUserId,
+            },
+            body: JSON.stringify(manifest),
+          });
+          return body.data || body;
+        },
       );
 
       const now = Date.now();

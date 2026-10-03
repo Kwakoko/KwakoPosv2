@@ -5382,22 +5382,3 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   return server;
 }
-
-
-if (process.env.START_SERVER === "true") {
-  (async () => {
-    const config = loadConfig();
-    const server = buildServer();
-    const port = Number(process.env.PORT) || config.PORT || 8080;
-    const host = process.env.HOST || config.HOST || "0.0.0.0";
-    try {
-      await server.listen({ port, host });
-      startTraVfdReconciliationWorker();
-      console.log(`KwakoPos 2.0 API listening on ${host}:${port}`);
-    } catch (err) {
-      console.error("FAILED_TO_START_SERVER:", err);
-      // Allow process manager to handle restarts; exit with non-zero to signal failure.
-      process.exit(1);
-    }
-  })();
-}

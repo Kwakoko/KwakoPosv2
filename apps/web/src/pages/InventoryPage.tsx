@@ -33,7 +33,7 @@ import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { NumberStepper } from "../components/UI/NumberStepper.js";
 import { safeUUID } from "../services/apiClient.js";
-import { queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
@@ -306,22 +306,17 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const loadInventory = useCallback(async () => {
     try {
       await db.ready;
-      const ledgerStockByVariant = new Map<string, number>();
-      for (const ledger of db.stockLedger.values()) {
-        const l = ledger as any;
-        if (currentTenantId && l.tenantId && l.tenantId !== currentTenantId) continue;
-        if (currentBranchId && l.branchId && l.branchId !== currentBranchId) continue;
-        if (!l.variantId) continue;
-        const delta = Number(l.quantityChange ?? l.quantity ?? 0);
-        ledgerStockByVariant.set(l.variantId, (ledgerStockByVariant.get(l.variantId) || 0) + delta);
+      if (!currentTenantId || !currentBranchId) {
+        setItems([]);
+        setLedger([]);
+        return;
       }
+      const stockProjection = buildStockBalanceProjection(db, currentTenantId, currentBranchId);
       const variantsByProduct = new Map<string, ProductVariantData[]>();
       for (const variant of db.productVariants.values()) {
+        if (variant.tenantId !== currentTenantId || variant.branchId !== currentBranchId) continue;
         const list = variantsByProduct.get(variant.productId) || [];
-        const hasLedger = ledgerStockByVariant.has(variant.id);
-        const ledgerStock = ledgerStockByVariant.get(variant.id);
-        const matQuantity = Number((variant as any).inventoryQuantity ?? (variant as any).stock ?? 0);
-        const effectiveVariantStock = hasLedger ? Number(ledgerStock ?? 0) : matQuantity;
+        const effectiveVariantStock = Number(stockProjection.byVariant.get(variant.id) || 0);
         list.push({
           id: variant.id,
           name: variant.name,
@@ -341,21 +336,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       const brandById = new Map(brandsMeta.map((b) => [b.id, b.name]));
       const loaded: InventoryItem[] = [];
       for (const prod of db.products.values()) {
+        if (prod.tenantId !== currentTenantId || prod.branchId !== currentBranchId) continue;
         const pAny = prod as any;
         if (pAny.deletedAt || pAny.deleted_at || pAny.status === "Inactive") continue;
         const vars = variantsByProduct.get(prod.id);
-        let pStock = 0;
-        if (vars && vars.length > 0) {
-          pStock = vars.reduce((sum, v) => sum + Number(v.stock || 0), 0);
-        } else {
-          const ledgerEntries = Array.from(db.stockLedger.values())
-            .filter((l: any) => (!currentTenantId || !l.tenantId || l.tenantId === currentTenantId) && (!currentBranchId || !l.branchId || l.branchId === currentBranchId) && l.productId === prod.id);
-          if (ledgerEntries.length > 0) {
-            pStock = ledgerEntries.reduce((sum, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
-          } else {
-            pStock = Number(pAny.availableStock ?? pAny.totalStock ?? pAny.stock ?? 0);
-          }
-        }
+        const pStock = vars && vars.length > 0
+          ? vars.reduce((sum, v) => sum + Number(v.stock || 0), 0)
+          : Number(stockProjection.byProduct.get(prod.id) || 0);
         const pReorder = Number(pAny.reorderLevel ?? 10);
         const pStatus: InventoryItem["status"] = pStock === 0 ? "Out of Stock" : pStock <= pReorder ? "Low Stock" : "Active";
         loaded.push({
@@ -380,6 +367,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       // Hydrate stock ledger
       const loadedLedger: any[] = [];
       for (const entry of db.stockLedger.values()) {
+        if (entry.tenantId !== currentTenantId || entry.branchId !== currentBranchId) continue;
         const eAny = entry as any;
         const entryDate = eAny.createdAt || eAny.timestamp || eAny.date;
         loadedLedger.push({
