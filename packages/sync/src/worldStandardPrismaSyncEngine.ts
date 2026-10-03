@@ -7,6 +7,18 @@ import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
 
 const MAX_DELTA = 500;
 
+function expenseShape(row: any): any {
+  return {
+    ...row,
+    amount: Number(row.amount ?? 0),
+    incurredAt: row.incurredAt instanceof Date ? row.incurredAt.toISOString() : row.incurredAt,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    paidAt: row.paidAt instanceof Date ? row.paidAt.toISOString() : row.paidAt,
+    voidedAt: row.voidedAt instanceof Date ? row.voidedAt.toISOString() : row.voidedAt,
+  };
+}
+
 type JournalRow = {
   revision: bigint;
   tenant_id: string;
@@ -1178,7 +1190,7 @@ const now = new Date();
       const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
       const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
-      const expenses = await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } });
+      const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
       const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
@@ -1236,7 +1248,7 @@ const now = new Date();
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
-      expenses: await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } }),
+      expenses: (await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } })).map(expenseShape),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
   }
