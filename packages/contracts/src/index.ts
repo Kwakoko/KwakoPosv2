@@ -768,6 +768,7 @@ export const PurchaseOrderSchema = z.object({
 export type PurchaseOrder = z.infer<typeof PurchaseOrderSchema>;
 
 export const CreatePurchaseOrderRequestSchema = z.object({
+  id: z.string().uuid().optional(),
   supplierId: z.string().uuid(),
   notes: z.string().optional(),
   items: z.array(
