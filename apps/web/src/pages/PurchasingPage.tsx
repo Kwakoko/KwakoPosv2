@@ -311,7 +311,10 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     try {
       const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/purchases", { method: "POST", body: JSON.stringify(payload) });
       if (!res.success) throw new Error("PO creation failed");
-      await loadProcurement(); setShowPoModal(false); playSuccessChime(); toast.success("Purchase Order Created", `PO ${res.data?.orderNumber || id} created in PostgreSQL.`);
+      if (status === "Approved" && res.data?.id) {
+        await apiFetch(`/api/v1/purchases/${encodeURIComponent(res.data.id)}/approve`, { method: "POST", body: JSON.stringify({}) });
+      }
+      await loadProcurement(); setShowPoModal(false); playSuccessChime(); toast.success(status === "Approved" ? "Purchase Order Approved" : "Purchase Order Drafted", `PO ${res.data?.orderNumber || id} committed to PostgreSQL.`);
     } catch {
       await db.executeAtomicMutation({
         writes: [],
