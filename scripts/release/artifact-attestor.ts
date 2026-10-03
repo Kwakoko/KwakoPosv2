@@ -60,7 +60,7 @@ export function generateArtifactAttestation(versionStr?: string, gitShaStr?: str
         configSource: {
           uri: `git+${repositoryUrl}.git`,
           digest: { sha256: gitSha },
-          entryPoint: ".github/workflows/deploy.yml",
+          entryPoint: ".github/workflows/production-release-exact-main.yml",
         },
         parameters: { environment: "production", nodeVersion: "20.x" },
       },

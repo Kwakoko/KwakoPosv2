@@ -1,9 +1,9 @@
 name: KwakoPos Exact Main Production Certification
-# Exact release certification is triggered by chore(release): v* on main; manual dispatch is retained for future registry refresh.
+# Exact production release certification is dispatched explicitly with the exact release SHA; manual dispatch is retained for controlled recovery.
 
 on:
   repository_dispatch:
-    types: [certify-release-2.13.0]
+    types: [certify-release]
   workflow_dispatch:
     inputs:
       release_sha:
