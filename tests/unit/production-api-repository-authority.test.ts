@@ -63,6 +63,15 @@ describe("P0 production API PostgreSQL authority", () => {
     const receipts = read("packages/database/src/receiptRepositories.ts");
     expect(receipts).toContain("constructor(private prisma: PrismaClient = new PrismaClient())");
     expect(receipts).toContain("export const globalReceiptRepository: ScopedReceiptRepository = new PrismaReceiptRepository();");
+    expect(receipts).toContain("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
+    expect(receipts).toContain("pg_advisory_xact_lock");
+    expect(receipts).toContain("RECEIPT_TOTAL_MISMATCH_WITH_AUTHORITATIVE_SALE");
+    expect(receipts).not.toContain("private inMemory = new InMemoryReceiptRepository()");
+    expect(receipts).not.toContain('tenantId: "TENANT-001"');
+    expect(receipts).toContain("tenantId: ctx.tenantId, branchId: ctx.branchId");
+    expect(receipts).toContain("getReceiptForPublicVerification");
+    expect(receipts).toContain('status: "REFUNDED"');
+
 
     expect(server).toContain('await telecomRepository.createKmlImport(req.tenantContext!, parsedRecord)');
   });
