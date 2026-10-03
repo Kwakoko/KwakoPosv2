@@ -3457,6 +3457,21 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               </button>
             </div>
 
+            {!shiftOpen && (
+              <div className="v2-p-3 v2-mb-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
+                <label className="v2-text-xs v2-font-bold">Opening Float (TZS)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="v2-input v2-input-sm v2-mt-1 v2-w-full"
+                  value={openingFloat || ""}
+                  placeholder="Enter physical opening cash"
+                  onChange={(e) => setOpeningFloat(Math.max(0, Number(e.target.value || 0)))}
+                />
+              </div>
+            )}
+
             {/* Float & Session Stats */}
             <div className="v2-grid v2-grid-3 v2-gap-2 v2-mb-4">
               <div className="v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
