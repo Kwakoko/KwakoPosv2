@@ -85,6 +85,7 @@
     "certify:uicert": "tsx scripts/certification/runUiCertification.ts",
     "certify:workflow": "tsx scripts/certification/runWorkflowAutomationCertification.ts",
     "certify:bi": "tsx scripts/certification/runBiAnalyticsCertification.ts",
+    "certify:reports": "tsx scripts/certification/reports-authority-certification.ts",
     "certify:ai-os": "tsx scripts/certification/runAiOperatingLayerCertification.ts",
     "certify:approvals": "tsx scripts/certification/runEnterpriseApprovalsCertification.ts",
     "certify:treasury": "tsx scripts/certification/runFinanceTreasuryCertification.ts",
