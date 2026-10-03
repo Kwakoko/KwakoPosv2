@@ -234,17 +234,17 @@ export async function getDashboardKpiSnapshot(
                 COALESCE(SUM(sl.quantity),0) AS units,
                 COALESCE((SELECT SUM(pbs.current_quantity)
                             FROM product_branch_stock pbs
-                           WHERE pbs.tenant_id = sl.tenant_id
-                             AND pbs.branch_id = sl.branch_id
+                           WHERE pbs.tenant_id = s.tenant_id
+                             AND pbs.branch_id = s.branch_id
                              AND pbs.product_id = sl.product_id),0) AS stock,
                 COALESCE(p.category,'General') AS category
            FROM sale_lines sl
            JOIN sales s ON s.id = sl.sale_id
            JOIN products p ON p.id = sl.product_id
-          WHERE sl.tenant_id = $1 AND sl.branch_id = $2
+          WHERE s.tenant_id = $1 AND s.branch_id = $2
             AND s.status = 'COMPLETED'
             AND s.sold_at >= $3 AND s.sold_at < $4
-          GROUP BY sl.product_id, p.name, p.category, sl.tenant_id, sl.branch_id
+          GROUP BY sl.product_id, p.name, p.category
           ORDER BY revenue DESC
           LIMIT 20`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
