@@ -27,6 +27,7 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run build --workspace=@kwakopos2/contracts
+      - run: npm run build --workspace=@kwakopos2/config
       - run: npm run build --workspace=@kwakopos2/domain
       - run: npx vitest run tests/unit/snapshot-reconciliation.test.ts
       - run: npx tsc -p apps/web/tsconfig.json --noEmit
