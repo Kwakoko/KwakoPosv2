@@ -4,23 +4,445 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-09-28
+## [2.13.0] - 2026-10-03
 
-### 🚧 Production Release Candidate
-- Certification retry is executed through the exact production release workflow; `v2.13.0` remains unpublished until that workflow passes.
-- Release candidate is bound to the exact `main` Git SHA and must pass the repository production certification workflow before `v2.13.0` is published.
-- Release engineering fixes preserve a committed version newer than the latest published tag and defer GitHub tag publication until certification succeeds.
-
-### Key Recent Changes
+### ✨ New Features
+- **reports**: expose authoritative tenant-scoped report data API
+- **core**: materialize authoritative variant stock balance
+- **core**: consolidate conflict resolution and durable rollback authority
+- **core**: consolidate conflict resolution and durable rollback authority
+- **core**: display dashboard sync freshness
+- **core**: expose sync revision freshness in status service
+- **core**: publish keyed authoritative dashboard KPIs
+- **core**: expose keyed dashboard KPI contract
+- **core**: connect module registry to dashboard card keys
+- **core**: add dynamic dashboard card registry
+- **core**: add web client authoritative dashboard KPI contract
+- **core**: register authoritative dashboard KPI endpoint
+- **core**: expose authoritative dashboard KPI snapshot endpoint
+- **core**: add PostgreSQL authoritative dashboard KPI service
+- **pos**: decouple cash drawer into hardware outbox
+- **sync**: add payload validation service, normalize pos payment methods, and auto-accept compliance in workspace seeding
+- **pos-tra**: add tactile TRA VFD toggle switch, dedicated fiscal tab, dashboard quick control, and multi-variant cart selection
+- **release**: production-lock navigation contract and bidirectional tab sync
 - **persistence**: integrate sync epoch, SaaS record envelope, and durable device identity
-- **inventory**: implement backdated inventory movements and timeline validation
-- **convergence**: harden multi-device E2E convergence and certification
-- **web**: add browser crypto compatibility guards
+- **inventory**: implement backdated inventory movements with 2-year threshold and harden UI rendering
+- **onboarding**: add durable tenant wizard resume
+- **brand**: lock Kwakoko production visual assets
+- **release**: add unified certification and production authority
+- **sync**: add world-standard revisioned Prisma sync engine
+- **sync**: add authoritative revision and change journal
+- **settings**: add developer diagnostics and sample data management panels
+- **reports**: purge fabricated ledger entries - implement 14-tab authentic BI (ZDH CLN-01)
+- **purchasing**: purge fabricated procurement data and enforce production cleanliness pillars
+- **core**: harden sync conflict audit and tenant export
+- **core**: add SLO rollback, FX provider, load gates and SBOM
+- **i18n**: localize dashboard pos and workspace surfaces
+- **platform**: harden support operations and tenant onboarding
+- **governance**: add legal compliance and rollback authorization
+- **core**: establish shared business engine layer
+- **pwa**: harden durable persistence and zero-data-loss lifecycle
+- **finance**: implement Phase 2 finance control, payroll bridge, and production certification
+- **sync**: enforce chunked delivery and strict response reconciliation
+- **sync**: make IndexedDB sync durable conflict-aware and complete
+- **sync**: harden postgres replay ordering and stale-write protection
+- **sync**: enforce deterministic ordered and conflict-safe sync
+- **sync**: add super-strong sync integrity primitives
+- **auth**: add one-time Super Admin bootstrap command
+- **auth**: enforce Super Admin setup MFA and backend throttling
+- **auth**: add Super Admin bootstrap, throttling and TOTP security service
+- **auth**: add super admin security state and login throttling tables
+- **auth**: use Argon2id for password storage with legacy rehash
+- **auth**: add Argon2id password hashing
+
+### ⚡ Improvements & Enhancements
+- **ci**: remove redundant scheduled maintenance workflow
+- **ci**: consolidate redundant GitHub Actions gates
+- **ci**: reduce workflow surface to core gates
+- **sync**: consolidate migration and conflict gates
+- **ci**: retire redundant governance and contract workflows
+- **ci**: consolidate governance workflows
+- **ci**: move core contract gates into CI
+- **ci**: update certification references
+- **ci**: update certification references
+- **ci**: consolidate redundant GitHub Actions gates
+- **core**: Merge pull request #38 from Kwakoko/fix/purchasing-closed-loop
+- **main**: reconcile latest sync engine with purchasing loop
+- **main**: reconcile purchasing sync changes with current main
+- **purchasing**: lock closed-loop PostgreSQL authority invariants
+- **core**: Merge pull request #35 from Kwakoko/fix/receipts-p0-p1-closed-loop
+- **core**: Merge pull request #31 from Kwakoko/fix/pos-p0-p1-closure
+- **release**: remove obsolete certification workflow
+- **release**: v2.13.0
+- **reports**: register Reports authority certification gate
+- **reports**: add executable P0/P1 authority certification gate
+- **receipts**: scope fabricated-tenant assertion to production repository
+- **receipts**: include receipt register in remediation gate
+- **receipts**: generate Prisma client before authority tests
+- **receipts**: add closed-loop P0/P1 certification gate
+- **receipts**: lock generator against process-local allocation
+- **receipts**: add P0 authority and tenant-boundary assertions
+- **core**: receipt branch write
+- **cash-drawer**: certify complete reconciliation equation
+- **cash-drawer**: certify complete reconciliation equation
+- **cash-drawer**: recover Prisma schema after interrupted patch
+- **core**: test
+- **pos**: lock stock and credit boundary regressions
+- **pos**: correct synthetic variant closure assertion
+- **pos**: add P0/P1 production closure gates
+- **dashboard**: add authoritative convergence certification (#30)
+- **dashboard**: certify full analytics convergence
+- **core**: Fix manifest theme and brand icon values to satisfy brand asset lock verification
+- **core**: Apply fix 1: normalize content-type headers before calling includes() in frontend deployment certification.
+- **core**: Apply fix 2: keep the release quality gate test assertion aligned with the expected overallPass behavior and allow longer runtime.
+- **core**: preserve current release certification workflows
+- **core**: preserve append-only audit evidence during cleanup
+- **core**: update oversell mock for durable conflict audit
+- **core**: certify end-to-end conflict resolution lifecycle
+- **core**: record final conflict resolution audit PASS
+- **core**: build conflict certification dependencies in workspace order
+- **core**: compile conflict server and web remediation paths
+- **core**: add dedicated conflict resolution certification
+- **core**: pass isolated database name to conflict applier
+- **core**: isolate revision application storage for certification
+- **core**: verify conflict metadata from durable IndexedDB
+- **core**: add authoritative conflict resolution certification
+- **core**: add conflict resolution certification gate
+- **core**: expose revision application for conflict certification
+- **core**: certify deterministic client conflict detection
+- **core**: align conflict resolution guarantees with implementation
+- **core**: certify multi-browser dashboard convergence
+- **core**: validate dashboard registry across all modules
+- **core**: guard dynamic dashboard card registry
+- **core**: route dashboard rendering through KPI keys
+- **core**: make dashboard KPI keys first class
+- **core**: render dashboard cards from KPI registry
+- **core**: enforce strict tenant branch catalog scope
+- **core**: simplify strict context switch guard
+- **core**: remove unused parallel dashboard KPI route
+- **sync**: bind explicit GIT_DIR and GIT_WORK_TREE environment variables in mock test fixture
+- **core**: finalize production hardening
+- **core**: checkpoint all pending certification fixes
+- **core**: test rbac browser persistence restart
+- **core**: restore package scripts after RBAC certification addition
+- **rbac**: add dedicated browser restart certification command
+- **rbac**: assert privileged mutations never enter browser outbox
+- **rbac**: prove Chromium RBAC persistence across API restart
+- **release**: v2.13.0
+- **release**: publish exact certification start evidence
+- **release**: add controlled certification event trigger
+- **release**: v2.13.0
+- **core**: add system layout and super admin assets
+- **web**: update manifest version to 2.13.0
+- **core**: Merge branch 'work/kwakopos-decomposition-2026-09-07'
+- **sync**: reconcile audit hardening, native migration tracking, and live HTTP e2e harness
+- **core**: add comprehensive version management prevention guide
+- **core**: add pre-commit hook for version drift prevention
+- **core**: add version management guidelines to CONTRIBUTING.md
+- **config**: update FALLBACK_AUTHORITATIVE_RELEASE to 2.13.0
+- **release**: bump api version to 2.13.0
+- **release**: bump version to 2.13.0 - resolve version drift issue
+- **release**: bump web version to 2.13.0
+- **core**: Merge pull request #22 from Kwakoko/work/kwakopos-decomposition-2026-09-07
+- **core**: Merge pull request #21 from Kwakoko/fix/offline-sync-100-STOP
+- **sync**: verify atomic outbox boundary is installed at app boot
+- **e2e**: require live evidence before 100 percent certification
+- **sync**: require transactional server and real E2E evidence for 100 percent
+- **e2e**: make PWA and convergence checks fail closed
+- **e2e**: execute real offline sync production certification
+- **e2e**: wire real offline sync certification command
+- **e2e**: add real Chromium PostgreSQL offline convergence certification
+- **sync**: add executable offline sync gate for implementation branch
+- **core**: close production governance and inventory sync loop
+- **sync**: gate world-standard offline sync at 100 percent
+- **sync**: add world-standard offline sync certification command
+- **sync**: add executable world-standard offline sync gate
+- **sync**: route Prisma sync through revisioned engine
+- **pillars**: add Pillar 6 - atomic commit and push discipline (DEV-GIT-01)
+- **core**: certify tenant export boundary and checksum
+- **core**: converge v2 production release and runtime hardening
+- **core**: Merge remote-tracking branch 'origin/main' into work/kwakopos-decomposition-2026-09-07
+- **release**: exclude local artifacts from Cloud Build context
+- **release**: ignore generated root release manifest
+- **release**: stop tracking generated release manifest
+- **release**: align versioning deployment and certification gates
+- **release**: finalize permanent release integrity lock
+- **release**: make generateReleaseManifest accept CI overrides and always write root/artifacts manifest
+- **sync**: add super-strong convergence and replay invariants
+- **core**: Merge pull request #15 from Kwakoko/fix/v2-production-convergence-hardening-20260903
+- **core**: cancel obsolete candidate runs during closed-loop verification
+- **core**: trigger closed-loop certification after contract repair
+- **core**: separate PR certification from exact production deployment authority
+- **core**: make SemVer release wait for exact production certification
+- **core**: harden rollback workflow inputs and permissions
+- **core**: make release workflow a non-mutating release contract gate
+- **core**: make locked release engine a non-mutating integrity gate
+- **core**: make deployment workflow a non-mutating contract gate
+- **core**: make database migration safety gate continuously verifiable
+- **core**: make maintenance health workflow verifiable
+- **core**: run security scan on pull requests and fail closed
+- **core**: make CI quality gates fail closed
+- **cert**: remove temporary repair workflow
+- **cert**: trigger deterministic repair workflow
+- **cert**: automate remaining certification type repairs
+- **ci**: remove one-time lockfile repair workflow
+- **ci**: repair lockfile for argon2 dependency once
+- **onboarding**: cover transactional idempotency and server-owned lifecycle
+- **core**: Merge pull request #14 from Kwakoko/fix/npm-lockfile-argon2-20260903
+- **core**: Merge pull request #13 from Kwakoko/fix/superadmin-secure-bootstrap-20260903
+- **auth**: use maintained Rust Argon2 binding
+- **auth**: cover Argon2id password hashing and legacy rejection
+- **security**: document Super Admin secret inputs
+
+### 🐛 Bug Fixes
+- **ci**: refresh production workflow lock hash
+- **purchasing**: close authoritative procurement loop
+- **sync**: resolve purchasing merge conflict markers
+- **sync**: resolve main merge conflict without conflict markers
+- **sync**: restore clean engine and strict reconciliation typing
+- **sync**: restore receipt sequence query syntax
+- **purchasing**: make supplier settlement offline-durable through Payment outbox
+- **purchasing**: model persisted sent purchase-order status
+- **purchasing**: remove legacy in-memory supply-chain production routes
+- **purchasing**: move supply-chain PO transitions and scorecards to PostgreSQL
+- **sync**: satisfy strict typing for transactional receipt sequence query
+- **sync**: type raw receipt sequence result safely
+- **certification**: refresh Receipts navigation lock hash (#37)
+- **certification**: refresh receipts navigation lock hash
+- **sync**: persist purchase orders and supplier payments through PostgreSQL sync engine
+- **purchasing**: make approve-and-issue an explicit persisted transition
+- **purchasing**: expose persisted purchase-order approval transition
+- **purchasing**: enforce draft-first purchase-order approval workflow
+- **purchasing**: route three-way matching through PostgreSQL authority
+- **purchasing**: persist three-way match outcome on supplier invoice
+- **purchasing**: make purchase-order creation idempotent by stable entity id
+- **purchasing**: allow stable client purchase-order identity
+- **purchasing**: stop classifying authoritative supplier records as demo data
+- **purchasing**: remove browser payable mutation and post supplier settlements server-side
+- **purchasing**: expose authoritative receipts and supplier settlement
+- **purchasing**: make supplier settlement transactional and idempotent
+- **purchasing**: expose authoritative purchase receipts
+- **purchasing**: make GRN server-authoritative and ledger-driven
+- **purchasing**: route suppliers and purchase orders through authoritative API/outbox
+- **receipts**: isolate in-memory status transitions
+- **sync**: type reconciliation row callbacks
+- **cash**: use legacy zero for unavailable cash-in total
+- **cash**: use legacy zero for unavailable cash-out total
+- **cash**: use legacy zeroes for unavailable movement totals
+- **rollback**: restore Prisma callback typing
+- **receipts**: restore Prisma callback typing
+- **database**: restore Prisma repository type safety
+- **database**: parameterize inventory projection SQL
+- **pos**: balance shift modal JSX structure
+- **cash**: align reconciliation state contract
+- **database**: reconcile Prisma schema with durable migrations
+- **release**: include dashboard in navigation lock
+- **release**: update navigation lock for build fixes
+- **dashboard**: resolve production build type errors
+- **cash-drawer**: remove impossible no-sale movement comparison
+- **release**: refresh navigation lock for exact main
+- **release**: add executable exact-main certification entrypoint
+- **release**: restore exact certification dispatch trigger
+- **reports**: resolve payment chart type regression
+- **reports**: normalize Prisma report numeric aggregates
+- **reports**: complete Prisma financial reporting authority
+- **reports**: initialize export handler after authoritative report aggregates
+- **reports**: make CSV export use the displayed authoritative report dataset
+- **reports**: expose authoritative stock lineage and remove unsupported TRA claim
+- **reports**: prevent report reload loop while resolving branch scope
+- **reports**: consume authoritative API data and remove fabricated calculations
+- **reports**: add authoritative PostgreSQL report data service
+- **receipts**: remove unused auth dependency after authoritative register cleanup
+- **receipts**: remove synthetic sale-to-receipt UI and default tenant template
+- **receipts**: enforce atomic terminal reversal lifecycle
+- **receipts**: repair authoritative creation transaction and remove duplicated patch residue
+- **receipts**: remove production in-memory repository fallback
+- **sync**: persist authoritative receipt signature timestamp
+- **receipts**: bind signature timestamp to persisted receipt creation time
+- **sync**: order Receipt after authoritative Sale
+- **receipts**: reconstruct synced receipts from authoritative Sale
+- **receipts**: make cancel and refund atomic with sale, payment, return and stock ledger reversal
+- **receipts**: remove fabricated tenant verification authority and validate supplied signature
+- **receipts**: enforce tenant boundaries, public verification, template ownership and analytics scope
+- **receipts**: enforce authoritative sale binding and database receipt sequencing
+- **receipts**: use repository-owned receipt authority
+- **receipts**: make creation PostgreSQL-authoritative and sale-bound
+- **receipts**: delegate authoritative creation to repository
+- **receipts**: remove process-local receipt sequence authority
+- **inventory**: close P0/P1 stock authority and convergence gaps
+- **cash-drawer**: enforce cash drawer authority on lifecycle mutations
+- **cash-drawer**: map both DrawerOperation payment foreign keys
+- **cash-drawer**: recalculate movement totals from immutable ledger
+- **dashboard**: use authoritative CashSession for till reconciliation
+- **pos**: bind cash sales to authoritative cash session
+- **cash-drawer**: enforce immutable sealed cash count in UI
+- **cash-drawer**: preserve cash session route identity
+- **cash-drawer**: refresh authoritative movement state with connectivity
+- **cash-drawer**: hydrate movement totals from PostgreSQL authority
+- **cash-drawer**: route no-sale events through drawer authority
+- **cash-drawer**: route manual cash movements to authoritative API
+- **cash-drawer**: expose authoritative cash movement API
+- **cash-drawer**: persist and reconcile authoritative cash movements
+- **cash-drawer**: reconcile expected cash with all drawer movements
+- **cash-drawer**: add authoritative cash movement ledger
+- **cash-drawer**: model authoritative cash movements
+- **cash-drawer**: preserve server cash-session totals on hydration
+- **cash-drawer**: make shift lifecycle PostgreSQL authoritative
+- **cash-drawer**: align DrawerOperation Prisma contract
+- **pos**: enforce server-side stock sufficiency at checkout
+- **pos**: enforce authoritative credit customer limits
+- **pos**: bind customer identity to tenant branch sale
+- **pos**: reject synthetic context and unsupported custom checkout lines
+- **pos**: keep local receipt completed while fiscalization remains separate
+- **pos**: make IndexedDB authoritative for active cart recovery
+- **pos**: require explicit opening float for shift
+- **pos**: bind shift UI to authoritative cash sessions
+- **pos**: remove legacy synthetic variant fallback
+- **pos**: enforce server-side settled payment and cash session
+- **pos**: require authoritative cash session at checkout
+- **pos**: enforce real variants and collision-safe transaction numbers
+- **pos**: close terminal P0 payment shift identity gates
+- **dashboard**: preserve last authoritative snapshot offline
+- **dashboard**: clarify snapshot freshness scope
+- **dashboard**: distinguish device sync from business KPIs
+- **dashboard**: scope top products through sales
+- **dashboard**: type authoritative financial summary
+- **dashboard**: render analytics from authoritative snapshot
+- **dashboard**: expose authoritative financial summary
+- **dashboard**: expose authoritative analytics snapshot
+- **dashboard**: select authoritative analytics timeframe
+- **dashboard**: make analytics PostgreSQL authoritative
+- **core**: harden inventory sync and stock balance persistence
+- **db**: align durable rollback sync state timestamps
+- **core**: harden durable rollback execution lock schema
+- **core**: close remaining security and session fail-open paths
+- **core**: record conflict audit events with database actor ids
+- **core**: persist oversell conflict audit transactionally
+- **core**: make conflict operator resolution authoritative
+- **core**: make resolved conflict outbox state durable
+- **core**: complete conflict detection and resolution lifecycle
+- **core**: persist conflict resolution operation metadata
+- **core**: initialize conflict infrastructure before registration
+- **core**: satisfy typed conflict persistence query
+- **core**: harden conflict registration isolation and status
+- **core**: deduplicate conflict notification counts
+- **core**: complete authoritative conflict resolution UI lifecycle
+- **core**: persist local conflict metadata cleanup
+- **core**: register client-detected conflicts authoritatively
+- **core**: expose authoritative conflict registration route
+- **core**: harden conflict persistence registration
+- **ci**: generate Prisma client before production certification
+- **ci**: move Prisma generation immediately after npm ci
+- **core**: finalize production convergence remediation
+- **core**: strengthen dashboard convergence assertions
+- **core**: validate dashboard sync revisions numerically
+- **core**: persist dashboard sync freshness metadata
+- **core**: remove fabricated dashboard KPI formulas
+- **core**: enforce exact tenant branch plugin scope
+- **core**: enforce exact tenant branch reconciliation scope
+- **core**: require exact tenant branch sync scope
+- **core**: enforce strict tenant branch reconciliation scope
+- **core**: enforce strict tenant branch sync scope
+- **core**: enforce strict tenant branch product scope
+- **core**: enforce tenant branch scope on sale idempotency replay
+- **core**: enforce tenant and branch authorization on context switch
+- **core**: enforce strict tenant and branch dashboard scope
+- **core**: remove mixed-source dashboard KPI calculations
+- **core**: harden stock ledger convergence and fiscalization
+- **core**: harden sync observability and production data flow
+- **sync**: enforce tripartite SHA verification, sanitize Windows git outputs, and align sync certification gates
+- **build**: resolve merge conflict markers, duplicate declarations, and missing contracts dependency
+- **core**: complete persistence sync certification hardening
+- **sync**: stabilize persistence and ledger convergence
+- **persistence**: make synchronization state observable
+- **certification**: include sync epoch and nine journal operations
+- **sync**: finalize epoch and server persistence integration
+- **persistence**: reconcile RBAC sync and audit hardening
+- **release**: let main release commit trigger exact certification
+- **release**: auto-certify release commits on main at exact SHA
+- **release**: defer tag publication until certification passes
+- **release**: fail closed on GitHub publication errors
+- **release**: preserve committed version ahead of published tag
+- **release**: optimize quality gates typecheck evaluation in test context
+- **web**: add browser crypto shim and guard Node runtime APIs for client compatibility
+- **convergence**: resolve multi-device E2E convergence sync propagation and enable local 18-gate certification
+- **dev**: harden Vite dev proxy against socket aborts and eliminate dev port collisions
+- **persistence**: guarantee durable data persistence across login/logout, repair mojibake, and sync workspace versions
+- **sync**: outbox persistence with exponential backoff and snapshot merge reconciliation
+- **sync**: resolve PR 22 offline sync integration
+- **database**: repair support schema migration drift
+- **sync**: unify stock persistence engine and standardize offline sync intervals
+- **sync**: commit domain mutation, sync operation and journal atomically
+- **sync**: make local delete atomic with outbox
+- **sync**: use tenant-scoped safe delta cursor
+- **sync**: prevent delta cursor from skipping branch changes
+- **sync**: activate atomic outbox boundary in web runtime
+- **sync**: enforce atomic local mutation outbox boundary
+- **core**: persist vertical plugin sync operations
+- **core**: enforce statutory onboarding consent gate
+- **inventory**: close product variant persistence
+- **system**: repair UTF-8 mojibake and dashboard encoding
+- **release**: prohibit synthetic cross-client proof
+- **security**: harden forensic release proof
+- **release**: verify registry provenance and production secrets
+- **certification**: harden forensic release provenance gates
+- **release**: make Cloud Run certification runner Windows-safe
+- **release**: remove synthetic provenance defaults and align prod infra
+- **release**: bind manifest generation to exact git head
+- **security**: isolate tenant context and harden release provenance
+- **release**: extend quality gate command timeout
+- **security**: harden super-admin bootstrap and client auth flows
+- **sync**: enforce rollback barriers and sync epoch convergence
+- **auth**: isolate browser tests and harden sessions
+- **release**: unblock automatic SemVer pipeline after v2.12.5
+- **release**: repair lockfile before automatic SemVer release
+- **db**: normalize production DATABASE_URL before Prisma initialization
+- **web**: use release-manifest.json fallback instead of hardcoded v2.12.5
+- **sync**: keep browser sync ordering self-contained
+- **ci**: align deployment contract with production release authority
+- **core**: restore full security certification and type environment contract
+- **core**: align version CLI with release promotion contract
+- **core**: keep workflow certification handlers void-returning
+- **core**: narrow security certification live request inputs
+- **ci**: isolate PR certification concurrency from production main
+- **certification**: remove stale bootstrap assertion and bind PWA check to current SemVer
+- **onboarding**: correct tenant update route response syntax
+- **deps**: synchronize argon2 lockfile
+- **onboarding**: type update actor identity correctly for audit trails
+- **onboarding**: preserve authenticated actor identity on updates
+- **onboarding**: make update transaction-safe and idempotent response consistent
+- **sync**: harden Prisma push idempotency and reject silent no-op operations
+- **sync**: serialize client sync and commit delta before advancing cursor
+- **sync**: make IndexedDB delta application atomic and durable before cursor advance
+- **sync**: enforce tenant-device idempotency uniqueness at database level
+- **onboarding**: make provisioning atomic, idempotent, scoped and contract-safe
+- **onboarding**: align response contract and restrict mutable lifecycle fields
+- **ci**: make production certification deterministic and migration-safe
+- **ci**: repair npm lockfile before clean install
+- **auth**: pin maintained Argon2id API and harden malformed legacy hashes
+- **db**: ensure UUID generator exists for auth throttles
+
+### 🛡️ Security Updates
+- **security**: harden admin SQL and certification gates
+- **security**: remove unsafe bulk conflict resolution bypass
+- **security**: add immutable fiscal receipt hash chain
+- **security**: harden offline PIN hashing
+- **release**: forbid emergency production gate bypasses
+- **super-admin**: pin setup JWT algorithm issuer and audience
+- **auth**: pin JWT algorithm and validate security claims
+
+### 🚀 Performance Enhancements
+- **web**: align vite chunk warning with bundle budget
+- **perf**: enforce structural bundle size limits
+- **perf**: optimize PWA startup and dashboard bundles
+
+### 🎨 UI/UX Changes
+- **web-sync**: consume monotonic revisions and preserve conflicts
+- **ui**: implement product registration wizard, offline font persistence, and universal module navigation
+- **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko
-
-
+Credit to: Kwakoko, Hilda99-D, Kwakoko1, Jack91186, github-actions[bot]
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
