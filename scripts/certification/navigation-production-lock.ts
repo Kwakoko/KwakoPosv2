@@ -3,25 +3,25 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
 
-const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-09-28";
+const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-10-03";
 const EXPECTED_MODULE_COUNT = 32;
 const EXPECTED_SUBMENU_GROUPS = 126;
-const EXPECTED_SUBITEM_COUNT = 657;
+const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "7872485194ed7be975b6c3659604795f88dca244",
-  "apps/web/src/App.tsx": "c46e1d017062bd772c7a93091f098dac4c3fda31",
-  "apps/web/src/modules/moduleRegistry.ts": "176d66bdd3ef031789ee41f9007cdadf2c6b735d",
+  "package.json": "c30f1c81d3f5116e5603dfdf7d58818fda7a7ee5",
+  "apps/web/src/App.tsx": "17dad6fe916d91266c8a1456cb435acd0c279e54",
+  "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "a84cb792a6e58d57862481f6e7adda9f991f4ca3",
-  "apps/web/src/pages/InventoryPage.tsx": "6ddee4fbcf44b747a8791248d95a7207cbeb949a",
-  "apps/web/src/pages/PurchasingPage.tsx": "f1c593ec73ae9c7575c74089f15209f7107ce7d2",
-  "apps/web/src/pages/ReportsPage.tsx": "b6f51960d14208eff7881c0110f031e6d912e833",
-  "apps/web/src/pages/SettingsPage.tsx": "ba8b71090ff11b4c502d54defae8f3718b2d9a54",
-  "apps/web/src/pages/CashDrawerPage.tsx": "43694902eabe22b60741b64ee871b3f42ed54cb7",
-  "apps/web/src/pages/ReceiptsPage.tsx": "2b0c0e79245f6f2d5bf1acdfa26009f4d807c5ba",
+  "apps/web/src/pages/InventoryPage.tsx": "41342cbfc43a0c5a2667143ab25361c20acee7a4",
+  "apps/web/src/pages/PurchasingPage.tsx": "bf8acea20b519b9b967a8e27b715f513792c4e4f",
+  "apps/web/src/pages/ReportsPage.tsx": "c236231b947976563b71d4aef08309e921882705",
+  "apps/web/src/pages/SettingsPage.tsx": "7bdd93c664912e763e0ccea23ebe10381671334e",
+  "apps/web/src/pages/CashDrawerPage.tsx": "eea52ed1d0e56e662bc1a334c189cd2fa06738e9",
+  "apps/web/src/pages/ReceiptsPage.tsx": "fc41b333fe39458447ae5fb053ade9d626933a44",
   ".github/workflows/locked-release-engine.yml": "e44d5cdf16f0adddef66d784c675c5c062659eb9",
   ".github/workflows/production-certification.yml": "9034050784a1d88fe6c04348c1d9189e0a0e2ad8",
-  ".github/workflows/production-release-certification.yml": "9ce19a43c1e35f22bf3b78536c747f9d78f4defa"
+  ".github/workflows/production-release-exact-main.yml": "3d830712941e93bf0989d3f04cbf524a8edbcb7d"
 };
 
 const MARKERS: Array<[string, string, string]> = [
@@ -38,7 +38,7 @@ const MARKERS: Array<[string, string, string]> = [
   ["package-hook", "package.json", "certify:navigation-lock"],
   ["locked-release-hook", ".github/workflows/locked-release-engine.yml", "npm run certify:navigation-lock"],
   ["candidate-certification-hook", ".github/workflows/production-certification.yml", "npm run certify:navigation-lock"],
-  ["exact-production-release-hook", ".github/workflows/production-release-certification.yml", "npm run certify:navigation-lock"]
+  ["exact-main-production-release-hook", ".github/workflows/production-release-exact-main.yml", "npm run certify:navigation-lock"]
 ];
 
 function gitBlobSha(content: string): string {
