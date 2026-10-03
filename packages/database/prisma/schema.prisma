@@ -912,19 +912,19 @@ model Tax {
 
 model SyncOperation {
   id              String    @id @default(uuid())
-  tenantId        String
-  branchId        String
-  deviceId        String
-  operationId     String
-  entityType      String // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession
-  entityId        String
-  operationType   String // CREATE, UPDATE, DELETE
+  tenantId        String    @map("tenant_id")
+  branchId        String    @map("branch_id")
+  deviceId        String    @map("device_id")
+  operationId     String    @map("operation_id")
+  entityType      String    @map("entity_type") // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession
+  entityId        String    @map("entity_id")
+  operationType   String    @map("operation_type") // CREATE, UPDATE, DELETE
   payload         Json
   status          String    @default("PROCESSED")
-  idempotencyKey  String
-  clientCreatedAt DateTime
-  processedAt     DateTime?
-  createdAt       DateTime  @default(now())
+  idempotencyKey  String    @map("idempotency_key")
+  clientCreatedAt DateTime  @map("client_created_at")
+  processedAt     DateTime? @map("processed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
   tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch          Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
