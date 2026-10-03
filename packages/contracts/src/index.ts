@@ -1330,6 +1330,7 @@ export const SyncStateManifestSchema = z.object({
   productIds: z.array(z.string()).optional(),
   variantIds: z.array(z.string()).optional(),
   ledgerIds: z.array(z.string()).optional(),
+  expenseIds: z.array(z.string()).optional(),
   stockBalances: z.record(z.number()).optional(),
 });
 export type SyncStateManifest = z.infer<typeof SyncStateManifestSchema>;
