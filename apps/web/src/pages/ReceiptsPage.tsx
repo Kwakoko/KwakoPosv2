@@ -20,7 +20,7 @@ import { Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckC
 import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopos2/contracts";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { useModule, useSync, useAuth } from "../context/KwakoPosContexts.js";
+import { useModule, useSync } from "../context/KwakoPosContexts.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { Sheet } from "../components/UI/Sheet.js";
 
@@ -86,7 +86,6 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
   // Template State
   const [templates, setTemplates] = useState<ReceiptTemplateDTO[]>([]);
   const { db } = useSync();
-  const { user } = useAuth();
 
   // Dynamic Receipts Store
   const [receipts, setReceipts] = useState<ReceiptDTO[]>([]);
