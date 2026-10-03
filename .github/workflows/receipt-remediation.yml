@@ -11,6 +11,7 @@ on:
       - "packages/sync/src/worldStandardPrismaSyncEngine.ts"
       - "tests/unit/production-api-repository-authority.test.ts"
       - "tests/unit/receipt-management-module.test.ts"
+      - "apps/web/src/pages/ReceiptsPage.tsx"
       - ".github/workflows/receipt-remediation.yml"
 
 permissions:
