@@ -674,6 +674,7 @@ const now = new Date();
           exchangeRate: 1,
           status: "COMPLETED",
           deviceId: req.deviceId,
+          createdAt: now,
           syncStatus: "SYNCED",
           digitalSignature,
           qrCodePayload: ReceiptEngine.generateQrCodePayload(
