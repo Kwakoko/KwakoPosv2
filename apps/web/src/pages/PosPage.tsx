@@ -295,6 +295,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       toast.warning("Customer Name Required", "Please enter customer full name.");
       return;
     }
+    if (!currentTenantId || !currentBranchId) {
+      toast.error("Context Required", "An active tenant and branch are required to register a customer.");
+      return;
+    }
     const customerId = safeUUID();
     const newCust = {
       id: customerId,
@@ -958,7 +962,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     if (!validateSaleProceed()) return;
     try {
       await db.ready;
-      const session = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const session = await apiFetch<{ data?: any }>("/api/v1/cash-sessions/active", { method: "GET" });
       const activeSession = session?.data ?? null;
       if (!activeSession?.id || activeSession.status !== "OPEN") {
         setShiftOpen(false);
@@ -979,7 +983,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     if (!validateSaleProceed()) return;
     let activeCashSession: any = null;
     try {
-      const sessionResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const sessionResponse = await apiFetch<{ data?: any }>("/api/v1/cash-sessions/active", { method: "GET" });
       activeCashSession = sessionResponse?.data ?? null;
     } catch {
       toast.error("Checkout Blocked", "Unable to verify the authoritative cash session.");
@@ -1230,7 +1234,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               operationId: saleId,
               idempotencyKey: saleId,
             });
-            const res = await apiFetch("/api/v1/pos/sales", {
+            const res = await apiFetch<{ data?: any }>("/api/v1/pos/sales", {
               method: "POST",
               body: JSON.stringify(pushPayload),
             });
@@ -1290,7 +1294,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       return;
     }
     try {
-      const res = await apiFetch("/api/v1/cash-sessions", {
+      const res = await apiFetch<{ data?: any }>("/api/v1/cash-sessions", {
         method: "POST",
         body: JSON.stringify({ openingCash: amount, notes: `POS terminal shift` }),
       });
@@ -1309,7 +1313,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const closeAuthoritativeShift = async () => {
     try {
-      const activeResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const activeResponse = await apiFetch<{ data?: any }>("/api/v1/cash-sessions/active", { method: "GET" });
       const session = activeResponse?.data;
       if (!session?.id || session.status !== "OPEN") {
         setShiftOpen(false);

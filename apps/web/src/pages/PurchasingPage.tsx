@@ -189,9 +189,18 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts"),
       ]);
 
-      const prods = Array.from(db.products.values())
-        .filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive")
-        .map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) }));
+      const productsById = new Map(Array.from(db.products.values()).map((p: any) => [p.id, p]));
+      const prods = Array.from(db.productVariants.values())
+        .filter((v: any) => v.tenantId === currentTenantId && v.branchId === currentBranchId && v.isActive !== false)
+        .map((v: any) => {
+          const product: any = productsById.get(v.productId);
+          return {
+            id: v.id,
+            name: product ? `${product.name} — ${v.name || v.sku}` : (v.name || v.sku),
+            sku: v.sku,
+            buyingPrice: Number(v.effectiveBuyingPrice ?? v.costPrice ?? product?.buyingPrice ?? 0),
+          };
+        });
       setCatalogProducts(prods);
 
       setSuppliers((Array.isArray(supplierRes.data) ? supplierRes.data : []).map((s: any) => ({ ...s, balance: Number(s.outstandingBalance || 0), creditLimit: Number(s.creditLimit || 0) })));
@@ -231,7 +240,18 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         total: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), status: "Draft", expected: new Date().toISOString(), date: new Date().toISOString(),
       })));
       setGrns([]);
-      setCatalogProducts(Array.from(db.products.values()).filter((p: any) => !p.deletedAt && p.status !== "Inactive").map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) })));
+      const productsById = new Map(Array.from(db.products.values()).map((p: any) => [p.id, p]));
+      setCatalogProducts(Array.from(db.productVariants.values())
+        .filter((v: any) => v.tenantId === currentTenantId && v.branchId === currentBranchId && v.isActive !== false)
+        .map((v: any) => {
+          const product: any = productsById.get(v.productId);
+          return {
+            id: v.id,
+            name: product ? `${product.name} — ${v.name || v.sku}` : (v.name || v.sku),
+            sku: v.sku,
+            buyingPrice: Number(v.effectiveBuyingPrice ?? v.costPrice ?? product?.buyingPrice ?? 0),
+          };
+        }));
     }
   }, [db, currentTenantId, currentBranchId, currentBranchName]);
 
@@ -452,7 +472,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           <button
             className="v2-btn v2-btn-primary v2-btn-sm"
             onClick={() => {
-              if (suppliers.length > 0) setPoSupplier(suppliers[0].name);
+              if (suppliers.length > 0) setPoSupplier(suppliers[0].id);
               setShowPoModal(true);
             }}
             type="button"
@@ -760,7 +780,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                               <button
                                 className="v2-btn v2-btn-ghost v2-btn-sm"
                                 onClick={() => {
-                                  setPoSupplier(s.name);
+                                  setPoSupplier(s.id);
                                   setShowPoModal(true);
                                 }}
                                 type="button"
@@ -791,7 +811,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
             <button
               className="v2-btn v2-btn-primary v2-btn-sm"
               onClick={() => {
-                if (suppliers.length > 0) setPoSupplier(suppliers[0].name);
+                if (suppliers.length > 0) setPoSupplier(suppliers[0].id);
                 setShowPoModal(true);
               }}
               type="button"
@@ -809,7 +829,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
                 onClick={() => {
-                  if (suppliers.length > 0) setPoSupplier(suppliers[0].name);
+                  if (suppliers.length > 0) setPoSupplier(suppliers[0].id);
                   setShowPoModal(true);
                 }}
                 type="button"
@@ -1098,8 +1118,8 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                 <label className="v2-text-xs v2-font-bold v2-text-muted">Select Supplier *</label>
                 <select className="v2-input v2-input-sm" value={poSupplier} onChange={(e) => setPoSupplier(e.target.value)}>
                   {suppliers.map((s) => (
-                    <option key={s.id} value={s.name}>
-                      {s.name} ({s.category})
+                    <option key={s.id} value={s.id}>
+                      {s.name}
                     </option>
                   ))}
                 </select>

@@ -217,7 +217,8 @@ export class PrismaCommercialRepository {
     return normalize(await db.purchaseOrder.create({ data: {
       id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId,
       orderNumber, supplierId: req.supplierId, status: req.status || "DRAFT",
-      totalAmount, notes: req.notes ?? null, createdById: ctx.userId, approvedById: ctx.userId,
+      totalAmount, notes: req.notes ?? null, createdById: ctx.userId,
+      approvedById: req.status === "APPROVED" ? (ctx.userId || null) : null,
       orderedAt: req.orderedAt ? new Date(req.orderedAt) : undefined, items: { create: items },
     }, include: { items: true } }));
   }
