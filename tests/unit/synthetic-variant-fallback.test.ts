@@ -3,7 +3,7 @@ import { PrismaAtomicCommercialFinanceService } from "@kwakopos2/database";
 import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 
-describe("Synthetic Fallback Variant Auto-Provisioning", () => {
+describe("Synthetic Variant Fail-Closed Governance", () => {
   let tenantCtx: TenantContext;
   let mockDb: any;
   let mockStore: {
@@ -161,12 +161,11 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
     };
   });
 
-  it("auto-provisions synthetic variant when sale references ${productId}-default", async () => {
+  it("rejects synthetic variant fabrication when a sale references an unregistered variant", async () => {
     const service = new PrismaAtomicCommercialFinanceService(mockDb);
     const productId = randomUUID();
     const syntheticVariantId = `${productId}-default`;
 
-    // Parent product exists, but no variants were defined yet
     mockStore.products.set(productId, {
       id: productId,
       tenantId: tenantCtx.tenantId,
@@ -177,35 +176,14 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
       costPrice: 600,
     });
 
-    const saleReq = {
+    await expect(service.createSale(tenantCtx, {
       id: randomUUID(),
       idempotencyKey: `SALE-${randomUUID()}`,
-      items: [
-        {
-          productId,
-          variantId: syntheticVariantId,
-          quantity: 3,
-          unitPrice: 1000,
-          unitCost: 600,
-        },
-      ],
-      payments: [
-        {
-          amount: 3000,
-          paymentMethod: "CASH",
-        },
-      ],
-    };
+      items: [{ productId, variantId: syntheticVariantId, quantity: 3, unitPrice: 1000, unitCost: 600 }],
+      payments: [{ amount: 3000, paymentMethod: "BANK" }],
+    })).rejects.toThrow("FINANCE_VARIANT_BOUNDARY_VIOLATION");
 
-    // Should succeed and auto-create synthetic variant instead of throwing FINANCE_VARIANT_BOUNDARY_VIOLATION
-    const result = await service.createSale(tenantCtx, saleReq);
-    expect(result.sale).toBeDefined();
-
-    // Verify synthetic variant was created in store
-    const createdVariant = mockStore.variants.get(syntheticVariantId);
-    expect(createdVariant).toBeDefined();
-    expect(createdVariant.attributes?.isSynthetic).toBe(true);
-    expect(createdVariant.name).toBe("Standard");
+    expect(mockStore.variants.has(syntheticVariantId)).toBe(false);
   });
 
   it("detects oversell and logs conflict in sync_conflict_record", async () => {
