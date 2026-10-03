@@ -35,6 +35,8 @@ jobs:
         run: npm ci
       - name: Database Generation
         run: npm run db:generate
+      - name: Generate Release Manifest
+        run: npx tsx scripts/release/generate-release-manifest.ts
       - name: Lint
         run: npm run lint
       - name: Build
