@@ -642,8 +642,6 @@ const now = new Date();
             AND "createdAt" >= $3 AND "createdAt" < $4`,
         ctx.tenantId, ctx.branchId, dayStart, dayEnd,
       ) as Array<{ seq: bigint | number | string }>;
-<<<<<<< HEAD
-=======
       const receiptNumber = ReceiptNumberGenerator.generate({
         tenantPrefix: ctx.tenantId.slice(0, 3),
         branchPrefix: ctx.branchId.slice(0, 3),
@@ -1278,7 +1276,6 @@ const now = new Date();
             AND "createdAt" >= $3 AND "createdAt" < $4`,
         ctx.tenantId, ctx.branchId, dayStart, dayEnd,
       ) as Array<{ seq: bigint | number | string }>;
->>>>>>> origin/main
       const receiptNumber = ReceiptNumberGenerator.generate({
         tenantPrefix: ctx.tenantId.slice(0, 3),
         branchPrefix: ctx.branchId.slice(0, 3),
