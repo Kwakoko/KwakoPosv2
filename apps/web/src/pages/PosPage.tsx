@@ -1232,6 +1232,78 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     void syncOutbox?.().catch(() => {});
   };
 
+  const openAuthoritativeShift = async () => {
+    if (!user?.id) {
+      toast.error("Authentication Required", "A signed-in cashier is required to open a shift.");
+      return;
+    }
+    const amount = Number(openingFloat);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.warning("Invalid Opening Float", "Enter a valid non-negative opening float.");
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/v1/cash-sessions", {
+        method: "POST",
+        body: JSON.stringify({ openingCash: amount, notes: `POS terminal shift` }),
+      });
+      const session = res?.data;
+      if (!session?.id || session.status !== "OPEN") throw new Error("CASH_SESSION_OPEN_FAILED");
+      setShiftOpen(true);
+      setOpeningFloat(Number(session.openingCash || 0));
+      setDeclaredCash(Number(session.openingCash || 0));
+      setShiftModal(false);
+      toast.success("Shift Opened", `Cash session ${session.sessionNumber || session.id} is now authoritative.`);
+    } catch (error) {
+      console.error("[POS] Failed to open cash session", error);
+      toast.error("Shift Open Failed", "The authoritative cash session could not be opened.");
+    }
+  };
+
+  const closeAuthoritativeShift = async () => {
+    try {
+      const activeResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const session = activeResponse?.data;
+      if (!session?.id || session.status !== "OPEN") {
+        setShiftOpen(false);
+        setShiftModal(false);
+        return;
+      }
+      const actualCash = Object.entries(cashDenominations).reduce((sum, [denom, count]) => sum + Number(denom) * Number(count), 0);
+      await apiFetch(`/api/v1/cash-sessions/${session.id}/count`, {
+        method: "POST",
+        body: JSON.stringify({ actualCash, deviceId: getOrCreatePersistentDeviceId("pos") }),
+      });
+      await apiFetch(`/api/v1/cash-sessions/${session.id}/close`, {
+        method: "POST",
+        body: JSON.stringify({ notes: "POS terminal close" }),
+      });
+      setDeclaredCash(actualCash);
+      setShiftOpen(false);
+      setShiftModal(false);
+      toast.success("Shift Closed", `Cash session ${session.sessionNumber || session.id} was closed authoritatively.`);
+    } catch (error) {
+      console.error("[POS] Failed to close cash session", error);
+      toast.error("Shift Close Failed", "The authoritative cash session could not be closed.");
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch("/api/v1/cash-sessions/active", { method: "GET" }).then((res: any) => {
+      if (!active) return;
+      const session = res?.data;
+      setShiftOpen(Boolean(session?.id && session.status === "OPEN"));
+      if (session) {
+        setOpeningFloat(Number(session.openingCash || 0));
+        setDeclaredCash(Number(session.actualCash ?? session.expectedCash ?? session.openingCash ?? 0));
+      }
+    }).catch(() => {
+      if (active) setShiftOpen(false);
+    });
+    return () => { active = false; };
+  }, [currentTenantId, currentBranchId, user?.id]);
+
   const executeReturn = () => {
     if (!selectedOrderToReturn) return;
     const totalReturnedQty = Object.values(returnItems).reduce((a, b) => a + b, 0);
@@ -3488,37 +3560,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
             {/* Action Buttons */}
             <div className="v2-flex v2-items-center v2-justify-between">
-              <button
-                type="button"
-                className="v2-btn v2-btn-secondary v2-btn-sm"
-                onClick={() => {
-                  playBeep(800, 50);
-                  toast.info("X-Report Generated", "Cash drawer audit summary sent to receipt printer spooler.");
-                }}
-              >
+              <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => {
+                playBeep(800, 50);
+                toast.info("X-Report Generated", "Cash drawer audit summary sent to receipt printer spooler.");
+              }}>
                 <Printer size={13} /> Print Shift X-Report
               </button>
               <div className="v2-flex v2-gap-2">
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => setShiftModal(false)}
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-primary v2-btn-sm"
-                  onClick={() => {
-                    playSuccessChime();
-                    toast.success("Shift Closed", "Shift reconciled and end-of-day Z-Report archived.");
-                    setShiftModal(false);
-                  }}
-                >
-                  Close Shift &amp; Till
-                </button>
+                <button type="button" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShiftModal(false)}>Close</button>
+                {shiftOpen ? (
+                  <button type="button" className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => void closeAuthoritativeShift()}>
+                    Close Shift &amp; Till
+                  </button>
+                ) : (
+                  <button type="button" className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void openAuthoritativeShift()}>
+                    Open Shift &amp; Till
+                  </button>
+                )}
               </div>
-            </div>
+            </div>            </div>
           </div>
         </div>
       )}
