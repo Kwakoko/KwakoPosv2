@@ -69,6 +69,26 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
   const { isOnline, db } = useSync();
   const { t } = useTranslation();
   const { formatCurrency, formatMoneyCompact } = useFormatters();
+  const { hasPermission } = useRbac();
+  const canCreateExpense = hasPermission("FINANCE_CREATE") || hasPermission("*");
+  const canVoidExpense = hasPermission("JOURNAL_REVERSE") || hasPermission("FINANCE_CREATE") || hasPermission("*");
+
+  const toCanonicalPaymentMethod = (value: string): "CASH" | "BANK" | "MOBILE_MONEY" | "CARD" => {
+    const normalized = String(value || "CASH").trim().toUpperCase().replace(/[ -]+/g, "_");
+    if (normalized === "MPESA" || normalized === "M_PESA" || normalized === "MOBILEMONEY" || normalized === "AIRTEL_MONEY" || normalized === "TIGO_MONEY") return "MOBILE_MONEY";
+    if (normalized === "BANK_TRANSFER" || normalized === "BANK") return "BANK";
+    if (normalized === "CARD") return "CARD";
+    return "CASH";
+  };
+
+  const fromCanonicalPaymentMethod = (value: string): string => {
+    switch (toCanonicalPaymentMethod(value)) {
+      case "MOBILE_MONEY": return "M-Pesa";
+      case "BANK": return "Bank Transfer";
+      case "CARD": return "Card";
+      default: return "Cash";
+    }
+  };
 
   // Expenses data state
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
@@ -102,29 +122,41 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
   const [newTaxDeductible, setNewTaxDeductible] = useState(true);
   const [formError, setFormError] = useState("");
 
-  // Load expenses from local DB or API
+  // Load authoritative server Expenses when online; use tenant/branch-scoped IndexedDB only while offline.
   useEffect(() => {
     let active = true;
     const loadData = async () => {
       setIsLoading(true);
       try {
         await db.ready;
-        const localExp = db.getConfigurationLocal?.(
-          "demo_expenses",
-          currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined,
-        );
-        if (Array.isArray(localExp)) {
-          if (active) setExpenses(localExp as ExpenseRecord[]);
+        const ctx = currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined;
+        if (!currentTenantId || !currentBranchId) {
+          if (active) setExpenses([]);
           return;
         }
+
         if (isOnline) {
           const res = await apiFetch<{ success: boolean; data: ExpenseRecord[] }>("/api/v1/expenses").catch(() => null);
           if (active && res && res.success && Array.isArray(res.data)) {
-            setExpenses(res.data);
+            const authoritative = res.data.map((e: any) => ({
+              ...e,
+              amount: Number(e.amount),
+              date: e.incurredAt ? String(e.incurredAt).slice(0, 10) : e.date,
+              description: e.description || e.reason || "",
+              payee: e.payee || "Unspecified Payee",
+              paymentMethod: fromCanonicalPaymentMethod(e.paymentMethod),
+              status: e.status === "VOIDED" ? "VOIDED" : e.status === "PENDING" ? "PENDING" : "PAID",
+              taxDeductible: Boolean(e.taxDeductible),
+            })) as ExpenseRecord[];
+            db.saveConfigurationLocal("expenses", authoritative, ctx);
+            setExpenses(authoritative);
             return;
           }
         }
-        if (active) setExpenses([]);
+
+        const localExp = db.getConfigurationLocal?.("expenses", ctx);
+        if (active && Array.isArray(localExp)) setExpenses(localExp as ExpenseRecord[]);
+        else if (active) setExpenses([]);
       } catch (err) {
         console.error("Failed to load expenses", err);
       } finally {
@@ -133,14 +165,11 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     };
     void loadData();
 
-    const handleDemoChange = () => {
-      void loadData();
-    };
-    window.addEventListener(DATA_CHANGED_EVENT, handleDemoChange);
-
+    const handleDataChange = () => { void loadData(); };
+    window.addEventListener(DATA_CHANGED_EVENT, handleDataChange);
     return () => {
       active = false;
-      window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleDataChange);
     };
   }, [db, isOnline, currentTenantId, currentBranchId]);
 
@@ -234,28 +263,18 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     e.preventDefault();
     setFormError("");
 
-    const numAmt = parseFloat(newAmount);
-    if (isNaN(numAmt) || numAmt <= 0) {
-      setFormError("Please enter a valid expense amount.");
-      return;
-    }
-    if (!newDescription.trim()) {
-      setFormError("Please enter a description for the expense.");
-      return;
-    }
-    if (!newPayee.trim()) {
-      setFormError("Please specify the payee / vendor.");
-      return;
-    }
+    const numAmt = Number.parseFloat(newAmount);
+    if (!Number.isFinite(numAmt) || numAmt <= 0) { setFormError("Please enter a valid expense amount."); return; }
+    if (!newDescription.trim()) { setFormError("Please enter a description for the expense."); return; }
+    if (!newPayee.trim()) { setFormError("Please specify the payee / vendor."); return; }
+    if (!currentTenantId || !currentBranchId) { setFormError("Tenant and branch context are required before recording an expense."); return; }
+    if (!canCreateExpense) { setFormError("Finance permission is required to record an expense."); return; }
 
-    if (!currentTenantId || !currentBranchId) {
-      setFormError("Tenant and branch context are required before recording an expense.");
-      return;
-    }
-
-    const voucherId = `EXP-2026-${Math.floor(100 + Math.random() * 900)}`;
+    const expenseId = window.crypto.randomUUID();
+    const idempotencyKey = `expense-${expenseId}`;
+    const canonicalPaymentMethod = toCanonicalPaymentMethod(newPaymentMethod);
     const record: ExpenseRecord = {
-      id: voucherId,
+      id: expenseId,
       tenantId: currentTenantId,
       branchId: currentBranchId,
       category: newCategory,
@@ -263,78 +282,191 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       date: newDate,
       description: newDescription.trim(),
       payee: newPayee.trim(),
-      paymentMethod: newPaymentMethod,
+      paymentMethod: fromCanonicalPaymentMethod(canonicalPaymentMethod),
       paymentRef: newPaymentRef.trim() || undefined,
       status: newStatus,
       taxDeductible: newTaxDeductible,
       createdAt: new Date().toISOString(),
     };
+    const payload = {
+      id: expenseId,
+      category: record.category,
+      amount: record.amount,
+      reason: record.description,
+      description: record.description,
+      payee: record.payee,
+      paymentMethod: canonicalPaymentMethod,
+      paymentRef: record.paymentRef,
+      status: record.status,
+      taxDeductible: record.taxDeductible,
+      tenantId: currentTenantId,
+      branchId: currentBranchId,
+      incurredAt: `${record.date}T12:00:00.000Z`,
+      idempotencyKey,
+    };
 
-    const updatedList = [record, ...expenses];
-    if (isOnline) {
-      await apiFetch("/api/v1/expenses", { method: "POST", body: JSON.stringify(record) }).catch(() => {});
-      db.saveConfigurationLocal("demo_expenses", updatedList, { tenantId: currentTenantId, branchId: currentBranchId });
-    } else {
-      const outboxItem = {
-        id: voucherId,
-        entityType: "Expense" as never,
-        entityId: voucherId,
-        operationType: "CREATE" as const,
-        payload: record as unknown as Record<string, unknown>,
-        clientCreatedAt: new Date().toISOString(),
-        idempotencyKey: voucherId,
-        status: "PENDING" as const,
-        tenantId: currentTenantId,
-        branchId: currentBranchId,
-      };
-      db.saveConfigurationLocal("demo_expenses", updatedList, { tenantId: currentTenantId, branchId: currentBranchId });
-      await db.executeAtomicMutation({
-        writes: [],
-        outboxItem,
-        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
-      });
+    try {
+      if (isOnline) {
+        const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/expenses", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const authoritative = {
+          ...record,
+          ...res.data,
+          amount: Number(res.data.amount),
+          date: String(res.data.incurredAt || record.date).slice(0, 10),
+          paymentMethod: fromCanonicalPaymentMethod(res.data.paymentMethod || canonicalPaymentMethod),
+          status: res.data.status === "VOIDED" ? "VOIDED" : res.data.status === "PENDING" ? "PENDING" : "PAID",
+          taxDeductible: Boolean(res.data.taxDeductible),
+        } as ExpenseRecord;
+        const next = [authoritative, ...expenses.filter((x) => x.id !== authoritative.id)];
+        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
+        setExpenses(next);
+      } else {
+        const next = [record, ...expenses.filter((x) => x.id !== record.id)];
+        const outboxItem = {
+          id: expenseId,
+          entityType: "Expense" as never,
+          entityId: expenseId,
+          operationType: "CREATE" as const,
+          payload: payload as Record<string, unknown>,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey,
+          status: "PENDING" as const,
+          tenantId: currentTenantId,
+          branchId: currentBranchId,
+        };
+        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
+        await db.executeAtomicMutation({
+          writes: [],
+          outboxItem,
+          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+        });
+        setExpenses(next);
+      }
+      setIsAddModalOpen(false);
+      setNewAmount(""); setNewDescription(""); setNewPayee(""); setNewPaymentRef(""); setNewStatus("PAID");
+    } catch (error: any) {
+      setFormError(error?.message || "Expense could not be recorded.");
     }
-
-    setExpenses(updatedList);
-    setIsAddModalOpen(false);
-
-    // Reset form
-    setNewAmount("");
-    setNewDescription("");
-    setNewPayee("");
-    setNewPaymentRef("");
-    setNewStatus("PAID");
   };
+
 
   // Handle Pay Voucher
   const handleConfirmPay = async () => {
-    if (!payModalItem) return;
-
-    const updated = expenses.map((item) =>
-      item.id === payModalItem.id
-        ? { ...item, status: "PAID" as const, paymentMethod: payMethod, paymentRef: payRef.trim() || undefined }
+    if (!payModalItem || !currentTenantId || !currentBranchId) return;
+    if (!canCreateExpense) return;
+    try {
+      const mutationId = window.crypto.randomUUID();
+      const canonicalPaymentMethod = toCanonicalPaymentMethod(payMethod);
+      const payload = {
+        status: "PAID",
+        paymentMethod: canonicalPaymentMethod,
+        paymentRef: payRef.trim() || undefined,
+        cashSessionId: (payModalItem as any).cashSessionId,
+        _baseUpdatedAt: (payModalItem as any).updatedAt,
+      };
+      const updated = expenses.map((item) => item.id === payModalItem.id
+        ? { ...item, status: "PAID" as const, paymentMethod: fromCanonicalPaymentMethod(canonicalPaymentMethod), paymentRef: payRef.trim() || undefined, updatedAt: new Date().toISOString() }
         : item
-    );
-    setExpenses(updated);
-    db.saveConfigurationLocal("demo_expenses", updated);
+      );
 
-    if (isOnline) {
-      await apiFetch(`/api/v1/expenses/${payModalItem.id}/pay`, {
-        method: "POST",
-        body: JSON.stringify({ paymentMethod: payMethod, paymentRef: payRef.trim() }),
-      }).catch(() => {});
+      if (isOnline) {
+        const res = await apiFetch<{ success: boolean; data: any }>(`/api/v1/expenses/${payModalItem.id}/pay`, {
+          method: "POST",
+          body: JSON.stringify({
+            paymentMethod: canonicalPaymentMethod,
+            paymentRef: payRef.trim() || undefined,
+            cashSessionId: (payModalItem as any).cashSessionId,
+            idempotencyKey: mutationId,
+          }),
+        });
+        const authoritative = {
+          ...payModalItem,
+          ...res.data,
+          amount: Number(res.data.amount),
+          date: String(res.data.incurredAt || payModalItem.date).slice(0, 10),
+          paymentMethod: fromCanonicalPaymentMethod(res.data.paymentMethod || canonicalPaymentMethod),
+        } as ExpenseRecord;
+        const next = expenses.map((item) => item.id === authoritative.id ? authoritative : item);
+        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
+        setExpenses(next);
+      } else {
+        db.saveConfigurationLocal("expenses", updated, { tenantId: currentTenantId, branchId: currentBranchId });
+        await db.executeAtomicMutation({
+          writes: [],
+          outboxItem: {
+            id: mutationId,
+            entityType: "Expense" as never,
+            entityId: payModalItem.id,
+            operationType: "UPDATE" as const,
+            payload: { ...payload, id: payModalItem.id, tenantId: currentTenantId, branchId: currentBranchId } as Record<string, unknown>,
+            clientCreatedAt: new Date().toISOString(),
+            idempotencyKey: mutationId,
+            status: "PENDING" as const,
+            tenantId: currentTenantId,
+            branchId: currentBranchId,
+          },
+          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+        });
+        setExpenses(updated);
+      }
+    } catch (error) {
+      console.error("Failed to settle expense", error);
+    } finally {
+      setPayModalItem(null);
+      setPayRef("");
     }
-
-    setPayModalItem(null);
-    setPayRef("");
   };
 
-  // Handle Delete Expense
-  const handleDelete = (id: string) => {
-    if (!window.confirm("Are you sure you want to void/delete this expense voucher?")) return;
-    const updated = expenses.filter((e) => e.id !== id);
-    setExpenses(updated);
-    db.saveConfigurationLocal("demo_expenses", updated);
+  // Handle Void Expense
+  const handleDelete = async (id: string) => {
+    if (!canVoidExpense) return;
+    const item = expenses.find((e) => e.id === id);
+    if (!item || !window.confirm("Void this expense voucher? Financial history will be retained and reversed where applicable.")) return;
+    if (!currentTenantId || !currentBranchId) return;
+    const reason = "Expense voucher voided by authorized user";
+    try {
+      const mutationId = window.crypto.randomUUID();
+      if (isOnline) {
+        const res = await apiFetch<{ success: boolean; data: any }>(`/api/v1/expenses/${id}/void`, {
+          method: "POST",
+          body: JSON.stringify({ reason, idempotencyKey: mutationId }),
+        });
+        const authoritative = {
+          ...item, ...res.data, amount: Number(res.data.amount),
+          date: String(res.data.incurredAt || item.date).slice(0, 10),
+          paymentMethod: fromCanonicalPaymentMethod(res.data.paymentMethod || item.paymentMethod),
+          status: "VOIDED" as const,
+        } as ExpenseRecord;
+        const next = expenses.map((e) => e.id === id ? authoritative : e);
+        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
+        setExpenses(next);
+      } else {
+        const next = expenses.map((e) => e.id === id ? { ...e, status: "VOIDED" as const } : e);
+        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
+        await db.executeAtomicMutation({
+          writes: [],
+          outboxItem: {
+            id: mutationId,
+            entityType: "Expense" as never,
+            entityId: id,
+            operationType: "UPDATE" as const,
+            payload: { id, tenantId: currentTenantId, branchId: currentBranchId, status: "VOIDED", voidReason: reason, _baseUpdatedAt: (item as any).updatedAt } as Record<string, unknown>,
+            clientCreatedAt: new Date().toISOString(),
+            idempotencyKey: mutationId,
+            status: "PENDING" as const,
+            tenantId: currentTenantId,
+            branchId: currentBranchId,
+          },
+          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+        });
+        setExpenses(next);
+      }
+    } catch (error) {
+      console.error("Failed to void expense", error);
+    }
   };
 
   // Export CSV
@@ -379,9 +511,9 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
           <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={handleExportCsv} type="button">
             <Download size={13} /> {t("expenses.exportVouchers") || "Export CSV"}
           </button>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setIsAddModalOpen(true)} type="button">
+          {canCreateExpense && <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setIsAddModalOpen(true)} type="button">
             <Plus size={13} /> {t("expenses.recordExpense") || "Record Expense"}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -592,7 +724,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                         >
                           <Eye size={13} />
                         </button>
-                        {exp.status === "PENDING" && (
+                        {exp.status === "PENDING" && canCreateExpense && (
                           <button
                             className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                             onClick={() => {
@@ -606,15 +738,15 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                             <Check size={13} style={{ color: "var(--success)" }} />
                           </button>
                         )}
-                        <button
+                        {canVoidExpense && <button
                           className="v2-btn v2-btn-ghost v2-btn-icon-sm"
-                          onClick={() => handleDelete(exp.id)}
+                          onClick={() => void handleDelete(exp.id)}
                           title="Delete Voucher"
                           type="button"
                           style={{ color: "var(--danger)" }}
                         >
                           <Trash2 size={13} />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
