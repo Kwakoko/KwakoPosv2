@@ -5147,70 +5147,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalFinanceTreasuryService.getDashboardMetrics(tenantId) });
   });
 
-  // ── Phase 36 — Supply Chain Operating Layer (KSCOL v1.0.0) ──
+  // ── Supply Chain Operating Layer — PostgreSQL-authoritative Purchasing ──
   server.get("/api/v1/supply-chain/suppliers", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
-    return reply.status(200).send({ success: true, data: globalSupplyChainService.listSuppliers(tenantId) });
+    return reply.status(200).send({ success: true, data: await commercialRepository.getSuppliers(req.tenantContext!) });
   });
 
   server.post("/api/v1/supply-chain/suppliers", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.registerSupplier(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    const validated = CreateSupplierRequestSchema.parse(req.body);
+    const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.post("/api/v1/supply-chain/suppliers/:id/scorecard", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.calculateSupplierScorecard({ ...body, supplierId: id });
-    return reply.status(result.success ? 200 : 422).send(result);
+    const scorecard = await commercialRepository.getSupplierScorecard(req.tenantContext!, id);
+    return reply.status(200).send({ success: true, data: scorecard });
   });
 
   server.post("/api/v1/supply-chain/purchase-orders", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.createPurchaseOrder(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    const body = CreatePurchaseOrderRequestSchema.parse(req.body);
+    const result = await commercialRepository.createPurchaseOrder(req.tenantContext!, body);
+    return reply.status(201).send({ success: true, data: result });
   });
 
   server.post("/api/v1/supply-chain/purchase-orders/:id/approve", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.approvePurchaseOrder(id, body.approvalRef || "APR-001", body.approvedBy || "USR-MGR");
-    return reply.status(result.success ? 200 : 422).send(result);
+    const result = await commercialRepository.approvePurchaseOrder(req.tenantContext!, id);
+    return reply.status(200).send({ success: true, data: result });
   });
 
   server.post("/api/v1/supply-chain/purchase-orders/:id/send", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.sendPurchaseOrder(id, body.sentBy || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    const result = await commercialRepository.sendPurchaseOrder(req.tenantContext!, id);
+    return reply.status(200).send({ success: true, data: result });
   });
 
-  server.post("/api/v1/supply-chain/shipments", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.trackShipment(body);
-    return reply.status(result.success ? 201 : 422).send(result);
-  });
-
-  server.post("/api/v1/supply-chain/receiving", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.processGoodsReceiving(body);
-    return reply.status(result.success ? 201 : 422).send(result);
-  });
+  // Shipment/receiving records belong to the dedicated logistics subsystem; do not expose the legacy in-memory engine as production authority.
+  server.post("/api/v1/supply-chain/shipments", async (_req, reply) => reply.status(501).send({ success: false, error: { code: "SUPPLY_CHAIN_PERSISTENCE_REQUIRED", message: "Shipment persistence is not enabled in the production PostgreSQL model." } }));
+  server.post("/api/v1/supply-chain/receiving", async (_req, reply) => reply.status(501).send({ success: false, error: { code: "SUPPLY_CHAIN_PERSISTENCE_REQUIRED", message: "Use /api/v1/purchases/receipts for authoritative goods receiving." } }));
 
   server.post("/api/v1/supply-chain/3way-match", async (req, reply) => {
-    const body = z.object({
-      poId: z.string().uuid(), receivingId: z.string().uuid(), invoiceRef: z.string().min(1),
-      invoiceAmount: z.number().nonnegative(), approvedBy: z.string().optional(),
-    }).parse(req.body);
+    const body = z.object({ poId: z.string().uuid(), receivingId: z.string().uuid(), invoiceRef: z.string().min(1), invoiceAmount: z.number().nonnegative(), approvedBy: z.string().optional() }).parse(req.body);
     const result = await commercialRepository.performThreeWayMatch(req.tenantContext!, body);
     return reply.status(200).send({ success: true, data: result });
   });
