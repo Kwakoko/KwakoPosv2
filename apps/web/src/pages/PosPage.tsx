@@ -242,11 +242,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [showQuickKeys, setShowQuickKeys] = useState(true);
   const [lineDiscountModal, setLineDiscountModal] = useState<{ index: number; itemName: string; currentPercent: number } | null>(null);
   const [customLineDiscountInput, setCustomLineDiscountInput] = useState("");
-  const [customerOptions, setCustomerOptions] = useState<string[]>([
-    "Walk-In Customer",
-    "Amani Mwakalundwa (VIP Customer)",
-    "Baraka Juma Msimbe",
-  ]);
+  const [customerOptions, setCustomerOptions] = useState<string[]>(["Walk-In Customer"]);
 
   useEffect(() => {
     let active = true;
@@ -394,10 +390,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [lastSale, setLastSale] = useState<any | null>(null);
 
   // Shift & Cash Drawer State
-  const [shiftOpen, setShiftOpen] = useState(true);
+  const [shiftOpen, setShiftOpen] = useState(false);
   const [shiftModal, setShiftModal] = useState(false);
-  const [openingFloat, setOpeningFloat] = useState(150000);
-  const [declaredCash, setDeclaredCash] = useState(150000);
+  const [openingFloat, setOpeningFloat] = useState(0);
+  const [declaredCash, setDeclaredCash] = useState(0);
   const [cashDenominations, setCashDenominations] = useState<Record<number, number>>({ 10000: 10, 5000: 6, 2000: 5, 1000: 10, 500: 0 });
 
   // Supervisor PIN Modal
@@ -934,10 +930,24 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return true;
   };
 
-  const handleInitiateCheckout = () => {
+  const handleInitiateCheckout = async () => {
     if (!validateSaleProceed()) return;
-    setCashReceived(cartGrandTotal);
-    setCheckoutModal(true);
+    try {
+      await db.ready;
+      const session = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const activeSession = session?.data ?? null;
+      if (!activeSession?.id || activeSession.status !== "OPEN") {
+        setShiftOpen(false);
+        setShiftModal(true);
+        toast.warning("Open Shift Required", "Open an authoritative cash session before checkout.");
+        return;
+      }
+      setShiftOpen(true);
+      setCashReceived(cartGrandTotal);
+      setCheckoutModal(true);
+    } catch {
+      toast.error("Shift Verification Failed", "The terminal could not verify the active cash session.");
+    }
   };
 
   // Complete Sale & Checkout
@@ -946,18 +956,23 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
     if (paymentMethod === "Split") {
       const splitTotal = splitAmounts.Cash + splitAmounts.MPesa + splitAmounts.Card + splitAmounts.Bank;
-      if (splitTotal < cartGrandTotal) {
+      if (Math.abs(splitTotal - cartGrandTotal) > 0.005) {
         toast.warning("Split Tender Incomplete", `Total tendered (${money(splitTotal)}) is less than due (${money(cartGrandTotal)}).`);
         return;
       }
     }
 
-    const saleId = `SALE-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const effectivePaid = paymentMethod === "Cash" ? Math.max(cashReceived, cartGrandTotal) : cartGrandTotal;
+    const saleId = safeUUID();
+    const effectivePaid = paymentMethod === "Cash" ? cashReceived : paymentMethod === "Split" ? (splitAmounts.Cash + splitAmounts.MPesa + splitAmounts.Card + splitAmounts.Bank) : cartGrandTotal;
+    if (paymentMethod === "Cash" && cashReceived < cartGrandTotal) {
+      toast.warning("Insufficient Cash", `Tendered (${money(cashReceived)}) is less than due (${money(cartGrandTotal)}).`);
+      return;
+    }
 
     const mappedItems = cart.map((i) => {
       const unitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
-      const variantId = i.variantId || `${i.product.id}-default`;
+      if (!i.variantId && !i.isCustom) throw new Error(`POS_VARIANT_REQUIRED:${i.product.id}`);
+      const variantId = i.variantId || `${i.product.id}-custom`;
       const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
       return {
         productId: i.product.id,
@@ -1040,13 +1055,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       receiptNumber: saleId,
       tenantId: currentTenantId,
       branchId: currentBranchId,
-      deviceId: "pos-terminal",
+      deviceId: paymentDeviceId,
       operationId: saleId,
-      idempotencyKey: saleId,
+      idempotencyKey: `${paymentDeviceId}/${saleId}`,
       customer: selectedCustomer,
       customerName: selectedCustomer,
-      cashierId: user?.id || "USER-01",
-      cashierName: user?.name || "Cashier",
+      cashierId: user?.id || "",
+      cashierName: user?.name || "",
       items: mappedItems,
       payments,
       cart: [...cart],
@@ -1078,8 +1093,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     // Atomic local sale boundary: sale + receipt + credit-customer projection + Sale outbox commit together.
     const receiptRecord = {
       id: saleId, receiptNumber: saleId, transactionId: saleId, transactionType: "POS_SALE",
-      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "USER-01",
-      cashierName: user?.name || "Cashier", customerId: "CUST-WALKIN", customerName: selectedCustomer,
+      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "",
+      cashierName: user?.name || "", customerId: selectedCustomer === "Walk-In Customer" ? null : undefined, customerName: selectedCustomer,
       subtotal: cartSubtotal, discountTotal: discountAmount, taxTotal: taxAmount, selectedTaxRate,
       taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
       changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
