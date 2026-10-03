@@ -59,6 +59,7 @@ export interface OutboxItem {
     | "PurchaseOrder"
     | "PurchaseReceipt"
     | "Payment"
+    | "Expense"
     | "User"
     | "Receipt"
     | string;
@@ -155,6 +156,7 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
   if (item.entityType === "PurchaseOrder") return 80;
   if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
+  if (item.entityType === "Expense") return 95;
   if (item.entityType === "Payment" || item.entityType === "CashSession") return 100;
   if (
     item.entityType.startsWith("Plugin:") ||
@@ -1338,6 +1340,7 @@ export class LocalIndexedDbStore {
     const categories = Array.isArray(delta.categories) ? delta.categories : [];
     const brands = Array.isArray(delta.brands) ? delta.brands : [];
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
+    const expenses = Array.isArray((delta as any).expenses) ? (delta as any).expenses : [];
     let appliedCount = 0;
 
     if (!this.nativeDb) {
@@ -1376,6 +1379,19 @@ export class LocalIndexedDbStore {
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
       }
+      if (expenses.length) {
+        const ctxTenant = String((expenses[0] as any).tenantId || "");
+        const ctxBranch = String((expenses[0] as any).branchId || "");
+        const existingExpenses = Array.isArray(this.getConfigurationLocal("expenses", ctxTenant && ctxBranch ? { tenantId: ctxTenant, branchId: ctxBranch } : undefined))
+          ? this.getConfigurationLocal("expenses", { tenantId: ctxTenant, branchId: ctxBranch }) : [];
+        const merged = new Map((existingExpenses as any[]).map((e: any) => [String(e.id), e]));
+        for (const expense of expenses) {
+          if (this.protectServerRecord("Expense", expense.id)) continue;
+          merged.set(String(expense.id), expense);
+          appliedCount += 1;
+        }
+        this.saveConfigurationLocal("expenses", Array.from(merged.values()), { tenantId: ctxTenant, branchId: ctxBranch });
+      }
       for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
       if (categories.length) {
         const tenantId = String((categories[0] as any).tenantId || "");
@@ -1403,6 +1419,7 @@ export class LocalIndexedDbStore {
     const adjustmentsStore = tx.objectStore("stockAdjustments");
     const customersStore = tx.objectStore("customers");
     const suppliersStore = tx.objectStore("suppliers");
+    const configStore = tx.objectStore("configuration");
 
     for (const product of products) {
       if (
@@ -1450,6 +1467,20 @@ export class LocalIndexedDbStore {
       suppliersStore.put(toIndexedDbCloneable(supplier), supplier.id);
       this.suppliers.set(supplier.id, supplier);
       appliedCount += 1;
+    }
+    if (expenses.length) {
+      const ctxTenant = String((expenses[0] as any).tenantId || "");
+      const ctxBranch = String((expenses[0] as any).branchId || "");
+      const configKey = ctxTenant + ":" + ctxBranch + ":expenses";
+      const currentValue = this.getConfigurationLocal("expenses", { tenantId: ctxTenant, branchId: ctxBranch });
+      const merged = new Map((Array.isArray(currentValue) ? currentValue : []).map((e: any) => [String(e.id), e]));
+      for (const expense of expenses) {
+        if (this.protectServerRecord("Expense", expense.id)) continue;
+        merged.set(String(expense.id), expense);
+        appliedCount += 1;
+      }
+      configStore.put(toIndexedDbCloneable({ key: "expenses", value: Array.from(merged.values()), tenantId: ctxTenant, branchId: ctxBranch, updatedAt: delta.serverTimestamp }), configKey);
+      this.configuration.set(configKey, { key: "expenses", value: Array.from(merged.values()), tenantId: ctxTenant, branchId: ctxBranch, updatedAt: delta.serverTimestamp });
     }
     for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
     tx.objectStore("syncMetadata").put(delta.serverTimestamp, "lastSyncTime");
@@ -1527,6 +1558,7 @@ export class LocalIndexedDbStore {
     const sales = Array.isArray((snapshot as any).sales) ? (snapshot as any).sales : [];
     const payments = Array.isArray((snapshot as any).payments) ? (snapshot as any).payments : [];
     const purchaseReceipts = Array.isArray((snapshot as any).purchaseReceipts) ? (snapshot as any).purchaseReceipts : [];
+    const expenses = Array.isArray((snapshot as any).expenses) ? (snapshot as any).expenses : [];
 
     const tenantId = String(ctx?.tenantId || (snapshot as any).tenantId || products[0]?.tenantId || "");
     const branchId = String(ctx?.branchId || (snapshot as any).branchId || products[0]?.branchId || "branch-default");
@@ -1554,6 +1586,13 @@ export class LocalIndexedDbStore {
     const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
     const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
     const brandValue = { key: "inventory_brands_meta", value: brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
+    const pendingExpenseItems = pending.filter((item) => item.entityType === "Expense");
+    const localExpenses = this.getConfigurationLocal("expenses", { tenantId, branchId });
+    const protectedExpenseIds = new Set(pendingExpenseItems.map((item) => String(item.entityId)));
+    const mergedExpenses = new Map<string, any>();
+    for (const row of (Array.isArray(expenses) ? expenses : [])) if (!protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
+    for (const row of (Array.isArray(localExpenses) ? localExpenses : [])) if (protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
+    const expenseValue = { key: "expenses", value: Array.from(mergedExpenses.values()), tenantId, branchId, updatedAt: snapshot.snapshotTimestamp };
 
     if (!this.nativeDb) {
       for (const store of replaceStores) {
@@ -1564,6 +1603,8 @@ export class LocalIndexedDbStore {
       }
       if (!pendingCatalogTypes.has("Category")) this.configuration.set(tenantId + ":" + branchId + ":inventory_categories_meta", categoryValue);
       if (!pendingCatalogTypes.has("Brand")) this.configuration.set(tenantId + ":" + branchId + ":inventory_brands_meta", brandValue);
+      this.configuration.set(tenantId + ":" + branchId + ":expenses", expenseValue);
+      this.persist("configuration", tenantId + ":" + branchId + ":expenses", expenseValue);
       for (const prodId of this.products.keys()) this.recalculateProductStockLocal(prodId);
       this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastSyncTime"), snapshot.snapshotTimestamp);
       this.setSyncMetadata(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
@@ -1586,6 +1627,7 @@ export class LocalIndexedDbStore {
     const configStore = tx.objectStore("configuration");
     if (!pendingCatalogTypes.has("Category")) configStore.put(toIndexedDbCloneable(categoryValue), tenantId + ":" + branchId + ":inventory_categories_meta");
     if (!pendingCatalogTypes.has("Brand")) configStore.put(toIndexedDbCloneable(brandValue), tenantId + ":" + branchId + ":inventory_brands_meta");
+    configStore.put(toIndexedDbCloneable(expenseValue), tenantId + ":" + branchId + ":expenses");
     const md = tx.objectStore("syncMetadata");
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastSyncTime"));
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"));
@@ -1605,6 +1647,7 @@ export class LocalIndexedDbStore {
     const allConfig = this.configuration;
     if (!pendingCatalogTypes.has("Category")) allConfig.set(tenantId + ":" + branchId + ":inventory_categories_meta", categoryValue);
     if (!pendingCatalogTypes.has("Brand")) allConfig.set(tenantId + ":" + branchId + ":inventory_brands_meta", brandValue);
+    allConfig.set(tenantId + ":" + branchId + ":expenses", expenseValue);
     for (const prodId of this.products.keys()) this.recalculateProductStockLocal(prodId);
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastSyncTime"), snapshot.snapshotTimestamp);
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
