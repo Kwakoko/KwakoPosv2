@@ -6,53 +6,7 @@ export class ReceiptService {
   constructor(private repo: ScopedReceiptRepository = globalReceiptRepository) {}
 
   async createReceipt(ctx: TenantContext, req: CreateReceiptRequest): Promise<ReceiptDTO> {
-    const timestamp = new Date().toISOString();
-    const receiptNumber = ReceiptNumberGenerator.generate({
-      tenantPrefix: ctx.tenantId.slice(0, 3),
-      branchPrefix: ctx.branchId.slice(0, 3),
-      sequenceType: "DAILY",
-    });
-
-    let subtotal = 0;
-    let taxTotal = 0;
-    let discountTotal = 0;
-    for (const item of req.items) {
-      const disc = item.discount || 0;
-      const taxR = item.taxRate || 0;
-      const itemSub = item.qty * item.unitPrice - disc;
-      const taxAmt = itemSub * (taxR / 100);
-      subtotal += item.qty * item.unitPrice;
-      discountTotal += disc;
-      taxTotal += taxAmt;
-    }
-    const grandTotal = subtotal - discountTotal + taxTotal;
-
-    const digitalSignature = ReceiptEngine.calculateDigitalSignature(
-      receiptNumber,
-      req.transactionId,
-      grandTotal,
-      timestamp
-    );
-
-    const verificationUrl = process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt";
-    const qrCodePayload = ReceiptEngine.generateQrCodePayload(
-      `RCPT-${Date.now()}`,
-      receiptNumber,
-      req.transactionId,
-      verificationUrl,
-      digitalSignature
-    );
-
-    const barcodePayload = ReceiptEngine.generateBarcodePayload(receiptNumber);
-
-    return this.repo.createReceipt(ctx, {
-      ...req,
-      receiptNumber,
-      digitalSignature,
-      qrCodePayload,
-      barcodePayload,
-      signatureTimestamp: timestamp,
-    });
+    return this.repo.createReceipt(ctx, req);
   }
 
   async getReceiptById(ctx: TenantContext, id: string): Promise<ReceiptDTO | null> {
