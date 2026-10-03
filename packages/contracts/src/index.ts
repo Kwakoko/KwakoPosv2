@@ -732,6 +732,7 @@ export type CreateStockAdjustmentRequest = z.infer<typeof CreateStockAdjustmentR
 export const PurchaseOrderStatusEnum = z.enum([
   "DRAFT",
   "APPROVED",
+  "SENT",
   "PARTIALLY_RECEIVED",
   "RECEIVED",
   "CANCELLED",
