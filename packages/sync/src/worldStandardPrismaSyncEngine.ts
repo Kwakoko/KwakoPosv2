@@ -966,7 +966,7 @@ const now = new Date();
       ]);
 
     const discrepancies: import("@kwakopos2/contracts").SyncReconciliationDiscrepancy[] = [];
-    const serverProductIds = new Set(serverProducts.map((row) => row.id));
+    const serverProductIds = new Set(serverProducts.map((row: any) => row.id));
     const compareIds = (entityType: string, serverIds: string[], clientIds: string[]) => {
       const serverSet = new Set(serverIds.map(String));
       const clientSet = new Set(clientIds.map(String));
@@ -988,9 +988,9 @@ const now = new Date();
       }
     };
 
-    compareIds("Product", serverProducts.map((row) => row.id), manifest.productIds || []);
-    compareIds("ProductVariant", serverVariants.map((row) => row.id), manifest.variantIds || []);
-    compareIds("StockLedger", serverLedger.map((row) => row.id), manifest.ledgerIds || []);
+    compareIds("Product", serverProducts.map((row: any) => row.id), manifest.productIds || []);
+    compareIds("ProductVariant", serverVariants.map((row: any) => row.id), manifest.variantIds || []);
+    compareIds("StockLedger", serverLedger.map((row: any) => row.id), manifest.ledgerIds || []);
 
     const serverBalances = new Map<string, number>();
     for (const row of serverLedger) {
@@ -1039,9 +1039,9 @@ const now = new Date();
       serverCounts,
       integrityChecksum: computePayloadChecksum({
         serverCounts,
-        serverProducts: serverProducts.map((row) => row.id).sort(),
-        serverVariants: serverVariants.map((row) => row.id).sort(),
-        serverLedger: serverLedger.map((row) => row.id).sort(),
+        serverProducts: serverProducts.map((row: any) => row.id).sort(),
+        serverVariants: serverVariants.map((row: any) => row.id).sort(),
+        serverLedger: serverLedger.map((row: any) => row.id).sort(),
         serverBalances: Object.fromEntries([...serverBalances.entries()].sort()),
       }),
       };
