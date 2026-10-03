@@ -27,6 +27,8 @@ describe("POS production closure gates", () => {
     expect(atomic).not.toContain("OFFLINE_POS_FALLBACK");
     expect(legacy).not.toContain("OFFLINE_POS_FALLBACK");
     expect(atomic).toContain("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+    expect(atomic).toContain("INSUFFICIENT_STOCK");
+    expect(atomic).toContain("CREDIT_CUSTOMER_BOUNDARY_VIOLATION");
     expect(legacy).toContain("POS_VARIANT_NOT_FOUND");
   });
 
