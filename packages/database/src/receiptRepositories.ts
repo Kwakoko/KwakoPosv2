@@ -522,7 +522,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       ]);
 
       return {
-        receipts: rows.map((r) => this.mapPrismaReceipt(r)),
+        receipts: rows.map((r: any) => this.mapPrismaReceipt(r)),
         total,
         page,
         limit,
@@ -620,7 +620,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       const rows = await this.prisma.receiptTemplate.findMany({
         where: { tenantId: ctx.tenantId },
       });
-      return rows.map((t) => ({
+      return rows.map((t: any) => ({
         id: t.id,
         tenantId: t.tenantId,
         branchId: t.branchId || undefined,
@@ -722,7 +722,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       const cashierMap = new Map<string, { cashierName: string; count: number; total: number }>();
       const branchMap = new Map<string, { count: number; total: number }>();
 
-      for (const r of rows) {
+      for (const r of rows as any[]) {
         if (r.status === "CANCELLED") cancelledCount++;
         if (r.status === "REFUNDED") refundedCount++;
         if (r.status === "PENDING_SYNC") pendingSyncCount++;
@@ -746,7 +746,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         }
       }
 
-      const todayCount = rows.filter((r) => r.status === "COMPLETED").length;
+      const todayCount = rows.filter((r: any) => r.status === "COMPLETED").length;
       const averageSale = todayCount > 0 ? todayTotal / todayCount : 0;
 
       return {
