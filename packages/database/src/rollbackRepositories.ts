@@ -233,7 +233,7 @@ export class PrismaRollbackRepository extends ScopedRollbackRepository {
     if (filters?.riskLevel) where.riskLevel = filters.riskLevel;
     if (filters?.scope) where.rollbackScope = filters.scope;
     const rows = await this.db.rollbackRequest.findMany({ where, orderBy: { createdAt: "desc" } });
-    return rows.map((row) => this.mapRequest(row));
+    return rows.map((row: any) => this.mapRequest(row));
   }
 
   override async acquireLock(lock: RollbackExecutionLock): Promise<boolean> {
@@ -277,7 +277,7 @@ export class PrismaRollbackRepository extends ScopedRollbackRepository {
 
   override async getAuditEvents(requestId?: string, tenantId?: string): Promise<RollbackAuditEvent[]> {
     const rows = await this.db.rollbackAuditEvent.findMany({ where: { rollbackRequestId: requestId, tenantId }, orderBy: { timestamp: "asc" } });
-    return rows.map((row) => this.mapAudit(row));
+    return rows.map((row: any) => this.mapAudit(row));
   }
 
   override async setSyncBarrier(tenantId: string, branchId: string | null, active: boolean): Promise<void> {
