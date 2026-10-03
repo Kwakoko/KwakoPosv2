@@ -189,13 +189,37 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   useEffect(() => {
     try {
-      if (cart.length > 0) {
-        localStorage.setItem(activeCartKey, JSON.stringify(cart));
-      } else {
-        localStorage.removeItem(activeCartKey);
-      }
+      if (cart.length > 0) localStorage.setItem(activeCartKey, JSON.stringify(cart));
+      else localStorage.removeItem(activeCartKey);
     } catch {}
-  }, [cart, activeCartKey]);
+    try {
+      db.saveConfigurationLocal(
+        "pos_active_cart",
+        cart,
+        currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
+      );
+    } catch (error) {
+      console.warn("[POS] Failed to persist active cart to IndexedDB", error);
+    }
+  }, [cart, activeCartKey, db, currentTenantId, currentBranchId]);
+
+  useEffect(() => {
+    let active = true;
+    const hydrateActiveCart = async () => {
+      try {
+        await db.ready;
+        const persisted = db.getConfigurationLocal(
+          "pos_active_cart",
+          currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
+        );
+        if (active && Array.isArray(persisted)) setCart(persisted);
+      } catch (error) {
+        console.warn("[POS] Failed to hydrate active cart from IndexedDB", error);
+      }
+    };
+    void hydrateActiveCart();
+    return () => { active = false; };
+  }, [db, currentTenantId, currentBranchId]);
 
   const [discountPercent, setDiscountPercent] = useState(0);
 
