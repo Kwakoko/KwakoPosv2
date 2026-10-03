@@ -170,6 +170,13 @@ export class PrismaCommercialRepository {
     return normalize(await db.purchaseOrder.findMany({ where: tenantWhere(ctx), include: { items: true }, orderBy: { createdAt: "desc" } }));
   }
 
+  async approvePurchaseOrder(ctx: TenantContext, id: string) {
+    const po = await db.purchaseOrder.findFirst({ where: { id, ...tenantWhere(ctx) } });
+    if (!po) throw new Error("PURCHASE_ORDER_NOT_FOUND");
+    if (po.status !== "DRAFT") throw new Error(`PURCHASE_ORDER_INVALID_STATUS:${po.status}`);
+    return normalize(await db.purchaseOrder.update({ where: { id }, data: { status: "APPROVED", approvedById: ctx.userId || null } }));
+  }
+
   async createPurchaseOrder(ctx: TenantContext, req: any) {
     if (req.id) {
       const existing = await db.purchaseOrder.findFirst({ where: { id: req.id, ...tenantWhere(ctx) }, include: { items: true } });
@@ -186,7 +193,7 @@ export class PrismaCommercialRepository {
     const totalAmount = items.reduce((sum: number, item: any) => sum + Number(item.totalCost || 0), 0);
     return normalize(await db.purchaseOrder.create({ data: {
       id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId,
-      orderNumber, supplierId: req.supplierId, status: req.status || "APPROVED",
+      orderNumber, supplierId: req.supplierId, status: req.status || "DRAFT",
       totalAmount, notes: req.notes ?? null, createdById: ctx.userId, approvedById: ctx.userId,
       orderedAt: req.orderedAt ? new Date(req.orderedAt) : undefined, items: { create: items },
     }, include: { items: true } }));
