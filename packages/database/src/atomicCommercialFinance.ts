@@ -25,7 +25,34 @@ export class PrismaAtomicCommercialFinanceService {
   }
 
   private async writeJournal(tx: any, ctx: TenantContext, built: any) {
-    const j = await tx.journalEntry.create({ data: { id: built.journal.id, tenantId: ctx.tenantId, branchId: ctx.branchId, journalNumber: built.journal.journalNumber, entryDate: new Date(built.journal.entryDate), postingDate: new Date(built.journal.postingDate), sourceType: built.journal.sourceType, sourceId: built.journal.sourceId ?? null, description: built.journal.description, currency: built.journal.currency, exchangeRate: built.journal.exchangeRate ?? 1, totalDebit: built.journal.totalDebit, totalCredit: built.journal.totalCredit, status: "POSTED", isReversal: false, reversalOfJournalId: null, reversalReason: null, createdById: ctx.userId, postedById: ctx.userId, postedAt: new Date(), idempotencyKey: built.journal.idempotencyKey } });
+    const existing = await tx.journalEntry.findUnique({ where: { idempotencyKey: built.journal.idempotencyKey } }).catch(() => null);
+    if (existing) {
+      const lines = await tx.journalLine.findMany({ where: { journalEntryId: existing.id } });
+      return { journal: existing, lines };
+    }
+    const j = await tx.journalEntry.create({ data: {
+      id: built.journal.id,
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      journalNumber: built.journal.journalNumber,
+      entryDate: new Date(built.journal.entryDate),
+      postingDate: new Date(built.journal.postingDate),
+      sourceType: built.journal.sourceType,
+      sourceId: built.journal.sourceId ?? null,
+      description: built.journal.description,
+      currency: built.journal.currency,
+      exchangeRate: built.journal.exchangeRate ?? 1,
+      totalDebit: built.journal.totalDebit,
+      totalCredit: built.journal.totalCredit,
+      status: "POSTED",
+      isReversal: Boolean(built.journal.isReversal),
+      reversalOfJournalId: built.journal.reversalOfJournalId ?? null,
+      reversalReason: built.journal.reversalReason ?? null,
+      createdById: ctx.userId,
+      postedById: ctx.userId,
+      postedAt: new Date(),
+      idempotencyKey: built.journal.idempotencyKey
+    } });
     const lines = await Promise.all((built.lines || []).map((l: any) => tx.journalLine.create({ data: { id: l.id, journalEntryId: j.id, accountId: l.accountId, costCenterId: l.costCenterId ?? null, description: l.description ?? null, debit: l.debit, credit: l.credit, currency: l.currency ?? built.journal.currency, exchangeRate: l.exchangeRate ?? 1 } })));
     return { journal: j, lines };
   }
@@ -284,12 +311,207 @@ export class PrismaAtomicCommercialFinanceService {
     });
   }
 
+  private normalizeExpensePaymentMethod(value: unknown): "CASH" | "BANK" | "MOBILE_MONEY" | "CARD" {
+    const v = String(value || "CASH").trim().toUpperCase().replace(/[ -]+/g, "_");
+    if (v === "MPESA" || v === "M_PESA" || v === "MOBILEMONEY") return "MOBILE_MONEY";
+    if (v === "BANK_TRANSFER") return "BANK";
+    if (v === "CASH") return "CASH";
+    if (v === "CARD") return "CARD";
+    if (v === "BANK") return "BANK";
+    if (v === "MOBILE_MONEY" || v === "AIRTEL_MONEY" || v === "TIGO_MONEY") return "MOBILE_MONEY";
+    throw new Error("INVALID_EXPENSE_PAYMENT_METHOD");
+  }
+
+  private async resolveCashSession(tx: any, ctx: TenantContext, cashSessionId?: string, requireOpen = true) {
+    const session = cashSessionId
+      ? await tx.cashSession.findUnique({ where: { id: cashSessionId } })
+      : await tx.cashSession.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE", "CLOSE_REQUESTED"] } }, orderBy: { openedAt: "desc" } });
+    if (!session) {
+      if (cashSessionId) throw new Error("CASH_SESSION_NOT_FOUND");
+      return null;
+    }
+    if (session.tenantId !== ctx.tenantId || session.branchId !== ctx.branchId) throw new Error("FINANCE_CASH_SESSION_BOUNDARY_VIOLATION");
+    if (requireOpen && session.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
+    if (session.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
+    return session;
+  }
+
+  private async postExpenseJournal(tx: any, ctx: TenantContext, expense: any, paymentMethod: string, journalSequence: number, reversal = false, reversalOfJournalId: string | null = null, reversalReason: string | null = null) {
+    const lookup = await this.accounts(tx, ctx);
+    const built = FinancialBridge.mapExpenseToJournal(
+      ctx, expense as any, lookup.expenseDefaultAccountId, lookup as any,
+      paymentMethod === "BANK" || paymentMethod === "MOBILE_MONEY" || paymentMethod === "CARD",
+      journalSequence,
+    );
+    built.journal.isReversal = reversal;
+    built.journal.reversalOfJournalId = reversalOfJournalId;
+    built.journal.reversalReason = reversalReason;
+    if (reversal) {
+      built.journal.sourceType = "REVERSAL";
+      built.journal.idempotencyKey = `jrn-exp-void-${expense.id}`;
+    }
+    return this.writeJournal(tx, ctx, built);
+  }
+
   async recordExpense(ctx: TenantContext, req: any) {
     return this.db.$transaction(async (tx: any) => {
-      const session = req.cashSessionId ? await tx.cashSession.findUnique({ where: { id: req.cashSessionId } }) : null; if (session) { if (session.tenantId !== ctx.tenantId || session.branchId !== ctx.branchId) throw new Error("FINANCE_CASH_SESSION_BOUNDARY_VIOLATION"); if (session.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED"); }
-      const now = new Date(); const expense = await tx.expense.create({ data: { id: req.id || crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: req.cashSessionId ?? null, category: req.category, amount: req.amount, reason: req.reason, authorizedById: ctx.userId, incurredAt: now } });
-      if (session) await tx.cashSession.update({ where: { id: session.id }, data: { cashExpensesTotal: { increment: req.amount } } });
-      const lookup = await this.accounts(tx, ctx); const built = FinancialBridge.mapExpenseToJournal(ctx, expense as any, lookup.expenseDefaultAccountId, lookup as any, false, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1); await this.writeJournal(tx, ctx, built); return expense;
+      const id = req.id || randomUUID();
+      const existing = await tx.expense.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          OR: [{ id }, ...(req.idempotencyKey ? [{ idempotencyKey: String(req.idempotencyKey) }] : [])],
+        },
+      });
+      if (existing) return existing;
+
+      const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
+      const status = String(req.status || "PAID").toUpperCase();
+      if (!["PENDING", "PAID"].includes(status)) throw new Error("INVALID_EXPENSE_STATUS");
+      const cashSession = paymentMethod === "CASH" && status === "PAID"
+        ? await this.resolveCashSession(tx, ctx, req.cashSessionId, false)
+        : null;
+      if (cashSession && cashSession.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
+
+      const now = new Date();
+      const expense = await tx.expense.create({
+        data: {
+          id,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          cashSessionId: cashSession?.id ?? (req.cashSessionId ?? null),
+          category: req.category,
+          amount: req.amount,
+          reason: req.reason,
+          description: req.description || req.reason,
+          payee: req.payee || "Unspecified Payee",
+          paymentMethod,
+          paymentRef: req.paymentRef || null,
+          status,
+          taxDeductible: Boolean(req.taxDeductible),
+          authorizedById: ctx.userId,
+          paidById: status === "PAID" ? ctx.userId : null,
+          paidAt: status === "PAID" ? now : null,
+          idempotencyKey: String(req.idempotencyKey || id),
+          incurredAt: req.incurredAt ? new Date(req.incurredAt) : now,
+        },
+      });
+
+      if (status === "PAID") {
+        if (cashSession) await tx.cashSession.update({ where: { id: cashSession.id }, data: { cashExpensesTotal: { increment: req.amount } } });
+        await this.postExpenseJournal(tx, ctx, expense, paymentMethod, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      }
+
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: req.deviceId || "web",
+          action: "EXPENSE_RECORDED",
+          entityType: "Expense",
+          entityId: expense.id,
+          metadata: { status, paymentMethod, amount: Number(req.amount), cashSessionId: cashSession?.id || null, idempotencyKey: expense.idempotencyKey },
+        },
+      });
+      return expense;
+    });
+  }
+
+  async getExpenses(ctx: TenantContext) {
+    return this.db.expense.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      orderBy: { incurredAt: "desc" },
+    });
+  }
+
+  async payExpense(ctx: TenantContext, id: string, req: any) {
+    return this.db.$transaction(async (tx: any) => {
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
+      if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
+      if (expense.status === "PAID") return expense;
+
+      const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
+      const cashSession = paymentMethod === "CASH" ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true) : null;
+      const now = new Date();
+      const updated = await tx.expense.update({
+        where: { id },
+        data: {
+          status: "PAID",
+          paymentMethod,
+          paymentRef: req.paymentRef || null,
+          cashSessionId: cashSession?.id ?? expense.cashSessionId ?? null,
+          paidById: ctx.userId,
+          paidAt: now,
+        },
+      });
+      if (cashSession) await tx.cashSession.update({ where: { id: cashSession.id }, data: { cashExpensesTotal: { increment: expense.amount } } });
+      await this.postExpenseJournal(tx, ctx, updated, paymentMethod, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId || "web", action: "EXPENSE_PAID", entityType: "Expense", entityId: id,
+          metadata: { paymentMethod, amount: Number(expense.amount), paymentRef: req.paymentRef || null, cashSessionId: cashSession?.id || null, idempotencyKey: req.idempotencyKey || null },
+        },
+      });
+      return updated;
+    });
+  }
+
+  async voidExpense(ctx: TenantContext, id: string, reason: string, req: any = {}) {
+    return this.db.$transaction(async (tx: any) => {
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
+      if (expense.status === "VOIDED") return expense;
+      const now = new Date();
+
+      if (expense.status === "PAID") {
+        if (expense.cashSessionId) {
+          const session = await tx.cashSession.findUnique({ where: { id: expense.cashSessionId } });
+          if (!session || session.tenantId !== ctx.tenantId || session.branchId !== ctx.branchId) throw new Error("FINANCE_CASH_SESSION_BOUNDARY_VIOLATION");
+          if (session.status === "CLOSED") throw new Error("CANNOT_VOID_CLOSED_CASH_SESSION_EXPENSE");
+          await tx.cashSession.update({ where: { id: session.id }, data: { cashExpensesTotal: { decrement: expense.amount } } });
+        }
+
+        const original = await tx.journalEntry.findFirst({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "EXPENSE", sourceId: id, isReversal: false },
+          include: { lines: true },
+        });
+        if (!original) throw new Error("EXPENSE_SOURCE_JOURNAL_NOT_FOUND");
+
+        const built = {
+          journal: {
+            id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+            journalNumber: TransactionNumbering.formatNumber("JRN", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1),
+            entryDate: now.toISOString(), postingDate: now.toISOString(), sourceType: "REVERSAL", sourceId: id,
+            description: `Void Expense: ${expense.category}`, currency: "TZS", exchangeRate: 1,
+            totalDebit: Number(original.totalCredit), totalCredit: Number(original.totalDebit),
+            status: "POSTED", isReversal: true, reversalOfJournalId: original.id, reversalReason: reason,
+            idempotencyKey: `jrn-exp-void-${id}`,
+          },
+          lines: original.lines.map((line: any) => ({
+            id: randomUUID(), accountId: line.accountId, description: `Reversal: ${line.description || "Expense"}`,
+            debit: Number(line.credit), credit: Number(line.debit), currency: line.currency, exchangeRate: Number(line.exchangeRate || 1),
+          })),
+        };
+        await this.writeJournal(tx, ctx, built);
+        await tx.journalEntry.update({ where: { id: original.id }, data: { status: "REVERSED" } });
+      }
+
+      const updated = await tx.expense.update({
+        where: { id },
+        data: { status: "VOIDED", voidedById: ctx.userId, voidedAt: now, voidReason: reason },
+      });
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId || "web", action: "EXPENSE_VOIDED", entityType: "Expense", entityId: id,
+          metadata: { reason, priorStatus: expense.status, idempotencyKey: req.idempotencyKey || null },
+        },
+      });
+      return updated;
     });
   }
 }
