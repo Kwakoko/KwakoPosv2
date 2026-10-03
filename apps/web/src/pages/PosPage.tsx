@@ -3640,7 +3640,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                   </button>
                 )}
               </div>
-            </div>            </div>
+            </div>
           </div>
         </div>
       )}
