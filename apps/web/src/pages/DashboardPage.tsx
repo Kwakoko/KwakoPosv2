@@ -270,6 +270,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [authoritativeKpiError, setAuthoritativeKpiError] = useState<string | null>(null);
   const [activeCashSession, setActiveCashSession] = useState<any | null>(null);
   const [isLoadingAuthoritativeKpis, setIsLoadingAuthoritativeKpis] = useState(false);
+  const [revenueTimeframe, setRevenueTimeframe] = useState<'today' | '7d' | '30d' | 'month'>('7d');
   const toast = useToast();
   const [traVfdStatus, setTraVfdStatus] = useState<TraVfdIntegrationStatus | null>(null);
   const [isVfdModalOpen, setIsVfdModalOpen] = useState(false);
@@ -485,7 +486,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [suppliers, setSuppliers] = useState<LocalSupplier[]>([]);
   const [paymentMetricMode, setPaymentMetricMode] = useState<'volume' | 'count'>('volume');
   const [activePaymentIndex, setActivePaymentIndex] = useState<number | null>(null);
-  const [revenueTimeframe, setRevenueTimeframe] = useState<'today' | '7d' | '30d' | 'month'>('7d');
   const [topProductsMetric, setTopProductsMetric] = useState<'revenue' | 'units'>('revenue');
   const [selectedOrderForDrawer, setSelectedOrderForDrawer] = useState<LocalOrder | null>(null);
   const [chartActiveMetric, setChartActiveMetric] = useState<'all' | 'revenue' | 'profit' | 'cogs'>('all');
@@ -1121,7 +1121,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Discounts Allowed (Today)', Number(authoritativeKpis?.discountsToday ?? stats.todayDiscounts ?? 0)],
         ['Customer Returns / Refunds', Number(authoritativeKpis?.refundsToday ?? stats.todayRefunds ?? 0)],
         ['GAAP Net Sales Turnover', Number(authoritativeKpis?.netSalesToday ?? stats.netSales ?? 0)],
-        ['Real Gross Profit Earned', Number(authoritativeKpis?.grossProfitToday ?? stats.todayGrossProfit ?? 0)],
+        ['Real Gross Profit Earned', Number(authoritativeKpis?.grossProfit ?? stats.todayGrossProfit ?? 0)],
         ['Cost of Goods Sold (COGS)', Number(authoritativeKpis?.cogsToday ?? stats.todayCOGS ?? 0)],
         ['Blended Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`],
         ['Average Order Value (AOV)', Number(authoritativeKpis?.aov ?? stats.todayAOV ?? 0)],
@@ -1150,7 +1150,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Discounts Allowed (Today)', Number(authoritativeKpis?.discountsToday ?? stats.todayDiscounts ?? 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
         ['Refunds & Returns (Today)', Number(authoritativeKpis?.refundsToday ?? stats.todayRefunds ?? 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
         ['Net Sales Turnover (Today)', Number(authoritativeKpis?.netSalesToday ?? stats.netSales ?? 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
-        ['Real Gross Profit (Today)', Number(authoritativeKpis?.grossProfitToday ?? stats.todayGrossProfit ?? 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
+        ['Real Gross Profit (Today)', Number(authoritativeKpis?.grossProfit ?? stats.todayGrossProfit ?? 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
         ['Cost of Goods Sold (COGS)', Number(authoritativeKpis?.cogsToday ?? stats.todayCOGS ?? 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
         ['Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`, 'Profitability', 'Gross Profit / Net Sales'],
         ['Completed Orders Count', Number(authoritativeKpis?.completedOrders ?? stats.completedOrders ?? 0), 'Operations', 'Successful completed checkout sales receipts'],
