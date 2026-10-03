@@ -36,7 +36,7 @@ export interface ExpenseRecord {
   payee: string;
   paymentMethod: string;
   paymentRef?: string;
-  status: "PAID" | "PENDING";
+  status: "PAID" | "PENDING" | "VOIDED";
   taxDeductible: boolean;
   isHq?: boolean;
   branchId?: string;
