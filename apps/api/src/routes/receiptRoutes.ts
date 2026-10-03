@@ -213,7 +213,11 @@ export function receiptRoutes(server: FastifyInstance) {
   server.get("/api/v1/dashboard/kpis", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const ctx = extractTenantContext(req);
-      const snapshot = await getDashboardKpiSnapshot(ctx);
+      const requestedTimeframe = String((req.query as any)?.timeframe || "7d");
+      const timeframe = requestedTimeframe === "today" || requestedTimeframe === "30d" || requestedTimeframe === "month"
+        ? requestedTimeframe
+        : "7d";
+      const snapshot = await getDashboardKpiSnapshot(ctx, timeframe);
       return reply.send({ success: true, data: snapshot });
     } catch (err: any) {
       const message = err?.message || "Unable to load authoritative dashboard KPIs";
