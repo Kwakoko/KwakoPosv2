@@ -194,7 +194,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         .map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) }));
       setCatalogProducts(prods);
 
-      setSuppliers(Array.isArray(supplierRes.data) ? supplierRes.data : []);
+      setSuppliers((Array.isArray(supplierRes.data) ? supplierRes.data : []).map((s: any) => ({ ...s, balance: Number(s.outstandingBalance || 0), creditLimit: Number(s.creditLimit || 0) })));
       const supplierById = new Map((supplierRes.data || []).map((s: any) => [s.id, s]));
       setOrders((orderRes.data || []).map((o: any) => ({
         id: o.id, poNumber: o.orderNumber, supplierId: o.supplierId,
@@ -236,9 +236,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   }, [db, currentTenantId, currentBranchId, currentBranchName]);
 
   // Check if demo supplier or procurement records are present
-  const hasDemoData = useMemo(() => {
-    return suppliers.some(isDemoSupplier) || orders.some(isDemoOrder) || grns.some(isDemoGrn);
-  }, [suppliers, orders, grns]);
+  const hasDemoData = false; // Production Purchasing never treats valid PostgreSQL records as demo data.
 
   // Clean Fabricated Procurement Data (Pillars CLN-01, CLN-03, CLN-04)
 
