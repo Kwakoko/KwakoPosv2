@@ -1004,8 +1004,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         console.info(`[Sync] Boot-time orphan purge: removed ${purged} outbox items from old scopes.`);
       }
     } catch { /* never break the app */ }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.tenantId, user?.branchId, currentTenantId, currentBranchId]);
+  }, [db, user?.tenantId, user?.branchId, currentTenantId, currentBranchId]);
 
   // 1. Cross-tab peer convergence via BroadcastChannel
   useEffect(() => {
