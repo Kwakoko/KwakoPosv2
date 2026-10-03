@@ -26,6 +26,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate --schema packages/database/prisma/schema.prisma
       - name: Receipt authority tests
         run: npx vitest run tests/unit/receipt-management-module.test.ts tests/unit/production-api-repository-authority.test.ts
       - name: Full TypeScript build
