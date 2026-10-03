@@ -507,207 +507,118 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   ): Promise<ReceiptDTO> {
     try {
       return await this.prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.findFirst({
-        where: {
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          OR: [{ id: req.transactionId }, { saleNumber: req.transactionId }],
-        },
-        include: { lines: true, payments: true },
-      });
-      if (!sale) throw new Error("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
+        const sale = await tx.sale.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            OR: [{ id: req.transactionId }, { saleNumber: req.transactionId }],
+          },
+          include: { lines: true, payments: true },
+        });
+        if (!sale) throw new Error("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
 
-      const now = new Date();
-      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-      const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
-      await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
-      const seqRows = await tx.$queryRawUnsafe<Array<{ seq: bigint | number | string }>>(
-        `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)
-      let taxTotal = 0;
-      let discountTotal = 0;
+        const now = new Date();
+        const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+        const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
+        await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
+        const seqRows = await tx.$queryRawUnsafe<Array<{ seq: bigint | number | string }>>(
+          `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)$'))::bigint), 0) + 1 AS seq
+             FROM receipts
+            WHERE "tenantId" = $1 AND "branchId" = $2
+              AND "createdAt" >= $3 AND "createdAt" < $4`,
+          ctx.tenantId, ctx.branchId, dayStart, dayEnd,
+        );
+        const receiptNumber = ReceiptNumberGenerator.generate({
+          tenantPrefix: ctx.tenantId.slice(0, 3),
+          branchPrefix: ctx.branchId.slice(0, 3),
+          sequenceType: "DAILY",
+          sequenceNumber: Number(seqRows[0]?.seq ?? 1),
+          date: now,
+        });
 
-      const preparedItems = req.items.map((item) => {
-        const disc = item.discount || 0;
-        const taxR = item.taxRate || 0;
-        const itemSub = item.qty * item.unitPrice - disc;
-        const taxAmt = itemSub * (taxR / 100);
-        const lineTot = itemSub + taxAmt;
+        const requestItems = Array.isArray(req.items) ? req.items : [];
+        const preparedItems = sale.lines.map((line: any) => {
+          const supplied = requestItems.find((item: any) => item.variantId === line.variantId);
+          return {
+            productId: line.productId,
+            variantId: line.variantId,
+            sku: supplied?.sku || line.variantId,
+            name: supplied?.name || line.variantId,
+            qty: Number(line.quantity),
+            unitPrice: Number(line.unitPrice),
+            discount: Number(line.discountAmount),
+            taxRate: 0,
+            taxAmount: Number(line.taxAmount),
+            lineTotal: Number(line.lineTotal),
+          };
+        });
+        const subtotal = Number(sale.subtotal);
+        const discountTotal = Number(sale.discountTotal);
+        const taxTotal = Number(sale.taxTotal);
+        const grandTotal = Number(sale.grandTotal);
+        const preparedTotal = preparedItems.reduce((sum: number, item: any) => sum + item.lineTotal, 0);
+        if (Math.abs(preparedTotal - grandTotal) > 0.01 || Math.abs((subtotal - discountTotal + taxTotal) - grandTotal) > 0.01) {
+          throw new Error("RECEIPT_TOTAL_MISMATCH_WITH_AUTHORITATIVE_SALE");
+        }
 
-        subtotal += item.qty * item.unitPrice;
-        discountTotal += disc;
-        taxTotal += taxAmt;
-
-        return {
-          productId: item.productId,
-          variantId: item.variantId,
-          sku: item.sku,
-          name: item.name,
-          qty: item.qty,
-          unitPrice: item.unitPrice,
-          discount: disc,
-          taxRate: taxR,
-          taxAmount: taxAmt,
-          lineTotal: lineTot,
-        };
-      });
-
-      const grandTotal = subtotal - discountTotal + taxTotal;
-      if (Math.abs(Number(sale.grandTotal) - grandTotal) > 0.01) {
-        throw new Error("RECEIPT_TOTAL_MISMATCH_WITH_AUTHORITATIVE_SALE");
-      }
-      const signatureTimestamp = req.signatureTimestamp || now.toISOString();
-      const digitalSignature = req.digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, grandTotal, signatureTimestamp);
-      const qrCodePayload = req.qrCodePayload || ReceiptEngine.generateQrCodePayload(
-        sale.id, receiptNumber, req.transactionId,
-        process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
-        digitalSignature,
-      );
-      const barcodePayload = req.barcodePayload || ReceiptEngine.generateBarcodePayload(receiptNumber);
-      const changeAmount = Math.max(0, req.paidAmount - grandTotal);
-
-      const created = await this.prisma.receipt.create({
-        data: {
+        const signatureTimestamp = now.toISOString();
+        const digitalSignature = ReceiptEngine.calculateDigitalSignature(receiptNumber, sale.id, grandTotal, signatureTimestamp);
+        const qrCodePayload = ReceiptEngine.generateQrCodePayload(
+          sale.id,
           receiptNumber,
-          transactionId: req.transactionId,
-          transactionType: req.transactionType,
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          cashierId: req.cashierId,
-          cashierName: req.cashierName,
-          customerId: req.customerId,
-          customerName: req.customerName,
-          customerPhone: req.customerPhone,
-          customerEmail: req.customerEmail,
-          subtotal,
-          discountTotal,
-          taxTotal,
-          grandTotal,
-          paidAmount: req.paidAmount,
-          changeAmount,
-          paymentMethod: req.paymentMethod,
-          currency: req.currency || "TZS",
-          exchangeRate: req.exchangeRate || 1,
-          status: "COMPLETED",
-          deviceId: req.deviceId || "POS-DEV-001",
-          syncStatus: "SYNCED",
+          sale.id,
+          process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
           digitalSignature,
-          qrCodePayload,
-          barcodePayload,
-          notes: req.notes,
-          createdAt: new Date(signatureTimestamp),
-          items: {
-            create: preparedItems,
-          },
-          auditLogs: {
-            create: {
-              action: "CREATED",
-              actorId: ctx.userId,
+        );
+        const barcodePayload = ReceiptEngine.generateBarcodePayload(receiptNumber);
+        const paidAmount = sale.payments
+          .filter((payment: any) => payment.status === "COMPLETED")
+          .reduce((sum: number, payment: any) => sum + Number(payment.amount), 0);
+        const changeAmount = Math.max(0, paidAmount - grandTotal);
+
+        const created = await tx.receipt.create({
+          data: {
+            receiptNumber,
+            transactionId: sale.id,
+            transactionType: "POS_SALE",
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            cashierId: sale.soldById || ctx.userId,
+            cashierName: null,
+            customerId: sale.customerId,
+            subtotal,
+            discountTotal,
+            taxTotal,
+            grandTotal,
+            paidAmount,
+            changeAmount,
+            paymentMethod: sale.payments[0]?.paymentMethod || "CASH",
+            currency: req.currency || "TZS",
+            exchangeRate: 1,
+            status: "COMPLETED",
+            deviceId: req.deviceId || "POS-DEV-001",
+            syncStatus: "SYNCED",
+            digitalSignature,
+            qrCodePayload,
+            barcodePayload,
+            notes: req.notes,
+            createdAt: now,
+            items: { create: preparedItems },
+            auditLogs: {
+              create: {
+                action: "CREATED",
+                actorId: ctx.userId,
+                branchId: ctx.branchId,
+                deviceId: req.deviceId || null,
+              },
             },
           },
-        },
-        include: {
-          items: true,
-        },
+          include: { items: true },
+        });
+
+        return this.mapPrismaReceipt(created);
       });
-
-      return this.mapPrismaReceipt(created);
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-))::bigint), 0) + 1 AS seq
-           FROM receipts
-          WHERE "tenantId" = $1 AND "branchId" = $2
-            AND "createdAt" >= $3 AND "createdAt" < $4`,
-        ctx.tenantId, ctx.branchId, dayStart, dayEnd,
-      );
-      const receiptNumber = req.receiptNumber || ReceiptNumberGenerator.generate({
-        tenantPrefix: ctx.tenantId.slice(0, 3),
-        branchPrefix: ctx.branchId.slice(0, 3),
-        sequenceType: "DAILY",
-        sequenceNumber: Number(seqRows[0]?.seq ?? 1),
-        date: now,
-      });
-
-      let subtotal = 0;
-      let taxTotal = 0;
-      let discountTotal = 0;
-
-      const preparedItems = req.items.map((item) => {
-        const disc = item.discount || 0;
-        const taxR = item.taxRate || 0;
-        const itemSub = item.qty * item.unitPrice - disc;
-        const taxAmt = itemSub * (taxR / 100);
-        const lineTot = itemSub + taxAmt;
-
-        subtotal += item.qty * item.unitPrice;
-        discountTotal += disc;
-        taxTotal += taxAmt;
-
-        return {
-          productId: item.productId,
-          variantId: item.variantId,
-          sku: item.sku,
-          name: item.name,
-          qty: item.qty,
-          unitPrice: item.unitPrice,
-          discount: disc,
-          taxRate: taxR,
-          taxAmount: taxAmt,
-          lineTotal: lineTot,
-        };
-      });
-
-      const grandTotal = subtotal - discountTotal + taxTotal;
-      const changeAmount = Math.max(0, req.paidAmount - grandTotal);
-
-      const created = await this.prisma.receipt.create({
-        data: {
-          receiptNumber: req.receiptNumber,
-          transactionId: req.transactionId,
-          transactionType: req.transactionType,
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          cashierId: req.cashierId,
-          cashierName: req.cashierName,
-          customerId: req.customerId,
-          customerName: req.customerName,
-          customerPhone: req.customerPhone,
-          customerEmail: req.customerEmail,
-          subtotal,
-          discountTotal,
-          taxTotal,
-          grandTotal,
-          paidAmount: req.paidAmount,
-          changeAmount,
-          paymentMethod: req.paymentMethod,
-          currency: req.currency || "TZS",
-          exchangeRate: req.exchangeRate || 1,
-          status: "COMPLETED",
-          deviceId: req.deviceId || "POS-DEV-001",
-          syncStatus: "SYNCED",
-          digitalSignature: req.digitalSignature,
-          qrCodePayload: req.qrCodePayload,
-          barcodePayload: req.barcodePayload,
-          notes: req.notes,
-          items: {
-            create: preparedItems,
-          },
-          auditLogs: {
-            create: {
-              action: "CREATED",
-              actorId: ctx.userId,
-            },
-          },
-        },
-        include: {
-          items: true,
-        },
-      });
-
-      return this.mapPrismaReceipt(created);
     } catch (error) {
       throw error;
     }
