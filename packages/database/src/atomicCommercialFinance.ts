@@ -64,7 +64,29 @@ export class PrismaAtomicCommercialFinanceService {
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
-      for (const p of req.payments || []) { const r = PaymentEngine.processPayment({ tenantId: ctx.tenantId, branchId: ctx.branchId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider, providerReference: p.providerReference, customerId: req.customerId }); if (!r.success) throw new Error("PAYMENT_REJECTED"); payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, saleId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
+      for (const p of req.payments || []) {
+        let customerCreditLimit: number | undefined;
+        let customerCurrentBalance: number | undefined;
+        if (p.paymentMethod === "CREDIT") {
+          if (!req.customerId) throw new Error("CREDIT_CUSTOMER_REQUIRED");
+          const customer = await tx.customer.findUnique({ where: { id: req.customerId } });
+          if (!customer || customer.tenantId !== ctx.tenantId || customer.branchId !== ctx.branchId) throw new Error("CREDIT_CUSTOMER_BOUNDARY_VIOLATION");
+          customerCreditLimit = Number(customer.creditLimit || 0);
+          customerCurrentBalance = Number(customer.currentBalance || customer.outstandingBalance || 0);
+        }
+        const r = PaymentEngine.processPayment({
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          amount: p.amount,
+          paymentMethod: p.paymentMethod,
+          provider: p.provider,
+          providerReference: p.providerReference,
+          customerId: req.customerId,
+          customerCreditLimit,
+          customerCurrentBalance,
+        });
+        if (!r.success) throw new Error(r.error || "PAYMENT_REJECTED");
+        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, saleId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
       const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
       if (payments.some((p) => p.paymentMethod === "CASH")) {
