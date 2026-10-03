@@ -43,7 +43,6 @@ export class MfaRequiredError extends Error {
 export interface StoredSession {
   sessionId: string;
   accessToken?: string;
-  refreshToken?: string;
   user: LoginResponseUser;
 }
 
@@ -71,7 +70,6 @@ export function getStoredSession(): StoredSession | null {
     return {
       sessionId: parsed.sessionId,
       accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
       user: parsed.user as LoginResponseUser,
     };
   } catch {
