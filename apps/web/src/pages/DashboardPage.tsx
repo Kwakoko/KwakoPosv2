@@ -1513,7 +1513,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <div className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/70 px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>
-              Data as of: Revision {dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision}
+              Authoritative Dashboard snapshot: Revision {dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision}
               {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : ""}
             </span>
             <span>
@@ -1522,14 +1522,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
           {dashboardFreshness.isBehind && (
             <div className="rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
-              Dashboard data is behind server · Local revision: {dashboardFreshness.localRevision} · Server revision: {dashboardFreshness.serverRevision}
+              Dashboard snapshot is ahead of the local replica · Local revision: {dashboardFreshness.localRevision} · Server revision: {dashboardFreshness.serverRevision}
             </div>
           )}
         </div>
       )}
       {!isOnline && (
         <div className="rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-          Data as of: Local revision {dashboardFreshness.localRevision}
+          Offline replica state: Local revision {dashboardFreshness.localRevision}
           {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : " · Sync time unavailable"}
           {dashboardFreshness.syncEpoch ? ` · Sync epoch: ${dashboardFreshness.syncEpoch.slice(0, 8)}` : ""}
         </div>
