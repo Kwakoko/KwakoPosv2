@@ -1944,6 +1944,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: session };
   });
 
+  server.get("/api/v1/cash-sessions/:id/movements", async (req) => {
+    if (!productionPersistence) throw new Error("CASH_MOVEMENT_REQUIRES_POSTGRESQL_AUTHORITY");
+    const movements = await commercialRepository.getCashMovements(req.tenantContext!, (req.params as any).id);
+    return { success: true, data: movements };
+  });
+
+  server.post("/api/v1/cash-sessions/:id/movements", async (req, reply) => {
+    if (!productionPersistence) throw new Error("CASH_MOVEMENT_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ id: z.string().optional(), type: z.enum(["CASH_IN", "CASH_OUT", "SAFE_DROP", "BANK_DEPOSIT", "PETTY_CASH"]), amount: z.number().positive(), reason: z.string().trim().min(3).max(500), deviceId: z.string().min(1).max(128), witness: z.string().trim().max(200).optional(), approvalStatus: z.enum(["APPROVED", "PENDING"]).optional(), idempotencyKey: z.string().min(1).max(200), occurredAt: z.string().datetime().optional() }).parse({ ...req.body, cashSessionId: (req.params as any).id });
+    const movement = await commercialRepository.createCashMovement(req.tenantContext!, body);
+    return reply.status(201).send({ success: true, data: movement });
+  });
+
   server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
