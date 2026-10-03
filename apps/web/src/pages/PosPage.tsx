@@ -953,6 +953,20 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   // Complete Sale & Checkout
   const handleCompleteSale = async () => {
     if (!validateSaleProceed()) return;
+    let activeCashSession: any = null;
+    try {
+      const sessionResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      activeCashSession = sessionResponse?.data ?? null;
+    } catch {
+      toast.error("Checkout Blocked", "Unable to verify the authoritative cash session.");
+      return;
+    }
+    if (!activeCashSession?.id || activeCashSession.status !== "OPEN") {
+      setShiftOpen(false);
+      setShiftModal(true);
+      toast.warning("Open Shift Required", "Checkout requires an authoritative OPEN cash session.");
+      return;
+    }
 
     if (paymentMethod === "Split") {
       const splitTotal = splitAmounts.Cash + splitAmounts.MPesa + splitAmounts.Card + splitAmounts.Bank;
@@ -1056,6 +1070,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       tenantId: currentTenantId,
       branchId: currentBranchId,
       deviceId: paymentDeviceId,
+      cashSessionId: activeCashSession.id,
       operationId: saleId,
       idempotencyKey: `${paymentDeviceId}/${saleId}`,
       customer: selectedCustomer,
