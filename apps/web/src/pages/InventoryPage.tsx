@@ -439,7 +439,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     } catch (err) {
       console.error("[Inventory] Failed to hydrate inventory:", err);
     }
-  }, [db, currentTenantId]);
+  }, [db, currentTenantId, currentBranchId]);
 
   useEffect(() => {
     void loadInventory();
@@ -558,7 +558,48 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   // ─── Production Inventory Valuation Metrics (Weighted Average Cost Basis) ────
   const totalUniqueSkus = items.length;
   const totalStockUnits = items.reduce((sum, i) => sum + i.stock, 0);
-  const stockBuyingValue = items.reduce((sum, i) => sum + i.stock * i.buyingPrice, 0);
+
+  // Inventory valuation is derived from ledger purchase/receipt costs, not the
+  // mutable catalog buyingPrice. This keeps the UI aligned with server WAC.
+  const authoritativeWacByVariant = useMemo(() => {
+    const result = new Map<string, number>();
+    const rowsByVariant = new Map<string, any[]>();
+    for (const row of db.stockLedger.values()) {
+      const r = row as any;
+      if (r.tenantId !== currentTenantId || r.branchId !== currentBranchId || !r.variantId) continue;
+      const rows = rowsByVariant.get(String(r.variantId)) || [];
+      rows.push(r);
+      rowsByVariant.set(String(r.variantId), rows);
+    }
+    for (const [variantId, rows] of rowsByVariant) {
+      let positiveQty = 0;
+      let positiveValue = 0;
+      for (const row of rows) {
+        const change = Number(row.quantityChange ?? row.quantity ?? 0);
+        if (change > 0) {
+          positiveQty += change;
+          positiveValue += change * Number(row.unitCost ?? 0);
+        }
+      }
+      result.set(variantId, positiveQty > 0 ? positiveValue / positiveQty : 0);
+    }
+    return result;
+  }, [db, currentTenantId, currentBranchId]);
+
+  const stockBuyingValue = items.reduce((sum, item) => {
+    if (item.variants && item.variants.length > 0) {
+      return sum + item.variants.reduce(
+        (variantSum, variant) =>
+          variantSum + Number(variant.stock || 0) * Number(authoritativeWacByVariant.get(variant.id) ?? variant.buyingPrice ?? 0),
+        0,
+      );
+    }
+    const variant = [...db.productVariants.values()].find(
+      (v: any) => v.productId === item.id && v.tenantId === currentTenantId && v.branchId === currentBranchId,
+    ) as any;
+    const wac = variant ? authoritativeWacByVariant.get(variant.id) : undefined;
+    return sum + item.stock * Number(wac ?? item.buyingPrice);
+  }, 0);
   const stockSellingValue = items.reduce((sum, i) => sum + i.stock * i.sellingPrice, 0);
   const potentialProfit = stockSellingValue - stockBuyingValue;
   const avgMarginPct = stockSellingValue > 0 ? Math.round((potentialProfit / stockSellingValue) * 100) : 0;
@@ -968,7 +1009,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const prevItem = editingItem;
     const newStock = Number(editProd.stock);
     const newReorder = Number(editProd.reorderLevel);
-    const newStatus: InventoryItem["status"] = newStock === 0 ? "Out of Stock" : newStock <= newReorder ? "Low Stock" : "Active";
+    if (newStock !== prevItem.stock) {
+      toast.error(
+        "Stock Changes Use Stock Ledger",
+        "Product editing cannot mutate stock. Use Add Stock, Stock Ledger, or Physical Count so every movement is recorded against an exact variant.",
+      );
+      return;
+    }
+    const newStatus: InventoryItem["status"] = prevItem.stock === 0 ? "Out of Stock" : prevItem.stock <= newReorder ? "Low Stock" : "Active";
 
     let existing = db.products.get(prevItem.id) as any;
     if (!existing) {
@@ -993,9 +1041,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       buyingPrice: Number(editProd.buyingPrice),
       sellingPrice: Number(editProd.sellingPrice),
       price: Number(editProd.sellingPrice),
-      stock: newStock,
-      totalStock: newStock,
-      availableStock: newStock,
+      stock: Number(existing?.stock ?? existing?.totalStock ?? prevItem.stock),
+      totalStock: Number(existing?.totalStock ?? prevItem.stock),
+      availableStock: Number(existing?.availableStock ?? prevItem.stock),
       reorderLevel: newReorder,
       status: newStatus,
       batchNumber: editProd.batchNumber ? editProd.batchNumber.trim() : undefined,
@@ -1032,46 +1080,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       branchId: currentBranchId || undefined,
     });
 
-    // If stock was modified during edit, record an audit ledger adjustment
-    const stockDiff = newStock - prevItem.stock;
-    if (stockDiff !== 0) {
-      const adjOpId = `adj-edit-${Date.now()}-${prevItem.id}`;
-      db.saveStockLedgerLocal({
-        id: adjOpId,
-        productId: prevItem.id,
-        sku: prevItem.sku,
-        name: updatedRecord.name,
-        quantity: stockDiff,
-        balanceAfter: newStock,
-        unitCost: Number(editProd.buyingPrice),
-        totalCost: Math.abs(stockDiff) * Number(editProd.buyingPrice),
-        ref: `AUDIT-EDIT-${prevItem.sku}`,
-        reason: `MANUAL_PRODUCT_EDIT_STOCK_ADJUSTMENT`,
-        movementType: stockDiff > 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS",
-        timestamp: new Date().toISOString(),
-        tenantId: currentTenantId || "default",
-      } as any, currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined);
-
-      pendingOutboxes.push({
-        entityType: "StockAdjustment",
-        entityId: adjOpId,
-        operationType: "CREATE",
-        payload: {
-          productId: prevItem.id,
-          variantId: prevItem.id,
-          sku: prevItem.sku,
-          adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE",
-          quantityChange: Math.abs(stockDiff),
-          reason: "MANUAL_PRODUCT_EDIT_STOCK_ADJUSTMENT",
-          deviceId: "web-client",
-          operationId: adjOpId,
-          idempotencyKey: `ADJ-${adjOpId}`,
-        },
-        idempotencyKey: `ADJ-${adjOpId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-    }
 
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     void loadInventory();
