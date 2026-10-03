@@ -261,6 +261,26 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     };
   }, [filteredExpenses]);
 
+  const commitOfflineExpenseMutation = async (
+    next: ExpenseRecord[],
+    outboxItem: any,
+  ) => {
+    if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
+    const key = `${currentTenantId}:${currentBranchId}:expenses`;
+    const value = {
+      key: "expenses",
+      value: next,
+      tenantId: currentTenantId,
+      branchId: currentBranchId,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.executeAtomicMutation({
+      writes: [{ store: "configuration", key, value }],
+      outboxItem,
+      tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+    });
+  };
+
   // Handle Add Expense
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,6 +335,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
         setFormError("An active cash session is required to record a paid cash expense while offline.");
         return;
       }
+      if (payload.cashSessionId) record.cashSessionId = String(payload.cashSessionId);
     }
 
     try {
@@ -349,12 +370,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
           tenantId: currentTenantId,
           branchId: currentBranchId,
         };
-        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
-        await db.executeAtomicMutation({
-          writes: [],
-          outboxItem,
-          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
-        });
+        await commitOfflineExpenseMutation(next, outboxItem);
         setExpenses(next);
       }
       setIsAddModalOpen(false);
@@ -412,23 +428,19 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
         db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
         setExpenses(next);
       } else {
-        db.saveConfigurationLocal("expenses", updated, { tenantId: currentTenantId, branchId: currentBranchId });
-        await db.executeAtomicMutation({
-          writes: [],
-          outboxItem: {
-            id: mutationId,
-            entityType: "Expense" as never,
-            entityId: payModalItem.id,
-            operationType: "UPDATE" as const,
-            payload: { ...payload, id: payModalItem.id, tenantId: currentTenantId, branchId: currentBranchId } as Record<string, unknown>,
-            clientCreatedAt: new Date().toISOString(),
-            idempotencyKey: mutationId,
-            status: "PENDING" as const,
-            tenantId: currentTenantId,
-            branchId: currentBranchId,
-          },
-          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
-        });
+        const outboxItem = {
+          id: mutationId,
+          entityType: "Expense" as never,
+          entityId: payModalItem.id,
+          operationType: "UPDATE" as const,
+          payload: { ...payload, id: payModalItem.id, tenantId: currentTenantId, branchId: currentBranchId } as Record<string, unknown>,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: mutationId,
+          status: "PENDING" as const,
+          tenantId: currentTenantId,
+          branchId: currentBranchId,
+        };
+        await commitOfflineExpenseMutation(updated, outboxItem);
         setExpenses(updated);
       }
     } catch (error) {
@@ -464,23 +476,19 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
         setExpenses(next);
       } else {
         const next = expenses.map((e) => e.id === id ? { ...e, status: "VOIDED" as const } : e);
-        db.saveConfigurationLocal("expenses", next, { tenantId: currentTenantId, branchId: currentBranchId });
-        await db.executeAtomicMutation({
-          writes: [],
-          outboxItem: {
-            id: mutationId,
-            entityType: "Expense" as never,
-            entityId: id,
-            operationType: "UPDATE" as const,
-            payload: { id, tenantId: currentTenantId, branchId: currentBranchId, status: "VOIDED", voidReason: reason, _baseUpdatedAt: (item as any).updatedAt } as Record<string, unknown>,
-            clientCreatedAt: new Date().toISOString(),
-            idempotencyKey: mutationId,
-            status: "PENDING" as const,
-            tenantId: currentTenantId,
-            branchId: currentBranchId,
-          },
-          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
-        });
+        const outboxItem = {
+          id: mutationId,
+          entityType: "Expense" as never,
+          entityId: id,
+          operationType: "UPDATE" as const,
+          payload: { id, tenantId: currentTenantId, branchId: currentBranchId, status: "VOIDED", voidReason: reason, _baseUpdatedAt: (item as any).updatedAt } as Record<string, unknown>,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: mutationId,
+          status: "PENDING" as const,
+          tenantId: currentTenantId,
+          branchId: currentBranchId,
+        };
+        await commitOfflineExpenseMutation(next, outboxItem);
         setExpenses(next);
       }
     } catch (error) {
