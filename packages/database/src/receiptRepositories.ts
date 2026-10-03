@@ -77,6 +77,19 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }
   ): Promise<ReceiptDTO> {
     const now = req.signatureTimestamp || new Date().toISOString();
+    const receiptNumber = req.receiptNumber || ReceiptNumberGenerator.generate({
+      tenantPrefix: ctx.tenantId.slice(0, 3),
+      branchPrefix: ctx.branchId.slice(0, 3),
+      sequenceType: "DAILY",
+      sequenceNumber: this.receipts.size + 1,
+      date: new Date(now),
+    });
+    const digitalSignature = req.digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, Number(req.paidAmount || 0), now);
+    const qrCodePayload = req.qrCodePayload || ReceiptEngine.generateQrCodePayload(
+      `local-${receiptNumber}`, receiptNumber, req.transactionId,
+      "https://pos.kwako.app/verify-receipt", digitalSignature
+    );
+    const barcodePayload = req.barcodePayload || ReceiptEngine.generateBarcodePayload(receiptNumber);
     let subtotal = 0;
     let taxTotal = 0;
     let discountTotal = 0;
@@ -112,7 +125,7 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
 
     const receipt: ReceiptDTO = {
       id: `RCPT-ID-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      receiptNumber: req.receiptNumber,
+      receiptNumber,
       transactionId: req.transactionId,
       transactionType: req.transactionType,
       tenantId: ctx.tenantId,
@@ -135,9 +148,9 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
       status: "COMPLETED",
       deviceId: req.deviceId || "POS-DEV-001",
       syncStatus: "SYNCED",
-      digitalSignature: req.digitalSignature,
-      qrCodePayload: req.qrCodePayload,
-      barcodePayload: req.barcodePayload,
+      digitalSignature,
+      qrCodePayload,
+      barcodePayload,
       reprintCount: 0,
       notes: req.notes,
       createdAt: now,
@@ -396,7 +409,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       const now = new Date();
       const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-      const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0,10)}`;
+      const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
       await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
       const seqRows = await tx.$queryRawUnsafe<Array<{ seq: bigint | number | string }>>(
         `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)
@@ -435,7 +448,9 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
       const signatureTimestamp = req.signatureTimestamp || now.toISOString();
       const digitalSignature = req.digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, grandTotal, signatureTimestamp);
       const qrCodePayload = req.qrCodePayload || ReceiptEngine.generateQrCodePayload(
-        sale.id, receiptNumber, req.transactionId, process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt", digitalSignature
+        sale.id, receiptNumber, req.transactionId,
+        process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
+        digitalSignature,
       );
       const barcodePayload = req.barcodePayload || ReceiptEngine.generateBarcodePayload(receiptNumber);
       const changeAmount = Math.max(0, req.paidAmount - grandTotal);
