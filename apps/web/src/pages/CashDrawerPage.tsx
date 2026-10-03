@@ -312,7 +312,7 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
     } catch (err) {
       console.error("[CashDrawer] Failed to hydrate drawer:", err);
     }
-  }, [db]);
+  }, [db, isOnline]);
 
   useEffect(() => {
     void loadDrawerData();
