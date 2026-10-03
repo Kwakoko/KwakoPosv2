@@ -79,23 +79,8 @@ export class ReceiptService {
     return this.repo.updateReceiptStatus(ctx, receiptId, status, reason, actorId);
   }
 
-  async verifyReceipt(receiptNumber: string, signature?: string, tenantId?: string) {
-    const searchCtx: TenantContext = {
-      tenantId: tenantId || "TENANT-001",
-      branchId: "BRANCH-001",
-      userId: "SYSTEM-VERIFIER",
-      roles: ["AUDITOR"],
-      permissions: ["*"],
-    };
-
-    let found = await this.repo.getReceiptByNumber(searchCtx, receiptNumber);
-
-    if (!found) {
-      const searchRes = await this.repo.searchReceipts(searchCtx, { query: receiptNumber });
-      if (searchRes.receipts.length > 0) {
-        found = searchRes.receipts[0];
-      }
-    }
+  async verifyReceipt(receiptNumber: string, signature?: string) {
+    const found = await this.repo.getReceiptForPublicVerification(receiptNumber);
 
     if (!found) {
       return {
@@ -108,7 +93,9 @@ export class ReceiptService {
       };
     }
 
-    const digitalSignatureValid = ReceiptEngine.verifyReceiptSignature(found);
+    const computedSignatureValid = ReceiptEngine.verifyReceiptSignature(found);
+    const suppliedSignatureValid = !signature || signature.toLowerCase() === found.digitalSignature.toLowerCase();
+    const digitalSignatureValid = computedSignatureValid && suppliedSignatureValid;
 
     return {
       receiptNumber,
