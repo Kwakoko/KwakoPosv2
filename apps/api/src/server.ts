@@ -1917,8 +1917,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: result });
   });
 
+  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
+    return ctx;
+  };
+
   // Cash Sessions & Drawer Reconciliation
   server.post("/api/v1/cash-sessions", async (req, reply) => {
+    assertCashDrawerAuthority(req, "open");
     const validated = OpenCashSessionRequestSchema.parse(req.body);
     const session = await commercialRepository.openCashSession(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: session });
@@ -1939,6 +1949,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
   server.post("/api/v1/cash-sessions/:id/count", async (req, reply) => {
+    assertCashDrawerAuthority(req, "close");
     const validated = SealCashSessionCountRequestSchema.parse(req.body);
     const session = await commercialRepository.sealCashSessionCount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: session };
@@ -1951,6 +1962,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/cash-sessions/:id/movements", async (req, reply) => {
+    assertCashDrawerAuthority(req, "move");
     if (!productionPersistence) throw new Error("CASH_MOVEMENT_REQUIRES_POSTGRESQL_AUTHORITY");
     const parsed = z.object({ id: z.string().optional(), type: z.enum(["CASH_IN", "CASH_OUT", "SAFE_DROP", "BANK_DEPOSIT", "PETTY_CASH"]), amount: z.number().positive(), reason: z.string().trim().min(3).max(500), deviceId: z.string().min(1).max(128), witness: z.string().trim().max(200).optional(), approvalStatus: z.enum(["APPROVED", "PENDING"]).optional(), idempotencyKey: z.string().min(1).max(200), occurredAt: z.string().datetime().optional() }).parse(req.body);
     const body = { ...parsed, cashSessionId: String((req.params as any).id) };
@@ -1990,6 +2002,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/cash-sessions/:id/close", async (req) => {
+    assertCashDrawerAuthority(req, "close");
     const validated = CloseCashSessionRequestSchema.parse(req.body);
     const session = await commercialRepository.closeCashSession(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: session };
