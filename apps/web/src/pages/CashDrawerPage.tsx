@@ -638,6 +638,18 @@ Manager Sign-off:  _____________________
       return;
     }
     try {
+      if (movementType === "NO_SALE") {
+        const response = await apiFetch<{ success: boolean; data: any }>("/api/v1/drawer-operations/no-sale", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cashSessionId, deviceId: terminalId, reason: record.reason, id: record.id }),
+        });
+        if (!response?.success || !response.data?.id) throw new Error("PostgreSQL did not acknowledge the no-sale drawer operation");
+        setLedger((prev) => [record, ...prev]);
+        setModalType(null);
+        setAmountInput(""); setReasonInput(""); setWitnessInput("");
+        return;
+      }
       const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/movements`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
