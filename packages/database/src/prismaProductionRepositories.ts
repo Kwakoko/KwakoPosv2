@@ -47,6 +47,72 @@ function pick(input: any, keys: string[]) {
 export class PrismaCommercialRepository {
   constructor(private readonly atomic = new PrismaAtomicCommercialFinanceService()) {}
 
+  async getReportsData(ctx: TenantContext, options: { from: Date; to: Date; branchId?: string | null }) {
+    const branchId = options.branchId || null;
+    if (branchId) {
+      const branch = await db.branch.findFirst({ where: { id: branchId, tenantId: ctx.tenantId } });
+      if (!branch) throw new Error("REPORT_BRANCH_BOUNDARY_VIOLATION");
+    }
+    const scope = branchId ? { tenantId: ctx.tenantId, branchId } : { tenantId: ctx.tenantId };
+    const saleScope = { ...scope, soldAt: { gte: options.from, lt: options.to } };
+    const expenseScope = { ...scope, incurredAt: { gte: options.from, lt: options.to } };
+    const paymentScope = { ...scope, paidAt: { gte: options.from, lt: options.to }, status: "COMPLETED", saleId: { not: null } };
+    const returnScope = { ...scope, createdAt: { gte: options.from, lt: options.to } };
+    const purchaseScope = { ...scope, createdAt: { gte: options.from, lt: options.to } };
+    const movementScope = { ...scope, occurredAt: { gte: options.from, lt: options.to } };
+
+    const [sales, expenses, payments, returns, purchaseOrders, stockMovements, customers, products, branches, invoices] =
+      await Promise.all([
+        db.sale.findMany({ where: saleScope, include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }),
+        db.expense.findMany({ where: expenseScope, orderBy: { incurredAt: "desc" } }),
+        db.payment.findMany({ where: paymentScope, orderBy: { paidAt: "desc" } }),
+        db.return.findMany({ where: returnScope, include: { lines: true }, orderBy: { createdAt: "desc" } }),
+        db.purchaseOrder.findMany({ where: purchaseScope, include: { items: true, supplier: true }, orderBy: { createdAt: "desc" } }),
+        db.stockLedger.findMany({ where: movementScope, include: { product: true, variant: true }, orderBy: { occurredAt: "desc" } }),
+        db.customer.findMany({ where: scope, orderBy: { createdAt: "asc" } }),
+        db.product.findMany({ where: scope, include: { variants: true, branchStocks: true }, orderBy: { name: "asc" } }),
+        branchId ? db.branch.findMany({ where: { tenantId: ctx.tenantId, id: branchId } }) : db.branch.findMany({ where: { tenantId: ctx.tenantId }, orderBy: { name: "asc" } }),
+        db.customerInvoice.findMany({ where: scope, include: { allocations: true }, orderBy: { dueDate: "asc" } }),
+      ]);
+
+    const activeSales = sales.filter((s: any) => !["CANCELLED", "VOIDED", "REFUNDED"].includes(String(s.status).toUpperCase()));
+    const totalGrossSales = activeSales.reduce((n: number, s: any) => n + num(s.grandTotal), 0);
+    const totalTaxCollected = activeSales.reduce((n: number, s: any) => n + num(s.taxTotal), 0);
+    const totalDiscounts = activeSales.reduce((n: number, s: any) => n + num(s.discountTotal), 0);
+    const totalCOGS = activeSales.reduce((n: number, s: any) => n + num(s.totalCost), 0);
+    const totalExpenses = expenses.reduce((n: number, e: any) => n + num(e.amount), 0);
+    const grossProfit = totalGrossSales - totalCOGS;
+    const netOperatingProfit = grossProfit - totalExpenses;
+    const paymentTotals: Record<string, { count: number; amount: number }> = {};
+    for (const p of payments) {
+      const key = String(p.provider || p.paymentMethod || "OTHER").toUpperCase();
+      paymentTotals[key] ||= { count: 0, amount: 0 };
+      paymentTotals[key].count += 1;
+      paymentTotals[key].amount += num(p.amount);
+    }
+
+    return normalize({
+      scope: { tenantId: ctx.tenantId, branchId, from: options.from, to: options.to },
+      metrics: {
+        totalGrossSales, totalTaxCollected, totalDiscounts, totalCOGS, totalExpenses,
+        grossProfit, netOperatingProfit,
+        marginPct: totalGrossSales ? (netOperatingProfit / totalGrossSales) * 100 : 0,
+        totalTransactions: activeSales.length,
+        paymentTotals,
+      },
+      sales: activeSales,
+      returnedSales: returns,
+      expenses,
+      purchaseOrders,
+      payments,
+      stockMovements,
+      customers,
+      products,
+      branches,
+      invoices,
+    });
+  }
+
   async getCustomers(ctx: TenantContext) {
     return normalize(await db.customer.findMany({ where: tenantWhere(ctx), orderBy: { createdAt: "asc" } }));
   }
