@@ -131,8 +131,9 @@ export class PrismaAtomicCommercialFinanceService {
         const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
         const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
 
-        const isOversell = qtyBefore < qtySold;
-        const shortfall = isOversell ? qtySold - qtyBefore : 0;
+        if (qtyBefore + 0.000001 < qtySold) throw new Error(`INSUFFICIENT_STOCK:${l.variantId}`);
+        const isOversell = false;
+        const shortfall = 0;
         const qtyAfter = Math.max(0, qtyBefore - qtySold);
 
         if (isOversell) {
