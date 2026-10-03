@@ -311,6 +311,26 @@ export class PrismaAtomicCommercialFinanceService {
     });
   }
 
+  private async lockExpense(tx: any, ctx: TenantContext, id: string) {
+    const rows = await tx.$queryRawUnsafe<any[]>(
+      `SELECT id FROM expenses WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
+      id, ctx.tenantId, ctx.branchId,
+    );
+    if (!rows.length) throw new Error("EXPENSE_NOT_FOUND");
+  }
+
+  private async publishExpenseChange(tx: any, ctx: TenantContext, expense: any, operationType: "CREATE" | "UPDATE" | "DELETE", operationId: string, source = "expense-service") {
+    if (!operationId || typeof tx?.$executeRawUnsafe !== "function") return;
+    await tx.$executeRawUnsafe(
+      `INSERT INTO sync_change_journal
+        (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source)
+       VALUES ($1,$2,$3,'Expense',$4,$5,$6::jsonb,$7)
+       ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING`,
+      ctx.tenantId, ctx.branchId, operationId, String(expense.id), operationType,
+      JSON.stringify(expense ?? {}), source,
+    );
+  }
+
   private normalizeExpensePaymentMethod(value: unknown): "CASH" | "BANK" | "MOBILE_MONEY" | "CARD" {
     const v = String(value || "CASH").trim().toUpperCase().replace(/[ -]+/g, "_");
     if (v === "MPESA" || v === "M_PESA" || v === "MOBILEMONEY") return "MOBILE_MONEY";
@@ -369,7 +389,7 @@ export class PrismaAtomicCommercialFinanceService {
       const status = String(req.status || "PAID").toUpperCase();
       if (!["PENDING", "PAID"].includes(status)) throw new Error("INVALID_EXPENSE_STATUS");
       const cashSession = paymentMethod === "CASH" && status === "PAID"
-        ? await this.resolveCashSession(tx, ctx, req.cashSessionId, false)
+        ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true)
         : null;
       if (cashSession && cashSession.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
 
@@ -379,7 +399,7 @@ export class PrismaAtomicCommercialFinanceService {
           id,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
-          cashSessionId: cashSession?.id ?? (req.cashSessionId ?? null),
+          cashSessionId: status === "PAID" && paymentMethod === "CASH" ? (cashSession?.id ?? null) : null,
           category: req.category,
           amount: req.amount,
           reason: req.reason,
@@ -402,6 +422,7 @@ export class PrismaAtomicCommercialFinanceService {
         await this.postExpenseJournal(tx, ctx, expense, paymentMethod, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       }
 
+      await this.publishExpenseChange(tx, ctx, expense, "CREATE", String(req.operationId || expense.idempotencyKey));
       await tx.auditEvent.create({
         data: {
           id: randomUUID(),
@@ -428,6 +449,7 @@ export class PrismaAtomicCommercialFinanceService {
 
   async payExpense(ctx: TenantContext, id: string, req: any) {
     return this.db.$transaction(async (tx: any) => {
+      await this.lockExpense(tx, ctx, id);
       const expense = await tx.expense.findUnique({ where: { id } });
       if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
       if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
@@ -442,13 +464,14 @@ export class PrismaAtomicCommercialFinanceService {
           status: "PAID",
           paymentMethod,
           paymentRef: req.paymentRef || null,
-          cashSessionId: cashSession?.id ?? expense.cashSessionId ?? null,
+          cashSessionId: cashSession?.id ?? null,
           paidById: ctx.userId,
           paidAt: now,
         },
       });
       if (cashSession) await tx.cashSession.update({ where: { id: cashSession.id }, data: { cashExpensesTotal: { increment: expense.amount } } });
       await this.postExpenseJournal(tx, ctx, updated, paymentMethod, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      await this.publishExpenseChange(tx, ctx, updated, "UPDATE", String(req.idempotencyKey || id));
       await tx.auditEvent.create({
         data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
@@ -462,6 +485,7 @@ export class PrismaAtomicCommercialFinanceService {
 
   async voidExpense(ctx: TenantContext, id: string, reason: string, req: any = {}) {
     return this.db.$transaction(async (tx: any) => {
+      await this.lockExpense(tx, ctx, id);
       const expense = await tx.expense.findUnique({ where: { id } });
       if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
       if (expense.status === "VOIDED") return expense;
@@ -504,6 +528,7 @@ export class PrismaAtomicCommercialFinanceService {
         where: { id },
         data: { status: "VOIDED", voidedById: ctx.userId, voidedAt: now, voidReason: reason },
       });
+      await this.publishExpenseChange(tx, ctx, updated, "UPDATE", String(req.idempotencyKey || id));
       await tx.auditEvent.create({
         data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
