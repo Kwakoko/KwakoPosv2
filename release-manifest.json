@@ -1,0 +1,19 @@
+{
+  "version": "2.13.0",
+  "tag": "v2.13.0",
+  "gitSha": "331cfb8ca04c24e0777e2d0926fe4befaaba7cba",
+  "buildNumber": 584,
+  "environment": "production-certification",
+  "releaseChannel": "production",
+  "releasedAt": "2026-10-03T16:36:17.044Z",
+  "containerDigest": null,
+  "cloudRunRevision": null,
+  "certification": "PENDING",
+  "compatibility": {
+    "databaseSchemaVersion": 4,
+    "syncProtocolVersion": 2,
+    "pwaSchemaVersion": 4,
+    "minSupportedClientVersion": "2.0.0",
+    "recommendedClientVersion": "2.13.0"
+  }
+}
