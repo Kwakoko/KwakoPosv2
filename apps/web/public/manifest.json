@@ -4,19 +4,19 @@
   "description": "Kwakoko Business Operating System with offline-first KwakoPos Point of Sale capability",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#F7FAF8",
+  "theme_color": "#0B5D4A",
   "version": "2.13.0",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/brand/kwakoko-mark.svg",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/svg+xml"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/brand/kwakoko-mark.svg",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/svg+xml"
     }
   ]
 }
