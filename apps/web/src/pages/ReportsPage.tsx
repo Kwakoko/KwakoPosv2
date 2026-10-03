@@ -453,7 +453,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                   <RePie>
                     <Pie data={paymentPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
                       {paymentPieData.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.color} />
+                        <Cell key={idx} />
                       ))}
                     </Pie>
                     <Tooltip />
