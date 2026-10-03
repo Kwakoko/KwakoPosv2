@@ -26,7 +26,6 @@ import { Wallet, DollarSign, Clock, ArrowDownRight, ArrowUpRight, Lock, Unlock,
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { apiFetch } from "../services/apiClient.js";
@@ -630,15 +629,40 @@ Manager Sign-off:  _____________________
       toast.error("Cash Movement Not Saved", "An active tenant and branch are required.");
       return;
     }
-    const paymentId = record.id;
-    const scopedRecord = { ...record, tenantId: currentTenantId, branchId: currentBranchId };
-    await commitLocalMutation({
-      db, tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
-      entityType: "Payment", entityId: paymentId, operationType: "CREATE",
-      payload: scopedRecord as unknown as Record<string, unknown>, idempotencyKey: paymentId,
-      writes: [{ store: "payments", key: paymentId, value: scopedRecord }],
-    });
-    setLedger((prev) => [record, ...prev]);
+    if (!cashSessionId) {
+      toast.error("Cash Movement Not Saved", "An authoritative open cash session is required.");
+      return;
+    }
+    if (!isOnline) {
+      toast.error("Cash Movement Requires Online Authority", "Manual cash movements are financial ledger entries and cannot be committed to browser-only storage.");
+      return;
+    }
+    try {
+      const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/movements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: record.id,
+          type: movementType,
+          amount: Math.abs(signedAmt),
+          reason: record.reason,
+          deviceId: terminalId,
+          witness: record.witness,
+          approvalStatus: "APPROVED",
+          idempotencyKey: record.id,
+          occurredAt: new Date().toISOString(),
+        }),
+      });
+      if (!response?.success || !response.data?.id) throw new Error("PostgreSQL did not acknowledge the cash movement");
+      setLedger((prev) => [record, ...prev]);
+      if (movementType === "CASH_IN") setCashIn((prev) => prev + amt);
+      if (movementType === "CASH_OUT") setCashOut((prev) => prev + amt);
+      if (movementType === "SAFE_DROP") setSafeDrops((prev) => prev + amt);
+      if (movementType === "NO_SALE") return;
+    } catch (error) {
+      toast.error("Cash Movement Not Saved", error instanceof Error ? error.message : "Unable to persist the cash movement.");
+      return;
+    }
 
     setModalType(null);
     setAmountInput("");
