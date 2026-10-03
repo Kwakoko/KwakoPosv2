@@ -830,6 +830,8 @@ model DrawerOperation {
   updatedAt     DateTime  @updatedAt
   payment       Payment?  @relation("PaymentDrawerOperation")
   paymentByPaymentId Payment? @relation("DrawerOperationPayment", fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([paymentId])
   cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, branchId, status, requestedAt])
