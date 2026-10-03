@@ -149,6 +149,33 @@ export class PrismaFinanceRepository {
 
 
 
+  async getProfitAndLoss(ctx: TenantContext, startDate?: string, endDate?: string) {
+    const start = startDate ? new Date(startDate) : new Date(0);
+    const end = endDate ? new Date(endDate) : new Date();
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) {
+      throw new Error("FINANCE_INVALID_REPORT_PERIOD");
+    }
+    const journals = await this.db.journalEntry.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, entryDate: { gte: start, lte: end }, status: "POSTED" },
+      include: { lines: true },
+    });
+    const accounts = await this.getAccounts(ctx);
+    const lines = journals.flatMap((j: any) => j.lines);
+    return FinancialReportingEngine.generateProfitAndLoss(ctx as any, accounts as any, journals as any, lines as any, "Standard", start, end);
+  }
+
+  async getBalanceSheet(ctx: TenantContext, asOfDate?: string) {
+    const reportDate = asOfDate ? new Date(asOfDate) : new Date();
+    if (!Number.isFinite(reportDate.getTime())) throw new Error("FINANCE_INVALID_REPORT_DATE");
+    const journals = await this.db.journalEntry.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, entryDate: { lte: reportDate }, status: "POSTED" },
+      include: { lines: true },
+    });
+    const accounts = await this.getAccounts(ctx);
+    const lines = journals.flatMap((j: any) => j.lines);
+    return FinancialReportingEngine.generateBalanceSheet(ctx as any, accounts as any, journals as any, lines as any, reportDate as any);
+  }
+
   async getExecutiveDashboard(ctx: TenantContext) {
     const journals = await this.db.journalEntry.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "POSTED" }, include: { lines: true } });
     const accounts = await this.getAccounts(ctx);
