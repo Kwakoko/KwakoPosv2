@@ -312,7 +312,7 @@ export class PrismaAtomicCommercialFinanceService {
   }
 
   private async lockExpense(tx: any, ctx: TenantContext, id: string) {
-    const rows = await tx.$queryRawUnsafe<any[]>(
+    const rows = await tx.$queryRawUnsafe(
       `SELECT id FROM expenses WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
       id, ctx.tenantId, ctx.branchId,
     );
