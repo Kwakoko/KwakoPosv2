@@ -1,0 +1,32 @@
+name: Receipt P0 P1 Remediation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/src/services/receiptService.ts"
+      - "packages/database/src/receiptRepositories.ts"
+      - "packages/domain/src/receiptEngine.ts"
+      - "packages/sync/src/syncIntegrity.ts"
+      - "packages/sync/src/worldStandardPrismaSyncEngine.ts"
+      - "tests/unit/production-api-repository-authority.test.ts"
+      - "tests/unit/receipt-management-module.test.ts"
+      - ".github/workflows/receipt-remediation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-remediation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Receipt authority tests
+        run: npx vitest run tests/unit/receipt-management-module.test.ts tests/unit/production-api-repository-authority.test.ts
+      - name: Full TypeScript build
+        run: npm run build
