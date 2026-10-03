@@ -23,13 +23,31 @@ type DashboardSnapshot = {
   productCount: number;
   supplierCount: number;
   kpis: Record<string, number | null>;
+  analytics: {
+    timeframe: "today" | "7d" | "30d" | "month";
+    chartPoints: Array<{ name: string; fullLabel: string; Revenue: number; Profit: number; COGS: number; PriorRevenue: number; ordersCount: number; marginPct: string }>;
+    totalRevenue: number;
+    totalCOGS: number;
+    totalProfit: number;
+    marginPct: string;
+    revenueDeltaPct: string | null;
+    profitDeltaPct: string | null;
+    priorTotalRevenue: number;
+    peakHour: { hour: string; revenue: number; ordersCount: number } | null;
+    paymentChannels: Array<{ name: string; volume: number; count: number; volumeShare: number; countShare: number; aov: number }>;
+    paymentTotalVolume: number;
+    paymentTotalCount: number;
+    paymentOverallAov: number;
+    topProducts: Array<{ productId: string; name: string; revenue: number; units: number; stock: number; category: string; rank: number }>;
+    topProductsTotalTracked: number;
+  };
 };
 
 async function readDashboardSnapshot(page: Page, tenantId: string, branchId: string): Promise<DashboardSnapshot> {
   return page.evaluate(async ({ tenantId, branchId }) => {
     const raw = localStorage.getItem("kwakopos:v2:session");
     const session = raw ? JSON.parse(raw) : null;
-    const response = await fetch("/api/v1/dashboard/kpis", {
+    const response = await fetch("/api/v1/dashboard/kpis?timeframe=7d", {
       headers: {
         Authorization: "Bearer " + String(session?.accessToken || ""),
         "x-tenant-id": tenantId,
@@ -475,6 +493,13 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     ];
     expect(finalA.kpis).toEqual(finalB.kpis);
     expect(finalB.kpis).toEqual(finalC.kpis);
+    expect(finalA.analytics).toEqual(finalB.analytics);
+    expect(finalB.analytics).toEqual(finalC.analytics);
+    expect(finalA.analytics.timeframe).toBe("7d");
+    expect(finalA.analytics.totalRevenue).toBe(serverFinal.salesToday);
+    expect(finalA.analytics.chartPoints.length).toBe(7);
+    expect(finalA.analytics.paymentTotalCount).toBeGreaterThanOrEqual(1);
+    expect(finalA.analytics.topProducts[0]?.revenue).toBeGreaterThan(0);
     expect(finalA.kpis.SalesToday).toBe(serverFinal.salesToday);
     expect(finalA.kpis.GrossProfitToday).toBe(serverFinal.grossProfit);
     expect(finalA.kpis.AovToday).toBe(serverFinal.aov);
