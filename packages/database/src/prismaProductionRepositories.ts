@@ -220,6 +220,27 @@ export class PrismaCommercialRepository {
     }));
   }
 
+  async performThreeWayMatch(ctx: TenantContext, req: { poId: string; receivingId: string; invoiceRef: string; invoiceAmount: number; approvedBy?: string }) {
+    const po = await db.purchaseOrder.findFirst({ where: { id: req.poId, ...tenantWhere(ctx) }, include: { items: true } });
+    const receipt = await db.purchaseReceipt.findFirst({ where: { id: req.receivingId, ...tenantWhere(ctx) }, include: { items: true } });
+    const invoice = await db.supplierInvoice.findFirst({ where: { invoiceNumber: req.invoiceRef, ...tenantWhere(ctx) }, include: { lines: true } });
+    if (!po) throw new Error("PURCHASE_ORDER_NOT_FOUND");
+    if (!receipt) throw new Error("PURCHASE_RECEIPT_NOT_FOUND");
+    if (!invoice) throw new Error("SUPPLIER_INVOICE_NOT_FOUND");
+    if (po.supplierId !== receipt.supplierId || receipt.supplierId !== invoice.supplierId) throw new Error("THREE_WAY_SUPPLIER_MISMATCH");
+    const receivedAmount = receipt.items.reduce((s: number, i: any) => s + Number(i.quantityReceived) * Number(i.unitCost), 0);
+    const poAmount = Number(po.totalAmount);
+    const priceVariance = Number(req.invoiceAmount) - receivedAmount;
+    const quantityVariance = po.items.reduce((s: number, i: any) => s + Number(i.quantityOrdered) - Number(i.quantityReceived), 0);
+    let status = "PERFECT_MATCH";
+    if (Math.abs(priceVariance) > 0.01 && Math.abs(priceVariance) < Math.max(poAmount * 0.02, 0.01)) status = "VARIANCE_TOLERATED";
+    else if (Math.abs(priceVariance) >= Math.max(poAmount * 0.02, 0.01)) status = "PRICE_MISMATCH";
+    if (quantityVariance > 0) status = "QUANTITY_MISMATCH";
+    const match = { matchId: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, poId: po.id, receivingId: receipt.id, invoiceId: invoice.id, invoiceRef: req.invoiceRef, poAmount, receivedAmount, invoiceAmount: Number(req.invoiceAmount), priceVariance, quantityVariance, status, matchedAt: new Date().toISOString(), approvedBy: req.approvedBy || ctx.userId };
+    await db.supplierInvoice.update({ where: { id: invoice.id }, data: { status: status === "PERFECT_MATCH" || status === "VARIANCE_TOLERATED" ? "APPROVED" : "REJECTED", notes: JSON.stringify({ previousNotes: invoice.notes, threeWayMatch: match }) } });
+    return match;
+  }
+
   async getSales(ctx: TenantContext) {
     return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }));
   }
