@@ -1,4 +1,5 @@
 name: KwakoPos Exact Production Release Certification
+# Exact release certification is triggered by chore(release): v* on main; manual dispatch is retained for future registry refresh.
 
 on:
   push:
