@@ -51,6 +51,14 @@ jobs:
         run: npm run test:sync
       - name: Version Sync Certification
         run: npm run certify:version-sync
+      - name: Commit Contract
+        run: npx tsx scripts/ci/validate-commit-message.ts
+      - name: Navigation Production Lock
+        run: npm run certify:navigation-lock
+      - name: Module Contract
+        run: npx tsx scripts/release/verify-kwakopos-modules.ts
+      - name: Release Quality Gates
+        run: npx tsx scripts/release/quality-gates.ts
       - name: Strict Runtime Certification
         run: npx tsx scripts/certification/strict-runtime-certification.ts
       - name: Production Release Authority Verification
