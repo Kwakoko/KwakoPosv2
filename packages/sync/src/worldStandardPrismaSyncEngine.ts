@@ -634,7 +634,12 @@ const now = new Date();
       const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
       await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
       const seqRows = await tx.$queryRawUnsafe(
-        `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)
+        `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)$'))::bigint), 0) + 1 AS seq
+           FROM receipts
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "createdAt" >= $3 AND "createdAt" < $4`,
+        ctx.tenantId, ctx.branchId, dayStart, dayEnd,
+      ) as Array<{ seq: bigint | number | string }>;
       const receiptNumber = ReceiptNumberGenerator.generate({
         tenantPrefix: ctx.tenantId.slice(0, 3),
         branchPrefix: ctx.branchId.slice(0, 3),
