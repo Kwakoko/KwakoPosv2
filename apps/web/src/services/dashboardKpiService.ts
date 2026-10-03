@@ -23,6 +23,12 @@ export interface DashboardKpiSnapshot {
   aov: number;
   todayOrderCount: number;
   completedOrders: number;
+  grossSalesToday: number;
+  discountsToday: number;
+  refundsToday: number;
+  netSalesToday: number;
+  cogsToday: number;
+  grossMarginToday: number;
   inventoryValue: number;
   stockAlerts: number;
   lowStockCount: number;
