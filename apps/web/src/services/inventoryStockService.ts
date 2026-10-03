@@ -424,44 +424,173 @@ export async function recordPosSaleDeductions(
 ): Promise<void> {
   const { saleId, items, tenantId, branchId, userId, deviceId } = params;
   const occurredAt = new Date().toISOString();
-  const ctx = { tenantId, branchId };
 
   for (const item of items) {
     const qty = Number(item.qty);
     if (!Number.isFinite(qty) || qty <= 0) continue;
-    let prod = db.products.get(item.productId) as any;
-    if (!prod) { for (const p of db.products.values()) if (p.id === item.productId || (item.sku && p.sku === item.sku)) { prod = p; break; } }
-    if (!prod) continue;
-    let targetVariant: any = item.variantId ? db.productVariants.get(item.variantId) : null;
-    if (!targetVariant) for (const v of db.productVariants.values()) if (v.productId === prod.id && (!item.variantId || v.id === item.variantId)) { targetVariant = v; break; }
-    const resolvedVariantId = targetVariant?.id || item.variantId || `${prod.id}-default`;
-    const priorLedger = [...db.stockLedger.values()].filter((entry: any) => (!tenantId || entry.tenantId === tenantId) && (!branchId || entry.branchId === branchId) && entry.variantId === resolvedVariantId);
-    const ledgerSum = priorLedger.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
-    const quantityBefore = ledgerSum;
-    if (quantityBefore < qty) throw new Error(`INSUFFICIENT_LOCAL_STOCK:${resolvedVariantId}`);
+
+    const prod = db.products.get(item.productId) as any;
+    if (!prod || prod.tenantId !== tenantId || prod.branchId !== branchId) {
+      throw new Error(`INVENTORY_PRODUCT_NOT_FOUND_OR_OUT_OF_SCOPE:${item.productId}`);
+    }
+
+    const targetVariant = item.variantId
+      ? (db.productVariants.get(item.variantId) as any)
+      : [...db.productVariants.values()].find(
+          (v: any) => v.productId === prod.id && v.tenantId === tenantId && v.branchId === branchId,
+        ) as any;
+
+    if (!targetVariant || targetVariant.tenantId !== tenantId || targetVariant.branchId !== branchId) {
+      throw new Error(`INVENTORY_VARIANT_REQUIRED:${item.productId}`);
+    }
+
+    const resolvedVariantId = targetVariant.id;
+    const priorLedger = [...db.stockLedger.values()].filter(
+      (entry: any) =>
+        entry.tenantId === tenantId &&
+        entry.branchId === branchId &&
+        entry.variantId === resolvedVariantId,
+    );
+    const quantityBefore = priorLedger.reduce(
+      (sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0),
+      0,
+    );
+    if (quantityBefore < qty) {
+      throw new Error(`INSUFFICIENT_LOCAL_STOCK:${resolvedVariantId}`);
+    }
+
     const quantityAfter = quantityBefore - qty;
-    const variant = targetVariant || { id: resolvedVariantId, productId: prod.id, name: "Standard", sku: `${prod.sku || prod.id}-STD`, price: Number(prod.sellingPrice || prod.price || 0), costPrice: Number(prod.buyingPrice || prod.costPrice || 0), isActive: true };
-    const updatedVariant = { ...variant, tenantId: tenantId || variant.tenantId, branchId: branchId || variant.branchId, inventoryQuantity: quantityAfter, stock: quantityAfter, updatedAt: occurredAt };
-    const productBefore = Number(prod.availableStock ?? prod.totalStock ?? prod.stock ?? quantityBefore);
-    const productAfter = Math.max(0, productBefore - qty);
-    const updatedProd = { ...prod, tenantId: tenantId || prod.tenantId, branchId: branchId || prod.branchId, availableStock: productAfter, totalStock: productAfter, stock: productAfter, updatedAt: occurredAt };
-    const unitCost = Number(item.unitCost || prod.costPrice || prod.buyingPrice || 0);
+    const unitCost = Number(item.unitCost ?? targetVariant.costPrice ?? prod.costPrice ?? prod.buyingPrice ?? 0);
     const ledgerId = `led-${saleId}-${resolvedVariantId}`;
     const adjustmentId = `adj-sale-${saleId}-${resolvedVariantId}`;
-    const ledgerRecord: StockLedger = { id: ledgerId, tenantId, branchId, productId: prod.id, variantId: resolvedVariantId, movementType: "SALE", referenceType: "SALE", referenceId: saleId, quantityBefore, quantityChange: -qty, quantity: -qty, quantityAfter, unitCost, totalCost: qty * unitCost, userId: userId || undefined, deviceId: deviceId || "pos-terminal", operationId: `sale-stock-${saleId}-${resolvedVariantId}`, idempotencyKey: `SALE-STOCK-${saleId}-${resolvedVariantId}`, notes: `POS Sale ${saleId}`, synced: false, occurredAt, createdAt: occurredAt };
-    const adjustmentRecord: any = { id: adjustmentId, tenantId, branchId, productId: prod.id, variantId: resolvedVariantId, sku: updatedVariant.sku || prod.sku, adjustmentType: "DECREASE", quantityChange: -qty, change: -qty, reason: `POS Sale ${saleId}`, status: "PENDING", deviceId: deviceId || "pos-terminal", operationId: adjustmentId, idempotencyKey: `ADJ-SALE-${saleId}-${resolvedVariantId}`, createdAt: occurredAt, updatedAt: occurredAt };
-    
-    db.productVariants.set(resolvedVariantId, updatedVariant);
-    db.products.set(prod.id, updatedProd);
-    db.stockLedger.set(ledgerId, ledgerRecord);
-    db.stockAdjustments.set(adjustmentId, adjustmentRecord);
-    db.persist("productVariants", resolvedVariantId, updatedVariant);
-    db.persist("products", prod.id, updatedProd);
-    db.persist("stockLedger", ledgerId, ledgerRecord);
-    db.persist("stockAdjustments", adjustmentId, adjustmentRecord);
-    await db.flushPersistence().catch(() => {});
+    const operationId = `sale-stock-${saleId}-${resolvedVariantId}`;
+    const idempotencyKey = `SALE-STOCK-${saleId}-${resolvedVariantId}`;
+
+    const existingLedger = [...db.stockLedger.values()].find(
+      (entry: any) =>
+        entry.tenantId === tenantId &&
+        entry.branchId === branchId &&
+        entry.idempotencyKey === idempotencyKey,
+    );
+    if (existingLedger) continue;
+
+    const ledgerRecord: StockLedger = {
+      id: ledgerId,
+      tenantId,
+      branchId,
+      productId: prod.id,
+      variantId: resolvedVariantId,
+      movementType: "SALE",
+      referenceType: "SALE",
+      referenceId: saleId,
+      quantityBefore,
+      quantityChange: -qty,
+      quantity: -qty,
+      quantityAfter,
+      unitCost,
+      totalCost: qty * unitCost,
+      userId: userId || undefined,
+      deviceId: deviceId || "pos-terminal",
+      operationId,
+      idempotencyKey,
+      notes: `POS Sale ${saleId}`,
+      synced: false,
+      occurredAt,
+      createdAt: occurredAt,
+    };
+
+    const updatedVariant = {
+      ...targetVariant,
+      inventoryQuantity: quantityAfter,
+      stock: quantityAfter,
+      tenantId,
+      branchId,
+      updatedAt: occurredAt,
+    };
+
+    const siblingVariants = [...db.productVariants.values()].filter(
+      (v: any) => v.productId === prod.id && v.tenantId === tenantId && v.branchId === branchId,
+    );
+    const productAfter = siblingVariants.reduce(
+      (sum: number, v: any) => sum + (v.id === resolvedVariantId ? quantityAfter : Number(v.inventoryQuantity ?? v.stock ?? 0)),
+      0,
+    );
+    const updatedProduct = {
+      ...prod,
+      tenantId,
+      branchId,
+      totalStock: Math.max(0, productAfter),
+      availableStock: Math.max(0, productAfter),
+      stock: Math.max(0, productAfter),
+      updatedAt: occurredAt,
+    };
+
+    const adjustmentRecord: any = {
+      id: adjustmentId,
+      tenantId,
+      branchId,
+      productId: prod.id,
+      variantId: resolvedVariantId,
+      sku: targetVariant.sku || prod.sku,
+      adjustmentType: "DECREASE",
+      quantityChange: -qty,
+      reason: `POS Sale ${saleId}`,
+      status: "PENDING",
+      deviceId: deviceId || "pos-terminal",
+      operationId,
+      idempotencyKey,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    };
+
+    const outboxItem: OutboxItem = {
+      id: operationId,
+      entityType: "StockAdjustment",
+      entityId: adjustmentId,
+      operationType: "CREATE",
+      payload: {
+        id: adjustmentId,
+        productId: prod.id,
+        variantId: resolvedVariantId,
+        adjustmentType: "DECREASE",
+        movementType: "SALE",
+        quantityChange: -qty,
+        quantity: qty,
+        reason: `POS Sale ${saleId}`,
+        deviceId: deviceId || "pos-terminal",
+        operationId,
+        idempotencyKey,
+        ledgerId,
+        referenceType: "SALE",
+        referenceId: saleId,
+        unitCost,
+        quantityBefore,
+        quantityAfter,
+        occurredAt,
+      },
+      clientCreatedAt: occurredAt,
+      idempotencyKey,
+      status: "PENDING",
+      tenantId,
+      branchId,
+    };
+
+    await db.executeAtomicMutation({
+      writes: [
+        { store: "stockLedger", key: ledgerId, value: ledgerRecord },
+        { store: "productVariants", key: resolvedVariantId, value: updatedVariant },
+        { store: "products", key: prod.id, value: updatedProduct },
+        { store: "stockAdjustments", key: adjustmentId, value: adjustmentRecord },
+      ],
+      outboxItem,
+      tenantContext: { tenantId, branchId },
+    });
   }
-  if (typeof window !== "undefined") { window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } })); window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } })); }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } }));
+    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+  }
 }
 
 /**
