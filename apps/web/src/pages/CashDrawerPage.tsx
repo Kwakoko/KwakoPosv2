@@ -29,6 +29,7 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { apiFetch } from "../services/apiClient.js";
 
 type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
@@ -137,6 +138,7 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
 
   const [shiftStatus, setShiftStatus] = useState<"OPEN" | "LOCKED" | "CLOSED">("CLOSED");
   const [shiftId, setShiftId] = useState("");
+  const [cashSessionId, setCashSessionId] = useState("");
   const [terminalId] = useState("POS-TERM-01");
 
   // Operational Cash Metrics (100% Dynamic)
@@ -222,22 +224,20 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   const loadDrawerData = useCallback(async () => {
     try {
       await db.ready;
-      const activeShift = db.getConfigurationLocal?.("active_shift_session");
-      if (activeShift && activeShift.status === "OPEN") {
+      const activeResponse = await apiFetch<{ success: boolean; data: any | null }>("/api/v1/cash-sessions/active");
+      const activeShift = activeResponse?.success ? activeResponse.data : null;
+      if (activeShift && activeShift.status !== "CLOSED") {
         setShiftStatus("OPEN");
-        setShiftId(activeShift.shiftNumber || activeShift.id || `SFT-${Date.now()}`);
-        setOpeningFloat(Number(activeShift.openingFloat || 0));
-        const persistedBlindCount = activeShift.blindCashCount;
-        if (persistedBlindCount?.sealedAt && Number.isFinite(Number(persistedBlindCount.amount)) && Number(persistedBlindCount.amount) >= 0) {
-          setBlindDeclaredCash(Number(persistedBlindCount.amount));
-          setBlindCountDone(true);
-          setBlindCountSealedAt(String(persistedBlindCount.sealedAt));
-        } else {
-          setBlindDeclaredCash(0);
-          setBlindCountDone(false);
-          setBlindCountSealedAt(null);
-        }
+        setCashSessionId(String(activeShift.id));
+        setShiftId(String(activeShift.sessionNumber || activeShift.id));
+        setOpeningFloat(Number(activeShift.openingCash || 0));
         setOpenedAtTime(activeShift.openedAt ? new Date(activeShift.openedAt).toISOString().slice(0, 16).replace("T", " ") : "Today");
+        setCashSales(Number(activeShift.cashSalesTotal || 0));
+        setCashRefunds(Number(activeShift.cashRefundsTotal || 0));
+        setCashExpenses(Number(activeShift.cashExpensesTotal || 0));
+        setBlindDeclaredCash(Number(activeShift.actualCash ?? 0));
+        setBlindCountDone(Boolean(activeShift.countSealedAt));
+        setBlindCountSealedAt(activeShift.countSealedAt ? String(activeShift.countSealedAt) : null);
 
         const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
         let cSales = 0;
@@ -498,38 +498,33 @@ Manager Sign-off:  _____________________
 
     if (modalType === "OPEN_SHIFT") {
       const flt = Number(openFloatInput) || 0;
-      setOpeningFloat(flt);
-      setShiftStatus("OPEN");
-      const newShiftNum = `SFT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-01`;
-      setShiftId(newShiftNum);
-      const openTime = new Date().toISOString().replace("T", " ").slice(0, 16);
-      setOpenedAtTime(openTime);
-      const openRecord: CashMovementRecord = {
-        id: `CSH-${Date.now()}`,
-        time: openTime,
-        type: "OPENING_FLOAT",
-        amount: flt,
-        balance: flt,
-        reason: "Register Shift Opened with Float",
-        user: currentUser?.name || "Cashier",
-        terminal: terminalId,
-        approvalStatus: "APPROVED",
-      };
-      const updatedMovements = [openRecord, ...ledger];
-      setLedger(updatedMovements);
-      db.saveConfigurationLocal("active_shift_session", {
-        id: newShiftNum,
-        shiftNumber: newShiftNum,
-        status: "OPEN",
-        openedAt: new Date().toISOString(),
-        openingFloat: flt,
-        terminalId,
-        cashierName: currentUser?.name || "Cashier",
-        movements: updatedMovements,
-      });
-      setModalType(null);
-      toast.success("Shift Opened", `Active register opened with float ${money(flt)}`);
-      playSuccessChime();
+      if (flt < 0) return;
+      try {
+        const response = await apiFetch<{ success: boolean; data: any }>("/api/v1/cash-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ openingCash: flt }),
+        });
+        const session = response?.data;
+        if (!response?.success || !session?.id) throw new Error("Cash session was not created by PostgreSQL authority");
+        setCashSessionId(String(session.id));
+        setShiftId(String(session.sessionNumber || session.id));
+        setOpeningFloat(Number(session.openingCash || flt));
+        setCashSales(Number(session.cashSalesTotal || 0));
+        setCashRefunds(Number(session.cashRefundsTotal || 0));
+        setCashExpenses(Number(session.cashExpensesTotal || 0));
+        setShiftStatus("OPEN");
+        setOpenedAtTime(new Date(session.openedAt || Date.now()).toISOString().slice(0, 16).replace("T", " "));
+        setBlindDeclaredCash(0);
+        setBlindCountDone(false);
+        setBlindCountSealedAt(null);
+        setLedger([]);
+        setModalType(null);
+        toast.success("Shift Opened", `PostgreSQL-authoritative register opened with float ${money(flt)}`);
+        playSuccessChime();
+      } catch (error) {
+        toast.error("Shift Not Opened", error instanceof Error ? error.message : "Unable to open the authoritative cash session.");
+      }
       return;
     }
 
@@ -540,8 +535,21 @@ Manager Sign-off:  _____________________
         setModalType(null);
         return;
       }
-      setShiftStatus("CLOSED");
-      const closeRecord: ShiftRecord = {
+      if (!cashSessionId) {
+        toast.error("Cash Session Missing", "Reload the authoritative cash session before closing.");
+        return;
+      }
+      try {
+        const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/close`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: witnessInput.trim() || undefined }),
+        });
+        const closed = response?.data;
+        if (!response?.success || closed?.status !== "CLOSED") throw new Error("Cash session was not closed by PostgreSQL authority");
+        setShiftStatus("CLOSED");
+        setCashSessionId("");
+        const closeRecord: ShiftRecord = {
         id: `SFT-${Date.now()}`,
         shiftNumber: shiftId,
         cashier: currentUser?.name || "Cashier",
@@ -566,7 +574,6 @@ Manager Sign-off:  _____________________
       const updatedHistory = [closeRecord, ...shiftHistory];
       setShiftHistory(updatedHistory);
       db.saveConfigurationLocal("shift_history", updatedHistory);
-      db.saveConfigurationLocal("active_shift_session", null);
       setBlindCountDone(false);
       setBlindCountSealedAt(null);
       setBlindDeclaredCash(0);
@@ -574,6 +581,9 @@ Manager Sign-off:  _____________________
       handleGenerateZReport();
       toast.info("Shift Closed", "Register reconciled and Z-Report compiled.");
       playBeep(440, 120);
+      } catch (error) {
+        toast.error("Shift Close Failed", error instanceof Error ? error.message : "Unable to close the authoritative cash session.");
+      }
       return;
     }
 
@@ -959,17 +969,25 @@ Manager Sign-off:  _____________________
                   style={{ width: "100%", justifyContent: "center" }}
                   onClick={() => {
                     if (!blindDeclaredCash || blindDeclaredCash < 0) return;
-                    const sealedAt = new Date().toISOString();
-                    setBlindCountDone(true);
-                    setBlindCountSealedAt(sealedAt);
-                    const activeShift = db.getConfigurationLocal?.("active_shift_session");
-                    if (activeShift) {
-                      db.saveConfigurationLocal("active_shift_session", {
-                        ...activeShift,
-                        blindCashCount: { amount: blindDeclaredCash, sealedAt, sealedBy: currentUser?.name || "Cashier" },
-                      });
+                    if (!cashSessionId) {
+                      toast.error("Cash Session Missing", "Open an authoritative cash session before sealing a count.");
+                      return;
                     }
-                    setActiveTab("reconciliation");
+                    void apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/count`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ actualCash: blindDeclaredCash, deviceId: terminalId }),
+                    }).then((response) => {
+                      const sealed = response?.data;
+                      if (!response?.success || !sealed?.countSealedAt) throw new Error("Cash count was not sealed by PostgreSQL authority");
+                      const sealedAt = String(sealed.countSealedAt);
+                      setBlindCountDone(true);
+                      setBlindCountSealedAt(sealedAt);
+                      setBlindDeclaredCash(Number(sealed.actualCash ?? blindDeclaredCash));
+                      setActiveTab("reconciliation");
+                    }).catch((error) => {
+                      toast.error("Count Not Sealed", error instanceof Error ? error.message : "Unable to seal the cash count.");
+                    });
                   }}
                   disabled={!blindDeclaredCash || blindDeclaredCash < 0}
                   type="button"
