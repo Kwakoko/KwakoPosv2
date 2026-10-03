@@ -22,6 +22,7 @@ export interface ScopedReceiptRepository {
   createReceipt(ctx: TenantContext, req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }): Promise<ReceiptDTO>;
   getReceiptById(ctx: TenantContext, id: string): Promise<ReceiptDTO | null>;
   getReceiptByNumber(ctx: TenantContext, receiptNumber: string): Promise<ReceiptDTO | null>;
+  getReceiptForPublicVerification(receiptNumber: string): Promise<ReceiptDTO | null>;
   searchReceipts(ctx: TenantContext, filter: ReceiptSearchFilter): Promise<{ receipts: ReceiptDTO[]; total: number; page: number; limit: number }>;
   recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }>;
   recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean>;
@@ -184,6 +185,14 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     }
     return null;
   }
+
+  async getReceiptForPublicVerification(receiptNumber: string): Promise<ReceiptDTO | null> {
+    for (const r of this.receipts.values()) {
+      if (r.receiptNumber.toLowerCase() === receiptNumber.toLowerCase()) return r;
+    }
+    return null;
+  }
+
 
   async searchReceipts(ctx: TenantContext, filter: ReceiptSearchFilter): Promise<{ receipts: ReceiptDTO[]; total: number; page: number; limit: number }> {
     let list = Array.from(this.receipts.values()).filter((r) => r.tenantId === ctx.tenantId);
@@ -627,6 +636,14 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
     }
   }
 
+  async getReceiptForPublicVerification(receiptNumber: string): Promise<ReceiptDTO | null> {
+    for (const r of await this.prisma.receipt.findMany({ where: { receiptNumber }, include: { items: true } })) {
+      if (r.receiptNumber.toLowerCase() === receiptNumber.toLowerCase()) return this.mapPrismaReceipt(r);
+    }
+    return null;
+  }
+
+
   async searchReceipts(ctx: TenantContext, filter: ReceiptSearchFilter): Promise<{ receipts: ReceiptDTO[]; total: number; page: number; limit: number }> {
     if (!this.prisma) return this.inMemory.searchReceipts(ctx, filter);
     try {
@@ -673,8 +690,10 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }> {
     if (!this.prisma) return this.inMemory.recordReprint(ctx, receiptId, printedBy, reason);
     try {
+      const owned = await this.prisma.receipt.findFirst({ where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!owned) throw new Error("RECEIPT_NOT_FOUND");
       const updated = await this.prisma.receipt.update({
-        where: { id: receiptId },
+        where: { id: owned.id },
         data: {
           reprintCount: { increment: 1 },
           lastReprintedAt: new Date(),
@@ -703,8 +722,10 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean> {
     if (!this.prisma) return this.inMemory.recordShare(ctx, receiptId, channel, recipient, sharedBy);
     try {
+      const owned = await this.prisma.receipt.findFirst({ where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!owned) throw new Error("RECEIPT_NOT_FOUND");
       await this.prisma.receipt.update({
-        where: { id: receiptId },
+        where: { id: owned.id },
         data: {
           shareLogs: {
             create: {
@@ -732,8 +753,10 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async updateReceiptStatus(ctx: TenantContext, receiptId: string, status: string, reason?: string, actorId?: string): Promise<ReceiptDTO> {
     if (!this.prisma) return this.inMemory.updateReceiptStatus(ctx, receiptId, status, reason, actorId);
     try {
+      const owned = await this.prisma.receipt.findFirst({ where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!owned) throw new Error("RECEIPT_NOT_FOUND");
       const updated = await this.prisma.receipt.update({
-        where: { id: receiptId },
+        where: { id: owned.id },
         data: {
           status,
           auditLogs: {
@@ -804,9 +827,14 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
         returnPolicyText: template.returnPolicyText,
       };
 
-      const saved = template.id
-        ? await this.prisma.receiptTemplate.update({ where: { id: template.id }, data })
-        : await this.prisma.receiptTemplate.create({ data });
+      let saved;
+      if (template.id) {
+        const owned = await this.prisma.receiptTemplate.findFirst({ where: { id: template.id, tenantId: ctx.tenantId } });
+        if (!owned) throw new Error("RECEIPT_TEMPLATE_NOT_FOUND");
+        saved = await this.prisma.receiptTemplate.update({ where: { id: owned.id }, data });
+      } else {
+        saved = await this.prisma.receiptTemplate.create({ data });
+      }
 
       return {
         id: saved.id,
@@ -847,8 +875,10 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   }> {
     if (!this.prisma) return this.inMemory.getReceiptAnalytics(ctx);
     try {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const rows = await this.prisma.receipt.findMany({
-        where: { tenantId: ctx.tenantId },
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: startOfDay, lt: now } },
       });
       let todayTotal = 0;
       let largestReceipt = 0;
