@@ -435,7 +435,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
     setIsLoadingAuthoritativeKpis(true);
     try {
-      const snapshot = await fetchDashboardKpiSnapshot();
+      const snapshot = await fetchDashboardKpiSnapshot(revenueTimeframe);
       if (snapshot.tenantId !== tenantId || snapshot.branchId !== branchId) {
         throw new Error("Dashboard KPI scope mismatch");
       }
@@ -451,14 +451,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     } finally {
       setIsLoadingAuthoritativeKpis(false);
     }
-  }, [tenantId, branchId, isOnline]);
+  }, [tenantId, branchId, isOnline, revenueTimeframe]);
 
   useEffect(() => {
     void refreshAuthoritativeKpis();
     if (!tenantId || !branchId || !isOnline) return;
     const interval = setInterval(() => { void refreshAuthoritativeKpis(); }, 3000);
     return () => clearInterval(interval);
-  }, [refreshAuthoritativeKpis, tenantId, branchId, isOnline]);
+  }, [refreshAuthoritativeKpis, tenantId, branchId, isOnline, revenueTimeframe]);
 
   // ── Operational States ─────────────────────────────────────────────────────
   const [products, setProducts] = useState<LocalProduct[]>([]);
@@ -949,392 +949,55 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   // ── Chart Data ─────────────────────────────────────────────────────────────
 
   const revenueAnalytics = useMemo(() => {
-    const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const DAY_LABELS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const now = new Date();
-
-    let chartPoints: Array<{
-      name: string;
-      fullLabel: string;
-      Revenue: number;
-      Profit: number;
-      COGS: number;
-      PriorRevenue: number;
-      ordersCount: number;
-      marginPct: string;
-    }> = [];
-
-    let peakHour: { hour: string; revenue: number; ordersCount: number } | null = null;
-    let priorTotalRevenue = 0;
-    let priorTotalProfit = 0;
-    let maxHourlyRevenue = 0;
-
-    if (revenueTimeframe === 'today') {
-      // Hourly intervals from 07:00 to 22:00
-      const todayStart = new Date(now);
-      todayStart.setHours(0, 0, 0, 0);
-      const yesterdayStart = new Date(todayStart);
-      yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
-      const hours = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
-
-      chartPoints = hours.map((h) => {
-        const hourLabel = h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
-
-        const curOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === now.getFullYear() &&
-                 od.getMonth() === now.getMonth() &&
-                 od.getDate() === now.getDate() &&
-                 od.getHours() === h;
-        });
-
-        const prevOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === yesterdayStart.getFullYear() &&
-                 od.getMonth() === yesterdayStart.getMonth() &&
-                 od.getDate() === yesterdayStart.getDate() &&
-                 od.getHours() === h;
-        });
-
-        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
-        let COGS = 0;
-        curOrders.forEach(o => {
-          o.items.forEach(item => {
-            COGS += costLookup.getItemCOGS(item);
-          });
-        });
-        const Profit = Math.max(0, Revenue - COGS);
-
-        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
-        let prevCOGS = 0;
-        prevOrders.forEach(o => {
-          o.items.forEach(item => {
-            prevCOGS += costLookup.getItemCOGS(item);
-          });
-        });
-        priorTotalRevenue += PriorRevenue;
-        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
-
-        if (Revenue > maxHourlyRevenue) {
-          maxHourlyRevenue = Revenue;
-          peakHour = { hour: hourLabel, revenue: Revenue, ordersCount: curOrders.length };
-        }
-
-        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
-
-        return {
-          name: hourLabel,
-          fullLabel: `Today at ${hourLabel}`,
-          Revenue,
-          Profit,
-          COGS,
-          PriorRevenue,
-          ordersCount: curOrders.length,
-          marginPct: margin,
-        };
-      });
-
-    } else if (revenueTimeframe === '7d') {
-      // Last 7 days vs Prior 7 days
-      chartPoints = Array.from({ length: 7 }, (_, i) => {
-        const curDate = new Date(now);
-        curDate.setDate(now.getDate() - (6 - i));
-        const prevDate = new Date(now);
-        prevDate.setDate(now.getDate() - (13 - i));
-
-        const curOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === curDate.getFullYear() &&
-                 od.getMonth() === curDate.getMonth() &&
-                 od.getDate() === curDate.getDate();
-        });
-
-        const prevOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === prevDate.getFullYear() &&
-                 od.getMonth() === prevDate.getMonth() &&
-                 od.getDate() === prevDate.getDate();
-        });
-
-        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
-        let COGS = 0;
-        curOrders.forEach(o => {
-          o.items.forEach(item => {
-            COGS += costLookup.getItemCOGS(item);
-          });
-        });
-        const Profit = Math.max(0, Revenue - COGS);
-
-        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
-        let prevCOGS = 0;
-        prevOrders.forEach(o => {
-          o.items.forEach(item => {
-            prevCOGS += costLookup.getItemCOGS(item);
-          });
-        });
-        priorTotalRevenue += PriorRevenue;
-        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
-
-        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
-
-        return {
-          name: DAY_LABELS[curDate.getDay()],
-          fullLabel: curDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }),
-          Revenue,
-          Profit,
-          COGS,
-          PriorRevenue,
-          ordersCount: curOrders.length,
-          marginPct: margin,
-        };
-      });
-
-    } else if (revenueTimeframe === '30d') {
-      // Last 30 days
-      chartPoints = Array.from({ length: 30 }, (_, i) => {
-        const curDate = new Date(now);
-        curDate.setDate(now.getDate() - (29 - i));
-        const prevDate = new Date(now);
-        prevDate.setDate(now.getDate() - (59 - i));
-
-        const curOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === curDate.getFullYear() &&
-                 od.getMonth() === curDate.getMonth() &&
-                 od.getDate() === curDate.getDate();
-        });
-
-        const prevOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === prevDate.getFullYear() &&
-                 od.getMonth() === prevDate.getMonth() &&
-                 od.getDate() === prevDate.getDate();
-        });
-
-        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
-        let COGS = 0;
-        curOrders.forEach(o => {
-          o.items.forEach(item => {
-            COGS += costLookup.getItemCOGS(item);
-          });
-        });
-        const Profit = Math.max(0, Revenue - COGS);
-
-        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
-        let prevCOGS = 0;
-        prevOrders.forEach(o => {
-          o.items.forEach(item => {
-            prevCOGS += costLookup.getItemCOGS(item);
-          });
-        });
-        priorTotalRevenue += PriorRevenue;
-        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
-
-        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
-
-        return {
-          name: `${curDate.getDate()} ${MONTH_LABELS[curDate.getMonth()]}`,
-          fullLabel: curDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
-          Revenue,
-          Profit,
-          COGS,
-          PriorRevenue,
-          ordersCount: curOrders.length,
-          marginPct: margin,
-        };
-      });
-
-    } else {
-      // 'month': This month to date
-      const currentDay = now.getDate();
-
-      chartPoints = Array.from({ length: currentDay }, (_, i) => {
-        const dayNum = i + 1;
-        const curDate = new Date(now.getFullYear(), now.getMonth(), dayNum);
-        const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, dayNum);
-
-        const curOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === curDate.getFullYear() &&
-                 od.getMonth() === curDate.getMonth() &&
-                 od.getDate() === dayNum;
-        });
-
-        const prevOrders = validOrders.filter(o => {
-          const od = new Date(o.timestamp);
-          return od.getFullYear() === prevDate.getFullYear() &&
-                 od.getMonth() === prevDate.getMonth() &&
-                 od.getDate() === dayNum;
-        });
-
-        const Revenue = curOrders.reduce((s, o) => s + o.total, 0);
-        let COGS = 0;
-        curOrders.forEach(o => {
-          o.items.forEach(item => {
-            COGS += costLookup.getItemCOGS(item);
-          });
-        });
-        const Profit = Math.max(0, Revenue - COGS);
-
-        const PriorRevenue = prevOrders.reduce((s, o) => s + o.total, 0);
-        let prevCOGS = 0;
-        prevOrders.forEach(o => {
-          o.items.forEach(item => {
-            prevCOGS += costLookup.getItemCOGS(item);
-          });
-        });
-        priorTotalRevenue += PriorRevenue;
-        priorTotalProfit += Math.max(0, PriorRevenue - prevCOGS);
-
-        const margin = Revenue > 0 ? ((Profit / Revenue) * 100).toFixed(1) : '0.0';
-
-        return {
-          name: `${dayNum}`,
-          fullLabel: curDate.toLocaleDateString([], { month: 'long', day: 'numeric' }),
-          Revenue,
-          Profit,
-          COGS,
-          PriorRevenue,
-          ordersCount: curOrders.length,
-          marginPct: margin,
-        };
-      });
-    }
-
-    const totalRevenue = chartPoints.reduce((s, p) => s + p.Revenue, 0);
-    const totalCOGS = chartPoints.reduce((s, p) => s + p.COGS, 0);
-    const totalProfit = Math.max(0, totalRevenue - totalCOGS);
-    const marginPct = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : '0.0';
-
-    const revenueDeltaPct = priorTotalRevenue > 0
-      ? (((totalRevenue - priorTotalRevenue) / priorTotalRevenue) * 100).toFixed(1)
-      : null;
-
-    const profitDeltaPct = priorTotalProfit > 0
-      ? (((totalProfit - priorTotalProfit) / priorTotalProfit) * 100).toFixed(1)
-      : null;
-
-    return {
-      chartPoints,
-      totalRevenue,
-      totalCOGS,
-      totalProfit,
-      marginPct,
-      revenueDeltaPct,
-      profitDeltaPct,
-      priorTotalRevenue,
-      peakHour: (maxHourlyRevenue > 0 ? peakHour : null) as { hour: string; revenue: number; ordersCount: number } | null,
+    const analytics = authoritativeKpis?.analytics;
+    return analytics ?? {
+      chartPoints: [],
+      totalRevenue: 0,
+      totalCOGS: 0,
+      totalProfit: 0,
+      marginPct: "0.0",
+      revenueDeltaPct: null,
+      profitDeltaPct: null,
+      priorTotalRevenue: 0,
+      peakHour: null,
     };
-  }, [validOrders, activeModule, costLookup, revenueTimeframe]);
+  }, [authoritativeKpis]);
 
   const paymentChannelSummary = useMemo(() => {
-    const channels: Record<string, { volume: number; count: number }> = {};
-    let totalVolume = 0;
-    let totalCount = 0;
-
-    validOrders.forEach((o) => {
-      const rawMethod = (o.paymentMethod || 'Cash').trim();
-      let normalized = rawMethod;
-      if (/cash/i.test(rawMethod)) normalized = 'Cash';
-      else if (/mpesa|m-pesa|airtel|tigo|halopesa|mobile/i.test(rawMethod)) normalized = 'Mobile Money';
-      else if (/card|visa|mastercard|pos/i.test(rawMethod)) normalized = 'Bank Card';
-      else if (/bank|transfer|wire/i.test(rawMethod)) normalized = 'Bank Transfer';
-      else if (/split/i.test(rawMethod)) normalized = 'Split Tender';
-      else if (/credit/i.test(rawMethod)) normalized = 'Store Credit';
-
-      const amount = Number(o.total || 0);
-      if (!channels[normalized]) {
-        channels[normalized] = { volume: 0, count: 0 };
-      }
-      channels[normalized].volume += amount;
-      channels[normalized].count += 1;
-      totalVolume += amount;
-      totalCount += 1;
-    });
-
-    const CHANNEL_CONFIG: Record<
-      string,
-      { color: string; icon: any; badgeBg: string; textColor: string }
-    > = {
-      'Cash': {
-        color: '#3b82f6',
-        icon: Banknote,
-        badgeBg: 'rgba(59,130,246,0.12)',
-        textColor: '#3b82f6',
-      },
-      'Mobile Money': {
-        color: '#10b981',
-        icon: Smartphone,
-        badgeBg: 'rgba(16,185,129,0.12)',
-        textColor: '#10b981',
-      },
-      'Bank Card': {
-        color: '#f59e0b',
-        icon: CreditCard,
-        badgeBg: 'rgba(245,158,11,0.12)',
-        textColor: '#f59e0b',
-      },
-      'Bank Transfer': {
-        color: '#6366f1',
-        icon: Building2,
-        badgeBg: 'rgba(99,102,241,0.12)',
-        textColor: '#6366f1',
-      },
-      'Split Tender': {
-        color: '#ec4899',
-        icon: ArrowLeftRight,
-        badgeBg: 'rgba(236,72,153,0.12)',
-        textColor: '#ec4899',
-      },
-      'Store Credit': {
-        color: '#8b5cf6',
-        icon: Wallet,
-        badgeBg: 'rgba(139,92,246,0.12)',
-        textColor: '#8b5cf6',
-      },
+    const channels = authoritativeKpis?.analytics?.paymentChannels ?? [];
+    const channelConfig: Record<string, { color: string; icon: any; badgeBg: string; textColor: string }> = {
+      CASH: { color: "#3b82f6", icon: Banknote, badgeBg: "rgba(59,130,246,0.12)", textColor: "#3b82f6" },
+      CARD: { color: "#f59e0b", icon: CreditCard, badgeBg: "rgba(245,158,11,0.12)", textColor: "#f59e0b" },
+      BANK: { color: "#6366f1", icon: Building2, badgeBg: "rgba(99,102,241,0.12)", textColor: "#6366f1" },
+      MOBILE_MONEY: { color: "#10b981", icon: Smartphone, badgeBg: "rgba(16,185,129,0.12)", textColor: "#10b981" },
+      CREDIT: { color: "#8b5cf6", icon: Wallet, badgeBg: "rgba(139,92,246,0.12)", textColor: "#8b5cf6" },
+      OTHER: { color: "#64748b", icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b" },
     };
-
-    const items = Object.entries(channels).map(([name, data], idx) => {
-      const volumeShare = totalVolume > 0 ? Math.round((data.volume / totalVolume) * 100) : 0;
-      const countShare = totalCount > 0 ? Math.round((data.count / totalCount) * 100) : 0;
-      const aov = data.count > 0 ? Math.round(data.volume / data.count) : 0;
-      const cfg = CHANNEL_CONFIG[name] || {
-        color: ['#14b8a6', '#f43f5e', '#a855f7', '#06b6d4'][idx % 4],
-        icon: Wallet,
-        badgeBg: 'rgba(100,116,139,0.12)',
-        textColor: '#64748b',
+    const items = channels.map((item, idx) => {
+      const key = String(item.name || "OTHER").toUpperCase();
+      const cfg = channelConfig[key] || {
+        color: ["#14b8a6", "#f43f5e", "#a855f7", "#06b6d4"][idx % 4],
+        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",
       };
-
-      const pieValue = paymentMetricMode === 'volume'
-        ? (volumeShare || (data.volume > 0 ? 1 : 0))
-        : (countShare || (data.count > 0 ? 1 : 0));
-
+      const pieValue = paymentMetricMode === "volume"
+        ? (item.volumeShare || (item.volume > 0 ? 1 : 0))
+        : (item.countShare || (item.count > 0 ? 1 : 0));
       return {
-        name,
-        volume: data.volume,
-        count: data.count,
-        volumeShare,
-        countShare,
-        aov,
+        ...item,
         value: Math.max(pieValue, 1),
-        rawMetric: paymentMetricMode === 'volume' ? data.volume : data.count,
-        color: cfg.color,
-        icon: cfg.icon,
-        badgeBg: cfg.badgeBg,
-        textColor: cfg.textColor,
+        rawMetric: paymentMetricMode === "volume" ? item.volume : item.count,
+        color: cfg.color, icon: cfg.icon, badgeBg: cfg.badgeBg, textColor: cfg.textColor,
       };
     });
-
     items.sort((a, b) => b.rawMetric - a.rawMetric);
-
+    const analytics = authoritativeKpis?.analytics;
     return {
       items,
-      totalVolume,
-      totalCount,
-      overallAov: totalCount > 0 ? Math.round(totalVolume / totalCount) : 0,
+      totalVolume: analytics?.paymentTotalVolume ?? 0,
+      totalCount: analytics?.paymentTotalCount ?? 0,
+      overallAov: analytics?.paymentOverallAov ?? 0,
     };
-  }, [validOrders, paymentMetricMode]);
+  }, [authoritativeKpis, paymentMetricMode]);
 
   const activePaymentChannel =
     activePaymentIndex !== null && paymentChannelSummary.items[activePaymentIndex]
@@ -1343,52 +1006,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   // Top products ranked leaderboard data with real-time stock & category awareness
   const topProductsAnalytics = useMemo(() => {
-    const map: Record<string, {
-      productId: string;
-      name: string;
-      revenue: number;
-      units: number;
-      stock: number;
-      category: string;
-    }> = {};
-
-    for (const o of validOrders) {
-      for (const item of o.items) {
-        if (!map[item.productId]) {
-          const matchedProd = products.find(p => p.id === item.productId);
-          map[item.productId] = {
-            productId: item.productId,
-            name: matchedProd?.name || item.name || 'Product',
-            revenue: 0,
-            units: 0,
-            stock: matchedProd ? Number(matchedProd.stock ?? 0) : 0,
-            category: matchedProd?.category || 'General',
-          };
-        }
-        map[item.productId].revenue += item.price * item.quantity;
-        map[item.productId].units   += item.quantity;
-      }
-    }
-
-    const list = Object.values(map);
-    const maxRev = Math.max(...list.map(p => p.revenue), 1);
-    const maxUnits = Math.max(...list.map(p => p.units), 1);
-
-    const sorted = list.sort((a, b) => {
-      return topProductsMetric === 'revenue' ? b.revenue - a.revenue : b.units - a.units;
-    }).slice(0, 5);
-
+    const rows = authoritativeKpis?.analytics?.topProducts ?? [];
+    const maxRevenue = Math.max(...rows.map(p => p.revenue), 1);
+    const maxUnits = Math.max(...rows.map(p => p.units), 1);
     return {
-      items: sorted.map((p, idx) => ({
+      items: rows.map(p => ({
         ...p,
-        rank: idx + 1,
-        progressPct: topProductsMetric === 'revenue'
-          ? Math.round((p.revenue / maxRev) * 100)
+        progressPct: topProductsMetric === "revenue"
+          ? Math.round((p.revenue / maxRevenue) * 100)
           : Math.round((p.units / maxUnits) * 100),
       })),
-      totalTracked: list.length,
+      totalTracked: authoritativeKpis?.analytics?.topProductsTotalTracked ?? rows.length,
     };
-  }, [validOrders, products, topProductsMetric]);
+  }, [authoritativeKpis, topProductsMetric]);
 
   // ── Register Till & Shift Reconciliation ──────────────────────────────────
   const activeShiftSession = useMemo(() => {
@@ -1498,19 +1128,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Fiscalization State', traVfdFiscalizationState],
         ['', ''],
         ['EXECUTIVE ACCRUAL SUMMARY', 'VALUE (TSH) / COUNT'],
-        ['Gross Sales Turnover (Today)', Number(stats.grossSales || 0)],
-        ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0)],
-        ['Customer Returns / Refunds', Number(stats.todayRefunds || 0)],
-        ['GAAP Net Sales Turnover', Number(stats.netSales || 0)],
-        ['Real Gross Profit Earned', Number(stats.todayGrossProfit || 0)],
-        ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0)],
-        ['Blended Gross Margin %', `${stats.todayMargin}%`],
-        ['Average Order Value (AOV)', Number(stats.todayAOV || 0)],
+        ['Gross Sales Turnover (Today)', Number(authoritativeKpis?.grossSalesToday ?? stats.grossSales ?? 0)],
+        ['Discounts Allowed (Today)', Number(authoritativeKpis?.discountsToday ?? stats.todayDiscounts ?? 0)],
+        ['Customer Returns / Refunds', Number(authoritativeKpis?.refundsToday ?? stats.todayRefunds ?? 0)],
+        ['GAAP Net Sales Turnover', Number(authoritativeKpis?.netSalesToday ?? stats.netSales ?? 0)],
+        ['Real Gross Profit Earned', Number(authoritativeKpis?.grossProfitToday ?? stats.todayGrossProfit ?? 0)],
+        ['Cost of Goods Sold (COGS)', Number(authoritativeKpis?.cogsToday ?? stats.todayCOGS ?? 0)],
+        ['Blended Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`],
+        ['Average Order Value (AOV)', Number(authoritativeKpis?.aov ?? stats.todayAOV ?? 0)],
         ['Calculated Cash in Drawer', Number(tillReconciliation.expectedCash || 0)],
-        ['Total Completed Orders', Number(stats.completedOrders || 0)],
+        ['Total Completed Orders', Number(authoritativeKpis?.completedOrders ?? stats.completedOrders ?? 0)],
         ['Total Active Product SKUs', Number(products.length || 0)],
-        ['Outstanding Customer Debt', Number(stats.totalLoans || 0)],
-        ['Pending Offline Outbox Mutations', Number(stats.unsyncedCount || 0)],
+        ['Outstanding Customer Debt', Number(authoritativeKpis?.customerDebts ?? stats.totalLoans ?? 0)],
+        ['Pending Offline Outbox Mutations', Number(syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount)],
       ];
       const ws0 = XLSX.utils.aoa_to_sheet(ws0Data);
       ws0['!cols'] = [{ wch: 35 }, { wch: 45 }];
@@ -1527,21 +1157,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       // Tab 1: "1. EXECUTIVE FINANCIAL OVERVIEW"
       const ws1Data: any[][] = [
         ['Financial Indicator', 'Value (Tsh / Metric)', 'Audit Category', 'Notes & Policy Explanation'],
-        ['Gross Sales (Today)', Number(stats.grossSales || 0), 'Revenue', 'Total gross transactions before promotional deductions'],
-        ['Discounts Allowed (Today)', Number(stats.todayDiscounts || 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
-        ['Refunds & Returns (Today)', Number(stats.todayRefunds || 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
-        ['Net Sales Turnover (Today)', Number(stats.netSales || 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
-        ['Real Gross Profit (Today)', Number(stats.todayGrossProfit || 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
-        ['Cost of Goods Sold (COGS)', Number(stats.todayCOGS || 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
-        ['Gross Margin %', `${stats.todayMargin}%`, 'Profitability', 'Gross Profit / Net Sales'],
-        ['Completed Orders Count', Number(stats.completedOrders || 0), 'Operations', 'Successful completed checkout sales receipts'],
-        ['Average Order Value (AOV)', Number(stats.todayAOV || 0), 'Performance', 'Net Sales / Completed Orders'],
-        ['Total Inventory Valuation', Number(stats.inventoryVal || 0), 'Balance Sheet', 'Total valuation of on-hand inventory at buying price'],
+        ['Gross Sales (Today)', Number(authoritativeKpis?.grossSalesToday ?? stats.grossSales ?? 0), 'Revenue', 'Total gross transactions before promotional deductions'],
+        ['Discounts Allowed (Today)', Number(authoritativeKpis?.discountsToday ?? stats.todayDiscounts ?? 0), 'Deduction', 'All promotional, line-item & bill-level discounts'],
+        ['Refunds & Returns (Today)', Number(authoritativeKpis?.refundsToday ?? stats.todayRefunds ?? 0), 'Deduction', `${stats.todayRefundCount} returned / voided customer orders`],
+        ['Net Sales Turnover (Today)', Number(authoritativeKpis?.netSalesToday ?? stats.netSales ?? 0), 'GAAP Revenue', 'Gross Sales − Discounts − Refunds'],
+        ['Real Gross Profit (Today)', Number(authoritativeKpis?.grossProfitToday ?? stats.todayGrossProfit ?? 0), 'Gross Margin', 'Net Sales − Actual Cost of Goods Sold'],
+        ['Cost of Goods Sold (COGS)', Number(authoritativeKpis?.cogsToday ?? stats.todayCOGS ?? 0), 'Direct Cost', 'Real inventory acquisition / purchase cost'],
+        ['Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`, 'Profitability', 'Gross Profit / Net Sales'],
+        ['Completed Orders Count', Number(authoritativeKpis?.completedOrders ?? stats.completedOrders ?? 0), 'Operations', 'Successful completed checkout sales receipts'],
+        ['Average Order Value (AOV)', Number(authoritativeKpis?.aov ?? stats.todayAOV ?? 0), 'Performance', 'Net Sales / Completed Orders'],
+        ['Total Inventory Valuation', Number(authoritativeKpis?.inventoryValue ?? stats.inventoryVal ?? 0), 'Balance Sheet', 'Total valuation of on-hand inventory at buying price'],
         ['Total Active SKUs', Number(products.length || 0), 'Catalog', 'Distinct active product master items in catalog'],
-        ['Low Stock Alert SKUs', Number(stats.lowStockCount || 0), 'Supply Chain', 'Items at or below minimum reorder threshold'],
-        ['Out of Stock SKUs', Number(stats.outOfStockCount || 0), 'Supply Chain', 'Items with 0 available units on shelf'],
-        ['Customer Receivables / Debt', Number(stats.totalLoans || 0), 'Receivables', 'Total outstanding credit balance owed by customers'],
-        ['Pending Cloud Sync Mutations', Number(stats.unsyncedCount || 0), 'Integrity', 'Mutations buffered in local IndexedDB sync queue'],
+        ['Low Stock Alert SKUs', Number(authoritativeKpis?.lowStockCount ?? stats.lowStockCount ?? 0), 'Supply Chain', 'Items at or below minimum reorder threshold'],
+        ['Out of Stock SKUs', Number(authoritativeKpis?.outOfStockCount ?? stats.outOfStockCount ?? 0), 'Supply Chain', 'Items with 0 available units on shelf'],
+        ['Customer Receivables / Debt', Number(authoritativeKpis?.customerDebts ?? stats.totalLoans ?? 0), 'Receivables', 'Total outstanding credit balance owed by customers'],
+        ['Pending Cloud Sync Mutations', Number(syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount), 'Integrity', 'Mutations buffered in local IndexedDB sync queue'],
       ];
       const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
       ws1['!cols'] = [{ wch: 32 }, { wch: 24 }, { wch: 18 }, { wch: 46 }];
