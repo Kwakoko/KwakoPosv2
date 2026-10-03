@@ -1051,17 +1051,8 @@ Manager Sign-off:  _____________________
                     {discrepancy === 0 ? "BALANCED" : money(discrepancy)}
                   </span>
                 </div>
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} onClick={() => {
-                  setBlindCountDone(false);
-                  setBlindCountSealedAt(null);
-                  setBlindDeclaredCash(0);
-                  const activeShift = db.getConfigurationLocal?.("active_shift_session");
-                  if (activeShift) {
-                    const { blindCashCount: _discarded, ...withoutBlindCount } = activeShift;
-                    db.saveConfigurationLocal("active_shift_session", withoutBlindCount);
-                  }
-                }} type="button">
-                  Re-enter Blind Count
+                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} disabled type="button" title="A sealed physical cash count is immutable.">
+                  Count Sealed — Cannot Re-enter
                 </button>
               </div>
             )}
