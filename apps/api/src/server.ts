@@ -1885,6 +1885,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: receipts };
   });
 
+  server.post("/api/v1/purchases/:id/approve", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const po = await commercialRepository.approvePurchaseOrder(req.tenantContext!, id);
+    return reply.status(200).send({ success: true, data: po });
+  });
+
   server.post("/api/v1/purchases/receipts", async (req, reply) => {
     const validated = CreatePurchaseReceiptRequestSchema.parse(req.body);
     const result = atomicCommercialFinance
