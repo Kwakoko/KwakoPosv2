@@ -196,6 +196,26 @@ export class PrismaCommercialRepository {
     return normalize(await db.purchaseReceipt.findMany({ where: tenantWhere(ctx), include: { items: true }, orderBy: { receivedAt: "desc" } }));
   }
 
+  async settleSupplierPayable(ctx: TenantContext, req: { supplierId: string; amount: number; paymentMethod: string; provider?: string; providerReference?: string; purchaseReceiptId?: string; idempotencyKey: string }) {
+    const supplier = await db.supplier.findFirst({ where: { id: req.supplierId, ...tenantWhere(ctx) } });
+    if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+    if (req.amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
+    if (req.amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+    const paymentNumber = `PAY-SUP-${String(req.idempotencyKey).replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber } });
+      if (existing) return existing;
+      const payment = await tx.payment.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
+        purchaseReceiptId: req.purchaseReceiptId || null, supplierId: req.supplierId, amount: req.amount,
+        paymentMethod: req.paymentMethod, provider: req.provider || null, providerReference: req.providerReference || null,
+        status: "COMPLETED", paidAt: new Date(),
+      } });
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: req.amount } } });
+      return payment;
+    }));
+  }
+
   async getSales(ctx: TenantContext) {
     return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }));
   }
