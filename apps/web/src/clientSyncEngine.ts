@@ -720,8 +720,33 @@ export async function reconcileInventory(
     await db.stockAdjustments.update(delta.id, { status: "RECONCILED" } as any);
   }
 
-  if (serverSnapshot.productId && typeof (db as any).recalculateProductStockLocal === "function") {
-    (db as any).recalculateProductStockLocal(serverSnapshot.productId);
+  // Do not rebuild the reconciled variant from the local ledger here: the
+  // server snapshot may contain concurrent remote movements that are not yet
+  // present in this device's ledger. Rebuild only the parent product summary
+  // from the already-reconciled variant projections.
+  if (serverSnapshot.productId) {
+    const product = db.products.get(serverSnapshot.productId) as any;
+    if (product) {
+      const variants = [...db.productVariants.values()].filter(
+        (v: any) =>
+          v.productId === serverSnapshot.productId &&
+          v.tenantId === serverSnapshot.tenantId &&
+          v.branchId === serverSnapshot.branchId,
+      );
+      const totalStock = variants
+        .filter((v: any) => v.isActive !== false)
+        .reduce((sum: number, v: any) => sum + Number(v.inventoryQuantity ?? v.stock ?? 0), 0);
+      const updatedProduct = {
+        ...product,
+        variants,
+        hasVariants: variants.length > 0,
+        stock: totalStock,
+        totalStock,
+        availableStock: totalStock,
+      };
+      db.products.set(serverSnapshot.productId, updatedProduct);
+      db.persist("products", serverSnapshot.productId, updatedProduct);
+    }
   }
 
   return reconciledQty;

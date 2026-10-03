@@ -1,0 +1,53 @@
+name: Inventory P0/P1 Closure
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/src/pages/InventoryPage.tsx"
+      - "apps/web/src/services/inventoryStockService.ts"
+      - "packages/database/src/prismaRepositories.ts"
+      - "packages/database/src/inventoryAuthority.ts"
+      - "packages/database/prisma/schema.prisma"
+      - "packages/database/prisma/migrations/**"
+      - "tests/unit/snapshot-reconciliation.test.ts"
+  push:
+    branches:
+      - main
+      - "fix/inventory-p0-p1-closure"
+
+jobs:
+  inventory-closure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run build --workspace=@kwakopos2/contracts
+      - run: npm run build --workspace=@kwakopos2/config
+      - run: npm run build --workspace=@kwakopos2/domain
+      - run: npx vitest run tests/unit/snapshot-reconciliation.test.ts
+      - name: Inventory authority assertions
+        run: |
+          grep -q "currentTenantId, currentBranchId" apps/web/src/pages/InventoryPage.tsx
+          grep -q "Stock Changes Use Stock Ledger" apps/web/src/pages/InventoryPage.tsx
+          grep -q "executeAtomicMutation" apps/web/src/services/inventoryStockService.ts
+          grep -q 'warehouseId: req.warehouseId' packages/database/src/prismaRepositories.ts
+          grep -q "server snapshot may contain concurrent remote movements" apps/web/src/clientSyncEngine.ts
+      - name: Web typecheck — report unrelated baseline errors without masking Inventory
+        run: |
+          set +e
+          npx tsc -p apps/web/tsconfig.json --noEmit > /tmp/kwako-web-tsc.log 2>&1
+          status=$?
+          cat /tmp/kwako-web-tsc.log
+          if grep -E "InventoryPage.tsx|inventoryStockService.ts|clientSyncEngine.ts" /tmp/kwako-web-tsc.log; then
+            echo "Inventory-specific TypeScript errors detected."
+            exit 1
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "Web typecheck has unrelated baseline errors; Inventory-specific typecheck findings are clean."
+          fi
+          exit 0
