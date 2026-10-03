@@ -189,13 +189,37 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   useEffect(() => {
     try {
-      if (cart.length > 0) {
-        localStorage.setItem(activeCartKey, JSON.stringify(cart));
-      } else {
-        localStorage.removeItem(activeCartKey);
-      }
+      if (cart.length > 0) localStorage.setItem(activeCartKey, JSON.stringify(cart));
+      else localStorage.removeItem(activeCartKey);
     } catch {}
-  }, [cart, activeCartKey]);
+    try {
+      db.saveConfigurationLocal(
+        "pos_active_cart",
+        cart,
+        currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
+      );
+    } catch (error) {
+      console.warn("[POS] Failed to persist active cart to IndexedDB", error);
+    }
+  }, [cart, activeCartKey, db, currentTenantId, currentBranchId]);
+
+  useEffect(() => {
+    let active = true;
+    const hydrateActiveCart = async () => {
+      try {
+        await db.ready;
+        const persisted = db.getConfigurationLocal(
+          "pos_active_cart",
+          currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
+        );
+        if (active && Array.isArray(persisted)) setCart(persisted);
+      } catch (error) {
+        console.warn("[POS] Failed to hydrate active cart from IndexedDB", error);
+      }
+    };
+    void hydrateActiveCart();
+    return () => { active = false; };
+  }, [db, currentTenantId, currentBranchId]);
 
   const [discountPercent, setDiscountPercent] = useState(0);
 
@@ -242,11 +266,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [showQuickKeys, setShowQuickKeys] = useState(true);
   const [lineDiscountModal, setLineDiscountModal] = useState<{ index: number; itemName: string; currentPercent: number } | null>(null);
   const [customLineDiscountInput, setCustomLineDiscountInput] = useState("");
-  const [customerOptions, setCustomerOptions] = useState<string[]>([
-    "Walk-In Customer",
-    "Amani Mwakalundwa (VIP Customer)",
-    "Baraka Juma Msimbe",
-  ]);
+  const [customerOptions, setCustomerOptions] = useState<string[]>(["Walk-In Customer"]);
 
   useEffect(() => {
     let active = true;
@@ -286,7 +306,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       outstandingBalance: 0,
       createdAt: new Date().toISOString(),
     };
-    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
     await commitLocalMutation({ db, tenantContext, entityType: "Customer", entityId: customerId, operationType: "CREATE", payload: newCust, idempotencyKey: customerId, writes: [{ store: "customers", key: customerId, value: newCust }] });
     setCustomerOptions((prev) => Array.from(new Set([...prev, trimmed])));
     setSelectedCustomer(trimmed);
@@ -394,10 +414,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [lastSale, setLastSale] = useState<any | null>(null);
 
   // Shift & Cash Drawer State
-  const [shiftOpen, setShiftOpen] = useState(true);
+  const [shiftOpen, setShiftOpen] = useState(false);
   const [shiftModal, setShiftModal] = useState(false);
-  const [openingFloat, setOpeningFloat] = useState(150000);
-  const [declaredCash, setDeclaredCash] = useState(150000);
+  const [openingFloat, setOpeningFloat] = useState(0);
+  const [declaredCash, setDeclaredCash] = useState(0);
   const [cashDenominations, setCashDenominations] = useState<Record<number, number>>({ 10000: 10, 5000: 6, 2000: 5, 1000: 10, 500: 0 });
 
   // Supervisor PIN Modal
@@ -934,30 +954,72 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return true;
   };
 
-  const handleInitiateCheckout = () => {
+  const handleInitiateCheckout = async () => {
     if (!validateSaleProceed()) return;
-    setCashReceived(cartGrandTotal);
-    setCheckoutModal(true);
+    try {
+      await db.ready;
+      const session = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const activeSession = session?.data ?? null;
+      if (!activeSession?.id || activeSession.status !== "OPEN") {
+        setShiftOpen(false);
+        setShiftModal(true);
+        toast.warning("Open Shift Required", "Open an authoritative cash session before checkout.");
+        return;
+      }
+      setShiftOpen(true);
+      setCashReceived(cartGrandTotal);
+      setCheckoutModal(true);
+    } catch {
+      toast.error("Shift Verification Failed", "The terminal could not verify the active cash session.");
+    }
   };
 
   // Complete Sale & Checkout
   const handleCompleteSale = async () => {
     if (!validateSaleProceed()) return;
+    let activeCashSession: any = null;
+    try {
+      const sessionResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      activeCashSession = sessionResponse?.data ?? null;
+    } catch {
+      toast.error("Checkout Blocked", "Unable to verify the authoritative cash session.");
+      return;
+    }
+    if (!activeCashSession?.id || activeCashSession.status !== "OPEN") {
+      setShiftOpen(false);
+      setShiftModal(true);
+      toast.warning("Open Shift Required", "Checkout requires an authoritative OPEN cash session.");
+      return;
+    }
 
     if (paymentMethod === "Split") {
       const splitTotal = splitAmounts.Cash + splitAmounts.MPesa + splitAmounts.Card + splitAmounts.Bank;
-      if (splitTotal < cartGrandTotal) {
+      if (Math.abs(splitTotal - cartGrandTotal) > 0.005) {
         toast.warning("Split Tender Incomplete", `Total tendered (${money(splitTotal)}) is less than due (${money(cartGrandTotal)}).`);
         return;
       }
     }
 
-    const saleId = `SALE-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    const effectivePaid = paymentMethod === "Cash" ? Math.max(cashReceived, cartGrandTotal) : cartGrandTotal;
+    if (!currentTenantId || !currentBranchId || !user?.id) {
+      toast.error("Checkout Context Missing", "Tenant, branch, and authenticated cashier context are required.");
+      return;
+    }
+    if (cart.some((item) => item.isCustom)) {
+      toast.warning("Catalog Item Required", "Custom/non-inventory items are not supported by the authoritative sale contract. Add a real catalog variant.");
+      return;
+    }
+
+    const saleId = safeUUID();
+    const effectivePaid = paymentMethod === "Cash" ? cashReceived : paymentMethod === "Split" ? (splitAmounts.Cash + splitAmounts.MPesa + splitAmounts.Card + splitAmounts.Bank) : cartGrandTotal;
+    if (paymentMethod === "Cash" && cashReceived < cartGrandTotal) {
+      toast.warning("Insufficient Cash", `Tendered (${money(cashReceived)}) is less than due (${money(cartGrandTotal)}).`);
+      return;
+    }
 
     const mappedItems = cart.map((i) => {
       const unitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
-      const variantId = i.variantId || `${i.product.id}-default`;
+      if (!i.variantId && !i.isCustom) throw new Error(`POS_VARIANT_REQUIRED:${i.product.id}`);
+      const variantId = i.variantId || `${i.product.id}-custom`;
       const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
       return {
         productId: i.product.id,
@@ -1031,7 +1093,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const payments = paymentPayload;
     const paymentDeviceId = getOrCreatePersistentDeviceId("pos");
 
-    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const tenantContext = { tenantId: currentTenantId!, branchId: currentBranchId! };
+    const selectedCustomerId = selectedCustomer === "Walk-In Customer"
+      ? null
+      : Array.from(db.customers.values()).find((customer: any) =>
+          customer.tenantId === currentTenantId &&
+          customer.branchId === currentBranchId &&
+          customer.name === selectedCustomer
+        )?.id ?? null;
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
 
     const saleRecord = {
@@ -1040,13 +1109,15 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       receiptNumber: saleId,
       tenantId: currentTenantId,
       branchId: currentBranchId,
-      deviceId: "pos-terminal",
+      deviceId: paymentDeviceId,
+      cashSessionId: activeCashSession.id,
       operationId: saleId,
-      idempotencyKey: saleId,
+      idempotencyKey: `${paymentDeviceId}/${saleId}`,
+      customerId: selectedCustomerId,
       customer: selectedCustomer,
       customerName: selectedCustomer,
-      cashierId: user?.id || "USER-01",
-      cashierName: user?.name || "Cashier",
+      cashierId: user?.id || "",
+      cashierName: user?.name || "",
       items: mappedItems,
       payments,
       cart: [...cart],
@@ -1078,8 +1149,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     // Atomic local sale boundary: sale + receipt + credit-customer projection + Sale outbox commit together.
     const receiptRecord = {
       id: saleId, receiptNumber: saleId, transactionId: saleId, transactionType: "POS_SALE",
-      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "USER-01",
-      cashierName: user?.name || "Cashier", customerId: "CUST-WALKIN", customerName: selectedCustomer,
+      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "",
+      cashierName: user?.name || "", customerId: selectedCustomerId, customerName: selectedCustomer,
       subtotal: cartSubtotal, discountTotal: discountAmount, taxTotal: taxAmount, selectedTaxRate,
       taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
       changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
@@ -1207,6 +1278,78 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SALE_COMPLETED", sale: saleRecord } }));
     void syncOutbox?.().catch(() => {});
   };
+
+  const openAuthoritativeShift = async () => {
+    if (!user?.id) {
+      toast.error("Authentication Required", "A signed-in cashier is required to open a shift.");
+      return;
+    }
+    const amount = Number(openingFloat);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.warning("Invalid Opening Float", "Enter a valid non-negative opening float.");
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/v1/cash-sessions", {
+        method: "POST",
+        body: JSON.stringify({ openingCash: amount, notes: `POS terminal shift` }),
+      });
+      const session = res?.data;
+      if (!session?.id || session.status !== "OPEN") throw new Error("CASH_SESSION_OPEN_FAILED");
+      setShiftOpen(true);
+      setOpeningFloat(Number(session.openingCash || 0));
+      setDeclaredCash(Number(session.openingCash || 0));
+      setShiftModal(false);
+      toast.success("Shift Opened", `Cash session ${session.sessionNumber || session.id} is now authoritative.`);
+    } catch (error) {
+      console.error("[POS] Failed to open cash session", error);
+      toast.error("Shift Open Failed", "The authoritative cash session could not be opened.");
+    }
+  };
+
+  const closeAuthoritativeShift = async () => {
+    try {
+      const activeResponse = await apiFetch("/api/v1/cash-sessions/active", { method: "GET" });
+      const session = activeResponse?.data;
+      if (!session?.id || session.status !== "OPEN") {
+        setShiftOpen(false);
+        setShiftModal(false);
+        return;
+      }
+      const actualCash = Object.entries(cashDenominations).reduce((sum, [denom, count]) => sum + Number(denom) * Number(count), 0);
+      await apiFetch(`/api/v1/cash-sessions/${session.id}/count`, {
+        method: "POST",
+        body: JSON.stringify({ actualCash, deviceId: getOrCreatePersistentDeviceId("pos") }),
+      });
+      await apiFetch(`/api/v1/cash-sessions/${session.id}/close`, {
+        method: "POST",
+        body: JSON.stringify({ notes: "POS terminal close" }),
+      });
+      setDeclaredCash(actualCash);
+      setShiftOpen(false);
+      setShiftModal(false);
+      toast.success("Shift Closed", `Cash session ${session.sessionNumber || session.id} was closed authoritatively.`);
+    } catch (error) {
+      console.error("[POS] Failed to close cash session", error);
+      toast.error("Shift Close Failed", "The authoritative cash session could not be closed.");
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch("/api/v1/cash-sessions/active", { method: "GET" }).then((res: any) => {
+      if (!active) return;
+      const session = res?.data;
+      setShiftOpen(Boolean(session?.id && session.status === "OPEN"));
+      if (session) {
+        setOpeningFloat(Number(session.openingCash || 0));
+        setDeclaredCash(Number(session.actualCash ?? session.expectedCash ?? session.openingCash ?? 0));
+      }
+    }).catch(() => {
+      if (active) setShiftOpen(false);
+    });
+    return () => { active = false; };
+  }, [currentTenantId, currentBranchId, user?.id]);
 
   const executeReturn = () => {
     if (!selectedOrderToReturn) return;
@@ -3361,6 +3504,21 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               </button>
             </div>
 
+            {!shiftOpen && (
+              <div className="v2-p-3 v2-mb-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
+                <label className="v2-text-xs v2-font-bold">Opening Float (TZS)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="v2-input v2-input-sm v2-mt-1 v2-w-full"
+                  value={openingFloat || ""}
+                  placeholder="Enter physical opening cash"
+                  onChange={(e) => setOpeningFloat(Math.max(0, Number(e.target.value || 0)))}
+                />
+              </div>
+            )}
+
             {/* Float & Session Stats */}
             <div className="v2-grid v2-grid-3 v2-gap-2 v2-mb-4">
               <div className="v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
@@ -3464,37 +3622,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
             {/* Action Buttons */}
             <div className="v2-flex v2-items-center v2-justify-between">
-              <button
-                type="button"
-                className="v2-btn v2-btn-secondary v2-btn-sm"
-                onClick={() => {
-                  playBeep(800, 50);
-                  toast.info("X-Report Generated", "Cash drawer audit summary sent to receipt printer spooler.");
-                }}
-              >
+              <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => {
+                playBeep(800, 50);
+                toast.info("X-Report Generated", "Cash drawer audit summary sent to receipt printer spooler.");
+              }}>
                 <Printer size={13} /> Print Shift X-Report
               </button>
               <div className="v2-flex v2-gap-2">
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-ghost v2-btn-sm"
-                  onClick={() => setShiftModal(false)}
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  className="v2-btn v2-btn-primary v2-btn-sm"
-                  onClick={() => {
-                    playSuccessChime();
-                    toast.success("Shift Closed", "Shift reconciled and end-of-day Z-Report archived.");
-                    setShiftModal(false);
-                  }}
-                >
-                  Close Shift &amp; Till
-                </button>
+                <button type="button" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShiftModal(false)}>Close</button>
+                {shiftOpen ? (
+                  <button type="button" className="v2-btn v2-btn-danger v2-btn-sm" onClick={() => void closeAuthoritativeShift()}>
+                    Close Shift &amp; Till
+                  </button>
+                ) : (
+                  <button type="button" className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void openAuthoritativeShift()}>
+                    Open Shift &amp; Till
+                  </button>
+                )}
               </div>
-            </div>
+            </div>            </div>
           </div>
         </div>
       )}
