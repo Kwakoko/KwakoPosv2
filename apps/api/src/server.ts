@@ -1880,12 +1880,28 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: po });
   });
 
+  server.get("/api/v1/purchases/receipts", async (req) => {
+    const receipts = await commercialRepository.getPurchaseReceipts(req.tenantContext!);
+    return { success: true, data: receipts };
+  });
+
   server.post("/api/v1/purchases/receipts", async (req, reply) => {
     const validated = CreatePurchaseReceiptRequestSchema.parse(req.body);
     const result = atomicCommercialFinance
       ? await atomicCommercialFinance.createPurchaseReceipt(req.tenantContext!, validated)
       : await commercialRepository.createPurchaseReceipt(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/finance/payables/settle-supplier", async (req, reply) => {
+    const body = z.object({
+      supplierId: z.string().uuid(), amount: z.number().positive(),
+      paymentMethod: z.string().min(1), provider: z.string().optional(),
+      providerReference: z.string().optional(), purchaseReceiptId: z.string().uuid().optional(),
+      idempotencyKey: z.string().min(1),
+    }).parse(req.body);
+    const payment = await commercialRepository.settleSupplierPayable(req.tenantContext!, body);
+    return reply.status(201).send({ success: true, data: payment });
   });
 
   // POS Sales Engine
