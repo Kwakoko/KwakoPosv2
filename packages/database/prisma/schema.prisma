@@ -743,6 +743,9 @@ model Payment {
 
   @@unique([tenantId, branchId, paymentNumber])
   @@index([tenantId, branchId, paidAt])
+  drawerOperationId String? @unique
+  drawerOperation DrawerOperation? @relation("PaymentDrawerOperation", fields: [drawerOperationId], references: [id], onDelete: SetNull)
+
   @@map("payments")
 }
 
@@ -771,10 +774,39 @@ model CashSession {
   cashier           User      @relation(fields: [cashierId], references: [id], onDelete: Cascade)
   sales             Sale[]
   expenses          Expense[]
+  drawerOperations  DrawerOperation[]
 
   @@unique([tenantId, branchId, sessionNumber])
   @@index([tenantId, branchId, cashierId])
   @@map("cash_sessions")
+}
+
+model DrawerOperation {
+  id            String    @id @default(uuid())
+  tenantId      String
+  branchId      String
+  cashSessionId String?
+  paymentId     String?
+  saleId        String?
+  operationType String
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  requestedAt   DateTime  @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  lastError     String?
+  deviceId      String
+  requestedById String
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  payment       Payment?  @relation("PaymentDrawerOperation")
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, branchId, status, requestedAt])
+  @@index([tenantId, branchId, operationType, createdAt])
+  @@index([tenantId, branchId, cashSessionId])
+  @@map("drawer_operations")
 }
 
 model Expense {
