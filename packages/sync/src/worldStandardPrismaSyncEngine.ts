@@ -282,11 +282,11 @@ export class WorldStandardPrismaSyncEngine {
       `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
               so."operationType" AS "operationType", so.payload
          FROM sync_operations so
-        WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
+        WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
-             WHERE cj.tenant_id = so."tenantId"
-               AND cj.branch_id = so."branchId"
+             WHERE cj.tenant_id = so.tenant_id
+               AND cj.branch_id = so.branch_id
                AND cj.operation_id = so."operationId"
           )
         ORDER BY so."createdAt" ASC LIMIT 1000`,
@@ -317,7 +317,7 @@ export class WorldStandardPrismaSyncEngine {
             SELECT 1 FROM sync_change_journal cj
              WHERE cj.tenant_id = so."tenantId"
                AND cj.branch_id = so."branchId"
-               AND cj.operation_id LIKE so."operationId" || ':ledger:%'
+               AND cj.operation_id LIKE so.operation_id || ':ledger:%'
           )
         ORDER BY so."createdAt" ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
