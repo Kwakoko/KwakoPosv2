@@ -24,7 +24,6 @@ import {
   validateRetroactiveTimeline,
   assertTenantIsolation,
 } from "@kwakopos2/domain";
-import { Prisma } from "@prisma/client";
 import { prisma } from "./client.js";
 import {
   projectProductBranchStock,
@@ -403,7 +402,7 @@ export class PrismaCatalogRepository {
   async listCategories(ctx: TenantContext): Promise<Category[]> {
     await this.ensureDefaults(ctx);
     const rows = await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
-    return rows.map((r) => this.categoryShape(r));
+    return rows.map((r: any) => this.categoryShape(r));
   }
 
   async createCategory(ctx: TenantContext, req: CreateCategoryRequest): Promise<Category> {
@@ -423,7 +422,7 @@ export class PrismaCatalogRepository {
       const parent = await prisma.category.findUnique({ where: { id: req.parentId } });
       if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
     }
-    const row = await prisma.$transaction(async (tx) => {
+    const row = await prisma.$transaction(async (tx: any) => {
       const updated = await tx.category.update({ where: { id }, data: { name: req.name?.trim(), code: req.code?.trim().toUpperCase(), parentId: req.parentId !== undefined ? req.parentId : undefined, description: req.description !== undefined ? (req.description.trim() || null) : undefined, color: req.color !== undefined ? (req.color.trim() || null) : undefined, isActive: req.isActive } });
       if (req.name !== undefined && req.name.trim() !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id }, data: { category: req.name.trim() } });
       return updated;
@@ -432,7 +431,7 @@ export class PrismaCatalogRepository {
   }
 
   async deleteCategory(ctx: TenantContext, id: string, replacementId?: string): Promise<{ deleted: boolean; reassigned: number }> {
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       const existing = await tx.category.findUnique({ where: { id } });
       if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
       const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id, isActive: true } });
@@ -451,7 +450,7 @@ export class PrismaCatalogRepository {
   async listBrands(ctx: TenantContext): Promise<Brand[]> {
     await this.ensureDefaults(ctx);
     const rows = await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true }, orderBy: [{ name: "asc" }, { id: "asc" }] });
-    return rows.map((r) => this.brandShape(r));
+    return rows.map((r: any) => this.brandShape(r));
   }
 
   async createBrand(ctx: TenantContext, req: CreateBrandRequest): Promise<Brand> {
@@ -467,7 +466,7 @@ export class PrismaCatalogRepository {
   }
 
   async deleteBrand(ctx: TenantContext, id: string, replacementId?: string): Promise<{ deleted: boolean; reassigned: number }> {
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
       const existing = await tx.brand.findUnique({ where: { id } });
       if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Brand not found");
       const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: id, isActive: true } });
@@ -492,7 +491,7 @@ export class PrismaStockRepository {
     const result = await prisma.$transaction(async (tx: any) => {
       const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
       if (existing) return existing;
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM "product_variants" WHERE id = ${req.variantId} AND "tenantId" = ${ctx.tenantId} AND "branchId" = ${ctx.branchId} FOR UPDATE`);
+      await tx.$queryRawUnsafe('SELECT id FROM "product_variants" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE', req.variantId, ctx.tenantId, ctx.branchId);
       const variant = await tx.productVariant.findUnique({ where: { id: req.variantId } });
       if (!variant) throw new Error(`Variant ${req.variantId} not found`);
       assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
@@ -568,7 +567,7 @@ export class PrismaStockRepository {
     }
 
     const result = await prisma.$transaction(async (tx: any) => {
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM "product_variants" WHERE id = ${resolvedVariantId} AND "tenantId" = ${ctx.tenantId} AND "branchId" = ${ctx.branchId} FOR UPDATE`);
+      await tx.$queryRawUnsafe('SELECT id FROM "product_variants" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE', resolvedVariantId, ctx.tenantId, ctx.branchId);
       const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
       const currentStock = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
       const quantityBefore = currentStock;
