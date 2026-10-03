@@ -280,125 +280,25 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
 
   async updateReceiptStatus(ctx: TenantContext, receiptId: string, status: string, reason?: string, actorId?: string): Promise<ReceiptDTO> {
     if (!["CANCELLED", "REFUNDED"].includes(status)) throw new Error("RECEIPT_STATUS_TRANSITION_NOT_ALLOWED");
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const receipt = await tx.receipt.findFirst({
-          where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-          include: { items: true },
-        });
-        if (!receipt) throw new Error("RECEIPT_NOT_FOUND");
-        if (receipt.status !== "COMPLETED") throw new Error("RECEIPT_TERMINAL_STATE");
+    const receipt = await this.getReceiptById(ctx, receiptId);
+    if (!receipt) throw new Error("RECEIPT_NOT_FOUND");
+    if (receipt.status !== "COMPLETED") throw new Error("RECEIPT_TERMINAL_STATE");
 
-        const sale = await tx.sale.findFirst({
-          where: {
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            OR: [{ id: receipt.transactionId }, { saleNumber: receipt.transactionId }],
-          },
-          include: { lines: true, payments: true },
-        });
-        if (!sale) throw new Error("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
-        if (sale.status !== "COMPLETED") throw new Error("SALE_TERMINAL_STATE");
-
-        const lockKey = `return:${ctx.tenantId}:${ctx.branchId}`;
-        await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey);
-        const returnNumber = `RET-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8).toUpperCase()}`;
-        const lines = sale.lines.map((line: any) => ({
-          id: randomUUID(),
-          variantId: line.variantId,
-          quantityReturned: Number(line.quantity),
-          refundUnitPrice: Number(line.unitPrice),
-          refundLineTotal: Number(line.quantity) * Number(line.unitPrice),
-          condition: "GOOD",
-        }));
-        const totalRefundAmount = lines.reduce((sum: number, line: any) => sum + line.refundLineTotal, 0);
-
-        const returnRecord = await tx.return.create({
-          data: {
-            id: randomUUID(),
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            returnNumber,
-            originalSaleId: sale.id,
-            customerId: sale.customerId ?? null,
-            reason: reason || `Receipt ${status.toLowerCase()}`,
-            refundType: "CASH",
-            totalRefundAmount,
-            status: "COMPLETED",
-            authorizedById: actorId || ctx.userId,
-            lines: { create: lines },
-          },
-        });
-
-        for (const line of lines) {
-          const variant = await tx.productVariant.findFirst({
-            where: { id: line.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-          });
-          if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
-          const beforeRow = await tx.stockLedger.aggregate({
-            _sum: { quantityChange: true },
-            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: variant.id },
-          });
-          const before = Number(beforeRow._sum.quantityChange ?? 0);
-          const change = Number(line.quantityReturned);
-          const after = before + change;
-          if (after < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
-
-          await tx.stockLedger.create({
-            data: {
-              tenantId: ctx.tenantId,
-              branchId: ctx.branchId,
-              productId: variant.productId,
-              variantId: variant.id,
-              movementType: "RETURN",
-              quantityChange: change,
-              quantity: change,
-              quantityBefore: before,
-              quantityAfter: after,
-              unitCost: 0,
-              totalCost: 0,
-              referenceType: "SALE",
-              referenceId: sale.id,
-              occurredAt: new Date(),
-              deviceId: receipt.deviceId,
-              operationId: `receipt-${receipt.id}-${status.toLowerCase()}`,
-              idempotencyKey: `receipt-${receipt.id}-${status.toLowerCase()}-${variant.id}`,
-            },
-          });
-          await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, variant.id);
-          await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
-          await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
-        }
-
-        await tx.payment.updateMany({
-          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, saleId: sale.id, status: "COMPLETED" },
-          data: { status: "REFUNDED" },
-        });
-        await tx.sale.update({
-          where: { id: sale.id },
-          data: { status, paymentStatus: "UNPAID" },
-        });
-        const updated = await tx.receipt.update({
-          where: { id: receipt.id },
-          data: {
-            status,
-            auditLogs: {
-              create: {
-                action: `STATUS_UPDATED_${status}`,
-                actorId: actorId || ctx.userId,
-                branchId: ctx.branchId,
-                reason,
-                details: JSON.stringify({ saleId: sale.id, returnId: returnRecord.id, totalRefundAmount }),
-              },
-            },
-          },
-          include: { items: true },
-        });
-        return this.mapPrismaReceipt(updated);
-      });
-    } catch (error) {
-      throw error;
-    }
+    const updated: ReceiptDTO = {
+      ...receipt,
+      status: status as ReceiptDTO["status"],
+      updatedAt: new Date().toISOString(),
+    };
+    this.receipts.set(receipt.id, updated);
+    this.auditLogs.push({
+      id: `AUDIT-${Date.now()}`,
+      receiptId: receipt.id,
+      action: `STATUS_UPDATED_${status}`,
+      actorId: actorId || ctx.userId,
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+    return updated;
   }
 
   async getReceiptTemplates(ctx: TenantContext): Promise<ReceiptTemplateDTO[]> {
