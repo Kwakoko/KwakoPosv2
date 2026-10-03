@@ -613,7 +613,6 @@ const now = new Date();
       return;
     }
 
-<<<<<<< HEAD
     if (op.entityType === "Receipt" && op.operationType === "CREATE") {
       const sale = await tx.sale.findFirst({
         where: {
@@ -1373,8 +1372,6 @@ const now = new Date();
       return;
     }
 
-=======
->>>>>>> origin/main
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
