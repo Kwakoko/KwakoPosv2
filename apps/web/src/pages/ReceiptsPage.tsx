@@ -84,27 +84,7 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
   const [verificationResult, setVerificationResult] = useState<ReceiptVerificationDTO | null>(null);
 
   // Template State
-  const [templates, setTemplates] = useState<ReceiptTemplateDTO[]>([
-    {
-      id: "TPL-001",
-      tenantId: "TENANT-001",
-      name: "Default Thermal 80mm",
-      templateType: "THERMAL_80MM",
-      isDefault: true,
-      headerText: "KWAKOPOS SUPERMARKET & WHOLESALE",
-      footerText: "Thank you for shopping with us! Please come again.",
-      primaryColor: "#0f172a",
-      fontFamily: "Inter, sans-serif",
-      showQrCode: true,
-      showBarcode: true,
-      showTaxBreakdown: true,
-      showCustomerInfo: true,
-      returnPolicyText: "Goods once sold can be returned within 7 days with valid receipt.",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ]);
-
+  const [templates, setTemplates] = useState<ReceiptTemplateDTO[]>([]);
   const { db } = useSync();
   const { user } = useAuth();
 
@@ -114,98 +94,44 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
   const loadReceipts = useCallback(async () => {
     try {
       await db.ready;
-      const allSalesMap = new Map<string, any>();
-      // 1. From db.sales
-      for (const s of db.sales.values()) {
-        const id = s.id || s.saleNumber || s.receiptNumber;
-        if (id) allSalesMap.set(id, s);
-      }
-      // 2. From db.receipts
-      for (const r of db.receipts.values()) {
-        const id = r.id || r.receiptNumber || r.transactionId;
-        if (id && !allSalesMap.has(id)) allSalesMap.set(id, r);
-      }
-      // 3. From outbox
-      for (const item of db.syncOutbox.values()) {
-        if (item.entityType === "Sale" && item.payload) {
-          const p = item.payload as any;
-          const id = p.id || p.saleNumber || p.receiptNumber || item.entityId;
-          if (id && !allSalesMap.has(id)) allSalesMap.set(id, p);
+      const receiptMap = new Map<string, ReceiptDTO>();
+
+      // Only persisted Receipt records are authoritative for this register.
+      for (const receipt of db.receipts.values()) {
+        if (receipt?.id && receipt.receiptNumber) {
+          receiptMap.set(receipt.id, receipt as ReceiptDTO);
         }
       }
 
-      const sales = Array.from(allSalesMap.values());
-      const mapped: ReceiptDTO[] = sales.map((sale: any) => {
-        const receiptNum = sale.receiptNumber || sale.saleNumber || (sale.id ? (String(sale.id).startsWith("SALE-") ? sale.id : `RCPT-${String(sale.id).slice(-8).toUpperCase()}`) : `RCPT-${Date.now()}`);
-        const sub = Number(sale.subtotal || sale.grandTotal || sale.totalAmount || 0);
-        const tax = Number(sale.taxTotal ?? sale.taxAmount ?? sale.tax ?? 0);
-        const grand = Number(sale.grandTotal || sale.totalAmount || (sub + tax));
-        const paid = Number(sale.paidAmount || sale.cashReceived || grand);
-        const change = Number(sale.changeAmount || sale.changeDue || (paid > grand ? paid - grand : 0));
-        const rawItems = Array.isArray(sale.items) ? sale.items : Array.isArray(sale.cart) ? sale.cart : Array.isArray(sale.lines) ? sale.lines : [];
-        const items = rawItems.map((it: any, idx: number) => ({
-          id: it.id || `ITM-${idx + 1}`,
-          sku: it.sku || it.barcode || it.product?.sku || `SKU-${idx + 1}`,
-          name: it.name || it.productName || it.product?.name || it.productTitle || "Retail Item",
-          qty: Number(it.quantity ?? it.qty ?? 1),
-          unitPrice: Number(it.price ?? it.unitPrice ?? it.product?.price ?? 0),
-          discount: Number(it.discount || 0),
-          taxRate: Number(it.taxRate ?? (sale.selectedTaxRate !== undefined ? sale.selectedTaxRate * 100 : (sale.tax ? 18 : 0))),
-          taxAmount: Number(it.taxAmount || 0),
-          notes: it.notes || it.instruction || undefined,
-          lineTotal: Number(it.lineTotal || (Number(it.quantity ?? it.qty ?? 1) * Number(it.price ?? it.unitPrice ?? 0))),
-        }));
+      // A pending Receipt outbox mutation may be shown as pending, but it must
+      // already contain a real receipt identity; never synthesize one from Sale.
+      for (const item of db.syncOutbox.values()) {
+        if (item.entityType !== "Receipt" || !item.payload) continue;
+        const payload = item.payload as any;
+        if (!payload.id || !payload.receiptNumber) continue;
+        if (!receiptMap.has(payload.id)) {
+          receiptMap.set(payload.id, { ...payload, syncStatus: payload.syncStatus || "PENDING_SYNC" } as ReceiptDTO);
+        }
+      }
 
-        return {
-          id: sale.id || receiptNum,
-          receiptNumber: receiptNum,
-          transactionId: sale.id || `TXN-${receiptNum}`,
-          transactionType: (sale.transactionType || "POS_SALE") as "POS_SALE",
-          tenantId: sale.tenantId || user?.tenantId || "default",
-          branchId: sale.branchId || "MAIN",
-          cashierId: sale.cashierId || user?.id || "USER-01",
-          cashierName: sale.cashierName || user?.name || "Cashier",
-          customerId: sale.customerId || "CUST-WALKIN",
-          customerName: sale.customerName || sale.customer || "Walk-In Customer",
-          customerPhone: sale.customerPhone || sale.phone || "",
-          customerEmail: sale.customerEmail || sale.email || "",
-          subtotal: sub,
-          discountTotal: Number(sale.discountTotal ?? sale.discount ?? 0),
-          taxTotal: tax,
-          grandTotal: grand,
-          paidAmount: paid,
-          changeAmount: change,
-          paymentMethod: String(sale.paymentMethod || "CASH").toUpperCase(),
-          currency: "TZS",
-          exchangeRate: 1,
-          status: sale.status === "REFUNDED" ? "REFUNDED" as const : "COMPLETED" as const,
-          deviceId: "REG-01",
-          syncStatus: "SYNCED" as const,
-          digitalSignature: sale.digitalSignature || `sig_${receiptNum.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
-          qrCodePayload: `https://pos.kwako.app/verify-receipt?receiptNumber=${receiptNum}`,
-          barcodePayload: receiptNum.replace(/[^a-zA-Z0-9]/g, ""),
-          reprintCount: Number(sale.reprintCount || 0),
-          notes: sale.notes || "POS Sale transaction",
-          createdAt: sale.createdAt || sale.soldAt || new Date().toISOString(),
-          updatedAt: sale.updatedAt || sale.createdAt || new Date().toISOString(),
-          items,
-        };
-      }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      setReceipts(mapped);
+      setReceipts(
+        Array.from(receiptMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
+      );
     } catch {
       setReceipts([]);
     }
-  }, [db, user]);
+  }, [db]);
 
   useEffect(() => {
     void loadReceipts();
-    const handleDemoChange = () => {
+    const handleReceiptDataChange = () => {
       void loadReceipts();
     };
-    window.addEventListener(DATA_CHANGED_EVENT, handleDemoChange);
+    window.addEventListener(DATA_CHANGED_EVENT, handleReceiptDataChange);
     return () => {
-      window.removeEventListener(DATA_CHANGED_EVENT, handleDemoChange);
+      window.removeEventListener(DATA_CHANGED_EVENT, handleReceiptDataChange);
     };
   }, [loadReceipts]);
 
