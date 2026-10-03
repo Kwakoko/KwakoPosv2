@@ -93,6 +93,8 @@ import {
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
   CreateExpenseRequestSchema,
+  PayExpenseRequestSchema,
+  VoidExpenseRequestSchema,
   CreateAccountRequestSchema,
   UpdateAccountRequestSchema,
   CreateFiscalYearRequestSchema,
@@ -1948,6 +1950,33 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return ctx;
   };
 
+  const normalizeExpenseResponse = (expense: any) => {
+    if (!expense) return expense;
+    return {
+      ...expense,
+      amount: Number(expense.amount),
+      incurredAt: expense.incurredAt instanceof Date ? expense.incurredAt.toISOString() : expense.incurredAt,
+      createdAt: expense.createdAt instanceof Date ? expense.createdAt.toISOString() : expense.createdAt,
+      updatedAt: expense.updatedAt instanceof Date ? expense.updatedAt.toISOString() : expense.updatedAt,
+      paidAt: expense.paidAt instanceof Date ? expense.paidAt.toISOString() : expense.paidAt,
+      voidedAt: expense.voidedAt instanceof Date ? expense.voidedAt.toISOString() : expense.voidedAt,
+    };
+  };
+
+  const assertExpenseAuthority = (req: any, action: "view" | "create" | "void") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+    const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const hasWildcard = permissions.includes("*");
+    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
+    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
+    const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
+    const allowed = action === "view" ? canView : action === "create" ? canCreate : canVoid;
+    if (!allowed) throw new Error("FORBIDDEN: Expense finance permission required");
+    return ctx;
+  };
+
   // Cash Sessions & Drawer Reconciliation
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
@@ -1961,12 +1990,56 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: session || null };
   });
 
-  server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
+  server.get("/api/v1/expenses", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expenses = await atomicCommercialFinance.getExpenses(ctx);
+    return { success: true, data: expenses.map(normalizeExpenseResponse) };
+  });
+
+  server.post("/api/v1/expenses", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
     const validated = CreateExpenseRequestSchema.parse(req.body);
-    const expense = atomicCommercialFinance
-      ? await atomicCommercialFinance.recordExpense(req.tenantContext!, validated)
-      : await commercialRepository.recordExpense(req.tenantContext!, validated);
-    return reply.status(201).send({ success: true, data: expense });
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.recordExpense(ctx, {
+      ...validated,
+      deviceId: req.tenantContext?.userId ? String(req.headers["x-device-id"] || "web") : "web",
+    });
+    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  server.post("/api/v1/expenses/:id/pay", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const validated = PayExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.payExpense(ctx, String((req.params as any).id), {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(200).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  server.post("/api/v1/expenses/:id/void", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "void");
+    const validated = VoidExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.voidExpense(ctx, String((req.params as any).id), validated.reason, {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(200).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  // Legacy cash-session expense endpoint retained as a compatibility alias.
+  server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const validated = CreateExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.recordExpense(ctx, {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
   });
 
 
