@@ -171,6 +171,10 @@ export class PrismaCommercialRepository {
   }
 
   async createPurchaseOrder(ctx: TenantContext, req: any) {
+    if (req.id) {
+      const existing = await db.purchaseOrder.findFirst({ where: { id: req.id, ...tenantWhere(ctx) }, include: { items: true } });
+      if (existing) return normalize(existing);
+    }
     await this.requireEntity("supplier", ctx, req.supplierId);
     const count = await db.purchaseOrder.count({ where: tenantWhere(ctx) });
     const orderNumber = req.orderNumber || `PUR-MAIN-${String(count + 1).padStart(6, "0")}`;
