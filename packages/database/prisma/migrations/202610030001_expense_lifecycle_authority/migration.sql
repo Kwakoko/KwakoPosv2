@@ -39,7 +39,7 @@ ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "voidReason" TEXT;
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT;
 UPDATE "expenses" SET "idempotencyKey" = "id" WHERE "idempotencyKey" IS NULL OR "idempotencyKey" = '';
 ALTER TABLE "expenses" ALTER COLUMN "idempotencyKey" SET NOT NULL;
-ALTER TABLE "expenses" ALTER COLUMN "idempotencyKey" SET DEFAULT '';
+ALTER TABLE "expenses" ALTER COLUMN "idempotencyKey" DROP DEFAULT;
 
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3);
 UPDATE "expenses" SET "updatedAt" = "createdAt" WHERE "updatedAt" IS NULL;
