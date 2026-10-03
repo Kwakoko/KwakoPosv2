@@ -215,7 +215,7 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       payments: [
         {
           amount: 750,
-          paymentMethod: "CASH",
+          paymentMethod: "BANK",
         },
       ],
     };
