@@ -430,7 +430,7 @@ export async function recordPosSaleDeductions(
     if (!Number.isFinite(qty) || qty <= 0) continue;
 
     const prod = db.products.get(item.productId) as any;
-    if (!prod || prod.tenantId !== tenantId || prod.branchId !== branchId) {
+    if (!prod || (prod.tenantId && prod.tenantId !== tenantId) || (prod.branchId && prod.branchId !== branchId)) {
       throw new Error(`INVENTORY_PRODUCT_NOT_FOUND_OR_OUT_OF_SCOPE:${item.productId}`);
     }
 
@@ -534,6 +534,7 @@ export async function recordPosSaleDeductions(
       sku: targetVariant.sku || prod.sku,
       adjustmentType: "DECREASE",
       quantityChange: -qty,
+      change: -qty,
       reason: `POS Sale ${saleId}`,
       status: "PENDING",
       deviceId: deviceId || "pos-terminal",
