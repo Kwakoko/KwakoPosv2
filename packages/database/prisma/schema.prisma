@@ -864,16 +864,30 @@ model Expense {
   category       String
   amount         Decimal      @db.Decimal(12, 2)
   reason         String
+  description    String       @default("")
+  payee          String       @default("")
+  paymentMethod  String       @default("CASH")
+  paymentRef     String?
+  status         String       @default("PAID") // PENDING, PAID, VOIDED
+  taxDeductible  Boolean      @default(false)
   authorizedById String?
+  paidById       String?
+  paidAt         DateTime?
+  voidedById     String?
+  voidedAt       DateTime?
+  voidReason     String?
+  idempotencyKey String       @default("")
   incurredAt     DateTime     @default(now())
   createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
 
+  @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, incurredAt])
+  @@index([tenantId, branchId, status, incurredAt])
   @@map("expenses")
-}
 
 model PriceList {
   id        String   @id @default(uuid())
