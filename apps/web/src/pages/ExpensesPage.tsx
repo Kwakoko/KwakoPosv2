@@ -241,12 +241,13 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
 
   // KPI Metrics
   const metrics = useMemo(() => {
-    const total = filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0);
-    const paidList = filteredExpenses.filter((e) => e.status === "PAID");
+    const activeExpenses = filteredExpenses.filter((e) => e.status !== "VOIDED");
+    const total = activeExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const paidList = activeExpenses.filter((e) => e.status === "PAID");
     const paidAmount = paidList.reduce((s, e) => s + (e.amount || 0), 0);
-    const pendingList = filteredExpenses.filter((e) => e.status === "PENDING");
+    const pendingList = activeExpenses.filter((e) => e.status === "PENDING");
     const pendingAmount = pendingList.reduce((s, e) => s + (e.amount || 0), 0);
-    const taxDeductibleAmount = filteredExpenses
+    const taxDeductibleAmount = activeExpenses
       .filter((e) => e.taxDeductible)
       .reduce((s, e) => s + (e.amount || 0), 0);
 
@@ -687,13 +688,13 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                 : "Try resetting your search query or adjusting your category/status filters."}
             </p>
             <div className="v2-flex v2-justify-center v2-gap-2">
-              <button
+              {canCreateExpense && <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
                 onClick={() => setIsAddModalOpen(true)}
                 type="button"
               >
                 <Plus size={13} /> Record Expense Voucher
-              </button>
+              </button>}
             </div>
           </div>
         ) : (
@@ -728,7 +729,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                       {formatCurrency(exp.amount)}
                     </td>
                     <td style={{ textAlign: "center" }}>
-                      <span className={`badge ${exp.status === "PAID" ? "v2-badge-success" : "v2-badge-warning"} v2-text-xs`}>
+                      <span className={`badge ${exp.status === "PAID" ? "v2-badge-success" : exp.status === "VOIDED" ? "v2-badge-danger" : "v2-badge-warning"} v2-text-xs`}>
                         {exp.status}
                       </span>
                     </td>
