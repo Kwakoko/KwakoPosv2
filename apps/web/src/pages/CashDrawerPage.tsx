@@ -234,6 +234,9 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setCashSales(Number(activeShift.cashSalesTotal || 0));
         setCashRefunds(Number(activeShift.cashRefundsTotal || 0));
         setCashExpenses(Number(activeShift.cashExpensesTotal || 0));
+        setCashIn(Number(activeShift.cashInTotal || 0));
+        setCashOut(Number(activeShift.cashOutTotal || 0));
+        setSafeDrops(Number(activeShift.safeDropTotal || 0));
         setBlindDeclaredCash(Number(activeShift.actualCash ?? 0));
         setBlindCountDone(Boolean(activeShift.countSealedAt));
         setBlindCountSealedAt(activeShift.countSealedAt ? String(activeShift.countSealedAt) : null);
@@ -261,13 +264,12 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
           else cSales += amt;
         }
 
-        if (Array.isArray(activeShift.movements)) {
-          setLedger(activeShift.movements);
-          for (const m of activeShift.movements) {
-            if (m.type === "CASH_IN") cIn += Math.abs(m.amount);
-            if (m.type === "CASH_OUT") cOut += Math.abs(m.amount);
-            if (m.type === "SAFE_DROP") sDrops += Math.abs(m.amount);
-            if (m.type === "PETTY_CASH") cExp += Math.abs(m.amount);
+        if (isOnline) {
+          try {
+            const movementResponse = await apiFetch<{ success: boolean; data: any[] }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/movements`);
+            setLedger(movementResponse?.success && Array.isArray(movementResponse.data) ? movementResponse.data.map((m: any) => ({ id: String(m.id), time: new Date(m.occurredAt).toISOString().replace("T", " ").slice(0, 16), type: m.type, amount: m.type === "CASH_IN" ? Number(m.amount) : -Number(m.amount), balance: 0, reason: String(m.reason || m.type), user: String(m.actorId || ""), terminal: String(m.deviceId || ""), witness: m.witness || undefined, approvalStatus: m.approvalStatus || "APPROVED" })) : []);
+          } catch {
+            setLedger([]);
           }
         } else {
           setLedger([]);
