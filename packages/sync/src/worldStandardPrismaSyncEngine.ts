@@ -772,7 +772,6 @@ const now = new Date();
       }
 
       if (!existing) {
-        if (op.operationType === "DELETE") return;
         throw new Error("EXPENSE_NOT_FOUND");
       }
       if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
@@ -780,7 +779,7 @@ const now = new Date();
       const base = getBaseUpdatedAt(op.payload);
       if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: expense changed on server");
 
-      if (op.operationType === "DELETE" || payload.status === "VOIDED") {
+      if (payload.status === "VOIDED") {
         await financeTx.voidExpense(ctx, op.entityId, String(payload.voidReason || payload.reason || "Voided from synchronized client mutation"), {
           deviceId: req.deviceId, idempotencyKey: op.idempotencyKey,
         });
