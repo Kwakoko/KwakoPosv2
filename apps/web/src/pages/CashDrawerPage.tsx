@@ -240,6 +240,12 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setBlindDeclaredCash(Number(activeShift.actualCash ?? 0));
         setBlindCountDone(Boolean(activeShift.countSealedAt));
         setBlindCountSealedAt(activeShift.countSealedAt ? String(activeShift.countSealedAt) : null);
+        db.saveConfigurationLocal("active_cash_session", {
+          id: String(activeShift.id),
+          sessionNumber: String(activeShift.sessionNumber || activeShift.id),
+          status: String(activeShift.status || "OPEN"),
+          openedAt: activeShift.openedAt ? String(activeShift.openedAt) : null,
+        }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
 
         const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
         let cSales = 0;
