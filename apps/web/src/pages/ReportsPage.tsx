@@ -62,6 +62,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [stockMovements, setStockMovements] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [reportBranches, setReportBranches] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
@@ -141,6 +142,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setProducts(Array.isArray(data.products) ? data.products : []);
       setCustomers(Array.isArray(data.customers) ? data.customers : []);
       setPurchaseOrders(Array.isArray(data.purchaseOrders) ? data.purchaseOrders : []);
+      setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : []);
       setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
       setReportBranches(Array.isArray(data.branches) ? data.branches : []);
       setReportMetrics(data.metrics || null);
@@ -148,7 +150,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       console.error("[Reports] Authoritative report load failed", e);
       setReportError(String(e?.message || e || "REPORT_DATA_UNAVAILABLE"));
       setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]);
-      setPurchaseOrders([]); setInvoices([]); setReportMetrics(null);
+      setPurchaseOrders([]); setStockMovements([]); setInvoices([]); setReportMetrics(null);
     } finally { setReportLoading(false); }
   }, [dateRange, branchFilter]);
 
@@ -624,7 +626,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                             ? "badge v2-badge-danger"
                             : "badge v2-badge-warning"
                         }>
-                          {s.fiscalizationState || s.efdStatus || "NOT_SUBMITTED"}
+                          {s.fiscalizationState || s.efdStatus || "NOT_REPORTED"}
                         </span>
                       </td>
                     </tr>
@@ -706,11 +708,11 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       {activeTab === "movements" && (
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">Stock Movement Lineage</div></div>
-          <EmptyState
-            icon={Layers}
-            title="Stock Movement Tracking Coming Soon"
-            desc="Granular stock movement history — including goods receipts, adjustments, transfers, and write-offs — will be compiled here from your inventory audit trail."
-          />
+          {stockMovements.length === 0 ? <EmptyState icon={Layers} title="No Stock Movements in Period" desc="Authoritative StockLedger movements for the selected tenant, branch scope, and reporting period will appear here." /> : (
+            <table className="v2-table"><thead><tr><th>Date</th><th>Product</th><th>Variant</th><th>Type</th><th>Change</th><th>Unit Cost</th><th>Reference</th></tr></thead><tbody>
+              {stockMovements.slice(0, 200).map((m: any, i: number) => <tr key={m.id || i}><td className="v2-text-xs">{m.occurredAt ? new Date(m.occurredAt).toLocaleString() : "—"}</td><td className="v2-font-bold">{m.product?.name || m.productId || "—"}</td><td>{m.variant?.name || m.variantId || "—"}</td><td>{m.movementType}</td><td className="v2-mono">{Number(m.quantityChange || 0).toLocaleString()}</td><td className="v2-mono">{money(Number(m.unitCost || 0))}</td><td className="v2-text-xs">{m.referenceType || "—"}{m.referenceId ? ` / ${m.referenceId}` : ""}</td></tr>)}
+            </tbody></table>
+          )}
         </div>
       )}
 
