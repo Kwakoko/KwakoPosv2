@@ -4,17 +4,20 @@ export interface CashSessionState {
   cashSalesTotal: number;
   cashRefundsTotal: number;
   cashExpensesTotal: number;
+  cashInTotal: number;
+  cashOutTotal: number;
+  safeDropTotal: number;
   actualCash?: number;
 }
 
 export class CashSessionEngine {
   /**
    * Calculates the exact expected cash drawer balance.
-   * Expected = Opening Cash + Cash Sales - Cash Refunds - Cash Expenses
+   * Expected = Opening Cash + Cash Sales + Cash In - Cash Refunds - Cash Expenses - Cash Out - Safe Drops
    */
   static calculateExpectedCash(state: CashSessionState): number {
     const expected =
-      state.openingCash + state.cashSalesTotal - state.cashRefundsTotal - state.cashExpensesTotal;
+      state.openingCash + state.cashSalesTotal + state.cashInTotal - state.cashRefundsTotal - state.cashExpensesTotal - state.cashOutTotal - state.safeDropTotal;
     return Math.round(expected * 100) / 100;
   }
 
