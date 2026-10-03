@@ -158,6 +158,7 @@ export class WorldStandardPrismaSyncEngine {
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
+      case "Expense": record = await tx.expense.findUnique({ where: { id: entityId } }); break;
       default: return null;
     }
     if (!record) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
@@ -199,6 +200,7 @@ export class WorldStandardPrismaSyncEngine {
         case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
+        case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
         default: return op.payload;
       }
     } catch {
@@ -739,6 +741,66 @@ const now = new Date();
       return;
     }
 
+    if (op.entityType === "Expense" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const existing = await tx.expense.findUnique({ where: { id: op.entityId } });
+      const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
+
+      if (op.operationType === "CREATE") {
+        if (existing) {
+          if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+          return;
+        }
+        await financeTx.recordExpense(ctx, {
+          ...payload, id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (!existing) {
+        if (op.operationType === "DELETE") return;
+        throw new Error("EXPENSE_NOT_FOUND");
+      }
+      if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: expense changed on server");
+
+      if (op.operationType === "DELETE" || payload.status === "VOIDED") {
+        await financeTx.voidExpense(ctx, op.entityId, String(payload.voidReason || payload.reason || "Voided from synchronized client mutation"), {
+          deviceId: req.deviceId, idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (payload.status === "PAID" && existing.status !== "PAID") {
+        await financeTx.payExpense(ctx, op.entityId, {
+          paymentMethod: payload.paymentMethod || existing.paymentMethod || "CASH",
+          paymentRef: payload.paymentRef,
+          cashSessionId: payload.cashSessionId || existing.cashSessionId || undefined,
+          deviceId: req.deviceId,
+          idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (existing.status !== "PENDING") throw new Error("EXPENSE_INVALID_STATE_TRANSITION");
+      await tx.expense.update({
+        where: { id: op.entityId },
+        data: {
+          category: payload.category,
+          reason: payload.reason,
+          description: payload.description,
+          payee: payload.payee,
+          paymentMethod: payload.paymentMethod || existing.paymentMethod,
+          paymentRef: payload.paymentRef !== undefined ? payload.paymentRef : existing.paymentRef,
+          taxDeductible: payload.taxDeductible !== undefined ? Boolean(payload.taxDeductible) : existing.taxDeductible,
+          incurredAt: payload.incurredAt ? new Date(payload.incurredAt) : undefined,
+        },
+      });
+      return;
+    }
+
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
       if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
@@ -1113,7 +1175,8 @@ const now = new Date();
       const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
       const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories };
+      const expenses = await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } });
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1169,7 +1232,8 @@ const now = new Date();
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
-      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      expenses: await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } }),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
   }
