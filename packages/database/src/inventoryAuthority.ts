@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 
 export const INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER =
   "INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER";
@@ -27,6 +28,51 @@ export async function calculateAuthoritativeStock(tx: any, tenantId: string, bra
     where: { tenantId, branchId, variantId },
   });
   return Number(result._sum.quantityChange ?? 0);
+}
+
+/** Materialize the authoritative StockLedger aggregate without a recursive trigger. */
+export async function projectProductVariantBalance(tx: any, tenantId: string, branchId: string, variantId: string): Promise<void> {
+  const variant = await tx.productVariant.findFirst({
+    where: { id: variantId, tenantId, branchId },
+    select: { productId: true },
+  });
+  if (!variant) throw new Error("STOCK_VARIANT_NOT_FOUND");
+
+  const projectionId = randomUUID();
+  await tx.$executeRaw(Prisma.sql`
+    INSERT INTO "product_variant_balances" (
+      "id", "tenantId", "branchId", "productId", "variantId",
+      "currentQuantity", "averageCost", "stockValue", "updatedAt"
+    )
+    SELECT
+      ${projectionId},
+      "tenantId", "branchId", "productId", "variantId",
+      COALESCE(SUM("quantityChange"), 0)::numeric(15,4),
+      COALESCE(
+        SUM(CASE WHEN "quantityChange" > 0 THEN "quantityChange" * "unitCost" ELSE 0 END)
+        / NULLIF(SUM(CASE WHEN "quantityChange" > 0 THEN "quantityChange" ELSE 0 END), 0),
+        0
+      )::numeric(15,2),
+      (
+        COALESCE(SUM("quantityChange"), 0) * COALESCE(
+          SUM(CASE WHEN "quantityChange" > 0 THEN "quantityChange" * "unitCost" ELSE 0 END)
+          / NULLIF(SUM(CASE WHEN "quantityChange" > 0 THEN "quantityChange" ELSE 0 END), 0),
+          0
+        )
+      )::numeric(15,2),
+      CURRENT_TIMESTAMP
+    FROM "stock_ledgers"
+    WHERE "tenantId" = ${tenantId}
+      AND "branchId" = ${branchId}
+      AND "variantId" = ${variantId}
+    GROUP BY "tenantId", "branchId", "productId", "variantId"
+    ON CONFLICT ("tenantId", "branchId", "variantId") DO UPDATE SET
+      "productId" = EXCLUDED."productId",
+      "currentQuantity" = EXCLUDED."currentQuantity",
+      "averageCost" = EXCLUDED."averageCost",
+      "stockValue" = EXCLUDED."stockValue",
+      "updatedAt" = CURRENT_TIMESTAMP
+  `);
 }
 
 export async function projectVariantInventory(tx: any, tenantId: string, branchId: string, variantId: string): Promise<number> {

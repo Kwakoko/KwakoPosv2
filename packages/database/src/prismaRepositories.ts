@@ -24,10 +24,12 @@ import {
   validateRetroactiveTimeline,
   assertTenantIsolation,
 } from "@kwakopos2/domain";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./client.js";
 import {
   projectProductBranchStock,
   projectProductStockSummary,
+  projectProductVariantBalance,
   projectVariantInventory,
   rejectAbsoluteInventoryMutation,
   rejectNonZeroAbsoluteInventoryMutation,
@@ -505,6 +507,7 @@ export class PrismaStockRepository {
         data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, req.variantId);
+      await projectProductVariantBalance(tx, ctx.tenantId, ctx.branchId, req.variantId);
       await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, req.variantId, req.warehouseId ?? null);
       await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return row;
@@ -658,6 +661,7 @@ export class PrismaStockRepository {
       });
 
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, resolvedVariantId);
+      await projectProductVariantBalance(tx, ctx.tenantId, ctx.branchId, resolvedVariantId);
       await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, resolvedVariantId, null);
       await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return { adjustment, ledger };
