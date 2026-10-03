@@ -268,6 +268,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const syncStatus = useAuthoritativeSyncStatus({ tenantId: tenantId || null, branchId: branchId || null });
   const [authoritativeKpis, setAuthoritativeKpis] = useState<DashboardKpiSnapshot | null>(null);
   const [authoritativeKpiError, setAuthoritativeKpiError] = useState<string | null>(null);
+  const [activeCashSession, setActiveCashSession] = useState<any | null>(null);
   const [isLoadingAuthoritativeKpis, setIsLoadingAuthoritativeKpis] = useState(false);
   const toast = useToast();
   const [traVfdStatus, setTraVfdStatus] = useState<TraVfdIntegrationStatus | null>(null);
@@ -280,6 +281,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     } catch {}
     return false;
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOnline) { setActiveCashSession(null); return () => { cancelled = true; }; }
+    void apiFetch<{ success: boolean; data: any | null }>("/api/v1/cash-sessions/active").then((response) => {
+      if (!cancelled) setActiveCashSession(response?.success ? response.data : null);
+    }).catch(() => { if (!cancelled) setActiveCashSession(null); });
+    return () => { cancelled = true; };
+  }, [isOnline, tenantId, branchId]);
 
   const refreshVfdStatus = useCallback(async () => {
     if (!tenantId || !branchId || !isOnline) return;
@@ -1028,45 +1038,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   }, [authoritativeKpis, topProductsMetric]);
 
   // ── Register Till & Shift Reconciliation ──────────────────────────────────
-  const activeShiftSession = useMemo(() => {
-    try {
-      const shift = db.getConfigurationLocal?.("active_shift_session");
-      return shift || null;
-    } catch {
-      return null;
-    }
-  }, [db, orders]);
+  const activeShiftSession = activeCashSession;
 
   const tillReconciliation = useMemo(() => {
-    const openingFloat = Number(activeShiftSession?.openingFloat || 0);
-    const shiftOpenedAt = activeShiftSession?.openedAt ? new Date(activeShiftSession.openedAt).getTime() : 0;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const relevantStartTime = shiftOpenedAt > 0 ? shiftOpenedAt : todayStart.getTime();
-
-    let cashSalesToday = 0;
-    let cashTransactionsCount = 0;
-
-    validOrders.forEach(o => {
-      if (o.timestamp >= relevantStartTime && /cash/i.test(o.paymentMethod || '')) {
-        cashSalesToday += Number(o.total || 0);
-        cashTransactionsCount += 1;
-      }
-    });
-
-    let cashIn = 0;
-    let cashOut = 0;
-    let safeDrops = 0;
-    if (Array.isArray(activeShiftSession?.movements)) {
-      activeShiftSession.movements.forEach((m: any) => {
-        if (m.type === "CASH_IN") cashIn += Math.abs(Number(m.amount || 0));
-        if (m.type === "CASH_OUT") cashOut += Math.abs(Number(m.amount || 0));
-        if (m.type === "SAFE_DROP") safeDrops += Math.abs(Number(m.amount || 0));
-      });
-    }
-
+    const openingFloat = Number(activeShiftSession?.openingCash || 0);
+    const cashSalesToday = Number(activeShiftSession?.cashSalesTotal || 0);
+    const cashIn = Number(activeShiftSession?.cashInTotal || 0);
+    const cashOut = Number(activeShiftSession?.cashOutTotal || 0);
+    const safeDrops = Number(activeShiftSession?.safeDropTotal || 0);
     const totalPayouts = cashOut + safeDrops;
-    const expectedCash = openingFloat + cashSalesToday + cashIn - totalPayouts;
+    const expectedCash = Number(activeShiftSession?.expectedCash || (openingFloat + cashSalesToday + cashIn - Number(activeShiftSession?.cashRefundsTotal || 0) - Number(activeShiftSession?.cashExpensesTotal || 0) - totalPayouts));
+    const cashTransactionsCount = 0;
     const isShiftOpen = activeShiftSession?.status === "OPEN";
 
     return {
