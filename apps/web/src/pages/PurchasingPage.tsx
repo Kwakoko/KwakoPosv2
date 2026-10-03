@@ -21,6 +21,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
+import { apiFetch, safeUUID } from "../services/apiClient.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
 
@@ -178,83 +179,61 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     return productionCleanupService.isProductionLocked();
   }, []);
 
-  // Load Authoritative State from Local DB & Auto-Purge Fabricated Data (CLN-01, CLN-03, CLN-04)
+  // PostgreSQL is the purchasing authority. IndexedDB is used only as an offline cache/pending-operation view.
   const loadProcurement = useCallback(async () => {
     try {
       await db.ready;
-      const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
+      const [supplierRes, orderRes, receiptRes] = await Promise.all([
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/suppliers"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts"),
+      ]);
 
-      // 1. Catalog Products
       const prods = Array.from(db.products.values())
         .filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive")
-        .map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          buyingPrice: Number(p.buyingPrice || p.costPrice || 0),
-        }));
+        .map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) }));
       setCatalogProducts(prods);
 
-      // 2. Suppliers - Auto-prune fabricated records from local DB
-      const savedSuppliers = db.getConfigurationLocal("procurement_suppliers", ctx);
-      if (Array.isArray(savedSuppliers)) {
-        const cleanSups = savedSuppliers.filter((s: any) => !isDemoSupplier(s));
-        if (cleanSups.length !== savedSuppliers.length) {
-          db.saveConfigurationLocal("procurement_suppliers", cleanSups, ctx);
-        }
-        setSuppliers(cleanSups);
-      } else {
-        const localSups = Array.from(db.suppliers.values()).filter((s: any) => !isDemoSupplier(s));
-        setSuppliers(localSups);
-      }
-
-      // Sanitize db.suppliers memory store
-      if (db.suppliers) {
-        for (const [id, sup] of Array.from(db.suppliers.entries())) {
-          if (isDemoSupplier(sup)) {
-            db.suppliers.delete(id);
-            (db as any).persist?.("suppliers", id, null);
-          }
-        }
-      }
-
-      // 3. Purchase Orders - Auto-prune fabricated POs from local DB
-      const savedOrders = db.getConfigurationLocal("procurement_purchase_orders", ctx);
-      if (Array.isArray(savedOrders)) {
-        const cleanOrders = savedOrders.filter((o: any) => !isDemoOrder(o));
-        if (cleanOrders.length !== savedOrders.length) {
-          db.saveConfigurationLocal("procurement_purchase_orders", cleanOrders, ctx);
-        }
-        setOrders(cleanOrders);
-      } else {
-        setOrders([]);
-      }
-
-      // 4. Goods Receipt Notes - Auto-prune fabricated GRNs from local DB
-      const savedGrns = db.getConfigurationLocal("procurement_grns", ctx);
-      if (Array.isArray(savedGrns)) {
-        const cleanGrns = savedGrns.filter((g: any) => !isDemoGrn(g));
-        if (cleanGrns.length !== savedGrns.length) {
-          db.saveConfigurationLocal("procurement_grns", cleanGrns, ctx);
-        }
-        setGrns(cleanGrns);
-      } else {
-        setGrns([]);
-      }
+      setSuppliers(Array.isArray(supplierRes.data) ? supplierRes.data : []);
+      const supplierById = new Map((supplierRes.data || []).map((s: any) => [s.id, s]));
+      setOrders((orderRes.data || []).map((o: any) => ({
+        id: o.id, poNumber: o.orderNumber, supplierId: o.supplierId,
+        supplier: supplierById.get(o.supplierId)?.name || o.supplierId,
+        supplierName: supplierById.get(o.supplierId)?.name || o.supplierId,
+        itemsCount: Array.isArray(o.items) ? o.items.length : 0,
+        items: (o.items || []).map((i: any) => ({
+          productId: i.variantId, sku: "", name: "", qtyOrdered: Number(i.quantityOrdered),
+          qtyReceived: Number(i.quantityReceived || 0), unitCost: Number(i.unitCost), totalCost: Number(i.totalCost),
+          variantId: i.variantId,
+        })),
+        subtotal: Number(o.totalAmount), vatAmount: 0, total: Number(o.totalAmount),
+        status: o.status === "RECEIVED" ? "Completed" : o.status === "CANCELLED" ? "Cancelled" : o.status === "DRAFT" ? "Draft" : "Approved",
+        expected: o.orderedAt, date: o.orderedAt, notes: o.notes || undefined,
+      })));
+      setGrns((receiptRes.data || []).map((r: any) => ({
+        id: r.id, poId: r.purchaseOrderId || "",
+        supplier: supplierById.get(r.supplierId)?.name || r.supplierId,
+        warehouse: currentBranchName || "Main Store", receivedAt: r.receivedAt,
+        batchNumber: r.items?.[0]?.batchNumber || undefined, expiryDate: r.items?.[0]?.expiryDate || undefined,
+        itemsCount: Array.isArray(r.items) ? r.items.length : 0,
+        totalValue: (r.items || []).reduce((s: number, i: any) => s + Number(i.totalCost || 0), 0), status: "VERIFIED",
+      })));
     } catch (e) {
-      console.warn("[Purchasing] Hydration notice:", e);
-      setSuppliers([]);
-      setOrders([]);
+      // Offline: never resurrect configuration snapshots. Show only authoritative local entities and pending outbox mutations.
+      const tenantId = currentTenantId;
+      setSuppliers(Array.from(db.suppliers.values()).filter((s: any) => s.tenantId === tenantId && s.branchId === currentBranchId));
+      const pending = Array.from((db as any).syncOutbox?.values?.() || []).filter((o: any) => o.tenantId === tenantId && o.branchId === currentBranchId && o.status === "PENDING");
+      setOrders(pending.filter((o: any) => o.entityType === "PurchaseOrder").map((o: any) => ({
+        id: o.entityId, poNumber: o.payload.orderNumber || o.entityId, supplierId: o.payload.supplierId,
+        supplier: o.payload.supplierId, supplierName: o.payload.supplierId, itemsCount: o.payload.items?.length || 0,
+        items: (o.payload.items || []).map((i: any) => ({ productId: i.variantId, sku: "", name: "", qtyOrdered: Number(i.quantityOrdered), qtyReceived: 0, unitCost: Number(i.unitCost), totalCost: Number(i.quantityOrdered) * Number(i.unitCost), variantId: i.variantId })),
+        subtotal: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), vatAmount: 0,
+        total: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), status: "Draft", expected: new Date().toISOString(), date: new Date().toISOString(),
+      })));
       setGrns([]);
+      setCatalogProducts(Array.from(db.products.values()).filter((p: any) => !p.deletedAt && p.status !== "Inactive").map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) })));
     }
-  }, [db, currentTenantId]);
-
-  useEffect(() => {
-    void loadProcurement();
-    const handleEvent = () => { void loadProcurement(); };
-    window.addEventListener(DATA_CHANGED_EVENT, handleEvent);
-    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleEvent);
-  }, [loadProcurement]);
+  }, [db, currentTenantId, currentBranchId, currentBranchName]);
 
   // Check if demo supplier or procurement records are present
   const hasDemoData = useMemo(() => {
@@ -302,72 +281,47 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const creditUtil = totalCreditLimit > 0 ? Math.round((totalOutstanding / totalCreditLimit) * 100) : 0;
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
-  const handleAddSupplier = (e: React.FormEvent) => {
+  const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supplierForm.name || !supplierForm.phone) return;
-
-    const newSup = {
-      id: `SUP-${String(suppliers.length + 1).padStart(3, "0")}`,
-      name: supplierForm.name.trim(),
-      category: supplierForm.category,
-      tin: supplierForm.tin.trim(),
-      vrn: supplierForm.vrn.trim(),
-      phone: supplierForm.phone.trim(),
-      mpesa: "paybill: 202600",
-      balance: 0,
-      creditLimit: Number(supplierForm.creditLimit),
-      status: "Active",
-    };
-
-    const updated = [newSup, ...suppliers];
-    setSuppliers(updated);
-    db.saveConfigurationLocal("procurement_suppliers", updated, currentTenantId ? { tenantId: currentTenantId } : undefined);
-    setShowSupplierModal(false);
-    setSupplierForm({ name: "", category: "General", tin: "", vrn: "", phone: "", creditLimit: 5000000 });
-    playSuccessChime();
-    toast.success("Supplier Added", `Supplier "${newSup.name}" registered with TIN/VRN compliance.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_CREATED", supplier: newSup } }));
+    if (!supplierForm.name || !currentTenantId || !currentBranchId) return;
+    const id = safeUUID();
+    const payload = { id, supplierCode: undefined, name: supplierForm.name.trim(), phone: supplierForm.phone.trim() || undefined, taxPin: supplierForm.tin.trim() || undefined };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/suppliers", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("Supplier creation failed");
+      await loadProcurement();
+      setShowSupplierModal(false); setSupplierForm({ name: "", category: "General", tin: "", vrn: "", phone: "", creditLimit: 5000000 });
+      playSuccessChime(); toast.success("Supplier Added", `Supplier "${payload.name}" registered.`);
+    } catch {
+      await db.executeAtomicMutation({
+        writes: [{ store: "suppliers", key: id, value: { ...payload, id, tenantId: currentTenantId, branchId: currentBranchId, outstandingBalance: 0, status: "ACTIVE", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }],
+        outboxItem: { id: safeUUID(), entityType: "Supplier", entityId: id, operationType: "CREATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey: id, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      await loadProcurement(); toast.info("Supplier Queued", "Supplier will be committed to PostgreSQL when connectivity returns.");
+    }
   };
 
-  // Create PO
-  const handleCreatePo = (status: "Draft" | "Approved" = "Approved") => {
-    if (!poSupplier) {
-      toast.warning("Supplier Required", "Please select a supplier for this PO.");
-      return;
+  const handleCreatePo = async (status: "Draft" | "Approved" = "Draft") => {
+    if (!poSupplier || !currentTenantId || !currentBranchId) return toast.warning("Supplier Required", "Select a supplier and active branch.");
+    const supplier = suppliers.find((s: any) => s.id === poSupplier);
+    const validLines = poLines.filter((l) => l.productId && l.qtyOrdered > 0);
+    if (!validLines.length) return toast.warning("Line Items Required", "Add at least one product variant with quantity > 0.");
+    const id = safeUUID();
+    const items = validLines.map((l) => ({ id: safeUUID(), variantId: l.productId, quantityOrdered: l.qtyOrdered, unitCost: l.unitCost }));
+    const payload = { id, supplierId: supplier?.id || poSupplier, notes: undefined, items };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/purchases", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("PO creation failed");
+      await loadProcurement(); setShowPoModal(false); playSuccessChime(); toast.success("Purchase Order Created", `PO ${res.data?.orderNumber || id} created in PostgreSQL.`);
+    } catch {
+      await db.executeAtomicMutation({
+        writes: [],
+        outboxItem: { id: safeUUID(), entityType: "PurchaseOrder", entityId: id, operationType: "CREATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey: id, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      await loadProcurement(); setShowPoModal(false); toast.info("Purchase Order Queued", "PO will be committed to PostgreSQL when connectivity returns.");
     }
-    const validLines = poLines.filter((l) => l.name && l.qtyOrdered > 0);
-    if (validLines.length === 0) {
-      toast.warning("Line Items Required", "Please add at least one product with quantity > 0.");
-      return;
-    }
-
-    const subtotal = validLines.reduce((s, l) => s + l.totalCost, 0);
-    const vat = poApplyVat ? Math.round(subtotal * 0.18) : 0;
-    const grandTotal = subtotal + vat;
-    const poNumber = `PO-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const newPo: PurchaseOrderRecord = {
-      id: poNumber,
-      poNumber,
-      supplier: poSupplier,
-      supplierName: poSupplier,
-      itemsCount: validLines.length,
-      items: validLines,
-      subtotal,
-      vatAmount: vat,
-      total: grandTotal,
-      status,
-      expected: poExpectedDate,
-      date: new Date().toISOString().slice(0, 10),
-    };
-
-    const updated = [newPo, ...orders];
-    setOrders(updated);
-    db.saveConfigurationLocal("procurement_purchase_orders", updated, currentTenantId ? { tenantId: currentTenantId } : undefined);
-    setShowPoModal(false);
-    playSuccessChime();
-    toast.success("Purchase Order Created", `PO #${poNumber} issued to ${poSupplier} (${fmt(grandTotal)}).`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: newPo } }));
   };
 
   // Open GRN Modal for a PO
