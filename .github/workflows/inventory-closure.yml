@@ -1,0 +1,30 @@
+name: Inventory P0/P1 Closure
+
+on:
+  pull_request:
+    paths:
+      - "apps/web/src/pages/InventoryPage.tsx"
+      - "apps/web/src/services/inventoryStockService.ts"
+      - "packages/database/src/prismaRepositories.ts"
+      - "packages/database/src/inventoryAuthority.ts"
+      - "packages/database/prisma/schema.prisma"
+      - "packages/database/prisma/migrations/**"
+      - "tests/unit/snapshot-reconciliation.test.ts"
+  push:
+    branches:
+      - main
+      - "fix/inventory-p0-p1-closure"
+
+jobs:
+  inventory-closure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npx vitest run tests/unit/snapshot-reconciliation.test.ts
+      - run: npx tsc -p apps/web/tsconfig.json --noEmit
