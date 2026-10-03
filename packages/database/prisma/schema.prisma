@@ -888,6 +888,7 @@ model Expense {
   @@index([tenantId, branchId, incurredAt])
   @@index([tenantId, branchId, status, incurredAt])
   @@map("expenses")
+}
 
 model PriceList {
   id        String   @id @default(uuid())
