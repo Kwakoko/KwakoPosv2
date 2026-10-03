@@ -1094,6 +1094,8 @@ const now = new Date();
     compareIds("Product", serverProducts.map((row: any) => row.id), manifest.productIds || []);
     compareIds("ProductVariant", serverVariants.map((row: any) => row.id), manifest.variantIds || []);
     compareIds("StockLedger", serverLedger.map((row: any) => row.id), manifest.ledgerIds || []);
+    const serverExpenses = await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true } });
+    compareIds("Expense", serverExpenses.map((row: any) => row.id), manifest.expenseIds || []);
 
     const serverBalances = new Map<string, number>();
     for (const row of serverLedger) {
@@ -1128,6 +1130,7 @@ const now = new Date();
       products: serverProducts.length,
       variants: serverVariants.length,
       stockLedger: serverLedger.length,
+      expenses: serverExpenses.length,
     };
       const serverRevision = await this.latestRevision(ctx, tx);
 
