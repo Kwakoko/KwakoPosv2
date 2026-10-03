@@ -21,7 +21,6 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   BarChart2, TrendingUp, DollarSign, Download, RefreshCw,
   Filter, PieChart, Users, Package, Scale,
@@ -72,6 +71,31 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [branchFilter, setBranchFilter] = useState("all");
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
   const isProductionLocked = productionCleanupService.isProductionLocked();
+
+  const exportCurrentReportCsv = useCallback(() => {
+    const rows = activeTab === "sales" || activeTab === "profit" || activeTab === "cashier" || activeTab === "branch"
+      ? validSales
+      : activeTab === "expenses" ? expenses
+      : activeTab === "purchasing" ? purchaseOrders
+      : activeTab === "movements" ? stockMovements
+      : activeTab === "aging" ? arAgingCustomers
+      : activeTab === "returns" ? returnedSales
+      : activeTab === "customers" ? customers
+      : activeTab === "inventory" ? products
+      : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
+      : discountedSales;
+    const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
+    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r))));
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [headers.map(esc).join(","), ...flat.map((r: any) => headers.map((h) => esc(r[h])).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales]);
 
   const selectReportTab = useCallback((tab: ReportTab) => {
     setActiveTab(tab);
@@ -274,7 +298,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             <option value="all">All Branches</option>
             <option value="hq">HQ Main Branch</option>
           </select>
-          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.ReportsPage.304.export-csv", "Export CSV", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.ReportsPage.304.export-csv">
+          <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={exportCurrentReportCsv} data-action-id="reports.export-current-csv">
             <Download size={13} /> Export CSV
           </button>
         </div>
