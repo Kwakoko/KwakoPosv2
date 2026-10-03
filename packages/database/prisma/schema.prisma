@@ -764,6 +764,9 @@ model CashSession {
   cashSalesTotal    Decimal   @default(0) @db.Decimal(12, 2)
   cashRefundsTotal  Decimal   @default(0) @db.Decimal(12, 2)
   cashExpensesTotal Decimal   @default(0) @db.Decimal(12, 2)
+  cashInTotal       Decimal   @default(0) @db.Decimal(12, 2)
+  cashOutTotal      Decimal   @default(0) @db.Decimal(12, 2)
+  safeDropTotal     Decimal   @default(0) @db.Decimal(12, 2)
   variance          Decimal?  @db.Decimal(12, 2)
   status            String    @default("OPEN") // OPEN, ACTIVE, CLOSE_REQUESTED, CLOSED
   notes             String?
@@ -775,10 +778,34 @@ model CashSession {
   sales             Sale[]
   expenses          Expense[]
   drawerOperations  DrawerOperation[]
+  cashMovements     CashMovement[]
 
   @@unique([tenantId, branchId, sessionNumber])
   @@index([tenantId, branchId, cashierId])
   @@map("cash_sessions")
+}
+
+model CashMovement {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  cashSessionId  String
+  type           String
+  amount         Decimal  @db.Decimal(12, 2)
+  reason         String
+  deviceId       String
+  actorId        String
+  witness        String?
+  approvalStatus String   @default("APPROVED")
+  idempotencyKey String   @unique
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  cashSession    CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, branchId, cashSessionId, occurredAt])
+  @@index([tenantId, branchId, type, occurredAt])
+  @@map("cash_movements")
 }
 
 model DrawerOperation {
