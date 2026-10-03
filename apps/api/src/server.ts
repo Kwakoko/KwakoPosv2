@@ -2014,6 +2014,42 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: summary };
   });
 
+  // Authoritative Reports data. Production reports never read browser-local business truth.
+  server.get("/api/v1/reports/data", async (req) => {
+    const ctx = requireTenantContext(req);
+    const query = (req.query as any) || {};
+    const now = new Date();
+    const end = query.to ? new Date(String(query.to)) : now;
+    if (!Number.isFinite(end.getTime())) throw new Error("REPORT_INVALID_TO_DATE");
+    let start = query.from ? new Date(String(query.from)) : new Date(end);
+    if (!Number.isFinite(start.getTime())) throw new Error("REPORT_INVALID_FROM_DATE");
+
+    const range = String(query.range || "").toLowerCase();
+    if (!query.from) {
+      const d = new Date(end);
+      if (range === "today") d.setHours(0, 0, 0, 0);
+      else if (range === "this_week") {
+        const day = d.getDay();
+        d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+        d.setHours(0, 0, 0, 0);
+      } else if (range === "this_month") {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_quarter") {
+        d.setMonth(Math.floor(d.getMonth() / 3) * 3, 1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_year") {
+        d.setMonth(0, 1); d.setHours(0, 0, 0, 0);
+      } else {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      }
+      start = d;
+    }
+    if (start >= end) throw new Error("REPORT_INVALID_DATE_RANGE");
+
+    const requestedBranch = query.branchId ? String(query.branchId) : null;
+    const data = await commercialRepository.getReportsData(ctx, { from: start, to: end, branchId: requestedBranch });
+    return { success: true, data };
+  });
+
   server.get("/api/v1/dashboard/executive", async (req) => {
     const summary = await commercialRepository.getDashboardSummary(req.tenantContext!);
     return { success: true, data: summary };
