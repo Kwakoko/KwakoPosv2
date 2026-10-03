@@ -672,7 +672,6 @@ Manager Sign-off:  _____________________
       if (movementType === "CASH_IN") setCashIn((prev) => prev + amt);
       if (movementType === "CASH_OUT") setCashOut((prev) => prev + amt);
       if (movementType === "SAFE_DROP") setSafeDrops((prev) => prev + amt);
-      if (movementType === "NO_SALE") return;
     } catch (error) {
       toast.error("Cash Movement Not Saved", error instanceof Error ? error.message : "Unable to persist the cash movement.");
       return;
