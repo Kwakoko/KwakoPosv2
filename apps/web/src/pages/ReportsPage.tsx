@@ -32,7 +32,8 @@ import {
   AreaChart, Area, PieChart as RePie, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
-import { useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
+import { useModule, useTenant } from "../context/KwakoPosContexts.js";
+import { apiFetch } from "../services/apiClient.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
@@ -51,16 +52,21 @@ export interface ReportsPageProps {
 }
 
 export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveTab }) => {
-  const { db } = useSync();
-  const { currentTenantName, currentTenantId } = useTenant();
+  const { currentTenantName } = useTenant();
   const { setActiveTab: setGlobalActiveTab } = useModule();
 
   const [activeTab, setActiveTab] = useState<ReportTab>("sales");
   const [sales, setSales] = useState<any[]>([]);
+  const [returnedSalesData, setReturnedSalesData] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [reportBranches, setReportBranches] = useState<any[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportMetrics, setReportMetrics] = useState<any>(null);
   const [dateRange, setDateRange] = useState("this_month");
   const [branchFilter, setBranchFilter] = useState("all");
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
@@ -114,95 +120,60 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   }, [propActiveTab]);
 
 
-  // ─── Hydrate Authoritative Data from Local DB & localStorage ──────────────
+  // ─── Hydrate authoritative PostgreSQL report data ────────────────────────
   const loadReportData = useCallback(async () => {
+    setReportLoading(true); setReportError(null);
     try {
-      if (!db) return;
-      await db.ready;
-      setSales(Array.from(db.sales.values()));
-
-      const expKey = "kwakopos:expenses:records";
-      try {
-        const raw = localStorage.getItem(expKey);
-        setExpenses(raw ? JSON.parse(raw) : []);
-      } catch { setExpenses([]); }
-
-      try {
-        const prods = await db.getProductsLocal(currentTenantId || undefined);
-        setProducts(Array.isArray(prods) ? prods : []);
-      } catch { setProducts([]); }
-
-      try {
-        const custs = await db.getCustomersLocal(currentTenantId || undefined);
-        setCustomers(Array.isArray(custs) ? custs : []);
-      } catch { setCustomers([]); }
-
-      try {
-        const poRaw = localStorage.getItem("procurement_purchase_orders");
-        setPurchaseOrders(poRaw ? JSON.parse(poRaw) : []);
-      } catch { setPurchaseOrders([]); }
-
-    } catch (e) {
-      console.error("[Reports] Failed to hydrate data", e);
-    }
-  }, [db, currentTenantId]);
-
-  useEffect(() => {
-    void loadReportData();
-    const handleSync = () => { void loadReportData(); };
-    window.addEventListener(DATA_CHANGED_EVENT, handleSync);
-    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleSync);
-  }, [loadReportData]);
-
-  // ─── Dynamic Aggregations ──────────────────────────────────────────────────
-  const validSales = useMemo(() => {
-    return sales.filter((s) => s.status !== "Cancelled" && s.status !== "Voided");
-  }, [sales]);
-
-  const returnedSales = useMemo(() => {
-    return sales.filter((s) => s.status === "Refunded" || s.status === "Voided" || s.status === "Returned");
-  }, [sales]);
-
-  const discountedSales = useMemo(() => {
-    return validSales.filter((s) => Number(s.discountAmount || s.discount || 0) > 0);
-  }, [validSales]);
-
-  const totalGrossSales = useMemo(() => {
-    return validSales.reduce((sum, s) => sum + Number(s.grandTotal || s.totalAmount || s.total || 0), 0);
-  }, [validSales]);
-
-  const totalTaxCollected = useMemo(() => {
-    return validSales.reduce((sum, s) => sum + Number(s.taxAmount || s.taxTotal || 0), 0);
-  }, [validSales]);
-
-  const totalDiscounts = useMemo(() => {
-    return validSales.reduce((sum, s) => sum + Number(s.discountAmount || s.discount || 0), 0);
-  }, [validSales]);
-
-  const totalCOGS = useMemo(() => {
-    return validSales.reduce((sum, s) => {
-      if (Array.isArray(s.items)) {
-        return sum + s.items.reduce((iSum: number, it: any) => iSum + (Number(it.costPrice || it.buyingPrice || (it.price * 0.75)) * Number(it.quantity || it.qty || 1)), 0);
+      let branchId: string | null = null;
+      if (branchFilter === "hq") {
+        const main = reportBranches.find((b: any) => b.isMain);
+        branchId = main?.id || null;
+        if (!branchId) throw new Error("REPORT_MAIN_BRANCH_NOT_FOUND");
       }
-      return sum + Number(s.grandTotal || 0) * 0.75;
-    }, 0);
-  }, [validSales]);
+      const params = new URLSearchParams({ range: dateRange });
+      if (branchId) params.set("branchId", branchId);
+      const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/reports/data?${params.toString()}`);
+      if (!response?.success || !response.data) throw new Error("REPORT_DATA_UNAVAILABLE");
+      const data = response.data;
+      setSales(Array.isArray(data.sales) ? data.sales : []);
+      setReturnedSalesData(Array.isArray(data.returnedSales) ? data.returnedSales : []);
+      setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
+      setProducts(Array.isArray(data.products) ? data.products : []);
+      setCustomers(Array.isArray(data.customers) ? data.customers : []);
+      setPurchaseOrders(Array.isArray(data.purchaseOrders) ? data.purchaseOrders : []);
+      setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setReportBranches(Array.isArray(data.branches) ? data.branches : []);
+      setReportMetrics(data.metrics || null);
+    } catch (e: any) {
+      console.error("[Reports] Authoritative report load failed", e);
+      setReportError(String(e?.message || e || "REPORT_DATA_UNAVAILABLE"));
+      setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]);
+      setPurchaseOrders([]); setInvoices([]); setReportMetrics(null);
+    } finally { setReportLoading(false); }
+  }, [dateRange, branchFilter, reportBranches]);
 
-  const totalExpensesAmt = useMemo(() => {
-    return expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  }, [expenses]);
+  useEffect(() => { void loadReportData(); }, [loadReportData]);
 
-  const netOperatingProfit = totalGrossSales - totalCOGS - totalExpensesAmt;
-  const marginPct = totalGrossSales > 0 ? Math.round((netOperatingProfit / totalGrossSales) * 100) : 0;
-  const totalTransactions = validSales.length;
+  // ─── Server-authoritative report metrics ─────────────────────────────────
+  const validSales = useMemo(() => sales.filter((s) => !["Cancelled", "Voided", "CANCELLED", "VOIDED", "REFUNDED"].includes(String(s.status))), [sales]);
+  const returnedSales = returnedSalesData;
+  const discountedSales = useMemo(() => validSales.filter((s) => Number(s.discountTotal || s.discountAmount || 0) > 0), [validSales]);
+  const totalGrossSales = Number(reportMetrics?.totalGrossSales ?? 0);
+  const totalTaxCollected = Number(reportMetrics?.totalTaxCollected ?? 0);
+  const totalDiscounts = Number(reportMetrics?.totalDiscounts ?? 0);
+  const totalCOGS = Number(reportMetrics?.totalCOGS ?? 0);
+  const totalExpensesAmt = Number(reportMetrics?.totalExpenses ?? 0);
+  const grossProfit = Number(reportMetrics?.grossProfit ?? 0);
+  const netOperatingProfit = Number(reportMetrics?.netOperatingProfit ?? 0);
+  const marginPct = Number(reportMetrics?.marginPct ?? 0);
+  const totalTransactions = Number(reportMetrics?.totalTransactions ?? 0);
 
   const salesByCashier = useMemo(() => {
     const map: Record<string, { name: string; branch: string; count: number; total: number }> = {};
     for (const s of validSales) {
-      const key = s.cashierName || s.servedBy || s.userId || "Unknown";
-      if (!map[key]) map[key] = { name: key, branch: s.branchName || s.branch || "—", count: 0, total: 0 };
-      map[key].count += 1;
-      map[key].total += Number(s.grandTotal || s.totalAmount || 0);
+      const key = s.soldById || "Unknown";
+      if (!map[key]) map[key] = { name: key, branch: s.branchId || "—", count: 0, total: 0 };
+      map[key].count += 1; map[key].total += Number(s.grandTotal || 0);
     }
     return Object.values(map).sort((a, b) => b.total - a.total);
   }, [validSales]);
@@ -210,70 +181,46 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const salesByBranch = useMemo(() => {
     const map: Record<string, { branch: string; count: number; total: number }> = {};
     for (const s of validSales) {
-      const key = s.branchName || s.branch || "Main Branch";
+      const key = s.branchId || "Unknown";
       if (!map[key]) map[key] = { branch: key, count: 0, total: 0 };
-      map[key].count += 1;
-      map[key].total += Number(s.grandTotal || s.totalAmount || 0);
+      map[key].count += 1; map[key].total += Number(s.grandTotal || 0);
     }
     return Object.values(map).sort((a, b) => b.total - a.total);
   }, [validSales]);
 
   const arAgingCustomers = useMemo(() => {
-    return customers.filter((c) => Number(c.balance || c.creditBalance || c.amountOwed || 0) > 0);
-  }, [customers]);
+    const customerMap = new Map(customers.map((c: any) => [c.id, c]));
+    const grouped = new Map<string, any>();
+    for (const inv of invoices.filter((i) => !["PAID", "CANCELLED"].includes(String(i.status).toUpperCase()))) {
+      const balance = Math.max(0, Number(inv.balanceDue || 0));
+      if (!balance) continue;
+      const days = Math.max(0, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / 86400000));
+      const existing = grouped.get(inv.customerId) || { ...(customerMap.get(inv.customerId) || {}), balance: 0, days: 0 };
+      existing.balance += balance; existing.days = Math.max(existing.days, days);
+      grouped.set(inv.customerId, existing);
+    }
+    return Array.from(grouped.values());
+  }, [customers, invoices]);
 
-  // Dynamic Daily Chart
   const salesChartData = useMemo(() => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const dayTotals: Record<string, { Sales: number; Profit: number; Tax: number }> = {};
-    for (const d of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
-      dayTotals[d] = { Sales: 0, Profit: 0, Tax: 0 };
-    }
+    const totals: Record<string, { Sales: number; Profit: number; Tax: number }> = {};
+    for (const d of days) totals[d] = { Sales: 0, Profit: 0, Tax: 0 };
     for (const s of validSales) {
-      const dt = new Date(s.createdAt || s.soldAt || Date.now());
-      const dayName = days[dt.getDay()];
-      if (dayTotals[dayName]) {
-        const sAmt = Number(s.grandTotal || s.totalAmount || 0);
-        const tAmt = Number(s.taxAmount || s.taxTotal || 0);
-        dayTotals[dayName].Sales += sAmt;
-        dayTotals[dayName].Tax += tAmt;
-        dayTotals[dayName].Profit += (sAmt * 0.28);
-      }
+      const day = days[new Date(s.soldAt || s.createdAt).getDay()];
+      totals[day].Sales += Number(s.grandTotal || 0);
+      totals[day].Profit += Number(s.grossProfit || 0);
+      totals[day].Tax += Number(s.taxTotal || 0);
     }
-    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => ({
-      day: d,
-      Sales: dayTotals[d].Sales,
-      Profit: Math.round(dayTotals[d].Profit),
-      Tax: Math.round(dayTotals[d].Tax),
-    }));
+    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => ({ day: d, ...totals[d] }));
   }, [validSales]);
 
-  // Dynamic Payment Method Breakdown
   const paymentPieData = useMemo(() => {
-    if (validSales.length === 0) {
-      return [
-        { name: "Cash", value: 0, color: "#38bdf8" },
-        { name: "M-Pesa", value: 0, color: "#4ade80" },
-        { name: "Card", value: 0, color: "#818cf8" },
-        { name: "Airtel Money", value: 0, color: "#fbbf24" },
-      ];
-    }
-    const counts: Record<string, number> = { Cash: 0, "M-Pesa": 0, Card: 0, "Airtel Money": 0 };
-    for (const s of validSales) {
-      const m = (s.paymentMethod || "Cash").toLowerCase();
-      if (m.includes("mpesa") || m.includes("m-pesa")) counts["M-Pesa"] += 1;
-      else if (m.includes("airtel")) counts["Airtel Money"] += 1;
-      else if (m.includes("card")) counts["Card"] += 1;
-      else counts["Cash"] += 1;
-    }
-    const total = validSales.length;
-    return [
-      { name: "Cash", value: Math.round((counts.Cash / total) * 100), color: "#38bdf8" },
-      { name: "M-Pesa", value: Math.round((counts["M-Pesa"] / total) * 100), color: "#4ade80" },
-      { name: "Card", value: Math.round((counts.Card / total) * 100), color: "#818cf8" },
-      { name: "Airtel Money", value: Math.round((counts["Airtel Money"] / total) * 100), color: "#fbbf24" },
-    ];
-  }, [validSales]);
+    const totals = reportMetrics?.paymentTotals || {};
+    const entries = Object.entries(totals) as Array<[string, any]>;
+    const amountTotal = entries.reduce((n, [, v]) => n + Number(v.amount || 0), 0);
+    return entries.map(([name, value]) => ({ name, value: amountTotal ? Math.round(Number(value.amount || 0) / amountTotal * 100) : 0, amount: Number(value.amount || 0) }));
+  }, [reportMetrics]);
 
   // ─── Empty State Helper ────────────────────────────────────────────────────
   const EmptyState = ({ icon: Icon, title, desc }: { icon: React.ElementType; title: string; desc: string }) => (
@@ -398,6 +345,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
           </button>
         ))}
       </div>
+
+      {reportError && <div className="v2-card" role="alert"><div className="v2-card-body v2-text-danger">Authoritative report data unavailable: {reportError}</div></div>}
+      {reportLoading && <div className="v2-card"><div className="v2-card-body v2-text-muted">Loading authoritative PostgreSQL report data…</div></div>}
 
       {/* KPI Cards Header */}
       <div className="metrics-grid kpi-grid-4">
@@ -546,8 +496,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
               <thead><tr><th>SKU / Code</th><th>Product Name</th><th>Qty in Stock</th><th>Cost Price</th><th>Retail Price</th><th>Stock Value</th></tr></thead>
               <tbody>
                 {products.slice(0, 100).map((p: any, i: number) => {
-                  const qty = Number(p.stockQuantity || p.quantity || p.stock || 0);
-                  const cost = Number(p.costPrice || p.buyingPrice || 0);
+                  const stocks = Array.isArray(p.branchStocks) ? p.branchStocks : [];
+                  const qty = stocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0);
+                  const stockValue = stocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0);
+                  const cost = qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0);
                   const retail = Number(p.sellingPrice || p.price || 0);
                   return (
                     <tr key={p.id || p.sku || i}>
@@ -577,7 +529,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
               <thead><tr><th>Customer Name</th><th>Phone</th><th>Email</th><th>Credit Balance</th><th>Status</th></tr></thead>
               <tbody>
                 {customers.slice(0, 100).map((c: any, i: number) => {
-                  const bal = Number(c.balance || c.creditBalance || c.amountOwed || 0);
+                  const bal = Number(c.currentBalance || c.balance || c.creditBalance || c.amountOwed || 0);
                   return (
                     <tr key={c.id || i}>
                       <td className="v2-font-bold">{c.name || c.fullName || "—"}</td>
@@ -655,8 +607,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
               <thead><tr><th>Receipt Ref</th><th>Date</th><th>Gross Amount</th><th>VAT (18%)</th><th>Net Amount</th><th>EFD Status</th></tr></thead>
               <tbody>
                 {validSales.slice(0, 100).map((s: any, i: number) => {
-                  const gross = Number(s.grandTotal || s.totalAmount || 0);
-                  const tax = Number(s.taxAmount || s.taxTotal || gross * 0.18);
+                  const gross = Number(s.grandTotal || 0);
+                  const tax = Number(s.taxTotal || 0);
                   return (
                     <tr key={s.id || i}>
                       <td className="v2-mono v2-text-xs v2-font-bold">{s.receiptNumber || s.id || `REC-${i + 1}`}</td>
@@ -734,11 +686,11 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                 {expenses.slice(0, 100).map((e: any, i: number) => (
                   <tr key={e.id || i}>
                     <td className="v2-mono v2-text-xs v2-font-bold">{e.id || e.ref || `EXP-${i + 1}`}</td>
-                    <td className="v2-font-bold">{e.description || e.name || "—"}</td>
+                    <td className="v2-font-bold">{e.reason || e.description || e.name || "—"}</td>
                     <td className="v2-text-xs v2-text-muted">{e.category || "General"}</td>
-                    <td className="v2-text-xs v2-text-muted">{(e.date || e.createdAt) ? new Date(e.date || e.createdAt).toLocaleDateString() : "—"}</td>
+                    <td className="v2-text-xs v2-text-muted">{(e.incurredAt || e.date || e.createdAt) ? new Date(e.incurredAt || e.date || e.createdAt).toLocaleDateString() : "—"}</td>
                     <td className="v2-mono v2-font-black">{money(Number(e.amount || 0))}</td>
-                    <td><span className="badge v2-badge-success">{e.status || "APPROVED"}</span></td>
+                    <td><span className="badge v2-badge-success">{e.status || "RECORDED"}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -775,8 +727,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                 {purchaseOrders.slice(0, 100).map((po: any, i: number) => (
                   <tr key={po.id || po.poNumber || i}>
                     <td className="v2-mono v2-text-xs v2-font-bold">{po.poNumber || po.id || `PO-${i + 1}`}</td>
-                    <td className="v2-font-bold">{po.supplierName || po.supplier || "—"}</td>
-                    <td className="v2-text-xs v2-text-muted">{(po.orderDate || po.createdAt) ? new Date(po.orderDate || po.createdAt).toLocaleDateString() : "—"}</td>
+                    <td className="v2-font-bold">{po.supplier?.name || po.supplierName || po.supplier || "—"}</td>
+                    <td className="v2-text-xs v2-text-muted">{(po.orderedAt || po.orderDate || po.createdAt) ? new Date(po.orderedAt || po.orderDate || po.createdAt).toLocaleDateString() : "—"}</td>
                     <td className="v2-mono">{Array.isArray(po.items) ? po.items.length : (po.itemCount || "—")}</td>
                     <td className="v2-mono v2-font-black">{money(Number(po.totalAmount || po.total || 0))}</td>
                     <td><span className={`badge ${po.status === "RECEIVED" ? "v2-badge-success" : po.status === "CANCELLED" ? "v2-badge-danger" : "v2-badge-warning"}`}>{po.status || "PENDING"}</span></td>
@@ -807,7 +759,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
               <tbody>
                 {arAgingCustomers.map((c: any, i: number) => {
                   const bal = Number(c.balance || c.creditBalance || c.amountOwed || 0);
-                  const days = c.creditDaysOutstanding || c.daysOwed || 0;
+                  const days = c.days || c.creditDaysOutstanding || c.daysOwed || 0;
                   const risk = days > 90 ? "HIGH" : days > 30 ? "MEDIUM" : "LOW";
                   return (
                     <tr key={c.id || i}>
