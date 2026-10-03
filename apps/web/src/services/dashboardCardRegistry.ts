@@ -146,8 +146,8 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
   PendingSync: {
     key: "PendingSync",
     kpiKey: "PendingSync",
-    title: "Pending Sync",
-    description: "Local mutations awaiting cloud synchronization",
+    title: "Device Sync",
+    description: "This device's local mutations awaiting cloud synchronization",
     icon: RefreshCw,
     accent: "#f97316",
     format: "count",
