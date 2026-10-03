@@ -150,7 +150,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]);
       setPurchaseOrders([]); setInvoices([]); setReportMetrics(null);
     } finally { setReportLoading(false); }
-  }, [dateRange, branchFilter, reportBranches]);
+  }, [dateRange, branchFilter]);
 
   useEffect(() => { void loadReportData(); }, [loadReportData]);
 
