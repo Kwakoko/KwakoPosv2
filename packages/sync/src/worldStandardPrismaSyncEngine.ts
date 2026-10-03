@@ -196,7 +196,9 @@ export class WorldStandardPrismaSyncEngine {
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
         case "Sale": return await db.sale.findUnique({ where: { id: op.entityId }, include: { lines: true, payments: true } });
+        case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
+        case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         default: return op.payload;
       }
     } catch {
@@ -712,9 +714,48 @@ const now = new Date();
       return;
     }
 
+    if (op.entityType === "PurchaseOrder" && op.operationType === "CREATE") {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const existing = await tx.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      if (supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_ACTIVE");
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (!items.length) throw new Error("PURCHASE_ORDER_ITEMS_REQUIRED");
+      const variants = await tx.productVariant.findMany({ where: { id: { in: items.map((i: any) => i.variantId) }, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (variants.length !== items.length) throw new Error("PURCHASE_ORDER_VARIANT_BOUNDARY_VIOLATION");
+      const totalAmount = items.reduce((sum: number, i: any) => sum + Number(i.quantityOrdered) * Number(i.unitCost), 0);
+      const orderNumber = payload.orderNumber || `PUR-MAIN-${Date.now()}`;
+      await tx.purchaseOrder.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, orderNumber,
+        supplierId: payload.supplierId, status: payload.status || "DRAFT", totalAmount,
+        notes: payload.notes ?? null, createdById: ctx.userId, approvedById: payload.status === "APPROVED" ? ctx.userId : null,
+        items: { create: items.map((i: any) => ({ id: i.id || randomUUID(), variantId: i.variantId, quantityOrdered: i.quantityOrdered, quantityReceived: i.quantityReceived || 0, unitCost: i.unitCost, totalCost: Number(i.quantityOrdered) * Number(i.unitCost) })) },
+      } });
+      return;
+    }
+
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      return;
+    }
+
+    if (op.entityType === "Payment" && op.operationType === "CREATE") {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
+      if (existing) return;
+      const amount = Number(payload.amount);
+      if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+      await tx.payment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`, purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount, paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
       return;
     }
 
