@@ -383,7 +383,37 @@ export class PrismaAtomicCommercialFinanceService {
           OR: [{ id }, ...(req.idempotencyKey ? [{ idempotencyKey: String(req.idempotencyKey) }] : [])],
         },
       });
-      if (existing) return existing;
+      if (existing) {
+        const incomingKey = String(req.idempotencyKey || id);
+        const incomingFingerprint = JSON.stringify({
+          category: req.category,
+          amount: Number(req.amount),
+          reason: req.reason,
+          description: req.description || req.reason,
+          payee: req.payee || "Unspecified Payee",
+          paymentMethod: this.normalizeExpensePaymentMethod(req.paymentMethod),
+          paymentRef: req.paymentRef || null,
+          status: String(req.status || "PAID").toUpperCase(),
+          taxDeductible: Boolean(req.taxDeductible),
+          incurredAt: req.incurredAt || null,
+        });
+        const existingFingerprint = JSON.stringify({
+          category: existing.category,
+          amount: Number(existing.amount),
+          reason: existing.reason,
+          description: existing.description,
+          payee: existing.payee,
+          paymentMethod: existing.paymentMethod,
+          paymentRef: existing.paymentRef || null,
+          status: existing.status,
+          taxDeductible: Boolean(existing.taxDeductible),
+          incurredAt: existing.incurredAt?.toISOString?.() || existing.incurredAt || null,
+        });
+        if (String(existing.idempotencyKey) === incomingKey && incomingFingerprint !== existingFingerprint) {
+          throw new Error("EXPENSE_IDEMPOTENCY_CONFLICT");
+        }
+        return existing;
+      }
 
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const status = String(req.status || "PAID").toUpperCase();
