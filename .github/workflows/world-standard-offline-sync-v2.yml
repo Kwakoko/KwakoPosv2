@@ -41,6 +41,9 @@ jobs:
       - run: npm run db:migrate
       - run: npm run build
       - run: npm run test:sync
+      - run: npx tsx scripts/release/database-migration-gate.ts
+      - run: npm run certify:conflicts
+      - run: npx vitest run tests/integration/sync-conflict-detection-convergence.test.ts tests/sync/super-strong-sync.test.ts --reporter=dot
       - run: npx playwright install --with-deps chromium
       - run: npm run certify:offline-e2e
       - run: npm run certify:offline-sync
