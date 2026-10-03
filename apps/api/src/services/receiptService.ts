@@ -158,3 +158,4 @@ export class ReceiptService {
 }
 
 export const globalReceiptService = new ReceiptService();
+
