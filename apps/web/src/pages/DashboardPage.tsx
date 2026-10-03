@@ -426,8 +426,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   ]);
 
   const refreshAuthoritativeKpis = useCallback(async () => {
-    if (!tenantId || !branchId || !isOnline) {
+    if (!tenantId || !branchId) {
       setAuthoritativeKpis(null);
+      setAuthoritativeKpiError(null);
+      setIsLoadingAuthoritativeKpis(false);
+      return;
+    }
+    if (!isOnline) {
+      // Preserve the last server-authoritative snapshot for offline read-only reporting.
+      // It remains explicitly labeled as the last authoritative snapshot.
       setAuthoritativeKpiError(null);
       setIsLoadingAuthoritativeKpis(false);
       return;
