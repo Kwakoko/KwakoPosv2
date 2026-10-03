@@ -10,35 +10,18 @@ export interface ReceiptNumberOptions {
 }
 
 export class ReceiptNumberGenerator {
-  private static sequenceCounters: Map<string, number> = new Map();
-
   public static generate(options: ReceiptNumberOptions = {}): string {
+    if (!Number.isInteger(options.sequenceNumber) || (options.sequenceNumber as number) < 1) {
+      throw new Error("RECEIPT_SEQUENCE_MUST_BE_DATABASE_ALLOCATED");
+    }
     const d = options.date || new Date();
     const YYYY = d.getFullYear();
     const MM = String(d.getMonth() + 1).padStart(2, "0");
     const DD = String(d.getDate()).padStart(2, "0");
-
     const tPrefix = options.tenantPrefix ? `${options.tenantPrefix.toUpperCase()}-` : "";
     const bPrefix = options.branchPrefix ? `${options.branchPrefix.toUpperCase()}-` : "";
-
-    let datePart = "";
-    if (options.sequenceType === "DAILY") {
-      datePart = `${YYYY}${MM}${DD}-`;
-    } else if (options.sequenceType === "MONTHLY") {
-      datePart = `${YYYY}${MM}-`;
-    } else {
-      datePart = `${YYYY}${MM}${DD}-`;
-    }
-
-    const key = `${tPrefix}${bPrefix}${datePart}`;
-    let seq = options.sequenceNumber;
-    if (seq === undefined) {
-      const current = this.sequenceCounters.get(key) || 0;
-      seq = current + 1;
-      this.sequenceCounters.set(key, seq);
-    }
-
-    const seqFormatted = String(seq).padStart(6, "0");
+    const datePart = options.sequenceType === "MONTHLY" ? `${YYYY}${MM}-` : `${YYYY}${MM}${DD}-`;
+    const seqFormatted = String(options.sequenceNumber).padStart(6, "0");
     return `${tPrefix}${bPrefix}RCPT-${datePart}${seqFormatted}`;
   }
 }

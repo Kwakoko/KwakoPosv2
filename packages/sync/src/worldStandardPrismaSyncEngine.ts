@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
@@ -608,6 +609,106 @@ const now = new Date();
     if (op.entityType === "Sale" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createSale(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      return;
+    }
+
+    if (op.entityType === "Receipt" && op.operationType === "CREATE") {
+      const sale = await tx.sale.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          OR: [{ id: (op.payload as any).transactionId }, { saleNumber: (op.payload as any).transactionId }],
+        },
+        include: { lines: true, payments: true },
+      });
+      if (!sale) throw new Error("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
+      const existingByTransaction = await tx.receipt.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, transactionId: sale.id },
+        include: { items: true },
+      });
+      if (existingByTransaction) return;
+
+      const now = new Date();
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
+      await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
+      const seqRows = await tx.$queryRawUnsafe<Array<{ seq: bigint | number | string }>>(
+        `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)$'))::bigint), 0) + 1 AS seq
+           FROM receipts
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "createdAt" >= $3 AND "createdAt" < $4`,
+        ctx.tenantId, ctx.branchId, dayStart, dayEnd,
+      );
+      const receiptNumber = ReceiptNumberGenerator.generate({
+        tenantPrefix: ctx.tenantId.slice(0, 3),
+        branchPrefix: ctx.branchId.slice(0, 3),
+        sequenceType: "DAILY",
+        sequenceNumber: Number(seqRows[0]?.seq ?? 1),
+        date: now,
+      });
+      const grandTotal = Number(sale.grandTotal);
+      const signatureTimestamp = now.toISOString();
+      const digitalSignature = ReceiptEngine.calculateDigitalSignature(receiptNumber, sale.id, grandTotal, signatureTimestamp);
+      const paidAmount = sale.payments.filter((p: any) => p.status === "COMPLETED").reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const changeAmount = Math.max(0, paidAmount - grandTotal);
+      await tx.receipt.create({
+        data: {
+          id: op.entityId || randomUUID(),
+          receiptNumber,
+          transactionId: sale.id,
+          transactionType: "POS_SALE",
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          cashierId: sale.soldById || ctx.userId,
+          cashierName: null,
+          customerId: sale.customerId,
+          subtotal: Number(sale.subtotal),
+          discountTotal: Number(sale.discountTotal),
+          taxTotal: Number(sale.taxTotal),
+          grandTotal,
+          paidAmount,
+          changeAmount,
+          paymentMethod: sale.payments[0]?.paymentMethod || "CASH",
+          currency: (op.payload as any).currency || "TZS",
+          exchangeRate: 1,
+          status: "COMPLETED",
+          deviceId: req.deviceId,
+          createdAt: now,
+          syncStatus: "SYNCED",
+          digitalSignature,
+          qrCodePayload: ReceiptEngine.generateQrCodePayload(
+            sale.id, receiptNumber, sale.id,
+            process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
+            digitalSignature,
+          ),
+          barcodePayload: ReceiptEngine.generateBarcodePayload(receiptNumber),
+          items: {
+            create: sale.lines.map((line: any) => ({
+              id: randomUUID(),
+              productId: line.productId,
+              variantId: line.variantId,
+              sku: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.sku || line.variantId,
+              name: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.name || line.variantId,
+              qty: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discount: Number(line.discountAmount),
+              taxRate: 0,
+              taxAmount: Number(line.taxAmount),
+              lineTotal: Number(line.lineTotal),
+            })),
+          },
+          auditLogs: {
+            create: {
+              action: "CREATED_FROM_AUTHORITATIVE_SALE_SYNC",
+              actorId: ctx.userId,
+              deviceId: req.deviceId,
+              branchId: ctx.branchId,
+              details: JSON.stringify({ saleId: sale.id, operationId: op.operationId }),
+            },
+          },
+        },
+      });
       return;
     }
 
