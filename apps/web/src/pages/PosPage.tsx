@@ -306,7 +306,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       outstandingBalance: 0,
       createdAt: new Date().toISOString(),
     };
-    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
     await commitLocalMutation({ db, tenantContext, entityType: "Customer", entityId: customerId, operationType: "CREATE", payload: newCust, idempotencyKey: customerId, writes: [{ store: "customers", key: customerId, value: newCust }] });
     setCustomerOptions((prev) => Array.from(new Set([...prev, trimmed])));
     setSelectedCustomer(trimmed);
@@ -998,6 +998,15 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         toast.warning("Split Tender Incomplete", `Total tendered (${money(splitTotal)}) is less than due (${money(cartGrandTotal)}).`);
         return;
       }
+    }
+
+    if (!currentTenantId || !currentBranchId || !user?.id) {
+      toast.error("Checkout Context Missing", "Tenant, branch, and authenticated cashier context are required.");
+      return;
+    }
+    if (cart.some((item) => item.isCustom)) {
+      toast.warning("Catalog Item Required", "Custom/non-inventory items are not supported by the authoritative sale contract. Add a real catalog variant.");
+      return;
     }
 
     const saleId = safeUUID();
