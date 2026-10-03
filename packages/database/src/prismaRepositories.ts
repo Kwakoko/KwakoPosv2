@@ -504,7 +504,7 @@ export class PrismaStockRepository {
       const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
       const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
       const row = await tx.stockLedger.create({
-        data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
+        data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, warehouseId: req.warehouseId ?? null, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, req.variantId);
       await projectProductVariantBalance(tx, ctx.tenantId, ctx.branchId, req.variantId);
@@ -639,6 +639,7 @@ export class PrismaStockRepository {
           id: req.ledgerId || undefined,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
+          warehouseId: (req as any).warehouseId ?? null,
           productId: variant.productId,
           variantId: resolvedVariantId,
           movementType: req.movementType || (changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS"),
@@ -662,7 +663,7 @@ export class PrismaStockRepository {
 
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, resolvedVariantId);
       await projectProductVariantBalance(tx, ctx.tenantId, ctx.branchId, resolvedVariantId);
-      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, resolvedVariantId, null);
+      await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, resolvedVariantId, (req as any).warehouseId ?? null);
       await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       return { adjustment, ledger };
     });
