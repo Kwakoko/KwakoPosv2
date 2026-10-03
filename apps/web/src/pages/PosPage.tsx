@@ -989,7 +989,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       toast.error("Checkout Blocked", "Unable to verify the authoritative cash session.");
       return;
     }
-    if (!activeCashSession?.id || activeCashSession.status !== "OPEN") {
+    if (!activeCashSession?.id || activeCashSession?.status !== "OPEN") {
       setShiftOpen(false);
       setShiftModal(true);
       toast.warning("Open Shift Required", "Checkout requires an authoritative OPEN cash session.");
