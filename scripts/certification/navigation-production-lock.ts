@@ -20,7 +20,6 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/SettingsPage.tsx": "7bdd93c664912e763e0ccea23ebe10381671334e",
   "apps/web/src/pages/CashDrawerPage.tsx": "f6738eb9cb07e0c6b72194686116a0827bfd9dce",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/locked-release-engine.yml": "e44d5cdf16f0adddef66d784c675c5c062659eb9",
   ".github/workflows/production-certification.yml": "9034050784a1d88fe6c04348c1d9189e0a0e2ad8",
   ".github/workflows/production-release-exact-main.yml": "3d830712941e93bf0989d3f04cbf524a8edbcb7d"
 };
@@ -37,7 +36,7 @@ const MARKERS: Array<[string, string, string]> = [
   ["cash-drawer-reverse-binding", "apps/web/src/pages/CashDrawerPage.tsx", "selectCashDrawerTab"],
   ["receipts-reverse-binding", "apps/web/src/pages/ReceiptsPage.tsx", "selectReceiptTab"],
   ["package-hook", "package.json", "certify:navigation-lock"],
-  ["locked-release-hook", ".github/workflows/locked-release-engine.yml", "npm run certify:navigation-lock"],
+  ["ci-hook", ".github/workflows/ci.yml", "npm run certify:navigation-lock"],
   ["candidate-certification-hook", ".github/workflows/production-certification.yml", "npm run certify:navigation-lock"],
   ["exact-main-production-release-hook", ".github/workflows/production-release-exact-main.yml", "npm run certify:navigation-lock"]
 ];
