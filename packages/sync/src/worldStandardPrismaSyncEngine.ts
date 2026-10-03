@@ -1235,7 +1235,7 @@ const now = new Date();
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
-      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
       expenses: await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } }),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
