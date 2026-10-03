@@ -1093,7 +1093,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const payments = paymentPayload;
     const paymentDeviceId = getOrCreatePersistentDeviceId("pos");
 
-    const tenantContext = { tenantId: currentTenantId || "tenant-default", branchId: currentBranchId || "branch-default" };
+    const tenantContext = { tenantId: currentTenantId!, branchId: currentBranchId! };
+    const selectedCustomerId = selectedCustomer === "Walk-In Customer"
+      ? null
+      : Array.from(db.customers.values()).find((customer: any) =>
+          customer.tenantId === currentTenantId &&
+          customer.branchId === currentBranchId &&
+          customer.name === selectedCustomer
+        )?.id ?? null;
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
 
     const saleRecord = {
@@ -1106,6 +1113,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       cashSessionId: activeCashSession.id,
       operationId: saleId,
       idempotencyKey: `${paymentDeviceId}/${saleId}`,
+      customerId: selectedCustomerId,
       customer: selectedCustomer,
       customerName: selectedCustomer,
       cashierId: user?.id || "",
@@ -1142,7 +1150,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const receiptRecord = {
       id: saleId, receiptNumber: saleId, transactionId: saleId, transactionType: "POS_SALE",
       tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, cashierId: user?.id || "",
-      cashierName: user?.name || "", customerId: selectedCustomer === "Walk-In Customer" ? null : undefined, customerName: selectedCustomer,
+      cashierName: user?.name || "", customerId: selectedCustomerId, customerName: selectedCustomer,
       subtotal: cartSubtotal, discountTotal: discountAmount, taxTotal: taxAmount, selectedTaxRate,
       taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
       changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
