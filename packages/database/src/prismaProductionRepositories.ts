@@ -291,17 +291,19 @@ export class PrismaCommercialRepository {
       if (existing.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
       if (existing.status === "CLOSED") throw new Error("CASH_SESSION_CLOSED");
       if (!existing.countSealedAt || existing.actualCash === null) throw new Error("CASH_COUNT_NOT_SEALED");
-      const [cashSales, cashRefunds, cashExpenses] = await Promise.all([
+      const [cashSales, cashRefunds, cashExpenses, cashMovements] = await Promise.all([
         tx.payment.aggregate({ where: { ...tenantWhere(ctx), paymentMethod: "CASH", status: "COMPLETED", sale: { cashSessionId: id } }, _sum: { amount: true } }),
         tx.return.aggregate({ where: { ...tenantWhere(ctx), refundType: "CASH", status: "COMPLETED", originalSale: { cashSessionId: id } }, _sum: { totalRefundAmount: true } }),
         tx.expense.aggregate({ where: { ...tenantWhere(ctx), cashSessionId: id }, _sum: { amount: true } }),
+        tx.cashMovement.groupBy({ by: ["type"], where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: id }, _sum: { amount: true } }),
       ]);
       const cashSalesTotal = Number(cashSales._sum.amount || 0);
       const cashRefundsTotal = Number(cashRefunds._sum.totalRefundAmount || 0);
-      const cashExpensesTotal = Number(cashExpenses._sum.amount || 0);
-      const cashInTotal = Number(existing.cashInTotal || 0);
-      const cashOutTotal = Number(existing.cashOutTotal || 0);
-      const safeDropTotal = Number(existing.safeDropTotal || 0);
+      const movementTotal = (type: string) => Number((cashMovements.find((row: any) => row.type === type)?._sum?.amount) || 0);
+      const cashExpensesTotal = Number(cashExpenses._sum.amount || 0) + movementTotal("PETTY_CASH");
+      const cashInTotal = movementTotal("CASH_IN");
+      const cashOutTotal = movementTotal("CASH_OUT");
+      const safeDropTotal = movementTotal("SAFE_DROP") + movementTotal("BANK_DEPOSIT");
       const expectedCash = Number(existing.openingCash) + cashSalesTotal + cashInTotal - cashRefundsTotal - cashExpensesTotal - cashOutTotal - safeDropTotal;
       const actualCash = Number(existing.actualCash);
       const variance = actualCash - expectedCash;
