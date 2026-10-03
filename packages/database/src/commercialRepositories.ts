@@ -725,6 +725,9 @@ export class ScopedCommercialRepository {
         cashSalesTotal: session.cashSalesTotal || 0,
         cashRefundsTotal: session.cashRefundsTotal || 0,
         cashExpensesTotal: session.cashExpensesTotal || 0,
+        cashInTotal: session.cashInTotal || 0,
+        cashOutTotal: session.cashOutTotal || 0,
+        safeDropTotal: session.safeDropTotal || 0,
       },
       actualCash
     );
