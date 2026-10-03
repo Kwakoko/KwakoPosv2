@@ -256,6 +256,34 @@ export class PrismaCommercialRepository {
     return normalize(await this.atomic.recordExpense(ctx, req));
   }
 
+  async createCashMovement(ctx: TenantContext, req: any) {
+    const amount = Number(req.amount);
+    const allowed = new Set(["CASH_IN", "CASH_OUT", "SAFE_DROP", "BANK_DEPOSIT", "PETTY_CASH"]);
+    if (!allowed.has(String(req.type))) throw new Error("INVALID_CASH_MOVEMENT_TYPE");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_CASH_MOVEMENT_AMOUNT");
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.cashMovement.findUnique({ where: { idempotencyKey: req.idempotencyKey } });
+      if (existing) return existing;
+      const session = await tx.cashSession.findFirst({ where: { id: req.cashSessionId, ...tenantWhere(ctx), status: { not: "CLOSED" } } });
+      if (!session || session.cashierId !== ctx.userId) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
+      const movement = await tx.cashMovement.create({ data: { id: req.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: session.id, type: req.type, amount, reason: String(req.reason || req.type), deviceId: String(req.deviceId || "unknown"), actorId: ctx.userId, witness: req.witness || null, approvalStatus: req.approvalStatus || "APPROVED", idempotencyKey: String(req.idempotencyKey), occurredAt: req.occurredAt ? new Date(req.occurredAt) : new Date() } });
+      const inc: any = {};
+      if (req.type === "CASH_IN") inc.cashInTotal = { increment: amount };
+      else if (req.type === "CASH_OUT") inc.cashOutTotal = { increment: amount };
+      else if (req.type === "SAFE_DROP" || req.type === "BANK_DEPOSIT") inc.safeDropTotal = { increment: amount };
+      else if (req.type === "PETTY_CASH") inc.cashExpensesTotal = { increment: amount };
+      if (Object.keys(inc).length) await tx.cashSession.update({ where: { id: session.id }, data: inc });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId || "unknown", action: "CASH_MOVEMENT_CREATED", entityType: "CashMovement", entityId: movement.id, metadata: { type: req.type, amount, cashSessionId: session.id, reason: req.reason } } });
+      return movement;
+    }));
+  }
+
+  async getCashMovements(ctx: TenantContext, cashSessionId: string) {
+    const session = await db.cashSession.findFirst({ where: { id: cashSessionId, ...tenantWhere(ctx) } });
+    if (!session) throw new Error("CASH_SESSION_NOT_FOUND");
+    return normalize(await db.cashMovement.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId }, orderBy: { occurredAt: "desc" } }));
+  }
+
   async closeCashSession(ctx: TenantContext, id: string, req: any) {
     return normalize(await db.$transaction(async (tx: any) => {
       const existing = await tx.cashSession.findFirst({ where: { id, ...tenantWhere(ctx) } });
@@ -271,12 +299,15 @@ export class PrismaCommercialRepository {
       const cashSalesTotal = Number(cashSales._sum.amount || 0);
       const cashRefundsTotal = Number(cashRefunds._sum.totalRefundAmount || 0);
       const cashExpensesTotal = Number(cashExpenses._sum.amount || 0);
-      const expectedCash = Number(existing.openingCash) + cashSalesTotal - cashRefundsTotal - cashExpensesTotal;
+      const cashInTotal = Number(existing.cashInTotal || 0);
+      const cashOutTotal = Number(existing.cashOutTotal || 0);
+      const safeDropTotal = Number(existing.safeDropTotal || 0);
+      const expectedCash = Number(existing.openingCash) + cashSalesTotal + cashInTotal - cashRefundsTotal - cashExpensesTotal - cashOutTotal - safeDropTotal;
       const actualCash = Number(existing.actualCash);
       const variance = actualCash - expectedCash;
       const closedAt = new Date();
-      const closed = await tx.cashSession.update({ where: { id: existing.id }, data: { closingCash: actualCash, expectedCash, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, variance, closedAt, status: "CLOSED", notes: req.notes ?? existing.notes } });
-      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: existing.countSealedDeviceId || "server", action: "CASH_SESSION_CLOSED", entityType: "CashSession", entityId: existing.id, metadata: { sessionNumber: existing.sessionNumber, openingCash: Number(existing.openingCash), actualCash, expectedCash, variance, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, countSealedAt: existing.countSealedAt.toISOString() } } });
+      const closed = await tx.cashSession.update({ where: { id: existing.id }, data: { closingCash: actualCash, expectedCash, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, cashInTotal, cashOutTotal, safeDropTotal, variance, closedAt, status: "CLOSED", notes: req.notes ?? existing.notes } });
+      await tx.auditEvent.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: existing.countSealedDeviceId || "server", action: "CASH_SESSION_CLOSED", entityType: "CashSession", entityId: existing.id, metadata: { sessionNumber: existing.sessionNumber, openingCash: Number(existing.openingCash), actualCash, expectedCash, variance, cashSalesTotal, cashRefundsTotal, cashExpensesTotal, cashInTotal, cashOutTotal, safeDropTotal, countSealedAt: existing.countSealedAt.toISOString() } } });
       return closed;
     }));
   }
