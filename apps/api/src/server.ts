@@ -5201,10 +5201,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/supply-chain/3way-match", async (req, reply) => {
-    const { globalSupplyChainService } = await import("./services/supplyChainService.js");
-    const body = (req.body as any) || {};
-    const result = globalSupplyChainService.performThreeWayMatch(body);
-    return reply.status(result.success ? 200 : 422).send(result);
+    const body = z.object({
+      poId: z.string().uuid(), receivingId: z.string().uuid(), invoiceRef: z.string().min(1),
+      invoiceAmount: z.number().nonnegative(), approvedBy: z.string().optional(),
+    }).parse(req.body);
+    const result = await commercialRepository.performThreeWayMatch(req.tenantContext!, body);
+    return reply.status(200).send({ success: true, data: result });
   });
 
   server.get("/api/v1/supply-chain/replenishment", async (req, reply) => {
