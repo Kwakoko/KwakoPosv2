@@ -338,181 +338,33 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setShowGrnModal(true);
   };
 
-  // Confirm GRN Delivery Intake & Restock Inventory
+  // Confirm GRN: the server transaction owns inventory, StockLedger and receipt persistence.
   const handleConfirmGrn = async () => {
-    if (!selectedPoForGrn) return;
-    if (!currentTenantId || !currentBranchId) {
-      toast.error("GRN Not Saved", "An active tenant and branch are required.");
-      return;
+    if (!selectedPoForGrn || !currentTenantId || !currentBranchId) return;
+    const receivedItems = selectedPoForGrn.items.map((item) => ({
+      variantId: (item as any).variantId || item.productId,
+      quantityReceived: Number(grnReceivedQtys[item.sku || item.productId] || 0),
+      unitCost: Number(item.unitCost || 0),
+      batchNumber: grnBatchNumber || undefined,
+      expiryDate: grnExpiryDate || undefined,
+    })).filter((i) => i.quantityReceived > 0);
+    if (!receivedItems.length) return toast.warning("Nothing Received", "Enter at least one received quantity.");
+    const operationId = safeUUID();
+    const payload = { purchaseOrderId: selectedPoForGrn.id, supplierId: selectedPoForGrn.supplierId, deviceId: operationId, operationId, idempotencyKey: operationId, items: receivedItems, notes: `GRN for ${selectedPoForGrn.poNumber}` };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/purchases/receipts", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("Receipt failed");
+      await loadProcurement(); setShowGrnModal(false); setSelectedPoForGrn(null); playSuccessChime();
+      toast.success("Delivery Received", "Purchase receipt committed; StockLedger and inventory projection updated by the server.");
+    } catch {
+      const receiptId = safeUUID();
+      await db.executeAtomicMutation({
+        writes: [],
+        outboxItem: { id: receiptId, entityType: "PurchaseReceipt", entityId: receiptId, operationType: "CREATE", payload: { ...payload, id: receiptId }, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      setShowGrnModal(false); setSelectedPoForGrn(null); toast.info("Delivery Queued", "Receipt will commit atomically when connectivity returns.");
     }
-    const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
-    const grnId = `GRN-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const nowIso = new Date().toISOString();
-    const nowStr = nowIso.replace("T", " ").slice(0, 16);
-    const writes: Array<{ store: any; key: string; value?: any; delete?: boolean }> = [];
-    const receivedItems: Array<Record<string, unknown>> = [];
-
-    let totalIntakeUnits = 0;
-    let totalIntakeValue = 0;
-
-    // 1. Update each product's stock in local DB & post Stock Ledger records
-    for (const item of selectedPoForGrn.items) {
-      const itemKey = item.sku || item.productId;
-      const receivedCount = grnReceivedQtys[itemKey] || 0;
-      if (receivedCount > 0) {
-        totalIntakeUnits += receivedCount;
-        totalIntakeValue += receivedCount * item.unitCost;
-
-        // Find product in catalog
-        let prod = db.products.get(item.productId) as any;
-        if (!prod) {
-          for (const p of db.products.values()) {
-            if (p.sku === item.sku || p.name === item.name) {
-              prod = p;
-              break;
-            }
-          }
-        }
-
-        if (prod) {
-          const variant = [...db.productVariants.values()].find((v: any) =>
-            v.productId === prod.id && v.tenantId === currentTenantId && v.branchId === currentBranchId && (!item.sku || v.sku === item.sku)
-          );
-          if (!variant) {
-            toast.error("GRN Not Saved", `No branch-scoped variant was found for ${item.name || item.productId}.`);
-            return;
-          }
-          const prevStock = [...db.stockLedger.values()]
-            .filter((l: any) => l.tenantId === currentTenantId && l.branchId === currentBranchId && l.variantId === variant.id)
-            .reduce((sum: number, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
-          const nextStock = prevStock + receivedCount;
-          const updatedProd = {
-            ...prod,
-            stock: nextStock,
-            availableStock: nextStock,
-            totalStock: nextStock,
-            batchNumber: grnBatchNumber || prod.batchNumber,
-            expiryDate: grnExpiryDate || prod.expiryDate,
-            status: "Active",
-            updatedAt: new Date().toISOString(),
-          };
-          writes.push({ store: "products", key: item.productId, value: updatedProd });
-
-          // Post audit ledger entry
-          const ledgerId = `led-grn-${grnId}-${variant.id}`;
-          writes.push({
-            store: "stockLedger",
-            key: ledgerId,
-            value: {
-              id: ledgerId,
-              productId: item.productId,
-              variantId: variant.id,
-              sku: item.sku,
-              name: item.name,
-              quantity: receivedCount,
-              quantityChange: receivedCount,
-              quantityBefore: prevStock,
-              quantityAfter: nextStock,
-              balanceAfter: nextStock,
-              unitCost: item.unitCost,
-              totalCost: receivedCount * item.unitCost,
-              reason: `INBOUND_GRN_RECEIPT - ${grnId} (PO: ${selectedPoForGrn.poNumber})`,
-              ref: grnId,
-              movementType: "PURCHASE",
-              referenceType: "PURCHASE_RECEIPT",
-              referenceId: grnId,
-              timestamp: nowIso,
-              occurredAt: nowIso,
-              tenantId: currentTenantId,
-              branchId: currentBranchId,
-            },
-          });
-          receivedItems.push({
-            variantId: variant.id,
-            quantityReceived: receivedCount,
-            unitCost: item.unitCost,
-            batchNumber: grnBatchNumber || undefined,
-            expiryDate: grnExpiryDate || undefined,
-          });
-        }
-      }
-    }
-
-    if (!receivedItems.length) return;
-
-    // 2. Create GRN Record
-    const newGrn: GrnRecord = {
-      id: grnId,
-      poId: selectedPoForGrn.poNumber,
-      supplier: selectedPoForGrn.supplier,
-      warehouse: grnWarehouse || currentBranchName || "Main Store",
-      receivedAt: nowStr,
-      batchNumber: grnBatchNumber,
-      expiryDate: grnExpiryDate,
-      itemsCount: selectedPoForGrn.items.length,
-      totalValue: totalIntakeValue,
-      status: "VERIFIED",
-    };
-
-    const updatedGrns = [newGrn, ...grns];
-    writes.push({ store: "receipts", key: grnId, value: { ...newGrn, tenantId: currentTenantId, branchId: currentBranchId } });
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_grns`, value: { key: "procurement_grns", value: updatedGrns, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    // 3. Update PO status & received quantities
-    const updatedOrders = orders.map((o) => {
-      if (o.id === selectedPoForGrn.id) {
-        const updatedItems = o.items.map((it) => {
-          const itemKey = it.sku || it.productId;
-          const rec = grnReceivedQtys[itemKey] || 0;
-          return { ...it, qtyReceived: it.qtyReceived + rec };
-        });
-        const allReceived = updatedItems.every((it) => it.qtyReceived >= it.qtyOrdered);
-        return {
-          ...o,
-          items: updatedItems,
-          status: allReceived ? "Completed" as const : "Approved" as const,
-        };
-      }
-      return o;
-    });
-
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_purchase_orders`, value: { key: "procurement_purchase_orders", value: updatedOrders, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    // 4. Update supplier payable balance
-    const supMatch = suppliers.find((s) => s.name === selectedPoForGrn.supplier);
-    const updatedSups = supMatch
-      ? suppliers.map((s) => s.id === supMatch.id ? { ...s, balance: s.balance + totalIntakeValue } : s)
-      : suppliers;
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_suppliers`, value: { key: "procurement_suppliers", value: updatedSups, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    const receiptOutbox = {
-      id: grnId,
-      entityType: "PurchaseReceipt" as const,
-      entityId: grnId,
-      operationType: "CREATE" as const,
-      payload: {
-        id: grnId,
-        purchaseOrderId: selectedPoForGrn.id,
-        supplierId: selectedPoForGrn.supplierId || supMatch?.id,
-        items: receivedItems,
-        notes: `GRN ${grnId} / ${selectedPoForGrn.poNumber}`,
-      },
-      clientCreatedAt: nowIso,
-      idempotencyKey: grnId,
-      status: "PENDING" as const,
-      tenantId: currentTenantId,
-      branchId: currentBranchId,
-    };
-    await db.executeAtomicMutation({ writes, outboxItem: receiptOutbox, tenantContext });
-
-    setGrns(updatedGrns);
-    setOrders(updatedOrders);
-    setSuppliers(updatedSups);
-    setShowGrnModal(false);
-    setSelectedPoForGrn(null);
-    playSuccessChime();
-    toast.success("Delivery Received & Stock Updated", `GRN #${grnId} verified. Added ${totalIntakeUnits} stock units across inventory.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "GRN_VERIFIED", grn: newGrn } }));
   };
 
   // Settle Supplier Debt
