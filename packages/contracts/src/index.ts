@@ -1084,7 +1084,7 @@ export const ExpenseSchema = z.object({
   payee: z.string().min(1),
   paymentMethod: ExpensePaymentMethodEnum.default("CASH"),
   paymentRef: z.string().nullable().optional(),
-  status: ExpenseStatusEnum.default("PAID"),
+  status: z.enum(["PENDING", "PAID"]).default("PAID"),
   taxDeductible: z.boolean().default(false),
   authorizedById: z.string().uuid().nullable().optional(),
   paidById: z.string().uuid().nullable().optional(),
