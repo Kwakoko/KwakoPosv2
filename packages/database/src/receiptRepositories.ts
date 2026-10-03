@@ -80,7 +80,8 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }
   ): Promise<ReceiptDTO> {
     const now = req.signatureTimestamp || new Date().toISOString();
-    const receiptNumber = ReceiptNumberGenerator.generate({
+    // Test double only: production sequencing is performed by PrismaReceiptRepository in PostgreSQL.
+    const receiptNumber = req.receiptNumber || ReceiptNumberGenerator.generate({
       tenantPrefix: ctx.tenantId.slice(0, 3),
       branchPrefix: ctx.branchId.slice(0, 3),
       sequenceType: "DAILY",
