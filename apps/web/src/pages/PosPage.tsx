@@ -1086,6 +1086,12 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       items: mappedItems, createdAt: saleRecord.createdAt,
       fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
     };
+    const authoritativeCashSession = payments.some((payment: any) => payment.paymentMethod === "CASH")
+      ? (await apiFetch<{ success: boolean; data: any | null }>("/api/v1/cash-sessions/active")).data
+      : null;
+    if (payments.some((payment: any) => payment.paymentMethod === "CASH") && !authoritativeCashSession?.id) {
+      throw new Error("CASH_SESSION_REQUIRED: Open the PostgreSQL-authoritative cash drawer before accepting cash.");
+    }
     const drawerOutboxItems = payments
       .filter((payment: any) => payment.paymentMethod === "CASH")
       .map((payment: any) => createDrawerOutboxItem({
@@ -1095,7 +1101,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         branchId: tenantContext.branchId || "",
         deviceId: paymentDeviceId,
         requestedAt: saleRecord.createdAt,
-        payload: { saleId, paymentId: payment.id, amount: payment.amount, cashSessionId: (db.getConfigurationLocal?.("active_shift_session") as any)?.id },
+        payload: { saleId, paymentId: payment.id, amount: payment.amount, cashSessionId: authoritativeCashSession?.id },
       }));
     const localSaleOutbox: any = {
       id: saleId, entityType: "Sale", entityId: saleId, operationType: "CREATE", payload: saleRecord,
