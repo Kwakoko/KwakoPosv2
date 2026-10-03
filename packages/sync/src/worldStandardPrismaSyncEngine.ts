@@ -642,6 +642,643 @@ const now = new Date();
             AND "createdAt" >= $3 AND "createdAt" < $4`,
         ctx.tenantId, ctx.branchId, dayStart, dayEnd,
       ) as Array<{ seq: bigint | number | string }>;
+<<<<<<< HEAD
+=======
+      const receiptNumber = ReceiptNumberGenerator.generate({
+        tenantPrefix: ctx.tenantId.slice(0, 3),
+        branchPrefix: ctx.branchId.slice(0, 3),
+        sequenceType: "DAILY",
+        sequenceNumber: Number(seqRows[0]?.seq ?? 1),
+        date: now,
+      });
+      const grandTotal = Number(sale.grandTotal);
+      const signatureTimestamp = now.toISOString();
+      const digitalSignature = ReceiptEngine.calculateDigitalSignature(receiptNumber, sale.id, grandTotal, signatureTimestamp);
+      const paidAmount = sale.payments.filter((p: any) => p.status === "COMPLETED").reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const changeAmount = Math.max(0, paidAmount - grandTotal);
+      await tx.receipt.create({
+        data: {
+          id: op.entityId || randomUUID(),
+          receiptNumber,
+          transactionId: sale.id,
+          transactionType: "POS_SALE",
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          cashierId: sale.soldById || ctx.userId,
+          cashierName: null,
+          customerId: sale.customerId,
+          subtotal: Number(sale.subtotal),
+          discountTotal: Number(sale.discountTotal),
+          taxTotal: Number(sale.taxTotal),
+          grandTotal,
+          paidAmount,
+          changeAmount,
+          paymentMethod: sale.payments[0]?.paymentMethod || "CASH",
+          currency: (op.payload as any).currency || "TZS",
+          exchangeRate: 1,
+          status: "COMPLETED",
+          deviceId: req.deviceId,
+          createdAt: now,
+          syncStatus: "SYNCED",
+          digitalSignature,
+          qrCodePayload: ReceiptEngine.generateQrCodePayload(
+            sale.id, receiptNumber, sale.id,
+            process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
+            digitalSignature,
+          ),
+          barcodePayload: ReceiptEngine.generateBarcodePayload(receiptNumber),
+          items: {
+            create: sale.lines.map((line: any) => ({
+              id: randomUUID(),
+              productId: line.productId,
+              variantId: line.variantId,
+              sku: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.sku || line.variantId,
+              name: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.name || line.variantId,
+              qty: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discount: Number(line.discountAmount),
+              taxRate: 0,
+              taxAmount: Number(line.taxAmount),
+              lineTotal: Number(line.lineTotal),
+            })),
+          },
+          auditLogs: {
+            create: {
+              action: "CREATED_FROM_AUTHORITATIVE_SALE_SYNC",
+              actorId: ctx.userId,
+              deviceId: req.deviceId,
+              branchId: ctx.branchId,
+              details: JSON.stringify({ saleId: sale.id, operationId: op.operationId }),
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
+      const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
+      await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      return;
+    }
+
+    if (op.entityType === "Customer" && op.operationType === "CREATE") {
+      const existing = await tx.customer.findUnique({ where: { id: op.entityId } });
+      if (!existing) await tx.customer.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      return;
+    }
+
+    if (op.entityType === "Supplier" && op.operationType === "CREATE") {
+      const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
+      if (!existing) await tx.supplier.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      return;
+    }
+
+    throw new Error(`Unsupported sync operation: ${op.entityType}/${op.operationType}`);
+  }
+
+  async processPush(ctx: TenantContext, req: SyncPushRequest): Promise<SyncPushResponse> {
+    await this.ensureInfrastructure();
+    validateSyncRequest(req);
+    const results: SyncPushResponse["results"] = [];
+    let processedCount = 0;
+    for (const op of orderSyncOperations(req.operations)) {
+      try {
+        if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
+          throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: privileged entities cannot be mutated through sync.");
+        }
+
+        const outcome = await prisma.$transaction(async (tx: any) => {
+          const existing = await tx.syncOperation.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              OR: [{ idempotencyKey: op.idempotencyKey }, { operationId: op.operationId }],
+            },
+          });
+          if (existing) {
+            const fingerprint = operationFingerprint({
+              operationId: existing.operationId,
+              entityType: existing.entityType as any,
+              entityId: existing.entityId,
+              operationType: existing.operationType as any,
+              payload: existing.payload as any,
+              clientCreatedAt: existing.clientCreatedAt.toISOString(),
+              idempotencyKey: existing.idempotencyKey,
+            });
+            if (fingerprint !== operationFingerprint(op)) return { status: "IDEMPOTENCY_CONFLICT" as const };
+            const snapshot = await this.snapshot(ctx, op, tx);
+            await this.journal(ctx, op, snapshot, "replay", tx);
+            await this.journalGeneratedStockLedgers(ctx, op, "replay", tx);
+            return { status: "ALREADY_PROCESSED" as const };
+          }
+
+          await this.applyOperationInTransaction(ctx, req, op, tx);
+          const snapshot = await this.snapshot(ctx, op, tx);
+          await tx.syncOperation.create({
+            data: {
+              tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: req.deviceId,
+              operationId: op.operationId, entityType: op.entityType, entityId: op.entityId,
+              operationType: op.operationType, payload: op.payload as any, status: "PROCESSED",
+              idempotencyKey: op.idempotencyKey, clientCreatedAt: new Date(op.clientCreatedAt), processedAt: new Date(),
+            },
+          });
+          const revision = await this.journal(ctx, op, snapshot, "push", tx);
+          await this.journalGeneratedStockLedgers(ctx, op, "push", tx);
+          return { status: "SUCCESS" as const, revision };
+        });
+
+        if (outcome.status === "IDEMPOTENCY_CONFLICT") {
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_IDEMPOTENCY_CONFLICT" });
+        } else if (outcome.status === "ALREADY_PROCESSED") {
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+        } else {
+          processedCount += 1;
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "SUCCESS" });
+        }
+      } catch (err: any) {
+        if (String(err?.message || "").startsWith("STALE_WRITE_CONFLICT:")) {
+          const conflictId = "conflict:" + op.operationId;
+          const remote = await this.snapshot(ctx, op);
+          await this.persistConflict(ctx, { id: conflictId, operationId: op.operationId, entityType: op.entityType, entityId: op.entityId, operationType: op.operationType, localPayload: op.payload, remotePayload: remote, deviceId: req.deviceId });
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_CONFLICT:" + conflictId });
+          continue;
+        }
+        if (String(err?.message || "").startsWith("CONVERSION_CONFLICT:")) {
+          const conflictId = "conflict:conversion:" + op.operationId;
+          const payload = op.payload;
+          const available = await calculateAuthoritativeStock(prisma, ctx.tenantId, ctx.branchId, String(payload.parentVariantId)).catch(() => 0);
+          await this.persistConflict(ctx, { id: conflictId, operationId: op.operationId, entityType: "UnitConversionConflict", entityId: String(payload.parentVariantId), operationType: op.operationType, localPayload: payload, remotePayload: { availableParentStock: available, required: Number(payload.parentUnitsDeducted || 0) }, deviceId: req.deviceId });
+          results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: "SYNC_CONFLICT:" + conflictId });
+          continue;
+        }        if (err?.code === "P2002" || err?.code === "23505") {
+          const committed = await prisma.syncOperation.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              OR: [{ idempotencyKey: op.idempotencyKey }, { operationId: op.operationId }],
+            },
+          });
+          if (committed) {
+            const snapshot = await this.snapshot(ctx, op);
+            await this.journal(ctx, op, snapshot, "recovery");
+            results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "ALREADY_PROCESSED" });
+            continue;
+          }
+        }
+        results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: err?.message || "Sync operation failed" });
+      }
+    }
+    return { processedCount, results };
+  }
+
+  async resolveConflict(ctx: TenantContext, conflictId: string, resolution: "ACCEPT_SERVER" | "ACCEPT_LOCAL" | "MERGE", mergedPayload?: Record<string, unknown>): Promise<{ status: string; operationId?: string; revision?: string }> {
+    await this.ensureInfrastructure();
+    return prisma.$transaction(async (tx: any) => {
+      const rows = await tx.$queryRawUnsafe(
+        "SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE",
+        conflictId, ctx.tenantId, ctx.branchId,
+      );
+      const conflict = rows[0];
+      if (!conflict) throw new Error("SYNC_CONFLICT_NOT_FOUND");
+      if (conflict.status !== "OPEN") return { status: conflict.status };
+
+      const chosen = resolution === "ACCEPT_SERVER"
+        ? conflict.remote_payload
+        : resolution === "ACCEPT_LOCAL"
+          ? conflict.local_payload
+          : mergedPayload;
+      if (!chosen || typeof chosen !== "object") throw new Error("SYNC_CONFLICT_MERGED_PAYLOAD_REQUIRED");
+      const entityType = String(conflict.entity_type);
+      const resolverOperationId = "conflict-resolution:" + conflictId;
+      let revision: string | undefined;
+      const payload: any = stripSyncControlFields(chosen as Record<string, unknown>);
+
+      if (entityType === "SaleOversell") {
+        // Committed business incident: resolution acknowledges the incident without rewriting sale/ledger history.
+      } else if (entityType === "UnitConversionConflict") {
+        if (resolution !== "ACCEPT_SERVER") {
+          const op: any = {
+            operationId: resolverOperationId,
+            entityType: "UnitConversionTransaction",
+            entityId: String(payload.id || conflict.operation_id),
+            operationType: "CREATE",
+            payload,
+            clientCreatedAt: new Date().toISOString(),
+            idempotencyKey: resolverOperationId,
+          };
+          await this.applyOperationInTransaction(ctx, { deviceId: "conflict-resolver:" + ctx.userId, operations: [op] } as any, op, tx);
+          const snapshot = await this.snapshot(ctx, op, tx);
+          await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType: op.entityType, entityId: op.entityId, operationType: op.operationType, payload: op.payload, status: "PROCESSED", idempotencyKey: op.idempotencyKey, clientCreatedAt: new Date(), processedAt: new Date() } });
+          revision = await this.journal(ctx, op, snapshot, "conflict-resolution", tx);
+        }
+      } else {
+        const current = await this.scopedRecord(tx, ctx, entityType, String(conflict.entity_id));
+        const effective: any = { ...current, ...payload };
+        const deleting = String(conflict.operation_type || "UPDATE") === "DELETE";
+        switch (entityType) {
+          case "Product":
+            await tx.product.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, description: effective.description ?? null, sku: effective.sku, categoryId: effective.categoryId ?? null, brandId: effective.brandId ?? effective.brand_id ?? null, supplierId: effective.supplierId ?? null, taxId: effective.taxId ?? null, category: effective.category ?? current.category, buyingPrice: effective.buyingPrice ?? current.buyingPrice, sellingPrice: effective.sellingPrice ?? current.sellingPrice, isActive: deleting ? false : (effective.isActive ?? true) } });
+            break;
+          case "ProductVariant":
+            if (effective.inventoryQuantity !== undefined || effective.stock !== undefined) throw new Error("INVENTORY_MUTATION_REQUIRES_STOCK_LEDGER");
+            await tx.productVariant.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, sku: effective.sku, barcode: effective.barcode ?? null, price: effective.price ?? current.price, costPrice: effective.costPrice ?? current.costPrice, reservedQuantity: effective.reservedQuantity ?? current.reservedQuantity, reorderLevel: effective.reorderLevel ?? current.reorderLevel, attributes: effective.attributes ?? current.attributes, isActive: deleting ? false : (effective.isActive ?? true) } });
+            break;
+          case "Customer":
+            await tx.customer.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { customerCode: effective.customerCode ?? current.customerCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, creditLimit: effective.creditLimit ?? current.creditLimit, openingBalance: effective.openingBalance ?? current.openingBalance, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            break;
+          case "Supplier":
+            await tx.supplier.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { supplierCode: effective.supplierCode ?? current.supplierCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, taxPin: effective.taxPin ?? null, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            break;
+          case "Category":
+            if (deleting) {
+              const replacementId = effective.replacementId;
+              const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: conflict.entity_id, isActive: true } });
+              if (count > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
+              if (replacementId) {
+                const replacement = await tx.category.findUnique({ where: { id: String(replacementId) } });
+                if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement category is invalid");
+                await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: conflict.entity_id }, data: { categoryId: replacement.id, category: replacement.name } });
+              }
+              await tx.category.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isActive: false } });
+            } else {
+              await tx.category.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, code: effective.code ?? current.code, parentId: effective.parentId ?? null, description: effective.description ?? null, color: effective.color ?? null, isActive: effective.isActive ?? true } });
+            }
+            break;
+          case "Brand":
+            if (deleting) {
+              const replacementId = effective.replacementId;
+              const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: conflict.entity_id, isActive: true } });
+              if (count > 0 && !replacementId) throw new Error("Brand has assigned products; replacementId is required");
+              if (replacementId) {
+                const replacement = await tx.brand.findUnique({ where: { id: String(replacementId) } });
+                if (!replacement || replacement.tenantId !== ctx.tenantId || replacement.branchId !== ctx.branchId || !replacement.isActive) throw new Error("Replacement brand is invalid");
+                await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, brandId: conflict.entity_id }, data: { brandId: replacement.id } });
+              }
+              await tx.brand.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isActive: false } });
+            } else {
+              await tx.brand.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, code: effective.code ?? current.code, origin: effective.origin ?? null, notes: effective.notes ?? null, isActive: effective.isActive ?? true } });
+            }
+            break;
+          default:
+            throw new Error("SYNC_CONFLICT_RESOLUTION_UNSUPPORTED:" + entityType);
+        }
+
+        const op: any = {
+          operationId: resolverOperationId,
+          entityType,
+          entityId: String(conflict.entity_id),
+          operationType: "UPDATE",
+          payload: effective,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: resolverOperationId,
+        };
+        const snapshot = await this.snapshot(ctx, op, tx);
+        await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType, entityId: String(conflict.entity_id), operationType: "UPDATE", payload: effective, status: "PROCESSED", idempotencyKey: resolverOperationId, clientCreatedAt: new Date(), processedAt: new Date() } });
+        revision = await this.journal(ctx, op, snapshot, "conflict-resolution", tx);
+      }
+
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "conflict-resolver:" + ctx.userId, action: "SYNC_CONFLICT_RESOLVED",
+        entityType, entityId: String(conflict.entity_id),
+        metadata: { conflictId, operationId: conflict.operation_id, resolution, resolutionOperationId: resolverOperationId,
+          mergedPayload: resolution === "MERGE" ? mergedPayload : undefined },
+      }});
+      await tx.$executeRawUnsafe("UPDATE sync_conflict_record SET status = $1, resolved_at = now() WHERE id = $2 AND tenant_id = $3 AND branch_id = $4", resolution, conflictId, ctx.tenantId, ctx.branchId);
+      return { status: "RESOLVED", operationId: resolverOperationId, revision };
+    });
+  }
+
+  async listConflicts(ctx: TenantContext, status: string = "OPEN"): Promise<any[]> {
+    await this.ensureInfrastructure();
+    const rows = status === "ALL"
+      ? await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
+      : await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
+    return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
+  }
+
+  async reconcileState(ctx: TenantContext, manifest: import("@kwakopos2/contracts").SyncStateManifest): Promise<import("@kwakopos2/contracts").SyncReconciliationResponse> {
+    await this.ensureInfrastructure();
+    return prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+
+      const [serverProducts, serverVariants, serverLedger] = await Promise.all([
+        tx.product.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true } }),
+        tx.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, productId: true } }),
+        tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, variantId: true, quantityChange: true } }),
+      ]);
+
+    const discrepancies: import("@kwakopos2/contracts").SyncReconciliationDiscrepancy[] = [];
+    const serverProductIds = new Set(serverProducts.map((row: any) => row.id));
+    const compareIds = (entityType: string, serverIds: string[], clientIds: string[]) => {
+      const serverSet = new Set(serverIds.map(String));
+      const clientSet = new Set(clientIds.map(String));
+      for (const id of serverSet) {
+        if (!clientSet.has(id)) discrepancies.push({
+          entityType,
+          entityId: id,
+          kind: "MISSING_ON_CLIENT",
+          remediation: "Client replica is missing an authoritative record; execute bootstrap.",
+        });
+      }
+      for (const id of clientSet) {
+        if (!serverSet.has(id)) discrepancies.push({
+          entityType,
+          entityId: id,
+          kind: "EXTRA_ON_CLIENT",
+          remediation: "Client replica contains a record absent from the authoritative tenant/branch state; purge via bootstrap after resolving pending mutations.",
+        });
+      }
+    };
+
+    compareIds("Product", serverProducts.map((row: any) => row.id), manifest.productIds || []);
+    compareIds("ProductVariant", serverVariants.map((row: any) => row.id), manifest.variantIds || []);
+    compareIds("StockLedger", serverLedger.map((row: any) => row.id), manifest.ledgerIds || []);
+
+    const serverBalances = new Map<string, number>();
+    for (const row of serverLedger) {
+      const variantId = String(row.variantId);
+      serverBalances.set(variantId, (serverBalances.get(variantId) || 0) + Number(row.quantityChange || 0));
+    }
+    const clientBalances = manifest.stockBalances || {};
+    const balanceVariantIds = new Set([...serverBalances.keys(), ...Object.keys(clientBalances)]);
+    for (const variantId of balanceVariantIds) {
+      const serverQty = Number(serverBalances.get(variantId) || 0);
+      const clientQty = Number(clientBalances[variantId] || 0);
+      if (Math.abs(serverQty - clientQty) > 0.0001) discrepancies.push({
+        entityType: "StockBalance",
+        entityId: variantId,
+        kind: "STOCK_MISMATCH",
+        serverValue: serverQty,
+        clientValue: clientQty,
+        remediation: "Client must rebuild stock balance from the authoritative Stock Ledger.",
+      });
+    }
+
+    for (const variant of serverVariants) {
+      if (!serverProductIds.has(variant.productId)) discrepancies.push({
+        entityType: "ProductVariant",
+        entityId: variant.id,
+        kind: "ORPHANED_VARIANT",
+        remediation: "Authoritative variant has no valid parent product in the same tenant/branch.",
+      });
+    }
+
+    const serverCounts = {
+      products: serverProducts.length,
+      variants: serverVariants.length,
+      stockLedger: serverLedger.length,
+    };
+      const serverRevision = await this.latestRevision(ctx, tx);
+
+      return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      evaluatedAt: new Date().toISOString(),
+      serverRevision,
+      inSync: discrepancies.length === 0,
+      totalDiscrepancies: discrepancies.length,
+      discrepancies,
+      serverCounts,
+      integrityChecksum: computePayloadChecksum({
+        serverCounts,
+        serverProducts: serverProducts.map((row: any) => row.id).sort(),
+        serverVariants: serverVariants.map((row: any) => row.id).sort(),
+        serverLedger: serverLedger.map((row: any) => row.id).sort(),
+        serverBalances: Object.fromEntries([...serverBalances.entries()].sort()),
+      }),
+      };
+    });
+  }
+
+  async processBootstrap(ctx: TenantContext, req: any): Promise<any> {
+    await this.ensureInfrastructure();
+    return prisma.$transaction(async (tx: any) => {
+      // One repeatable snapshot: the revision cursor and all bootstrap rows refer to the same committed state.
+      await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+      const snapshotRevision = await this.latestRevision(ctx, tx);
+      const syncEpoch = await this.currentSyncEpoch(tx);
+      const snapshotTimestamp = new Date().toISOString();
+
+      const productRows = await tx.product.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { variants: true }, orderBy: { createdAt: "asc" } });
+      const products = productRows.map(productShape);
+      const parentPrices = new Map<string, { buyingPrice: number; sellingPrice: number }>(productRows.map((p: any) => [p.id, { buyingPrice: Number(p.buyingPrice ?? 0), sellingPrice: Number(p.sellingPrice ?? 0) }]));
+      const variantsRaw = await tx.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const variants = variantsRaw.map((v: any) => { const prices = parentPrices.get(v.productId) || { buyingPrice: 0, sellingPrice: 0 }; return variantShape(v, prices.buyingPrice, prices.sellingPrice); });
+      const stockLedger = (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { occurredAt: "asc" } })).map(ledgerShape);
+      const adjustments = await tx.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const customers = await tx.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const suppliers = await tx.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const categories = await tx.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const brands = await tx.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const sales = await tx.sale.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, payments: true }, orderBy: { soldAt: "asc" } });
+      const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
+      const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
+      const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories };
+      const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
+      return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
+    });
+  }
+  async processDelta(ctx: TenantContext, req: SyncDeltaRequest): Promise<SyncDeltaResponse> {
+    await this.ensureInfrastructure();
+    await this.reconcileJournal(ctx);
+    const syncEpoch = await this.currentSyncEpoch();
+    const rawSince = req.since || "rev:0";
+    const revisionMode = rawSince.startsWith("rev:");
+    const afterRevision = revisionMode ? BigInt(rawSince.slice(4) || "0") : 0n;
+    const changes = revisionMode
+      ? await prisma.$queryRawUnsafe<Array<{ revision: bigint | number | string; tenant_id: string; branch_id: string; operation_id: string; entity_type: string; entity_id: string; operation_type: string; record: unknown; source: string; created_at: Date }>>(
+          `SELECT revision, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source, created_at
+             FROM sync_change_journal
+            WHERE tenant_id = $1 AND branch_id = $2 AND revision > $3
+            ORDER BY revision ASC LIMIT $4`,
+          ctx.tenantId, ctx.branchId, afterRevision, MAX_DELTA,
+        )
+      : [];
+    const lastDeliveredRevision = changes.length ? changes[changes.length - 1].revision : afterRevision;
+    const normalizedChanges = changes.map((change: any) => ({ revision: String(change.revision), entityType: change.entity_type, entityId: change.entity_id, operationType: change.operation_type, record: change.record, source: change.source }));
+    if (revisionMode) {
+      if (afterRevision > 0n) {
+        const minRevRows = await prisma.$queryRawUnsafe<Array<{ min_rev: bigint | number | string | null }>>(
+          `SELECT MIN(revision) AS min_rev FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2`,
+          ctx.tenantId, ctx.branchId,
+        );
+        const minRev = minRevRows[0]?.min_rev ? BigInt(minRevRows[0].min_rev) : 0n;
+        if (minRev > 1n && afterRevision < minRev) {
+          return {
+            serverTimestamp: new Date().toISOString(),
+            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch,
+            serverRevision: String(afterRevision),
+            changes: [],
+            requiresBootstrap: true,
+            compactionMinRevision: String(minRev),
+          } as any;
+        }
+      }
+      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
+    }
+    const since = new Date(rawSince);
+    if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid sync cursor");
+    const anchor = new Date();
+    return {
+      serverTimestamp: anchor.toISOString(),
+      products: (await this.productRepo.getProducts(ctx)).filter((p: any) => new Date(p.updatedAt).getTime() >= since.getTime() && new Date(p.updatedAt).getTime() <= anchor.getTime()),
+      variants: await prisma.productVariant.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      stockLedger: (await this.stockRepo.getLedger(ctx)).filter((x: any) => new Date(x.createdAt).getTime() >= since.getTime() && new Date(x.createdAt).getTime() <= anchor.getTime()),
+      adjustments: await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      customers: await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
+    } as any;
+  }
+  async getJournalCompactionStats(ctx?: CompactionScopeContext): Promise<JournalCompactionStats[]> {
+    await this.ensureInfrastructure();
+    let query: string;
+    const params: any[] = [];
+
+    if (ctx?.tenantId && ctx?.branchId) {
+      query = `
+        SELECT tenant_id, branch_id,
+               COUNT(*)::text AS total_entries,
+               MIN(revision)::text AS min_revision,
+               MAX(revision)::text AS max_revision,
+               MIN(created_at)::text AS oldest_entry_date,
+               MAX(created_at)::text AS newest_entry_date
+          FROM sync_change_journal
+         WHERE tenant_id = $1 AND branch_id = $2
+         GROUP BY tenant_id, branch_id
+      `;
+      params.push(ctx.tenantId, ctx.branchId);
+    } else {
+      query = `
+        SELECT tenant_id, branch_id,
+               COUNT(*)::text AS total_entries,
+               MIN(revision)::text AS min_revision,
+               MAX(revision)::text AS max_revision,
+               MIN(created_at)::text AS oldest_entry_date,
+               MAX(created_at)::text AS newest_entry_date
+          FROM sync_change_journal
+         GROUP BY tenant_id, branch_id
+         ORDER BY tenant_id, branch_id
+      `;
+    }
+
+    const rows = await prisma.$queryRawUnsafe<any[]>(query, ...params);
+    return rows.map((r) => ({
+      tenantId: r.tenant_id,
+      branchId: r.branch_id,
+      totalEntries: Number(r.total_entries || 0),
+      minRevision: r.min_revision ? String(r.min_revision) : null,
+      maxRevision: r.max_revision ? String(r.max_revision) : null,
+      oldestEntryDate: r.oldest_entry_date ? new Date(r.oldest_entry_date).toISOString() : null,
+      newestEntryDate: r.newest_entry_date ? new Date(r.newest_entry_date).toISOString() : null,
+    }));
+  }
+
+  async compactJournal(
+    ctx: CompactionScopeContext,
+    options?: JournalCompactionOptions,
+  ): Promise<JournalCompactionResult> {
+    await this.ensureInfrastructure();
+    const dryRun = Boolean(options?.dryRun);
+    const retainRevisions = options?.retainRevisions ?? 5000;
+    const maxAgeDays = options?.maxAgeDays;
+
+    const statsList = await this.getJournalCompactionStats(ctx);
+    const stats = statsList[0];
+    if (!stats || stats.totalEntries === 0) {
+      return {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        entriesExamined: 0,
+        prunedCount: 0,
+        safeRevisionThreshold: "0",
+        retainedCount: 0,
+        dryRun,
+        compactedAt: new Date().toISOString(),
+      };
+    }
+
+    const currentMaxRev = stats.maxRevision ? BigInt(stats.maxRevision) : 0n;
+    let safeRevision: bigint;
+
+    if (options?.beforeRevision) {
+      const explicitRev = BigInt(options.beforeRevision);
+      safeRevision = explicitRev < currentMaxRev ? explicitRev : currentMaxRev;
+    } else {
+      const retainBig = BigInt(retainRevisions);
+      safeRevision = currentMaxRev > retainBig ? (currentMaxRev - retainBig + 1n) : 0n;
+    }
+
+    if (safeRevision <= 0n) {
+      return {
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        entriesExamined: stats.totalEntries,
+        prunedCount: 0,
+        safeRevisionThreshold: "0",
+        retainedCount: stats.totalEntries,
+        dryRun,
+        compactedAt: new Date().toISOString(),
+      };
+    }
+
+    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
+    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+
+    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
+      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+      deleteSql += ` AND created_at < $4`;
+      params.push(cutoffDate);
+    }
+
+    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+      `SELECT COUNT(*)::text AS count ${deleteSql}`,
+      ...params,
+    );
+    const prunedCount = Number(countRows[0]?.count || 0);
+
+    if (!dryRun && prunedCount > 0) {
+      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+    }
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      entriesExamined: stats.totalEntries,
+      prunedCount,
+      safeRevisionThreshold: String(safeRevision),
+      retainedCount: stats.totalEntries - (dryRun ? 0 : prunedCount),
+      dryRun,
+      compactedAt: new Date().toISOString(),
+    };
+  }
+
+  async compactAllJournals(options?: JournalCompactionOptions): Promise<JournalCompactionResult[]> {
+    await this.ensureInfrastructure();
+    const scopes = await prisma.$queryRawUnsafe<Array<{ tenant_id: string; branch_id: string }>>(
+      `SELECT DISTINCT tenant_id, branch_id FROM sync_change_journal ORDER BY tenant_id, branch_id`,
+    );
+    const results: JournalCompactionResult[] = [];
+    for (const scope of scopes) {
+      const res = await this.compactJournal({ tenantId: scope.tenant_id, branchId: scope.branch_id }, options);
+      results.push(res);
+    }
+    return results;
+  }
+}
+))::bigint), 0) + 1 AS seq
+           FROM receipts
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "createdAt" >= $3 AND "createdAt" < $4`,
+        ctx.tenantId, ctx.branchId, dayStart, dayEnd,
+      ) as Array<{ seq: bigint | number | string }>;
+>>>>>>> origin/main
       const receiptNumber = ReceiptNumberGenerator.generate({
         tenantPrefix: ctx.tenantId.slice(0, 3),
         branchPrefix: ctx.branchId.slice(0, 3),
