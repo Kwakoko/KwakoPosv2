@@ -65,7 +65,18 @@ export class PrismaAtomicCommercialFinanceService {
       const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
       for (const p of req.payments || []) { const r = PaymentEngine.processPayment({ tenantId: ctx.tenantId, branchId: ctx.branchId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider, providerReference: p.providerReference, customerId: req.customerId }); if (!r.success) throw new Error("PAYMENT_REJECTED"); payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, saleId, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
+      const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
+      if (payments.some((p) => p.paymentMethod === "CASH")) {
+        if (!req.cashSessionId) throw new Error("CASH_SESSION_REQUIRED");
+        const session = await tx.cashSession.findUnique({ where: { id: req.cashSessionId } });
+        if (!session || session.tenantId !== ctx.tenantId || session.branchId !== ctx.branchId || session.cashierId !== ctx.userId || session.status !== "OPEN") {
+          throw new Error("CASH_SESSION_INVALID");
+        }
+      }
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
+      if (paymentStatus !== "PAID") throw new Error("PAYMENT_NOT_SETTLED");
+
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: totals.subtotal, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: totals.grossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
