@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   auto-semver:
@@ -108,7 +107,19 @@ jobs:
           git push origin HEAD:main
           RELEASE_SHA="$(git rev-parse HEAD)"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-      # Production certification is triggered automatically by the release commit on main.\n      - name: Verify authoritative SemVer state
+      - name: Dispatch exact production certification
+        if: steps.commit_release.outputs.release_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.commit_release.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type=certify-release \
+            -f client_payload="{\"release_sha\":\"$RELEASE_SHA\"}"
+          echo "Production certification dispatched for $RELEASE_SHA"
+
+      - name: Verify authoritative SemVer state
         shell: bash
         run: |
           set -euo pipefail

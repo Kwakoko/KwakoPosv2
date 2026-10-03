@@ -51,15 +51,15 @@ jobs:
         run: |
           set -euo pipefail
           test -f .github/workflows/production-certification.yml
-          test -f .github/workflows/production-release-certification.yml
+          test -f .github/workflows/production-release-exact-main.yml
           # PR candidate certification must remain strictly non-mutating.
           ! grep -q "release:deploy-candidate" .github/workflows/production-certification.yml
           ! grep -q "release:promote" .github/workflows/production-certification.yml
           ! grep -q "google-github-actions/auth" .github/workflows/production-certification.yml
           # Exact production release certification is the sole deployment authority.
-          grep -q "release:deploy-candidate" .github/workflows/production-release-certification.yml
-          grep -q "release:promote" .github/workflows/production-release-certification.yml
-          grep -q "google-github-actions/auth" .github/workflows/production-release-certification.yml
+          grep -q "release:deploy-candidate" .github/workflows/production-release-exact-main.yml
+          grep -q "release:promote" .github/workflows/production-release-exact-main.yml
+          grep -q "google-github-actions/auth" .github/workflows/production-release-exact-main.yml
           # This contract workflow itself must never mutate main or production infrastructure.
           if grep -q "git push origin HEAD:main" .github/workflows/deploy.yml; then
             echo "DEPLOYMENT_CONTRACT_FAIL: duplicate workflow may mutate main directly."

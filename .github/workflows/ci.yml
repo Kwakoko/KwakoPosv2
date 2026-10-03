@@ -51,6 +51,12 @@ jobs:
         run: npm run test:sync
       - name: Version Sync Certification
         run: npm run certify:version-sync
+      - name: Strict Runtime Certification
+        run: npx tsx scripts/certification/strict-runtime-certification.ts
+      - name: Production Release Authority Verification
+        run: npm run production-release:verify
+      - name: Production Release Authority Tests
+        run: npx vitest run tests/unit/production-release-authority.test.ts
       - name: Report Quality Gate Status
         if: always()
         run: |
