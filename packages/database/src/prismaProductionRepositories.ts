@@ -6,6 +6,7 @@ import { assertTenantIsolation, EmployeeEngine } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 const db: any = prisma;
+const num = (v: unknown) => Number(v ?? 0);
 
 function normalize(value: any): any {
   if (value == null) return value;
