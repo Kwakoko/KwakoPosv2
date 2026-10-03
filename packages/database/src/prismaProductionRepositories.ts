@@ -192,6 +192,10 @@ export class PrismaCommercialRepository {
     return normalize(await this.atomic.createPurchaseReceipt(ctx, req));
   }
 
+  async getPurchaseReceipts(ctx: TenantContext) {
+    return normalize(await db.purchaseReceipt.findMany({ where: tenantWhere(ctx), include: { items: true }, orderBy: { receivedAt: "desc" } }));
+  }
+
   async getSales(ctx: TenantContext) {
     return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }));
   }
