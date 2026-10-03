@@ -367,24 +367,24 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     }
   };
 
-  // Settle Supplier Debt
-  const handleSettleDebt = (e: React.FormEvent) => {
+  // Supplier settlement is an authoritative financial mutation; no local balance writes.
+  const handleSettleDebt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payingSupplier || debtPayAmount <= 0) return;
-
-    const newBalance = Math.max(0, payingSupplier.balance - debtPayAmount);
-    const updatedSups = suppliers.map((s) =>
-      s.id === payingSupplier.id ? { ...s, balance: newBalance } : s
-    );
-    setSuppliers(updatedSups);
-    db.saveConfigurationLocal("procurement_suppliers", updatedSups, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-    playSuccessChime();
-    toast.success("Payment Dispatched", `Paid ${fmt(debtPayAmount)} to ${payingSupplier.name} via ${debtPayMethod}. Remaining balance: ${fmt(newBalance)}.`);
-    setPayingSupplier(null);
-    setDebtPayAmount(0);
-    setDebtPayRef("");
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_PAID" } }));
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/finance/payables/settle-supplier", {
+        method: "POST", body: JSON.stringify({
+          supplierId: payingSupplier.id, amount: debtPayAmount, paymentMethod: debtPayMethod,
+          providerReference: debtPayRef || undefined, idempotencyKey: safeUUID(),
+        }),
+      });
+      if (!res.success) throw new Error("Settlement failed");
+      await loadProcurement();
+      playSuccessChime(); toast.success("Payment Posted", `Paid ${fmt(debtPayAmount)} to ${payingSupplier.name}.`);
+      setPayingSupplier(null); setDebtPayAmount(0); setDebtPayRef("");
+    } catch (err: any) {
+      toast.error("Payment Not Posted", err?.message || "Supplier payment could not be committed.");
+    }
   };
 
   return (
