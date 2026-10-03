@@ -40,6 +40,7 @@ export interface ExpenseRecord {
   taxDeductible: boolean;
   isHq?: boolean;
   branchId?: string;
+  cashSessionId?: string;
   createdAt?: string;
 }
 
@@ -147,6 +148,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
               paymentMethod: fromCanonicalPaymentMethod(e.paymentMethod),
               status: e.status === "VOIDED" ? "VOIDED" : e.status === "PENDING" ? "PENDING" : "PAID",
               taxDeductible: Boolean(e.taxDeductible),
+              cashSessionId: e.cashSessionId ? String(e.cashSessionId) : undefined,
             })) as ExpenseRecord[];
             db.saveConfigurationLocal("expenses", authoritative, ctx);
             setExpenses(authoritative);
@@ -302,8 +304,17 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       tenantId: currentTenantId,
       branchId: currentBranchId,
       incurredAt: `${record.date}T12:00:00.000Z`,
+      cashSessionId: undefined as string | undefined,
       idempotencyKey,
     };
+    const activeCashSession = db.getConfigurationLocal?.("active_cash_session", { tenantId: currentTenantId, branchId: currentBranchId }) as any;
+    if (canonicalPaymentMethod === "CASH" && record.status === "PAID") {
+      payload.cashSessionId = activeCashSession?.id ? String(activeCashSession.id) : undefined;
+      if (!isOnline && !payload.cashSessionId) {
+        setFormError("An active cash session is required to record a paid cash expense while offline.");
+        return;
+      }
+    }
 
     try {
       if (isOnline) {
@@ -360,11 +371,18 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     try {
       const mutationId = window.crypto.randomUUID();
       const canonicalPaymentMethod = toCanonicalPaymentMethod(payMethod);
+      const offlineSession = db.getConfigurationLocal?.("active_cash_session", { tenantId: currentTenantId, branchId: currentBranchId }) as any;
+      const cashSessionId = canonicalPaymentMethod === "CASH"
+        ? ((payModalItem as any).cashSessionId || offlineSession?.id)
+        : undefined;
+      if (!isOnline && canonicalPaymentMethod === "CASH" && !cashSessionId) {
+        throw new Error("An active cash session is required for an offline cash settlement.");
+      }
       const payload = {
         status: "PAID",
         paymentMethod: canonicalPaymentMethod,
         paymentRef: payRef.trim() || undefined,
-        cashSessionId: (payModalItem as any).cashSessionId,
+        cashSessionId,
         _baseUpdatedAt: (payModalItem as any).updatedAt,
       };
       const updated = expenses.map((item) => item.id === payModalItem.id
