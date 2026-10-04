@@ -332,14 +332,14 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const openTestDb = (version: number): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
       const req = indexedDB.open(pwaDbName, version);
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result;
         const tx = req.transaction;
         if (!tx) {
           reject(new Error("PWA_UPGRADE_TRANSACTION_UNAVAILABLE"));
           return;
         }
-        migrationEngine.applySchemaUpgrade(db, tx, req.result.version ? (req as any).transaction?.db?.version ?? 0 : 0, version);
+        migrationEngine.applySchemaUpgrade(db, tx, event.oldVersion, version);
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error || new Error("PWA_TEST_DB_OPEN_FAILED"));
