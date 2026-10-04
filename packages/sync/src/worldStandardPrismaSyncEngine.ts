@@ -856,7 +856,7 @@ const now = new Date();
     let processedCount = 0;
     for (const op of orderSyncOperations(req.operations)) {
       try {
-        if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
+        if (["Role", "User", "Employee", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
           throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: privileged entities cannot be mutated through sync.");
         }
 
