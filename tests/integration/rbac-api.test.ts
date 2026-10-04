@@ -155,6 +155,7 @@ describe("Privileged RBAC PostgreSQL API", () => {
       data: {
         id: randomUUID(),
         tenantId,
+        branchId: secondBranchId,
         userId,
         deviceId: "p0-rbac-device",
         refreshTokenHash: "p0-rbac-refresh-hash",
