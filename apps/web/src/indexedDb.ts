@@ -870,19 +870,10 @@ export class LocalIndexedDbStore {
     if (ctx?.tenantId) {
       const compoundKey = ctx.branchId ? `${ctx.tenantId}:${ctx.branchId}:${key}` : `${ctx.tenantId}:${key}`;
       const item = this.configuration.get(compoundKey);
-      if (item) return item.value;
-      if (ctx.branchId) return undefined;
+      return item?.value !== undefined ? item.value : undefined;
     }
     const direct = this.configuration.get(key);
-    if (direct !== undefined) {
-      return direct?.value !== undefined ? direct.value : direct;
-    }
-    for (const [k, item] of this.configuration.entries()) {
-      if (k.endsWith(`:${key}`)) {
-        return item?.value !== undefined ? item.value : item;
-      }
-    }
-    return undefined;
+    return direct?.value !== undefined ? direct.value : direct;
   }
 
   saveCatalogCategoriesLocal(records: any[], ctx?: TenantScopedContext): void {
@@ -968,7 +959,35 @@ export class LocalIndexedDbStore {
     return tenantId ? all.filter((r) => r.tenantId === tenantId) : all;
   }
 
-  recordOutboxMutation(item: OutboxItem, ctx?: TenantScopedContext): void {
+  recordOutboxMutation(item: OutboxItem, ctx?: TenantScopedContext): void {\n  async enqueueSettingsMutations(
+    records: Array<{ key: string; value: unknown; scope?: "TENANT" | "BRANCH" | "USER"; operationType?: "CREATE" | "UPDATE" | "DELETE" }>,
+    ctx: TenantScopedContext,
+  ): Promise<void> {
+    if (!ctx.tenantId || !ctx.branchId || !records.length) throw new Error("SETTINGS_MUTATION_CONTEXT_REQUIRED");
+    const writes: Array<{ store: NativeStore; key: string; value?: any; delete?: boolean }> = [];
+    const outboxItems: OutboxItem[] = [];
+    const now = new Date().toISOString();
+    for (const record of records) {
+      const operationId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `settings-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const storageKey = `${ctx.tenantId}:${ctx.branchId}:${record.key}`;
+      writes.push({
+        store: "configuration",
+        key: storageKey,
+        value: record.operationType === "DELETE"
+          ? { key: record.key, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: false, _deleted: true, updatedAt: now }
+          : { key: record.key, value: record.value, tenantId: ctx.tenantId, branchId: ctx.branchId, scope: record.scope || "BRANCH", isActive: true, updatedAt: now },
+      });
+      outboxItems.push({
+        id: operationId, entityType: "Setting", entityId: operationId,
+        operationType: record.operationType || "UPDATE", payload: { key: record.key, value: record.value, scope: record.scope || "BRANCH", branchId: ctx.branchId, userId: ctx.userId },
+        clientCreatedAt: now, idempotencyKey: "SETTING:" + ctx.tenantId + ":" + ctx.branchId + ":" + record.key + ":" + operationId,
+        status: "PENDING", tenantId: ctx.tenantId, branchId: ctx.branchId,
+      });
+    }
+    await this.executeAtomicMutation({ writes, outboxItems, tenantContext: ctx });
+  }
+
+
     assertSyncOutboxEntityTypeAllowed(String(item.entityType));
     if (ctx?.tenantId && !item.tenantId) {
       item = { ...item, tenantId: ctx.tenantId, branchId: ctx.branchId || item.branchId };
