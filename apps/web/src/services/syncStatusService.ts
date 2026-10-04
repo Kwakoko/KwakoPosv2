@@ -23,6 +23,8 @@ export interface SyncStatusSnapshot extends SyncStatusScope {
   serverRevision: string | null;
   /** Durable sync epoch observed by the existing sync engine. */
   syncEpoch: string | null;
+  /** Last authoritative reconciliation result persisted by the sync engine. */
+  reconciliationStatus: "IN_SYNC" | "DIVERGENT" | "UNKNOWN";
   pendingOutboxCount: number;
   failedOutboxCount: number;
   /** Items permanently abandoned after exceeding the server-rejection retry cap. */
@@ -43,6 +45,7 @@ const emptySnapshot = (): SyncStatusSnapshot => ({
   localRevision: "0",
   serverRevision: null,
   syncEpoch: null,
+  reconciliationStatus: "UNKNOWN",
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
@@ -157,6 +160,13 @@ export class SyncStatusService {
             return value == null ? null : String(value);
           })()
         : null;
+      const rawReconciliationStatus = scopePrefix
+        ? String(this.db.syncMetadata.get(scopePrefix + "reconciliationStatus") ?? "UNKNOWN")
+        : "UNKNOWN";
+      const reconciliationStatus =
+        rawReconciliationStatus === "IN_SYNC" || rawReconciliationStatus === "DIVERGENT"
+          ? rawReconciliationStatus
+          : "UNKNOWN";
       const authoritativeServerRevision = scopePrefix
         ? (() => {
             const value = this.db!.syncMetadata.get(scopePrefix + "lastServerRevision");
@@ -186,6 +196,7 @@ export class SyncStatusService {
         pendingOutboxCount: pending,
         failedOutboxCount: failed,
         abandonedOutboxCount: abandoned,
+        reconciliationStatus,
         localRevision,
         syncEpoch,
         ...(authoritativeServerRevision !== null ? { serverRevision: authoritativeServerRevision } : {}),
