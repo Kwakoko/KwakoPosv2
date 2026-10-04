@@ -43,13 +43,13 @@ export interface AuthoritativeReleaseIdentity {
 }
 
 export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
-  appVersion: "2.13.0",
-  version: "2.13.0",
-  tag: "v2.13.0",
-  gitTag: "v2.13.0",
+  appVersion: "0.0.0-dev",
+  version: "0.0.0-dev",
+  tag: "v0.0.0-dev",
+  gitTag: "v0.0.0-dev",
   gitSha: "",
   buildId: "",
-  buildNumber: 585,
+  buildNumber: 0,
   releaseId: "",
   containerDigest: null,
   cloudRunRevision: null,
@@ -57,7 +57,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   releaseChannel: "stable",
   releasedAt: "2026-09-15T20:10:00.000Z",
   releaseTimestamp: "2026-09-15T20:10:00.000Z",
-  pwaVersion: "2.13.0",
+  pwaVersion: "0.0.0-dev",
   pwaSchemaVersion: 4,
   syncProtocolVersion: 2,
   databaseSchemaVersion: 4,
@@ -69,7 +69,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
     syncProtocolVersion: 2,
     pwaSchemaVersion: 4,
     minSupportedClientVersion: "2.0.0",
-    recommendedClientVersion: "2.13.0",
+    recommendedClientVersion: "0.0.0-dev",
     maximumSupportedClientVersion: "3.0.0",
     migrationSet: ["1->2", "2->3", "3->4", "4->3", "4->2", "3->2", "2->1"],
   },
@@ -128,7 +128,7 @@ export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIden
     return FALLBACK_AUTHORITATIVE_RELEASE;
   }
   const packagePath = path.join(root, "package.json");
-  let version = FALLBACK_AUTHORITATIVE_RELEASE.version;
+  let version = "";
   if (fs.existsSync(packagePath)) {
     try { version = JSON.parse(fs.readFileSync(packagePath, "utf8")).version || version; } catch {}
   }
