@@ -114,8 +114,50 @@ jobs:
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
 
+      # Security certification performs real HTTP authentication/session/RBAC checks.
+      # Do not replace this with a mock server: the security engine deliberately fails
+      # when live execution is unavailable (BLOCKED_EXTERNAL).
+      - name: Start local API for executable security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+            exit 0
+          fi
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-exact-release-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-exact-release-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              echo "Local security API is healthy on http://127.0.0.1:3000"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "SECURITY_GATE_BLOCKED: local API failed to become healthy"
+          cat /tmp/kwakopos-exact-release-security-api.log
+          exit 1
+
       - name: Execute Phase 12 Security & Compliance Certification Engine
+        env:
+          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
         run: npm run certify:security
+
+      - name: Stop local security API
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -f /tmp/kwakopos-exact-release-security-api.pid ]]; then
+            PID="$(cat /tmp/kwakopos-exact-release-security-api.pid)"
+            kill "$PID" 2>/dev/null || true
+            pkill -P "$PID" 2>/dev/null || true
+          fi
 
       - name: Run synthetic monitoring
         run: npx tsx scripts/ops/synthetic-monitor.ts
