@@ -58,6 +58,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **release**: v2.13.0
 - **core**: commit local release and cleanup changes
 - **core**: Merge PR #63: Dashboard financial reporting closures
 - **core**: isolate synthetic devices with independent IndexedDB stores
@@ -394,6 +395,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **core**: close Conflict Center P0/P1 convergence loop
 - **core**: terminate synthetic certification CLI deterministically
 - **core**: close synthetic IndexedDB stores before monitor exit
 - **core**: validate concrete world-standard sync engine in runtime gate
