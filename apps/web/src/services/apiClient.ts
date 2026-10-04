@@ -21,7 +21,7 @@ export interface LoginResponse {
       status?: string;
       expiresAt?: string;
       refreshTokenExpiresAt?: string;
-      policy?: Record<string, number>;
+      policy?: Record<string, number | boolean>;
     };
   };
   error?: { code?: string; message?: string };
@@ -58,7 +58,7 @@ export interface StoredSession {
     status?: string;
     expiresAt?: string;
     refreshTokenExpiresAt?: string;
-    policy?: Record<string, number>;
+    policy?: Record<string, number | boolean>;
   };
 }
 
@@ -113,14 +113,22 @@ export function setStoredSession(session: StoredSession | null): void {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
   } else {
-    // Persist only the durable session identity. Never persist the bearer access token.
+    // Persist only non-secret session metadata. Force-browser-close policy and
+    // non-remembered sessions stay in sessionStorage; remembered sessions may use localStorage.
     const serialized = JSON.stringify({
       sessionId: session.sessionId,
       user: session.user,
       session: session.session,
     });
-    try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
-    try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+    const forceBrowserClose = session.session?.policy?.forceLogoutOnBrowserClose === true;
+    const rememberMe = session.session?.policy?.rememberMe === true;
+    if (!forceBrowserClose && rememberMe) {
+      try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+      try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    } else {
+      try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+      try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    }
   }
 }
 
