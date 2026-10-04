@@ -934,6 +934,12 @@ const now = new Date();
         if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
           throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: privileged entities cannot be mutated through sync.");
         }
+        if (op.entityType === "Setting") {
+          const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+          const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+          const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+          if (!allowed) throw new Error("SETTINGS_MANAGE_REQUIRED");
+        }
 
         const outcome = await prisma.$transaction(async (tx: any) => {
           const existing = await tx.syncOperation.findFirst({
