@@ -33,6 +33,7 @@ type UserCreateInput = {
   roleId?: string;
   roleName?: string;
   branchId: string;
+  createEmployeeProfile?: boolean;
 };
 
 type UserUpdateInput = {
@@ -381,6 +382,53 @@ export class PrivilegedRbacMutationService {
           roleName: role.name,
           branchId: branch.id,
         });
+
+        if (input.createEmployeeProfile) {
+          await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `kwakopos:employee-number:${actor.tenantId}`);
+          const employeeCount = await tx.employee.count({ where: { tenantId: actor.tenantId } });
+          const employeeNumber = `EMP-${String(employeeCount + 1).padStart(4, "0")}`;
+          const employee = await tx.employee.create({
+            data: {
+              id: randomUUID(),
+              tenantId: actor.tenantId,
+              branchId: branch.id,
+              userId: user.id,
+              employeeNumber,
+              firstName,
+              lastName,
+              phone: input.phone ? String(input.phone).trim() : null,
+              email,
+              status: "ACTIVE",
+              hireDate: new Date(),
+              workType: "FULL_TIME",
+              contractType: "PERMANENT",
+              baseSalary: 0,
+              hourlyRate: 0,
+              commissionRate: 0,
+            },
+          });
+          const initialRecord = await tx.employmentRecord.create({
+            data: {
+              id: randomUUID(),
+              tenantId: actor.tenantId,
+              employeeId: employee.id,
+              effectiveDate: employee.hireDate,
+              changeType: "HIRE",
+              branchId: branch.id,
+              contractType: employee.contractType,
+              payRate: employee.baseSalary ?? employee.hourlyRate ?? null,
+              createdById: actorResolved.userId,
+              reason: "Initial employment",
+            },
+          });
+          await this.audit(tx, actor, actorResolved, "EMPLOYEE_CREATED", "Employee", employee.id, {
+            employeeNumber,
+            userId: user.id,
+            branchId: branch.id,
+            employmentRecordId: initialRecord.id,
+          });
+        }
+
         return user;
       } catch (error: any) {
         if (error?.code === "P2002") {
@@ -452,6 +500,40 @@ export class PrivilegedRbacMutationService {
           data,
           include: { role: true, branch: true },
         });
+
+        if (String(updated.branchId) !== String(existing.branchId)) {
+          const employee = await tx.employee.findFirst({ where: { tenantId: actor.tenantId, userId } });
+          if (employee) {
+            await tx.employmentRecord.updateMany({
+              where: { tenantId: actor.tenantId, employeeId: employee.id, endDate: null },
+              data: { endDate: new Date() },
+            });
+            const employeeUpdated = await tx.employee.update({ where: { id: employee.id }, data: { branchId: updated.branchId } });
+            await tx.employmentRecord.create({
+              data: {
+                id: randomUUID(),
+                tenantId: actor.tenantId,
+                employeeId: employee.id,
+                effectiveDate: new Date(),
+                changeType: "TRANSFER",
+                branchId: employeeUpdated.branchId,
+                departmentId: employeeUpdated.departmentId,
+                positionId: employeeUpdated.positionId,
+                managerId: employeeUpdated.managerId,
+                contractType: employeeUpdated.contractType,
+                payRate: employeeUpdated.baseSalary ?? employeeUpdated.hourlyRate ?? null,
+                reason: "User account branch changed",
+                createdById: actorResolved.userId,
+              },
+            });
+            await this.audit(tx, actor, actorResolved, "EMPLOYEE_UPDATED", "Employee", employee.id, {
+              changedFields: ["branchId"],
+              previousBranchId: existing.branchId,
+              nextBranchId: updated.branchId,
+              reason: "Synchronized with linked user account branch change",
+            });
+          }
+        }
         if (updated.status !== "ACTIVE") {
           await tx.deviceSession.updateMany({
             where: { userId, revokedAt: null },
