@@ -1899,6 +1899,13 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   const allPassed = results.every((r) => r.status === "PASS");
 
+  // Synthetic LocalIndexedDbStore instances open native IndexedDB connections in
+  // the Node certification process. Close every test database before returning
+  // so the monitor terminates cleanly after printing its GREEN result.
+  for (const store of [bADb, bBDb, offlineDb, pwaDb, dbA, dbB, dbStoreF06A, dbStoreF06B]) {
+    try { store.close(); } catch { /* best-effort test cleanup */ }
+  }
+
   return { allPassed, results };
 }
 
