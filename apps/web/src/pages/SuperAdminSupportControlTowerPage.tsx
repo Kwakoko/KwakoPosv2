@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type Tower = { activeTenants:number; openTickets:Array<{status:string;severity:string;count:number}>; activeIncidents:Array<{id:string;severity:string;status:string;title:string;affected_module?:string;affected_version?:string}>; remediationStats:Array<{policy_decision:string;result?:string;count:number}>; supportEvents24h:number; sla:{breached:number;dueSoon:number}; generatedAt:string };
 type Health = { tenantId:string; health:string; sync:Record<string,number|string>; stockLedgerEntries:number; tickets:Record<string,number> };
-async function api(path:string, init?:RequestInit){ const r=await fetch(path,{credentials:"include",headers:{"Content-Type":"application/json",...(init?.headers||{})},...init}); const b=await r.json().catch(()=>({})); if(!r.ok||b.success===false) throw new Error(b?.error?.message||"Request failed"); return b.data; }
+async function api<T = any>(path:string, init?:RequestInit){ const b=await apiFetch<{success?:boolean;data?:T;error?:{message?:string}}>(path,init); if(b?.success===false) throw new Error(b?.error?.message||"Request failed"); return b?.data as T; }
 
 export const SuperAdminSupportControlTowerPage:React.FC=()=>{
  const [tower,setTower]=useState<Tower|null>(null); const [tenantId,setTenantId]=useState(""); const [health,setHealth]=useState<Health|null>(null); const [busy,setBusy]=useState(false); const [scanBusy,setScanBusy]=useState(false); const [message,setMessage]=useState("");
