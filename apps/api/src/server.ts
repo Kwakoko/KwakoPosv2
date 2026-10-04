@@ -1213,7 +1213,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       deviceId: deviceId || "device-server-01",
     };
     const accessToken = generateAccessToken(tokenPayload);
-    const session = await globalSessionManager.createSession(tenantId, userId, tokenPayload.deviceId);
+    const session = await globalSessionManager.createSession({ tenantId, userId, branchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
     return reply.send({
       success: true,
@@ -1239,103 +1239,41 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Refresh token rotation
   // H-004: Strict rate limit on refresh token endpoint
+  // Refresh token rotation. The refresh token is mandatory; session identity alone
+  // must never mint a new access token.
   server.post("/auth/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (req, reply) => {
     const { sessionId, refreshToken } = (req.body as any) || {};
-    if (!sessionId) {
-      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing sessionId" } });
+    if (!sessionId || !refreshToken) {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "sessionId and refreshToken are required" } });
     }
-
-    const session = (globalSessionManager as any).storeProvider
-      ? await (globalSessionManager as any).storeProvider.get(sessionId)
-      : (globalSessionManager as any).inMemorySessions?.get(sessionId);
-
-    if (!session || session.revokedAt || (session.expiresAt && new Date(session.expiresAt) < new Date())) {
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked session" } });
-    }
-
-    let effectiveTenantId = String(session.tenantId);
-    let effectiveUserId = String(session.userId);
-    let effectiveBranchId = "";
-    let effectiveEmail = "";
-    let effectiveRole = "ADMIN";
-    let effectivePermissions: string[] = [];
-
-    if (productionPersistence) {
-      const sessionUser = await prisma.user.findFirst({
-        where: { id: effectiveUserId, tenantId: effectiveTenantId, status: "ACTIVE" },
-        include: { role: true },
+    try {
+      const validation = await globalSessionManager.validateSession(String(sessionId), { activity: false });
+      if (!validation.valid || !validation.session) {
+        const code = validation.code === "SESSION_EXPIRED" ? "SESSION_EXPIRED" : validation.code === "SESSION_REVOKED" ? "SESSION_REVOKED" : "AUTH_REQUIRED";
+        return reply.status(401).send({ success: false, error: { code, message: "Invalid or expired session" } });
+      }
+      const session = validation.session;
+      const sessionUser = productionPersistence
+        ? await prisma.user.findFirst({ where: { id: session.userId, tenantId: session.tenantId, branchId: session.branchId, status: "ACTIVE" }, include: { role: true } })
+        : Array.from(globalInMemoryStore.users.values()).find((candidate: any) => candidate.id === session.userId && candidate.tenantId === session.tenantId) as any;
+      if (!sessionUser) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Session user is no longer active" } });
+      const roles = [String(sessionUser.role?.name || sessionUser.role || "ADMIN")];
+      const permissions = productionPersistence && Array.isArray(sessionUser.role?.permissions)
+        ? sessionUser.role.permissions.map((p: unknown) => String(p))
+        : ["*"];
+      const rotated = await globalSessionManager.rotateRefreshToken(String(sessionId), String(refreshToken), {
+        sub: sessionUser.id,
+        tenantId: session.tenantId,
+        branchId: session.branchId,
+        email: sessionUser.email,
+        roles,
+        permissions,
       });
-      if (!sessionUser) {
-        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session user is no longer active" } });
-      }
-      effectiveTenantId = sessionUser.tenantId;
-      effectiveUserId = sessionUser.id;
-      effectiveBranchId = sessionUser.branchId;
-      effectiveEmail = sessionUser.email;
-      effectiveRole = String(sessionUser.role?.name || "ADMIN");
-      effectivePermissions = Array.isArray(sessionUser.role?.permissions)
-        ? sessionUser.role.permissions.map((permission: unknown) => String(permission))
-        : [];
-    } else {
-      const inMemoryUser = Array.from(globalInMemoryStore.users.values()).find(
-        (candidate: any) => candidate.id === effectiveUserId && candidate.tenantId === effectiveTenantId,
-      ) as any;
-      if (inMemoryUser) {
-        effectiveBranchId = String(inMemoryUser.branchId || "");
-        effectiveEmail = String(inMemoryUser.email || "");
-        effectiveRole = String(inMemoryUser.role || "ADMIN");
-      }
-      effectiveBranchId ||= String(session.branchId || "");
-      effectiveEmail ||= "system@kwakopos.local";
-      effectivePermissions = ["*"];
+      if (!rotated) return reply.status(401).send({ success: false, error: { code: "TOKEN_INVALID", message: "Invalid or reused refresh token" } });
+      return reply.send({ success: true, data: { accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, sessionId: session.id } });
+    } catch {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Invalid or expired session" } });
     }
-
-    if (!effectiveBranchId || !effectiveEmail) {
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session context is incomplete" } });
-    }
-
-    const tokenPayload = {
-      sub: effectiveUserId,
-      tenantId: effectiveTenantId,
-      branchId: effectiveBranchId,
-      email: effectiveEmail,
-      roles: [effectiveRole],
-      permissions: effectivePermissions,
-      deviceId: session.deviceId,
-      sessionId: session.id,
-    };
-
-    if (refreshToken) {
-      const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
-        sub: effectiveUserId,
-        tenantId: effectiveTenantId,
-        branchId: effectiveBranchId,
-        email: effectiveEmail,
-        roles: [effectiveRole],
-        permissions: effectivePermissions,
-      });
-
-      if (rotated) {
-        return reply.send({
-          success: true,
-          data: {
-            accessToken: rotated.accessToken,
-            refreshToken: rotated.refreshToken,
-          },
-        });
-      }
-    }
-
-    // Compatibility recovery path for offline-first clients that persist only the
-    // opaque session identity; RBAC claims still come exclusively from the authoritative user record.
-    const newAccessToken = generateAccessToken(tokenPayload);
-
-    return reply.send({
-      success: true,
-      data: {
-        accessToken: newAccessToken,
-      },
-    });
   });
 
   // Logout / revoke session
@@ -1407,7 +1345,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       };
 
       const accessToken = generateAccessToken(tokenPayload);
-      const session = await globalSessionManager.createSession(newTenantId, userId, tokenPayload.deviceId);
+      const session = await globalSessionManager.createSession({ tenantId: newTenantId, userId, branchId: resolvedBranchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
       return reply.send({
         success: true,
