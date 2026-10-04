@@ -395,6 +395,9 @@ const AuthenticatedApp: React.FC = () => {
     getStoredSession()?.user ? "checking" : "compliant"
   );
   const [legalGateNonce, setLegalGateNonce] = useState(0);
+  // Track whether compliance was ever confirmed in this session so we never
+  // re-block the workspace during a background re-check after login.
+  const legalEverCompliantRef = useRef(false);
 
   const isSuperAdmin = Boolean(
     user && (user.role === "SUPER_ADMIN" || user.email === "admin@kwakoko.co.tz")
@@ -419,14 +422,19 @@ const AuthenticatedApp: React.FC = () => {
       .then((res) => {
         if (cancelled) return;
         if (!res.success || !res.data) return setLegalGate("error");
-        setLegalGate(res.data.isCompliant ? "compliant" : "pending");
+        const next = res.data.isCompliant ? "compliant" : "pending";
+        if (next === "compliant") legalEverCompliantRef.current = true;
+        setLegalGate(next);
       })
       .catch(() => { if (!cancelled) setLegalGate("error"); });
     return () => { cancelled = true; };
   }, [user, isAuthenticated, legalGateNonce]);
 
   useEffect(() => {
-    if ((user || isAuthenticated) && legalGate === "compliant") setHasEnteredWorkspace(true);
+    if ((user || isAuthenticated) && legalGate === "compliant") {
+      legalEverCompliantRef.current = true;
+      setHasEnteredWorkspace(true);
+    }
   }, [user, isAuthenticated, legalGate]);
 
   useEffect(() => {
@@ -528,19 +536,22 @@ const AuthenticatedApp: React.FC = () => {
   }
 
   // Fail-closed statutory consent gate: never render the authenticated workspace before server verification.
-  if (isAuthenticated && user && legalGate !== "compliant") {
-    if (legalGate === "error") {
-      return (
-        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "2rem", background: "var(--surface-sunken, #f8fafc)" }}>
-          <div className="v2-card" style={{ maxWidth: "560px", width: "100%", padding: "2rem", textAlign: "center" }}>
-            <h2 className="v2-text-lg v2-font-black" style={{ marginTop: 0 }}>Statutory Consent Verification Required</h2>
-            <p className="v2-text-sm v2-text-muted">KwakoPos cannot open your workspace until statutory consent status is verified. Service or network failure is treated as non-compliance.</p>
-            <button className="v2-btn v2-btn-primary" type="button" onClick={() => setLegalGateNonce((n) => n + 1)}>Retry Verification</button>
-          </div>
+  // IMPORTANT: Only block on "pending" (user must explicitly accept) or on "error" when we've never
+  // confirmed compliance before. During "checking" (background re-verification after login) we allow
+  // the workspace to render if we've already confirmed compliance, to prevent the post-login flash.
+  if (isAuthenticated && user && legalGate === "pending") {
+    return <LegalAcceptanceModal isOpen={true} onAccepted={() => { legalEverCompliantRef.current = true; setLegalGate("compliant"); }} />;
+  }
+  if (isAuthenticated && user && legalGate === "error" && !legalEverCompliantRef.current) {
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "2rem", background: "var(--surface-sunken, #f8fafc)" }}>
+        <div className="v2-card" style={{ maxWidth: "560px", width: "100%", padding: "2rem", textAlign: "center" }}>
+          <h2 className="v2-text-lg v2-font-black" style={{ marginTop: 0 }}>Statutory Consent Verification Required</h2>
+          <p className="v2-text-sm v2-text-muted">KwakoPos cannot open your workspace until statutory consent status is verified. Service or network failure is treated as non-compliance.</p>
+          <button className="v2-btn v2-btn-primary" type="button" onClick={() => setLegalGateNonce((n) => n + 1)}>Retry Verification</button>
         </div>
-      );
-    }
-    return <LegalAcceptanceModal isOpen={true} onAccepted={() => setLegalGate("compliant")} />;
+      </div>
+    );
   }
 
   // Standalone Customer-Facing Secondary Display Window (runs without admin shell)
