@@ -279,6 +279,17 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
+  const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
+  const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
+  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
+  return ctx;
+}
+
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
   /** Pre-loaded config — skips env re-read when provided. */
@@ -439,6 +450,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         code === "TENANT_BOUNDARY_VIOLATION" ||
         code === "INVARIANT_007_VIOLATION" ||
         msg.includes("TENANT_BOUNDARY_VIOLATION") ||
+        msg.includes("EMPLOYEE_BOUNDARY_VIOLATION") ||
         msg.includes("INVARIANT_007_VIOLATION") ||
         msg.includes("Cross-tenant") ||
         msg.toLowerCase().includes("access denied") ||
@@ -525,9 +537,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       environment: config.NODE_ENV,
     });
 
-    if (req.url.startsWith("/api/v1/workforce/") && !req.url.startsWith("/api/v1/workforce-ops/")) {
-      req.raw.url = req.url.replace("/api/v1/workforce/", "/api/v1/workforce-ops/");
-    } else if (req.url === "/api/v1/commercial/portfolio") {
+    if (req.url === "/api/v1/commercial/portfolio") {
       req.raw.url = "/api/v1/commercial/summary";
     }
 
@@ -2379,33 +2389,45 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: position });
   });
 
-  // Employees & Employment Records
+  // Employees & Employment Records — PostgreSQL-authoritative HR service.
   server.get("/api/v1/workforce/employees", async (req) => {
-    const employees = await workforceRepository.getEmployees(req.tenantContext!);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const employees = await workforceRepository.getEmployees(ctx);
     return { success: true, data: employees };
   });
 
   server.post("/api/v1/workforce/employees", async (req, reply) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_CREATE");
     const validated = CreateEmployeeRequestSchema.parse(req.body);
-    const result = await workforceRepository.createEmployee(req.tenantContext!, validated);
+    const result = await workforceRepository.createEmployee(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/workforce/employees/:id", async (req, reply) => {
-    const employee = await workforceRepository.getEmployeeById(req.tenantContext!, (req.params as any).id);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const employee = await workforceRepository.getEmployeeById(ctx, (req.params as any).id);
     if (!employee) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Employee not found" } });
     return { success: true, data: employee };
   });
 
   server.put("/api/v1/workforce/employees/:id", async (req) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_EDIT");
     const validated = UpdateEmployeeRequestSchema.parse(req.body);
     const reason = (req.body as any)?.reason;
-    const updated = await workforceRepository.updateEmployee(req.tenantContext!, (req.params as any).id, validated, reason);
+    const updated = await workforceRepository.updateEmployee(ctx, (req.params as any).id, validated, reason);
     return { success: true, data: updated };
   });
 
+  server.post("/api/v1/workforce/employees/:id/archive", async (req) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_ARCHIVE");
+    const reason = String((req.body as any)?.reason || "").trim() || "Employee archived";
+    const archived = await workforceRepository.archiveEmployee(ctx, (req.params as any).id, reason);
+    return { success: true, data: archived };
+  });
+
   server.get("/api/v1/workforce/employees/:id/employment-history", async (req) => {
-    const history = await workforceRepository.getEmploymentHistory(req.tenantContext!, (req.params as any).id);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const history = await workforceRepository.getEmploymentHistory(ctx, (req.params as any).id);
     return { success: true, data: history };
   });
 
@@ -5301,14 +5323,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
-  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
+  // Phase 37 legacy Workforce-ops employee surface is quarantined in production.
   server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative /api/v1/workforce/employees API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
   });
 
   server.post("/api/v1/workforce-ops/employees", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative /api/v1/workforce/employees API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.registerEmployee(body);
@@ -5316,6 +5340,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/transition", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -5324,6 +5349,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/onboard", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -5332,6 +5358,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/offboard", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
