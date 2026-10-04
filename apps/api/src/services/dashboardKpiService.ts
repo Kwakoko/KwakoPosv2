@@ -253,6 +253,8 @@ export async function getDashboardKpiSnapshot(
                 ),0) AS returned_cogs
            FROM returns r
            LEFT JOIN sales s ON s."id" = r."originalSaleId"
+           AND s."tenantId" = r."tenantId"
+           AND s."branchId" = r."branchId"
            LEFT JOIN return_lines rl ON rl."returnId" = r."id"
           WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
             AND r."createdAt" >= $3 AND r."createdAt" < $4
@@ -267,7 +269,10 @@ export async function getDashboardKpiSnapshot(
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
            JOIN sales s ON s."id" = p."saleId"
+            AND s."tenantId" = p."tenantId"
+            AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
+            AND s."tenantId" = $1 AND s."branchId" = $2
             AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4
           GROUP BY COALESCE(p."paymentMethod", 'CASH')
@@ -284,13 +289,15 @@ export async function getDashboardKpiSnapshot(
             AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
-      ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
+      ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string; revenue_rank: number; units_rank: number }>>(
         `WITH sold AS (
            SELECT sl."productId", sl."variantId",
                   COALESCE(SUM(sl."lineTotal" - sl."taxAmount"),0) AS revenue,
                   COALESCE(SUM(sl."quantity"),0) AS units
              FROM sale_lines sl
              JOIN sales s ON s."id" = sl."saleId"
+              AND s."tenantId" = $1
+              AND s."branchId" = $2
             WHERE s."tenantId" = $1 AND s."branchId" = $2 AND s."status" = 'COMPLETED'
               AND s."soldAt" >= $3 AND s."soldAt" < $4
             GROUP BY sl."productId", sl."variantId"
@@ -303,25 +310,36 @@ export async function getDashboardKpiSnapshot(
              FROM return_lines rl
              JOIN returns r ON r."id" = rl."returnId"
              LEFT JOIN sales s ON s."id" = r."originalSaleId"
-            WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
+              AND s."tenantId" = r."tenantId"
+              AND s."branchId" = r."branchId"
+            WHERE r."tenantId" = $1 AND r."branchId" = $2 AND s."tenantId" = $1 AND s."branchId" = $2 AND r."status" = 'COMPLETED'
               AND r."createdAt" >= $3 AND r."createdAt" < $4
             GROUP BY rl."variantId"
+         ), aggregated AS (
+          SELECT sold."productId", p."name",
+                 COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0) AS revenue,
+                 GREATEST(0, COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) AS units,
+                 COALESCE((SELECT SUM(pbs."currentQuantity") FROM product_branch_stock pbs
+                            WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+                              AND pbs."productId" = sold."productId"),0) AS stock,
+                 COALESCE(p.category,'General') AS category
+            FROM sold
+            JOIN products p ON p."id" = sold."productId"
+             AND p."tenantId" = $1
+             AND p."branchId" = $2
+            LEFT JOIN returns_by_variant rbv ON rbv."variantId" = sold."variantId"
+           GROUP BY sold."productId", p."name", p.category
+          HAVING (COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0)) > 0
+              OR (COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) > 0
+         ), ranked AS (
+          SELECT aggregated.*,
+                 ROW_NUMBER() OVER (ORDER BY revenue DESC, "productId") AS revenue_rank,
+                 ROW_NUMBER() OVER (ORDER BY units DESC, "productId") AS units_rank
+            FROM aggregated
          )
-        SELECT sold."productId", p."name",
-               COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0) AS revenue,
-               GREATEST(0, COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) AS units,
-               COALESCE((SELECT SUM(pbs."currentQuantity") FROM product_branch_stock pbs
-                          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
-                            AND pbs."productId" = sold."productId"),0) AS stock,
-               COALESCE(p.category,'General') AS category
-          FROM sold
-          JOIN products p ON p."id" = sold."productId"
-          LEFT JOIN returns_by_variant rbv ON rbv."variantId" = sold."variantId"
-         GROUP BY sold."productId", p."name", p.category
-        HAVING (COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0)) > 0
-            OR (COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) > 0
-         ORDER BY revenue DESC
-         LIMIT 20` ,
+        SELECT * FROM ranked
+         WHERE revenue_rank <= 20 OR units_rank <= 20
+         ORDER BY revenue_rank, units_rank`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ hour: number; revenue: unknown; orders_count: bigint | number | string }>>(
@@ -386,9 +404,13 @@ export async function getDashboardKpiSnapshot(
     const topProductsTotalTracked = topProductRows.length;
     const maxRevenue = Math.max(...topProductRows.map(r=>numberValue(r.revenue)),1);
     const maxUnits = Math.max(...topProductRows.map(r=>numberValue(r.units)),1);
-    const topProducts = topProductRows.slice(0,5).map((r,i)=>({
+    const topProducts = topProductRows.slice().sort((a,b) => {
+      const primary = numberValue(a.revenue_rank) - numberValue(b.revenue_rank);
+      return primary !== 0 ? primary : numberValue(a.units_rank) - numberValue(b.units_rank);
+    }).slice(0,20).map((r,i)=>({
       productId:r.product_id, name:r.name, revenue:numberValue(r.revenue), units:numberValue(r.units),
       stock:numberValue(r.stock), category:r.category || "General", rank:i+1,
+      revenueRank:numberValue(r.revenue_rank), unitsRank:numberValue(r.units_rank),
     }));
     const peak = hourlyRows[0];
     const analytics: DashboardAnalyticsSnapshot = {
