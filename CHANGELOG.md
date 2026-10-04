@@ -58,8 +58,31 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #54 from Kwakoko/fix/communication-fabric-p0-p2-final
+- **core**: enforce application facade against raw UI fetch transport
+- **test**: remove temporary certification diagnostic
+- **test**: add temporary certification failure diagnostic
+- **sync**: use durable domain event correlation lookup
+- **sync**: align domain event id contract
+- **core**: Merge pull request #52 from Kwakoko/fix/communication-fabric-final-certification-v2
+- **catalog**: read branch-scoped metadata using tenant and branch
+- **auth**: remove obsolete persisted refresh-token fixture
+- **core**: Merge pull request #51 from Kwakoko/fix/internal-communication-fabric-closed-loop-2
+- **core**: reconcile PR #51 with current main
+- **core**: Merge pull request #47 from Kwakoko/fix/remaining-p0-p1-gates
+- **core**: reconcile PR #47 with current main
+- **core**: retrigger closed-loop certification
+- **core**: Merge pull request #41 from Kwakoko/fix/live-persistence-unit-integration-cert-20261003
+- **core**: reconcile PR #41 with current main
+- **sync**: lock communication fabric boundaries
+- **release**: v2.13.0
+- **sync**: assert real dual-operation offline sale queue
 - **core**: Merge pull request #49 from Kwakoko/fix/dashboard-kpi-sync-health-20261004
 - **core**: reconcile PR #49 with current main
+- **test**: provision PostgreSQL and migrations for integration gates
+- **production**: provision PostgreSQL for candidate integration certification
+- **cert**: remove retired fabricated certification artifact
+- **auth**: enforce non-persistent refresh-token session contract
 - **release**: v2.13.0
 - **core**: Merge pull request #50 from Kwakoko/fix/internal-communication-fabric-closed-loop
 - **auth**: align session persistence contract with server refresh handle
@@ -104,19 +127,43 @@ All notable changes to KwakoPos will be documented in this file.
 - **sync**: align variant drill with explicit client variant authority
 - **settings**: prove direct API retry idempotency
 - **settings**: respect append-only audit lifecycle in isolated CI
+- **core**: test sync: correct retry failure count for sale and stock-adjustment pairs
 - **settings**: assert fail-closed result and preserve append-only audit
 - **dashboard**: assert PostgreSQL product KPI renders in card
 - **sync**: enforce fail-closed sync status labeling
 - **settings**: add dedicated P0/P1 closed-loop workflow
+- **core**: test sync: certify Sale and StockAdjustment outbox pairs
+- **core**: test inventory: seed authoritative opening stock ledger
+- **core**: fix integration: tests/integration/session-revoke-api-restart.test.ts
+- **core**: fix integration: tests/integration/rbac-api-restart-persistence.test.ts
+- **core**: fix integration: tests/integration/outbox-retry-reconciliation.test.ts
 - **settings**: restore production-certified parity after real closed-loop evidence
+- **core**: fix navigation lock: contract workflow hooks instead of byte-locking CI implementation
+- **core**: fix integration: make RBAC API restart test cross-platform
+- **core**: fix candidate CI: provision PostgreSQL for integration certification
+- **core**: fix CI: provision PostgreSQL for integration certification
+- **core**: fix forensic hygiene: normalize TRA VFD SQL fixture encoding
 - **settings**: certify update and delete lifecycle without resurrection
+- **core**: fix cleanliness: expose forensic failure diagnostics
 - **settings**: remove obsolete in-memory Retail Settings authority
+- **core**: fix forensic gate: classify retired certification fixtures intentionally
 - **settings**: require closed-loop Settings evidence
+- **core**: fix offline e2e: launch executable API entrypoint
 - **settings**: certify persistence RBAC audit and tenant isolation
 - **settings**: preserve canonical service after bootstrap wiring
 - **settings**: bind Settings status to closed-loop evidence
 - **settings**: make browser Settings verification executable
 - **settings**: await canonical retail settings checkout
+- **core**: fix release: allow SemVer package version changes without navigation-lock drift
+- **core**: test sync: assert deterministic default variant identity
+- **core**: fix navigation lock: reconcile current authoritative release blobs
+- **core**: fix release: send exact certification payload as JSON object
+- **core**: fix gates: scripts/certification/runProductionCleanlinessCertification.ts
+- **core**: fix gates: scripts/release/verify-marketplace-partner-governance.ts
+- **core**: fix gates: packages/database/src/index.ts
+- **core**: fix gates: tests/unit/session-persistence.test.ts
+- **core**: fix security: refresh Fastify and fast-uri lock entries
+- **core**: fix security: upgrade Fastify to patched 5.12.5
 - **release**: v2.13.0
 - **core**: align privileged sync authority contract
 - **release**: v2.13.0
@@ -133,6 +180,30 @@ All notable changes to KwakoPos will be documented in this file.
 - **core**: reconcile purchasing sync repair with current main
 - **release**: v2.13.0
 - **core**: Merge pull request #40 from Kwakoko/fix/expenses-p0-p1-20261003
+- **core**: classify sealed cash-count display control
+- **core**: add accessible name to vertical tab controls
+- **core**: add accessible name to conflict modal close control
+- **core**: persist brand hierarchy in generated release manifests
+- **core**: refresh navigation lock hashes from current certified tree
+- **core**: align release manifest with brand hierarchy
+- **core**: add idempotent sync operations schema repair migration
+- **core**: align synthetic variant tests with fail-closed inventory authority
+- **core**: restore active full-system certification authority
+- **core**: provide open cash session to pharmacy certification journey
+- **core**: exercise oversell conflict without cash session dependency
+- **core**: align marketplace unit test with active five-pillar authority
+- **core**: fix stock ledger lifecycle lookup scope
+- **core**: align session persistence with HttpOnly refresh token contract
+- **core**: align cash-session guard source contract
+- **core**: record explicit oversell conflict state
+- **core**: derive POS product from authoritative variant
+- **core**: accept omitted productId while preserving variant tenant branch authority
+- **core**: add production certification campaign script
+- **core**: align SyncOperation Prisma mapping with canonical snake_case schema
+- **core**: preserve test-double receipt sequence while keeping production DB authority
+- **core**: route receipt sequencing to authoritative repository
+- **core**: fix cash session arithmetic for legacy persisted state
+- **core**: fix sync injected transport reconciliation boundary
 - **expenses**: add dedicated P0/P1 closed-loop certification gate
 - **core**: remove eslint governance bypass from sync boot effect
 - **core**: refresh vertical command center production lock hash
@@ -284,10 +355,36 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **ui**: route support control tower through application API facade
+- **ui**: route remaining page transport through application API facade
+- **ui**: route remaining page transport through application API facade
+- **ui**: route remaining page transport through application API facade
+- **cert**: decouple pharmacy journey from cash-session fixture
+- **ci**: align strict runtime guard with production sync entrypoints
+- **sync**: apply catalog deltas with scoped deletion-aware merge
+- **sync**: close all remaining full-payload cross-tab broadcasts
+- **cert**: isolate pharmacy cashier session journey
+- **cert**: isolate concurrent business journey fixtures
+- **ci**: update navigation lock for command center repair
+- **sync**: restore schema-valid deterministic domain event ids
+- **sync**: minimize atomic outbox cross-tab broadcast payload
+- **ci**: remove duplicate command center aria-label
+- **ci**: remove remaining duplicate service block
+- **ci**: remove duplicate service and environment YAML keys
+- **ci**: refresh navigation lock for current production files
+- **test**: use branch-scoped catalog replica keys
+- **test**: make session restart certification cross-platform
+- **test**: make RBAC restart certification cross-platform
+- **cert**: refresh navigation lock after candidate workflow changes
+- **cert**: start real API listener in offline E2E
+- **ci**: update navigation lock for candidate workflow contract
+- **test**: seed authoritative opening stock ledger in offline outbox drill
 - **cert**: normalize candidate workflow YAML line breaks
+- **test**: isolate IndexedDB integration databases across workers
 - **cert**: make candidate API startup idempotent
 - **cert**: provide local API to synthetic and security gates
 - **cert**: keep local API alive for synthetic monitoring
+- **hygiene**: remove hidden control characters from live SQL diff
 - **cert**: correct forensic certification import path
 - **test**: restore path resolver import for session restart proof
 - **cert**: make cleanliness forensic gate self-contained
@@ -665,7 +762,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
+Credit to: Kwakoko, Jack91186, github-actions[bot], Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
