@@ -549,7 +549,7 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
         body: JSON.stringify({
           items: [{ productId, variantId, quantity: 1, unitPrice: 1180, unitCost: 600 }],
           payments: [
-            { amount: 590, paymentMethod: 'CASH' },
+            { amount: 590, paymentMethod: 'CARD' },
             { amount: 590, paymentMethod: 'MOBILE_MONEY' },
           ],
           deviceId: 'DEVICE-A',
@@ -602,9 +602,12 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(financialSnapshot.analytics.paymentTotalOrderCount).toBe(2);
     expect(financialSnapshot.analytics.paymentOverallAov).toBe(1340);
     const cashChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'CASH');
+    const cardChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'CARD');
     const mobileChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'MOBILE_MONEY');
-    expect(cashChannel?.orderCount).toBe(2);
-    expect(cashChannel?.paymentCount).toBe(2);
+    expect(cashChannel?.orderCount).toBe(1);
+    expect(cashChannel?.paymentCount).toBe(1);
+    expect(cardChannel?.orderCount).toBe(1);
+    expect(cardChannel?.paymentCount).toBe(1);
     expect(mobileChannel?.orderCount).toBe(1);
     expect(mobileChannel?.paymentCount).toBe(1);
     expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1);
