@@ -285,7 +285,7 @@ export function useAuthoritativeSyncStatus(scope?: Partial<SyncStatusScope>): Sy
 export function syncStatusLabel(snapshot: SyncStatusSnapshot): string {
   if (snapshot.state === "OFFLINE") return "OFFLINE";
   if (snapshot.state === "SYNCING") return "SYNCING";
-  if (snapshot.abandonedOutboxCount > 0) return "CONFLICT";
+  if (snapshot.abandonedOutboxCount > 0 || snapshot.openConflictCount > 0) return "CONFLICT";
   if (snapshot.failedOutboxCount > 0) return "ERROR";
   if (snapshot.pendingOutboxCount > 0) return "PENDING";
   if (snapshot.state === "ERROR") return "ERROR";
