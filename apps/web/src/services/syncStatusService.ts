@@ -310,6 +310,6 @@ export function syncStatusLabel(snapshot: SyncStatusSnapshot): string {
   if (snapshot.state === "SUCCESS" && snapshot.reconciliationStatus === "DIVERGENT") return "CONFLICT";
   if (snapshot.state === "SUCCESS" && snapshot.reconciliationStatus !== "IN_SYNC") return "VERIFYING";
   if (snapshot.state === "SUCCESS" && snapshot.openConflictCount === null) return "VERIFYING";
-  if (snapshot.state === "SUCCESS" && snapshot.openConflictCount > 0) return "CONFLICT";
+  if (snapshot.state === "SUCCESS" && snapshot.openConflictCount !== null && snapshot.openConflictCount > 0) return "CONFLICT";
   return snapshot.state === "SUCCESS" ? "SYNCED" : "IDLE";
 }
