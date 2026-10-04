@@ -116,7 +116,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
 
   // Form states across tabs
   const [profile, setProfile] = useState(() => {
-    const saved = db.getConfigurationLocal?.("store_profile") as any;
+    const saved = db.getConfigurationLocal?.("business.profile", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
     return {
       businessName: saved?.businessName || currentTenantName || "",
       tradingName: saved?.tradingName || "KwakoPos Central",
@@ -129,7 +129,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   });
 
   useEffect(() => {
-    const saved = db.getConfigurationLocal?.("store_profile") as any;
+    const saved = db.getConfigurationLocal?.("business.profile", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
     if (saved) {
       setProfile((prev) => ({
         ...prev,
@@ -145,7 +145,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   }, [currentTenantName, db]);
 
   useEffect(() => {
-    const saved = db.getConfigurationLocal?.("tax_config") as any;
+    const saved = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
     const savedVfd = db.getConfigurationLocal?.("tra_vfd_config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
     if (saved || savedVfd) {
       setTaxConfig((prev) => ({
@@ -203,6 +203,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       });
   }, [currentTenantId, currentBranchId, db]);
 
+  useEffect(() => {
+    if (!currentTenantId || !currentBranchId || typeof navigator === "undefined" || !navigator.onLine) return;
+    void apiFetch<any>("/api/v1/settings")
+      .then((res) => {
+        const data = res?.data || res;
+        const read = (key: string) => data?.[key]?.value;
+        const profileRemote = read("business.profile");
+        const posRemote = read("pos.config");
+        const taxRemote = read("tax.config");
+        const inventoryRemote = read("inventory.config");
+        const securityRemote = read("security.config");
+        const notificationsRemote = read("notifications.config");
+        const syncRemote = read("sync.config");
+        if (profileRemote) { setProfile((v) => ({ ...v, ...profileRemote })); db.saveConfigurationLocal?.("business.profile", profileRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (posRemote) { setPosConfig((v) => ({ ...v, ...posRemote })); db.saveConfigurationLocal?.("pos.config", posRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (taxRemote) { setTaxConfig((v) => ({ ...v, ...taxRemote })); db.saveConfigurationLocal?.("tax.config", taxRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (inventoryRemote) { setInvConfig((v) => ({ ...v, ...inventoryRemote })); db.saveConfigurationLocal?.("inventory.config", inventoryRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (securityRemote) setSecurityConfig((v) => ({ ...v, ...securityRemote }));
+        if (notificationsRemote) setNotificationsConfig((v) => ({ ...v, ...notificationsRemote }));
+        if (syncRemote) setSyncConfig((v) => ({ ...v, ...syncRemote }));
+      })
+      .catch(() => {});
+  }, [currentTenantId, currentBranchId, db]);
+
   const [posConfig, setPosConfig] = useState({
     autoPrintReceipt: true,
     kickCashDrawer: true,
@@ -213,8 +237,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
 
   const [taxConfig, setTaxConfig] = useState(() => {
     try {
-      const saved = db.getConfigurationLocal?.("tax_config") as any;
-      const savedVfd = db.getConfigurationLocal?.("tra_vfd_config") as any;
+      const saved = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
+      const savedVfd = db.getConfigurationLocal?.("tra_vfd_config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
       if (saved || savedVfd) {
         return {
           vatEnabled: Boolean(saved?.vatEnabled),
@@ -324,47 +348,48 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     barcodePrefix: "200",
   });
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    db.saveConfigurationLocal?.("store_profile", profile);
-    db.saveConfigurationLocal?.("pos_config", posConfig);
-    db.saveConfigurationLocal?.("tax_config", taxConfig);
-    db.saveConfigurationLocal?.("tra_vfd_config", {
-      enabled: Boolean(taxConfig.traVfdEnabled),
-      endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
-      environment: taxConfig.traVfdEnvironment || "TEST",
-      tin: taxConfig.traVfdTin || undefined,
-      certSerial: taxConfig.traVfdCertSerial || undefined,
-      registrationId: taxConfig.traVfdRegistrationId || undefined,
-      efdSerial: taxConfig.traVfdEfdSerial || undefined,
-      receiptCode: taxConfig.traVfdReceiptCode || undefined,
-      routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
-    }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
-    db.saveConfigurationLocal?.("inv_config", invConfig);
-    if (currentTenantId && currentBranchId && typeof navigator !== "undefined" && navigator.onLine) {
-      try {
-        await apiFetch("/api/v1/tra-vfd/config", {
-          method: "PUT",
-          body: JSON.stringify({
-            enabled: Boolean(taxConfig.traVfdEnabled),
-            endpoint: String(taxConfig.traVfdEndpoint || "").trim(),
-            environment: taxConfig.traVfdEnvironment || "TEST",
-            tin: taxConfig.traVfdTin || undefined,
-            certSerial: taxConfig.traVfdCertSerial || undefined,
-            registrationId: taxConfig.traVfdRegistrationId || undefined,
-            efdSerial: taxConfig.traVfdEfdSerial || undefined,
-            receiptCode: taxConfig.traVfdReceiptCode || undefined,
-            routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
-          }),
-        });
-      } catch (error: any) {
-        setSavedSuccess(false);
-        toast.error("TRA VFD Configuration Failed", error?.message || "The server did not accept the VFD configuration.");
-        return;
-      }
+  const [securityConfig, setSecurityConfig] = useState({
+    inactivityLockMinutes: 15,
+    managerPinPolicy: "6-digit numeric PIN",
+  });
+  const [notificationsConfig, setNotificationsConfig] = useState({
+    lowStockAlerts: true,
+    dailySummaryEmail: false,
+    smsGatewayEnabled: false,
+  });
+  const [syncConfig, setSyncConfig] = useState({
+    backgroundSyncEnabled: true,
+    retryBackoff: "EXPONENTIAL",
+    conflictPolicy: "SERVER_AUTHORITATIVE",
+  });
+
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!currentTenantId || !currentBranchId) {
+      toast.error("Tenant Context Required", "Settings require an authenticated tenant and branch.");
+      return;
     }
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    try {
+      await db.enqueueSettingsMutations(
+        [
+          { key: "business.profile", value: profile, scope: "BRANCH" },
+          { key: "pos.config", value: posConfig, scope: "BRANCH" },
+          { key: "tax.config", value: taxConfig, scope: "BRANCH" },
+          { key: "inventory.config", value: invConfig, scope: "BRANCH" },
+          { key: "security.config", value: securityConfig, scope: "BRANCH" },
+          { key: "notifications.config", value: notificationsConfig, scope: "BRANCH" },
+          { key: "sync.config", value: syncConfig, scope: "BRANCH" },
+        ],
+        { tenantId: currentTenantId, branchId: currentBranchId, userId: "" },
+      );
+      setSavedSuccess(true);
+      toast.success("Settings Saved", "Changes are durably persisted and queued for authoritative synchronization.");
+      window.dispatchEvent(new CustomEvent("kwakopos:context-sync-now"));
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (error: any) {
+      setSavedSuccess(false);
+      toast.error("Settings Save Failed", error?.message || "The settings mutation could not be committed.");
+    }
   };
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: LucideIcon }> = [
@@ -730,15 +755,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabSecurity")}</div></div>
           <div className="v2-space-y-3">
-            <div className="v2-text-xs v2-text-muted">Configure manager override PINs, session inactivity lockouts, and cryptographic signatures.</div>
+            <div className="v2-text-xs v2-text-muted">Security policy changes are tenant/branch settings and use the canonical durable Settings pipeline.</div>
             <div className="v2-grid v2-grid-2 v2-gap-4">
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">Cashier Inactivity Lock (Minutes)</label>
-                <input className="v2-input" type="number" defaultValue={15} />
+                <input className="v2-input" type="number" min={1} value={securityConfig.inactivityLockMinutes} onChange={(e) => setSecurityConfig({ ...securityConfig, inactivityLockMinutes: Number(e.target.value) })} />
               </div>
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">Manager Approval PIN Policy</label>
-                <select className="v2-input">
+                <select className="v2-input" value={securityConfig.managerPinPolicy} onChange={(e) => setSecurityConfig({ ...securityConfig, managerPinPolicy: e.target.value })}>
                   <option>6-digit numeric PIN</option>
                   <option>Password + Biometric</option>
                 </select>
@@ -746,7 +771,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             </div>
           </div>
         </div>
-      )}
+      )}}
 
       {/* Production-safe developer diagnostics: sample/demo data injection is deliberately unavailable. */}
       <div className="v2-card">
@@ -858,9 +883,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                   <Sparkles size={18} />
                 </div>
                 <div>
-                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>Developer Options &amp; Sample Retail Data</div>
+                  <div className="v2-font-bold v2-text-sm" style={{ color: "var(--text)" }}>Developer Diagnostics</div>
                   <div className="v2-text-xs v2-text-muted" style={{ marginTop: "2px" }}>
-                    Configure the retail training sandbox, load sample retail datasets, or purge test records.
+                    Inspect authoritative local persistence, synchronization, release information, and safe production maintenance controls.
                   </div>
                 </div>
               </div>
@@ -870,7 +895,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 onClick={() => setActiveTab("developer")}
                 style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
-                <span>Open Developer Options</span>
+                <span>Open Diagnostics</span>
                 <span>&rarr;</span>
               </button>
             </div>
@@ -1077,9 +1102,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
                   <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
                     <strong className="v2-text-xs">Vodacom M-Pesa</strong>
-                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>CONFIGURE</span>
                   </div>
-                  <div className="v2-text-xs v2-text-muted">C2B Paybill & Till STK Push integrated via webhooks.</div>
+                  <div className="v2-text-xs v2-text-muted">Provider integration availability; configure credentials and webhooks before activation.</div>
                 </div>
 
                 <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
@@ -1087,7 +1112,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                     <strong className="v2-text-xs">Airtel Money</strong>
                     <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
                   </div>
-                  <div className="v2-text-xs v2-text-muted">Merchant collection API & instant settlement.</div>
+                  <div className="v2-text-xs v2-text-muted">Provider integration availability; configure credentials and settlement mapping before activation.</div>
                 </div>
 
                 <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
@@ -1095,7 +1120,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                     <strong className="v2-text-xs">CRDB / NMB Bank</strong>
                     <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
                   </div>
-                  <div className="v2-text-xs v2-text-muted">Host-to-host bank statement & QR payment feeds.</div>
+                  <div className="v2-text-xs v2-text-muted">Provider integration availability; configure bank integration credentials before activation.</div>
                 </div>
               </div>
             </div>
@@ -1104,20 +1129,27 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       )}
 
       {/* Notifications & Sync Tabs */}
-      {["notifications", "sync"].includes(activeTab) && (
+      {activeTab === "notifications" && (
         <div className="v2-card">
-          <div className="v2-card-header">
-            <div className="v2-card-title">
-              {tabs.find((t) => t.id === activeTab)?.label}
-            </div>
-          </div>
-          <div className="v2-card-body">
-            <div className="v2-text-xs v2-text-muted">
-              Enterprise configuration active and synchronizing with branch policies. All changes are logged to the immutable audit trail.
-            </div>
+          <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabNotifications")}</div></div>
+          <div className="v2-card-body v2-space-y-3">
+            <label className="v2-flex v2-items-center v2-justify-between"><span className="v2-text-sm">Low stock alerts</span><input type="checkbox" checked={notificationsConfig.lowStockAlerts} onChange={(e) => setNotificationsConfig({ ...notificationsConfig, lowStockAlerts: e.target.checked })} /></label>
+            <label className="v2-flex v2-items-center v2-justify-between"><span className="v2-text-sm">Daily summary email</span><input type="checkbox" checked={notificationsConfig.dailySummaryEmail} onChange={(e) => setNotificationsConfig({ ...notificationsConfig, dailySummaryEmail: e.target.checked })} /></label>
+            <label className="v2-flex v2-items-center v2-justify-between"><span className="v2-text-sm">SMS gateway alerts</span><input type="checkbox" checked={notificationsConfig.smsGatewayEnabled} onChange={(e) => setNotificationsConfig({ ...notificationsConfig, smsGatewayEnabled: e.target.checked })} /></label>
           </div>
         </div>
       )}
+
+      {activeTab === "sync" && (
+        <div className="v2-card">
+          <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabSync")}</div></div>
+          <div className="v2-card-body v2-space-y-3">
+            <div className="v2-text-xs v2-text-muted">Settings synchronization uses the durable local outbox, PostgreSQL authority, monotonic revision journal, and server-authoritative conflict policy.</div>
+            <label className="v2-flex v2-items-center v2-justify-between"><span className="v2-text-sm">Background sync</span><input type="checkbox" checked={syncConfig.backgroundSyncEnabled} onChange={(e) => setSyncConfig({ ...syncConfig, backgroundSyncEnabled: e.target.checked })} /></label>
+            <div className="v2-text-xs v2-text-muted">Retry: {syncConfig.retryBackoff} · Conflict policy: {syncConfig.conflictPolicy}</div>
+          </div>
+        </div>
+      )}}
     </div>
   );
 };
