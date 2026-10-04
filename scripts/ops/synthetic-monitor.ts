@@ -193,7 +193,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D1",
     status: "PENDING",
-  });
+  }, ctx);
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D2",
     entityType: "ProductVariant",
@@ -203,7 +203,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D2",
     status: "PENDING",
-  });
+  }, ctx);
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D3",
     entityType: "StockAdjustment",
