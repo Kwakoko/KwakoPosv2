@@ -82,7 +82,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const session: StoredSession = {
       sessionId: "sess-valid-jwt",
       accessToken: fakeJwt,
-      refreshToken: "refresh-xyz",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
