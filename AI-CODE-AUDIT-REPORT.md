@@ -59,14 +59,13 @@ While the platform features extensive domain modeling, granular role contracts, 
 graph TD
     Client[Client PWA - React 18 / Vite / IndexedDB]
     Gateway[Fastify 5.12 API Server]
-    FixedWrapper[serverFixed.ts - PreValidation Interceptor]
-    BaseServer[server.ts - 4,810 lines Monolith]
+    CanonicalServer[server.ts - Fastify API + centralized authentication/security]
+
     PrismaDB[(PostgreSQL / Prisma 5.9.1)]
     MemStore[(Volatile In-Memory Maps Store)]
     
     Client -->|HTTP / REST / Static Assets| Gateway
-    Gateway --> FixedWrapper
-    FixedWrapper -->|Bypasses/Overrides| BaseServer
+    Gateway --> CanonicalServer
     
     BaseServer -->|Persistence Mode: TRUE| PrismaDB
     BaseServer -->|Persistence Mode: FALSE| MemStore
