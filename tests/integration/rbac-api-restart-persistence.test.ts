@@ -1,12 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolve as resolvePath } from "node:path";
 import { once } from "node:events";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { prisma } from "@kwakopos2/database";
 
 const ROOT = process.cwd();
-process.env.JWT_SECRET ||= randomBytes(48).toString("hex");
 const PORT = 3012;
 const BASE = "http://127.0.0.1:" + PORT;
 
@@ -28,9 +27,8 @@ describe("RBAC API mutations survive exact API restart", () => {
   };
 
   async function startApi() {
-    const tsx = resolvePath(ROOT, "node_modules/tsx/dist/cli.mjs");
-    const serverEntry = resolvePath(ROOT, "apps/api/src/serverFixed.ts");
-    api = spawn(process.execPath, [tsx, serverEntry], {
+    const tsx = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+    api = spawn(process.execPath, [tsx, "apps/api/src/serverFixed.ts"], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -40,6 +38,7 @@ describe("RBAC API mutations survive exact API restart", () => {
         PORT: String(PORT),
         KWAKOPOS_MOCK_AUTH: "false",
         KWAKOPOS_DISABLE_SUPPORT_AUTOMATION: "true",
+        JWT_SECRET: process.env.JWT_SECRET || "kwakopos-ci-rbac-restart-test-secret-20261004",
       },
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
@@ -68,8 +67,8 @@ describe("RBAC API mutations survive exact API restart", () => {
     } else {
       api.kill("SIGTERM");
       await Promise.race([
-        once(api, "exit").then(() => undefined),
-        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        once(api, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
       if (api.exitCode === null) api.kill("SIGKILL");
     }

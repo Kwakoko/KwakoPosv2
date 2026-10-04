@@ -28,7 +28,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
@@ -1056,7 +1056,7 @@ Manager Sign-off:  _____________________
                     {discrepancy === 0 ? "BALANCED" : money(discrepancy)}
                   </span>
                 </div>
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} disabled type="button" title="A sealed physical cash count is immutable.">
+                <button data-governance="display" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} disabled type="button" title="A sealed physical cash count is immutable.">
                   Count Sealed — Cannot Re-enter
                 </button>
               </div>

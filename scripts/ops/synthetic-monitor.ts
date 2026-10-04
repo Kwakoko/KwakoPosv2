@@ -483,6 +483,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     category: "OFFICE_EXPENSE",
     amount: 10000,
     reason: "Cleaning Supplies",
+    status: "PAID",
+    paymentMethod: "CASH",
+    taxDeductible: false,
   });
   commercialRepo.sealCashSessionCount(ctx, sessionL.id, { actualCash: 140000, deviceId: "synthetic-monitor" });
   const closedSessionL = commercialRepo.closeCashSession(ctx, sessionL.id, {});
@@ -586,7 +589,14 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F04: Expense -> Journal Posting
   // -------------------------------------------------------------------------
   const startF04 = Date.now();
-  const expF04 = commercialRepo.recordExpense(ctx, { category: "UTILITIES", amount: 25000, reason: "Electricity Bill" });
+  const expF04 = commercialRepo.recordExpense(ctx, {
+    category: "UTILITIES",
+    amount: 25000,
+    reason: "Electricity Bill",
+    status: "PAID",
+    paymentMethod: "CASH",
+    taxDeductible: false,
+  });
   const { journal: jF04 } = FinancialBridge.mapExpenseToJournal(ctx, expF04, accountLookup.expenseDefaultAccountId, accountLookup);
   financeRepo.journalEntries.set(jF04.id, jF04);
   financeRepo.journalLines.set(jF04.id, jF04.lines || []);

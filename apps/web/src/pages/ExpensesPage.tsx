@@ -23,7 +23,7 @@ import {
   Receipt, Sparkles
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 
 export interface ExpenseRecord {

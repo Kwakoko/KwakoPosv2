@@ -24,7 +24,7 @@ import {
   Calendar, Clock, ChevronDown, ChevronRight, FileText, Monitor, Barcode
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
-import { apiFetch, safeUUID } from "../services/apiClient.js";
+import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
@@ -225,7 +225,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const getBaseTaxRate = useCallback(() => {
     try {
-      const cfg = db.getConfigurationLocal?.("tax_config") as any;
+      const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
       if (cfg && cfg.vatEnabled && typeof cfg.vatRatePercent === "number") {
         return cfg.vatRatePercent / 100;
       }
@@ -235,7 +235,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const [selectedTaxRate, setSelectedTaxRate] = useState<number>(() => {
     try {
-      const cfg = db.getConfigurationLocal?.("tax_config") as any;
+      const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
       if (cfg && cfg.vatEnabled && typeof cfg.vatRatePercent === "number") {
         return cfg.vatRatePercent / 100;
       }
@@ -248,7 +248,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const hydrateTaxRate = async () => {
       try {
         await db.ready;
-        const cfg = db.getConfigurationLocal?.("tax_config") as any;
+        const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
         if (active && cfg) {
           if (cfg.vatEnabled && typeof cfg.vatRatePercent === "number") {
             setSelectedTaxRate(cfg.vatRatePercent / 100);

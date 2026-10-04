@@ -23,7 +23,7 @@ import {
   Building, Briefcase, FileText, UserPlus, Sliders, ShieldCheck, Terminal, Cpu, Zap, Archive
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 // User and Role mutations are privileged PostgreSQL operations; they never use the business sync outbox.
 
@@ -100,7 +100,7 @@ export interface AuditLogRecord {
 
 const SYSTEM_ROLES: CustomRoleRecord[] = [
   { id: "role-owner", name: "Tenant Owner", slug: "tenant-owner", description: "Full administrative control across all tenant branches", isSystemRole: true, isCustom: false, permissions: ["*"] },
-  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.manage", "reports.view"] },
+  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.read", "settings.manage", "reports.view"] },
   { id: "role-manager", name: "Branch Manager", slug: "branch-manager", description: "Branch operations, stock adjustments, purchase orders, and shift approvals", isSystemRole: true, isCustom: false, permissions: ["sales.*", "inventory.*", "purchase.*", "staff.view", "reports.branch"] },
   { id: "role-cashier", name: "Cashier / POS Operator", slug: "cashier", description: "Point of sale registers, receipts, customer creation, and cash collection", isSystemRole: true, isCustom: false, permissions: ["sales.create", "payment.receive", "customer.create", "receipt.print"] },
   { id: "role-inventory", name: "Inventory Officer", slug: "inventory-officer", description: "Stock intake, FEFO batching, supplier purchase orders, stock adjustments", isSystemRole: true, isCustom: false, permissions: ["product.manage", "stock.adjust", "purchase.manage", "supplier.manage"] },

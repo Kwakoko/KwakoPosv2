@@ -224,7 +224,9 @@ export class ScopedProductRepository {
 
     if (createdVariants.length === 0 && !req.hasVariants) {
       createdVariants.push({
-        id: `${productId}-default`,
+        // Deterministic canonical variant for products without explicit variants.
+        // This is a real master record, not demo/fabricated inventory data.
+        id: req.id ? `${req.id}-default` : `${productId}-default`,
         tenantId: ctx.tenantId,
         branchId: ctx.branchId,
         productId,

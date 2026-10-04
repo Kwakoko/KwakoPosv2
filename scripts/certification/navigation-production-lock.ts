@@ -9,16 +9,19 @@ const EXPECTED_SUBMENU_GROUPS = 126;
 const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/App.tsx": "17dad6fe916d91266c8a1456cb435acd0c279e54",
+  "package.json": "9ea5125220428ea41006e9dbd3201060056fd3d5",
+  "apps/web/src/App.tsx": "000a361bbaab925456e36cec3ee5c26d14026931",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "2bbdaad3402ad9f99e4e060269ec33d07c3ab897",
-  "apps/web/src/pages/InventoryPage.tsx": "41342cbfc43a0c5a2667143ab25361c20acee7a4",
-  "apps/web/src/pages/PurchasingPage.tsx": "cdaf018cc7cffe91150a1b262f1b2d118c24981a",
-  "apps/web/src/pages/ReportsPage.tsx": "c236231b947976563b71d4aef08309e921882705",
-  "apps/web/src/pages/SettingsPage.tsx": "7bdd93c664912e763e0ccea23ebe10381671334e",
-  "apps/web/src/pages/CashDrawerPage.tsx": "cba6164b3dc341fd1e03b5605e54046072518ad5",
+  "apps/web/src/pages/DashboardPage.tsx": "8821c3ec11803bebfacdb0e4c5b9e597bcab5ec1",
+  "apps/web/src/pages/InventoryPage.tsx": "b692a288e7b3842ea32eff1709bedf9113394519",
+  "apps/web/src/pages/PurchasingPage.tsx": "07e34d92a282c0172a7a9b3cf8e7f20b2a321d39",
+  "apps/web/src/pages/ReportsPage.tsx": "4c66a81a465479ddd35cad56005002d73b99772b",
+  "apps/web/src/pages/SettingsPage.tsx": "aef9d5de51d62f8f7de0d772f7f426152951b949",
+  "apps/web/src/pages/CashDrawerPage.tsx": "13f30ca82037198e2704bfe25688783d689a40dd",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
+  ".github/workflows/production-certification.yml": "cd6aa88d31253df2c8bdae56f7f944ebaa70fd10"
+  ".github/workflows/production-release-exact-main.yml": "d49cdb11f9cd97b66fd36da205da56b2a71ce7ee"
 };
 
 const MARKERS: Array<[string, string, string]> = [

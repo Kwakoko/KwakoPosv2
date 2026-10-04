@@ -44,24 +44,28 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     };
     db.saveVariantLocal(variant);
 
-    // Stock Ledger is authoritative: seed the opening balance explicitly.
-    db.stockLedger.set("led-opening-var-integ-100", {
-      id: "led-opening-var-integ-100",
+    // Opening stock is authoritative ledger state. Seed it as a historical receipt
+    // so offline sale deductions can never derive inventory from the variant cache.
+    db.stockLedger.set("opening-stock-" + variantId, {
+      id: "opening-stock-" + variantId,
       tenantId: "tenant-integ-1",
       branchId: "branch-integ-1",
       productId,
       variantId,
-      movementType: "OPENING_STOCK",
-      referenceType: "OPENING_STOCK",
-      referenceId: "OPENING-var-integ-100",
+      movementType: "PURCHASE_RECEIPT",
+      referenceType: "PURCHASE_RECEIPT",
+      referenceId: "opening-balance",
       quantityBefore: 0,
       quantityChange: 100,
       quantity: 100,
       quantityAfter: 100,
       unitCost: 28000,
       totalCost: 2800000,
-      idempotencyKey: "OPENING-STOCK-var-integ-100",
-      operationId: "OPENING-STOCK-var-integ-100",
+      userId: "test-fixture",
+      deviceId: "test-fixture",
+      operationId: "opening-stock",
+      idempotencyKey: "OPENING-STOCK-" + variantId,
+      notes: "Test opening balance",
       synced: true,
       occurredAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
@@ -83,29 +87,15 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
         branchId: "branch-integ-1",
       });
 
-      // Enqueue to outbox before any network attempt
-      await enqueueOutbox(
-        {
-          entityType: "Sale",
-          entityId: saleId,
-          operationType: "CREATE",
-          tenantId: "tenant-integ-1",
-          branchId: "branch-integ-1",
-          payload: {
-            id: saleId,
-            items: [{ variantId, qty: 2, price: 35000 }],
-            total: 70000,
-          },
-        },
-        db
-      );
+      // recordPosSaleDeductions atomically queues the StockAdjustment mutation.
+      // Do not create a second Sale outbox entry in this transport drill: the
+      // authoritative server sale path generates the stock ledger, while the
+      // local inventory mutation is already represented by the StockAdjustment outbox.
     }
 
-    // Each offline sale produces a Sale operation and its StockAdjustment operation.
+    // Verify one durable StockAdjustment outbox item per offline sale
     const pendingItems = await db.outbox.where("status").equals("PENDING").toArray();
-    expect(pendingItems.length).toBe(10);
-    expect(pendingItems.filter((item) => item.entityType === "Sale").length).toBe(5);
-    expect(pendingItems.filter((item) => item.entityType === "StockAdjustment").length).toBe(5);
+    expect(pendingItems.length).toBe(5);
 
     // Verify local inventory shows 100 - (5 * 2) = 90
     expect(db.productVariants.get(variantId)?.inventoryQuantity).toBe(90);
@@ -126,14 +116,14 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(failResult.failed).toBe(10);
+    expect(failResult.failed).toBe(5);
     expect(failResult.succeeded).toBe(0);
-    // 10 outbox operations * 3 retries each = 30 attempts.
-    expect(attemptsCount).toBe(30);
+    // 5 items * 3 retries each = 15 attempts
+    expect(attemptsCount).toBe(15);
 
     // Assert that errors were persisted and items marked FAILED with error messages
     const failedItems = db.getFailedOutbox();
-    expect(failedItems.length).toBe(10);
+    expect(failedItems.length).toBe(5);
     for (const item of failedItems) {
       expect(item.status).toBe("FAILED");
       const errReason = db.syncMetadata.get(`error_${item.id}`);
@@ -144,7 +134,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     for (const item of failedItems) {
       db.retryOutbox(item.id);
     }
-    expect(db.getPendingOutbox().length).toBe(10);
+    expect(db.getPendingOutbox().length).toBe(5);
 
     // 4. Simulate network recovery and successful outbox processing
     const successfulPush = vi.fn().mockResolvedValue({ success: true });
@@ -156,7 +146,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(successResult.succeeded).toBe(10);
+    expect(successResult.succeeded).toBe(5);
     expect(successResult.failed).toBe(0);
     expect(db.getPendingOutbox().length).toBe(0);
 
@@ -183,7 +173,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
 
     // 6. Verify ledger integrity: 5 distinct sale entries exist totaling -10
     const ledgerEntries = Array.from(db.stockLedger.values()).filter(
-      (entry) => entry.variantId === variantId && (entry as any).movementType === "SALE"
+      (entry) => entry.variantId === variantId && entry.movementType === "SALE"
     );
     expect(ledgerEntries.length).toBe(5);
     const totalDeducted = ledgerEntries.reduce(

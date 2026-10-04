@@ -18,11 +18,38 @@ const suspicious = [
 ];
 const intentionalFixturePath = /(^|\\)(tests|scripts[\\/]certification|scripts[\\/]retired-certification)[\\/]/i;
 const provenanceEnforcementPath = /scripts[\\/]release[\\/]releaseIdentity\.ts$/i;
+const retiredArtifactPath = /scripts[\\/]retired-certification[\\/].*\.disabled$/i;
 
 function actionableSuspiciousMatches(relative: string, matches: string[]) {
   if (!matches.length) return matches;
-  if (intentionalFixturePath.test(relative) || provenanceEnforcementPath.test(relative)) return [];
+  if (intentionalFixturePath.test(relative) || provenanceEnforcementPath.test(relative) || retiredArtifactPath.test(relative)) return [];
   return matches;
+}
+
+function decodeText(bytes: Buffer): { text: string; encoding: string } {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return { text: bytes.toString("utf16le"), encoding: "utf16le" };
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    const swapped = Buffer.alloc(bytes.length - 2);
+    for (let i = 2; i + 1 < bytes.length; i += 2) {
+      swapped[i - 2] = bytes[i + 1];
+      swapped[i - 1] = bytes[i];
+    }
+    return { text: swapped.toString("utf16le"), encoding: "utf16be" };
+  }
+  // Windows tooling can emit UTF-16LE text without a BOM. Detect the characteristic
+  // alternating NUL-byte pattern so the scanner does not mistake encoding bytes for
+  // control characters in otherwise valid SQL/configuration text.
+  const sample = bytes.subarray(0, Math.min(bytes.length, 1024));
+  let oddNuls = 0;
+  let evenNuls = 0;
+  for (let i = 0; i < sample.length; i += 2) if (sample[i] === 0) evenNuls++;
+  for (let i = 1; i < sample.length; i += 2) if (sample[i] === 0) oddNuls++;
+  if (oddNuls > 16 && oddNuls > evenNuls * 4) {
+    return { text: bytes.toString("utf16le"), encoding: "utf16le-no-bom" };
+  }
+  return { text: bytes.toString("utf8"), encoding: "utf8" };
 }
 
 function gitFiles(): string[] {
@@ -34,7 +61,8 @@ function scanFile(relative: string) {
   const absolute = path.resolve(root, relative);
   const bytes = fs.readFileSync(absolute);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const text = bytes.toString("utf8");
+  const decoded = decodeText(bytes);
+  const text = decoded.text;
   const isText = textExt.test(relative);
   let parseStatus: "NOT_APPLICABLE" | "PASS" | "FAIL" = "NOT_APPLICABLE";
   let parseError = "";
@@ -51,7 +79,7 @@ function scanFile(relative: string) {
   const lines = text.split(/\r?\n/).length;
   const controlChars = isText && /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text);
   const suspiciousMatches = actionableSuspiciousMatches(relative, suspicious.filter(rx => rx.test(text)).map(String));
-  return { relative, sha256, lines, isText, parseStatus, parseError, controlChars, suspiciousMatches };
+  return { relative, sha256, lines, isText, encoding: decoded.encoding, parseStatus, parseError, controlChars, suspiciousMatches };
 }
 
 export function runRepositoryForensicIntegrityCertification() {

@@ -23,7 +23,7 @@ import { createHash } from "crypto";
 import { execFileSync } from "child_process";
 import { tenantStoreCleanupService } from "../../apps/web/src/services/tenantStoreCleanupService.js";
 import { productionCleanupService } from "../../apps/web/src/services/productionCleanupService.js";
-import { runRepositoryForensicIntegrityCertification } from "./repository-forensic-integrity.js";
+import { runRepositoryForensicIntegrityCertification } from "../certification/repository-forensic-integrity.js";
 
 export interface CleanlinessPillar {
   pillarId: string;
@@ -214,29 +214,12 @@ export async function runProductionCleanlinessCertification(): Promise<{
   );
 
   // 10. CLN-10: Forensic Source Cleanliness & Control Character Elimination
-  const forensicEvidencePath = path.resolve(process.cwd(), "artifacts/release-evidence/kwakopos-repository-forensic-integrity.json");
   let forensicPassed = false;
   try {
     const forensicData = runRepositoryForensicIntegrityCertification();
-    forensicPassed = forensicData.verdict === "PASS" && forensicData.files?.parseFailures === 0;
-  } catch {}
-  if (!forensicPassed && fs.existsSync(forensicEvidencePath)) {
-    try {
-      const forensicData = JSON.parse(fs.readFileSync(forensicEvidencePath, "utf8"));
-      forensicPassed =
-        forensicData.verdict === "PASS" &&
-        forensicData.files?.parseFailures === 0 &&
-        forensicData.files?.controlFailures === 0 &&
-        forensicData.files?.suspiciousFiles === 0;
-      if (!forensicPassed) {
-        console.log("[CLN-10 FORENSIC DIAGNOSTICS]", JSON.stringify({
-          files: forensicData.files,
-          failures: forensicData.failures,
-        }));
-      }
-    } catch (error) {
-      console.log("[CLN-10 FORENSIC READ FAILURE]", String(error));
-    }
+    forensicPassed = forensicData.verdict === "PASS" && forensicData.files?.parseFailures === 0 && forensicData.files?.controlFailures === 0;
+  } catch {
+    forensicPassed = false;
   }
   addPillar(
     "CLN-10",

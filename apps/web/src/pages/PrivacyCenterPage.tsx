@@ -14,7 +14,7 @@ import {
   Eye,
   Key,
 } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 interface DsrItem {
   id: string;

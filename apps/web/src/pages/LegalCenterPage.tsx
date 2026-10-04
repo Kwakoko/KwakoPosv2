@@ -16,7 +16,7 @@ import {
   Code2,
   Cookie,
 } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 interface LegalDocListItem {
   id: string;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, X, ShieldAlert, Layers } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 export interface SyncConflictItem {
   id: string;
@@ -196,7 +196,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
           </div>
           <button
             type="button"
-            aria-label="Close sync conflict dialog"
+            aria-label="Close sync conflict resolution dialog"
             title="Close"
             onClick={onClose}
             style={{
