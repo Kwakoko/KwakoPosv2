@@ -7,7 +7,7 @@ export function validateCommitMessage(message: string): { isValid: boolean; erro
   }
 
   const firstLine = message.trim().split("\n")[0];
-  if (firstLine.startsWith("Merge pull request ") || firstLine.startsWith("Merge branch ")) {
+  if (firstLine.startsWith("Merge ")) {
     return { isValid: true, commit: { type: "chore", scope: "merge", isBreaking: false, subject: firstLine, rawMessage: message.trim() } };
   }
   const parsed = parseConventionalCommit(message);
