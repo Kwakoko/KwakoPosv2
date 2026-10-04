@@ -1,7 +1,7 @@
 // Single production API entrypoint.
 import { pathToFileURL } from "url";
 
-const entrypoint = "apps/api/dist/apps/api/src/server.js";
+const entrypoint = "apps/api/dist/server.js";
 const moduleUrl = pathToFileURL(entrypoint).href;
 
 console.log(`Starting KwakoPos 2.0 API from entrypoint: ${entrypoint}`);
