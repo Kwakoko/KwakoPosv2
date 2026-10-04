@@ -1580,6 +1580,7 @@ export class LocalIndexedDbStore {
     const payments = Array.isArray((snapshot as any).payments) ? (snapshot as any).payments : [];
     const purchaseReceipts = Array.isArray((snapshot as any).purchaseReceipts) ? (snapshot as any).purchaseReceipts : [];
     const expenses = Array.isArray((snapshot as any).expenses) ? (snapshot as any).expenses : [];
+    const settings = Array.isArray((snapshot as any).settings) ? (snapshot as any).settings : [];
 
     const tenantId = String(ctx?.tenantId || (snapshot as any).tenantId || products[0]?.tenantId || "");
     const branchId = String(ctx?.branchId || (snapshot as any).branchId || products[0]?.branchId || "branch-default");
@@ -1614,6 +1615,19 @@ export class LocalIndexedDbStore {
     for (const row of (Array.isArray(expenses) ? expenses : [])) if (!protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
     for (const row of (Array.isArray(localExpenses) ? localExpenses : [])) if (protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
     const expenseValue = { key: "expenses", value: Array.from(mergedExpenses.values()), tenantId, branchId, updatedAt: snapshot.snapshotTimestamp };
+    const settingValues = (Array.isArray(settings) ? settings : [])
+      .filter((row: any) => row && row.tenantId === tenantId && row.isActive !== false && (!row.branchId || row.branchId === branchId))
+      .map((row: any) => ({
+        key: String(row.key || ""),
+        value: row.value,
+        tenantId,
+        branchId,
+        scope: row.scope || "BRANCH",
+        settingId: row.id,
+        version: Number(row.version || 1),
+        updatedAt: row.updatedAt || snapshot.snapshotTimestamp,
+      }))
+      .filter((row: any) => row.key);
 
     if (!this.nativeDb) {
       for (const store of replaceStores) {
@@ -1649,6 +1663,7 @@ export class LocalIndexedDbStore {
     if (!pendingCatalogTypes.has("Category")) configStore.put(toIndexedDbCloneable(categoryValue), tenantId + ":" + branchId + ":inventory_categories_meta");
     if (!pendingCatalogTypes.has("Brand")) configStore.put(toIndexedDbCloneable(brandValue), tenantId + ":" + branchId + ":inventory_brands_meta");
     configStore.put(toIndexedDbCloneable(expenseValue), tenantId + ":" + branchId + ":expenses");
+    for (const setting of settingValues) configStore.put(toIndexedDbCloneable(setting), tenantId + ":" + branchId + ":" + setting.key);
     const md = tx.objectStore("syncMetadata");
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastSyncTime"));
     md.put(snapshot.snapshotTimestamp, this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"));
