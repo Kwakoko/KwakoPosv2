@@ -661,9 +661,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             timestamp: new Date(s.createdAt || s.soldAt || s.timestamp || Date.now()).getTime(),
             total: Number(s.totalAmount || s.grandTotal || s.total || 0),
             status: s.status || 'Completed',
-            paymentMethod: s.paymentMethod || s.method || 'Cash',
+            paymentMethod: s.payments?.length > 1 ? 'Split' : (s.paymentMethod || s.method || s.payments?.[0]?.paymentMethod || 'Cash'),
             syncStatus: 'Synced',
-            cashierName: s.cashierName || s.cashier || s.user || 'Cashier',
+            cashierName: s.cashierName || s.cashier || s.user || s.soldById || 'Cashier',
             module: s.module,
             branch_id: s.branchId || s.branch_id,
             items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : Array.isArray(s.lines) ? s.lines : []).map((it: any) => ({
@@ -680,7 +680,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       }
 
       // Merge local sales from db.sales (IndexedDB local store)
-      if (db.sales) {
+      if (!isOnline && db.sales) {
         for (const s of db.sales.values()) {
           const sAny = s as any;
           if (!hasStrictScope(sAny)) continue;
@@ -720,7 +720,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
       // Pending sales are operational-only and must remain exact-scope.
       // They are never included in authoritative online KPI calculations.
-      if (db.syncOutbox) {
+      if (!isOnline && db.syncOutbox) {
         for (const item of db.syncOutbox.values()) {
           if (item.entityType === 'Sale' && outboxMatchesScope(item, tenantId, branchId)) {
             const p = (item.payload || {}) as any;
@@ -763,7 +763,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       setProductVariants(localVariants);
       setCustomers(localCusts);
       setSuppliers(localSupps);
-      setOrders(parsedOrders.sort((a, b) => a.timestamp - b.timestamp));
+      setOrders(parsedOrders.sort((a, b) => b.timestamp - a.timestamp));
     } catch {
       // Graceful fallback
     }
@@ -1233,7 +1233,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       // Tab 5: "5. AUDITED RECENT ORDERS"
       const ws5Data: any[][] = [
         ['Order Ref / Receipt', 'Date & Time', 'Customer Name', 'Serving Cashier', 'Items Count', 'Grand Total (Tsh)', 'Payment Channel', 'Sync Status', 'Audit Status'],
-        ...orders.slice(-50).reverse().map(o => [
+        ...orders.slice(0, 50).map(o => [
           o.saleNumber || o.id,
           new Date(o.timestamp).toLocaleString(),
           o.customer || 'Walk-In Customer',
@@ -2809,7 +2809,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                       </td>
                     </tr>
                   ) : (
-                    orders.slice(-6).reverse().map(order => {
+                    orders.slice(0, 6).map(order => {
                       const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
                       const tender = getTenderBadge(order.paymentMethod);
                       const TenderIcon = tender.Icon;
