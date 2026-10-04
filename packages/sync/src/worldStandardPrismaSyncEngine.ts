@@ -7,6 +7,18 @@ import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
 
 const MAX_DELTA = 500;
 
+function expenseShape(row: any): any {
+  return {
+    ...row,
+    amount: Number(row.amount ?? 0),
+    incurredAt: row.incurredAt instanceof Date ? row.incurredAt.toISOString() : row.incurredAt,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+    updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    paidAt: row.paidAt instanceof Date ? row.paidAt.toISOString() : row.paidAt,
+    voidedAt: row.voidedAt instanceof Date ? row.voidedAt.toISOString() : row.voidedAt,
+  };
+}
+
 type JournalRow = {
   revision: bigint;
   tenant_id: string;
@@ -158,6 +170,7 @@ export class WorldStandardPrismaSyncEngine {
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
+      case "Expense": record = await tx.expense.findUnique({ where: { id: entityId } }); break;
       default: return null;
     }
     if (!record) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
@@ -199,6 +212,7 @@ export class WorldStandardPrismaSyncEngine {
         case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
+        case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
         default: return op.payload;
       }
     } catch {
@@ -265,17 +279,17 @@ export class WorldStandardPrismaSyncEngine {
   private async reconcileJournal(ctx: TenantContext): Promise<void> {
     await this.ensureInfrastructure();
     const rows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
-      `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
-              so."operationType" AS "operationType", so.payload
+      `SELECT so.operation_id AS "operationId", so.entity_type AS "entityType", so.entity_id AS "entityId",
+              so.operation_type AS "operationType", so.payload
          FROM sync_operations so
-        WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
+        WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
-             WHERE cj.tenant_id = so."tenantId"
-               AND cj.branch_id = so."branchId"
-               AND cj.operation_id = so."operationId"
+             WHERE cj.tenant_id = so.tenant_id
+               AND cj.branch_id = so.branch_id
+               AND cj.operation_id = so.operation_id
           )
-        ORDER BY so."createdAt" ASC LIMIT 1000`,
+        ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
     );
     for (const row of rows) {
@@ -293,19 +307,19 @@ export class WorldStandardPrismaSyncEngine {
     }
 
     const generatedLedgerRows = await prisma.$queryRawUnsafe<Array<{ operationId: string; entityType: string; entityId: string; operationType: string; payload: unknown }>>(
-      `SELECT so."operationId" AS "operationId", so."entityType" AS "entityType", so."entityId" AS "entityId",
-              so."operationType" AS "operationType", so.payload
+      `SELECT so.operation_id AS "operationId", so.entity_type AS "entityType", so.entity_id AS "entityId",
+              so.operation_type AS "operationType", so.payload
          FROM sync_operations so
-        WHERE so."tenantId" = $1 AND so."branchId" = $2 AND so.status = 'PROCESSED'
-          AND so."operationType" = 'CREATE'
-          AND so."entityType" IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
+        WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
+          AND so.operation_type = 'CREATE'
+          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
-             WHERE cj.tenant_id = so."tenantId"
-               AND cj.branch_id = so."branchId"
-               AND cj.operation_id LIKE so."operationId" || ':ledger:%'
+             WHERE cj.tenant_id = so.tenant_id
+               AND cj.branch_id = so.branch_id
+               AND cj.operation_id LIKE so.operation_id || ':ledger:%'
           )
-        ORDER BY so."createdAt" ASC LIMIT 1000`,
+        ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
     );
     for (const row of generatedLedgerRows) {
@@ -739,6 +753,67 @@ const now = new Date();
       return;
     }
 
+    if (op.entityType === "Expense" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      if (op.operationType === "DELETE") throw new Error("EXPENSE_DELETE_FORBIDDEN: use governed Expense void/reversal");
+
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const existing = await tx.expense.findUnique({ where: { id: op.entityId } });
+      const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
+
+      if (op.operationType === "CREATE") {
+        if (existing) {
+          if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+          return;
+        }
+        await financeTx.recordExpense(ctx, {
+          ...payload, id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (!existing) {
+        throw new Error("EXPENSE_NOT_FOUND");
+      }
+      if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: expense changed on server");
+
+      if (payload.status === "VOIDED") {
+        await financeTx.voidExpense(ctx, op.entityId, String(payload.voidReason || payload.reason || "Voided from synchronized client mutation"), {
+          deviceId: req.deviceId, idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (payload.status === "PAID" && existing.status !== "PAID") {
+        await financeTx.payExpense(ctx, op.entityId, {
+          paymentMethod: payload.paymentMethod || existing.paymentMethod || "CASH",
+          paymentRef: payload.paymentRef,
+          cashSessionId: payload.cashSessionId || existing.cashSessionId || undefined,
+          deviceId: req.deviceId,
+          idempotencyKey: op.idempotencyKey,
+        });
+        return;
+      }
+
+      if (existing.status !== "PENDING") throw new Error("EXPENSE_INVALID_STATE_TRANSITION");
+      await tx.expense.update({
+        where: { id: op.entityId },
+        data: {
+          category: payload.category,
+          reason: payload.reason,
+          description: payload.description,
+          payee: payload.payee,
+          paymentMethod: payload.paymentMethod || existing.paymentMethod,
+          paymentRef: payload.paymentRef !== undefined ? payload.paymentRef : existing.paymentRef,
+          taxDeductible: payload.taxDeductible !== undefined ? Boolean(payload.taxDeductible) : existing.taxDeductible,
+          incurredAt: payload.incurredAt ? new Date(payload.incurredAt) : undefined,
+        },
+      });
+      return;
+    }
+
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
       if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
@@ -1032,6 +1107,8 @@ const now = new Date();
     compareIds("Product", serverProducts.map((row: any) => row.id), manifest.productIds || []);
     compareIds("ProductVariant", serverVariants.map((row: any) => row.id), manifest.variantIds || []);
     compareIds("StockLedger", serverLedger.map((row: any) => row.id), manifest.ledgerIds || []);
+    const serverExpenses = await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true } });
+    compareIds("Expense", serverExpenses.map((row: any) => row.id), manifest.expenseIds || []);
 
     const serverBalances = new Map<string, number>();
     for (const row of serverLedger) {
@@ -1066,6 +1143,7 @@ const now = new Date();
       products: serverProducts.length,
       variants: serverVariants.length,
       stockLedger: serverLedger.length,
+      expenses: serverExpenses.length,
     };
       const serverRevision = await this.latestRevision(ctx, tx);
 
@@ -1113,7 +1191,8 @@ const now = new Date();
       const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
       const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories };
+      const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1170,6 +1249,7 @@ const now = new Date();
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      expenses: (await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } })).map(expenseShape),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
   }

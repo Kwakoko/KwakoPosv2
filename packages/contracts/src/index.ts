@@ -1066,27 +1066,69 @@ export const CloseCashSessionRequestSchema = z.object({
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;
 
+export const ExpensePaymentMethodEnum = z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD"]);
+export type ExpensePaymentMethod = z.infer<typeof ExpensePaymentMethodEnum>;
+
+export const ExpenseStatusEnum = z.enum(["PENDING", "PAID", "VOIDED"]);
+export type ExpenseStatus = z.infer<typeof ExpenseStatusEnum>;
+
 export const ExpenseSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
   cashSessionId: z.string().uuid().nullable().optional(),
-  category: z.string(),
+  category: z.string().min(1),
   amount: z.number().positive(),
-  reason: z.string(),
+  reason: z.string().min(1),
+  description: z.string().min(1),
+  payee: z.string().min(1),
+  paymentMethod: ExpensePaymentMethodEnum.default("CASH"),
+  paymentRef: z.string().nullable().optional(),
+  status: ExpenseStatusEnum.default("PAID"),
+  taxDeductible: z.boolean().default(false),
   authorizedById: z.string().uuid().nullable().optional(),
+  paidById: z.string().uuid().nullable().optional(),
+  paidAt: z.string().or(z.date()).nullable().optional(),
+  voidedById: z.string().uuid().nullable().optional(),
+  voidedAt: z.string().or(z.date()).nullable().optional(),
+  voidReason: z.string().nullable().optional(),
+  idempotencyKey: z.string().min(1),
   incurredAt: z.string().or(z.date()),
   createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
 });
 export type Expense = z.infer<typeof ExpenseSchema>;
 
 export const CreateExpenseRequestSchema = z.object({
+  id: z.string().uuid().optional(),
   cashSessionId: z.string().uuid().optional(),
   category: z.string().min(1),
   amount: z.number().positive(),
   reason: z.string().min(1),
+  description: z.string().min(1).optional(),
+  payee: z.string().min(1).optional(),
+  paymentMethod: ExpensePaymentMethodEnum.default("CASH"),
+  paymentRef: z.string().trim().min(1).optional(),
+  status: z.enum(["PENDING", "PAID"]).default("PAID"),
+  taxDeductible: z.boolean().default(false),
+  incurredAt: z.string().datetime().optional(),
+  idempotencyKey: z.string().min(1).optional(),
 });
 export type CreateExpenseRequest = z.infer<typeof CreateExpenseRequestSchema>;
+
+export const PayExpenseRequestSchema = z.object({
+  paymentMethod: ExpensePaymentMethodEnum.default("CASH"),
+  paymentRef: z.string().trim().max(200).optional(),
+  cashSessionId: z.string().uuid().optional(),
+  idempotencyKey: z.string().min(1).optional(),
+});
+export type PayExpenseRequest = z.infer<typeof PayExpenseRequestSchema>;
+
+export const VoidExpenseRequestSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  idempotencyKey: z.string().min(1).optional(),
+});
+export type VoidExpenseRequest = z.infer<typeof VoidExpenseRequestSchema>;
 
 // ==========================================
 // Commercial Reports & Executive Dashboard
@@ -1233,6 +1275,7 @@ export const SyncDeltaResponseSchema = z.object({
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
   sales: z.array(z.record(z.unknown())).optional(),
   payments: z.array(z.record(z.unknown())).optional(),
+  expenses: z.array(ExpenseSchema).optional(),
   purchaseReceipts: z.array(z.record(z.unknown())).optional(),
   settings: z.array(z.record(z.unknown())).optional(),
   integrityChecksum: z.string().optional(),
@@ -1270,6 +1313,7 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
+  expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1286,6 +1330,7 @@ export const SyncStateManifestSchema = z.object({
   productIds: z.array(z.string()).optional(),
   variantIds: z.array(z.string()).optional(),
   ledgerIds: z.array(z.string()).optional(),
+  expenseIds: z.array(z.string()).optional(),
   stockBalances: z.record(z.number()).optional(),
 });
 export type SyncStateManifest = z.infer<typeof SyncStateManifestSchema>;

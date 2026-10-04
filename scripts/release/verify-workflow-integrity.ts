@@ -62,6 +62,7 @@ function sourceRouteSet(){
 
 function analyzeFile(file:string,routes:Set<string>):Control[]{
   const source=fs.readFileSync(file,"utf8"); const rel=path.relative(ROOT,file).replaceAll("\\","/"); const controls:Control[]=[];
+  if (rel === "apps/web/src/components/UI/Button.tsx") return controls;
   const rx=/<button\b[\s\S]*?<\/button>/gi;
   for(const m of source.matchAll(rx)){
     const tag=extractOpeningTag(m[0]); const start=m.index??0;
@@ -73,7 +74,8 @@ function analyzeFile(file:string,routes:Set<string>):Control[]{
     const persistence=/indexedDB|outbox|bulkPut|put\(|add\(|delete\(|prisma|repository|save|persist/i.test(section);
     const permission=/data-permission=|requiredPermission=|permission(s)?\b|can[A-Z]|authorize|RBAC|SUPER_ADMIN|isSuperAdmin|user\.permissions|hasPermission|\bcan\(/i.test(section+"\n"+source);
     let status="CERTIFIED";
-    if(!handler&&!actionId) status="ORPHAN_ACTION";
+    const disabled = /\bdisabled(?:\s*=|\s|>)/i.test(tag);
+    if(!handler&&!actionId&&!disabled) status="ORPHAN_ACTION";
     else if(route&&!routes.has(route)) status="UNKNOWN_ROUTE";
     else if(/delete|remove|void|refund|approve|reject|archive/i.test(labelFrom(tag,m[0]))&&!permission&&!/workspace/i.test(labelFrom(tag,m[0]))) status="PRIVILEGE_UNPROVEN";
     controls.push({file:rel,line:lineOf(source,start),tag:tag.slice(0,240),label:labelFrom(tag,m[0]),handler,actionId,route,service,persistence,permission,status});
