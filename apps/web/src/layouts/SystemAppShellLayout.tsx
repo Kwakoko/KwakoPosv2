@@ -45,7 +45,7 @@ import {
   type IndustrySector,
   type IndustrySortOption,
 } from "../utils/mobileFormatters.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
 import { ImpersonationModal } from "../components/ImpersonationModal.js";
 import { KeyboardShortcutsModal } from "../components/UI/KeyboardShortcutsModal.js";

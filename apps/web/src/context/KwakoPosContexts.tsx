@@ -107,7 +107,8 @@ const DEFAULT_AUTH_CONTEXT: AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 export const useAuth = (): AuthContextType => {
   const ctx = useContext(AuthContext);
-  return ctx || DEFAULT_AUTH_CONTEXT;
+  if (!ctx) throw new Error("AUTH_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface TenantContextType {
@@ -131,7 +132,8 @@ const DEFAULT_TENANT_CONTEXT: TenantContextType = {
 const TenantContext = createContext<TenantContextType | null>(null);
 export const useTenant = (): TenantContextType => {
   const ctx = useContext(TenantContext);
-  return ctx || DEFAULT_TENANT_CONTEXT;
+  if (!ctx) throw new Error("TENANT_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface BranchContextType {
@@ -153,7 +155,8 @@ const DEFAULT_BRANCH_CONTEXT: BranchContextType = {
 const BranchContext = createContext<BranchContextType | null>(null);
 export const useBranch = (): BranchContextType => {
   const ctx = useContext(BranchContext);
-  return ctx || DEFAULT_BRANCH_CONTEXT;
+  if (!ctx) throw new Error("BRANCH_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface RbacContextType {
@@ -173,7 +176,8 @@ const DEFAULT_RBAC_CONTEXT: RbacContextType = {
 const RbacContext = createContext<RbacContextType | null>(null);
 export const useRbac = (): RbacContextType => {
   const ctx = useContext(RbacContext);
-  return ctx || DEFAULT_RBAC_CONTEXT;
+  if (!ctx) throw new Error("RBAC_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 export interface ModuleContextType {
@@ -221,7 +225,8 @@ const DEFAULT_MODULE_CONTEXT: ModuleContextType = {
 const ModuleContext = createContext<ModuleContextType | null>(null);
 export const useModule = (): ModuleContextType => {
   const ctx = useContext(ModuleContext);
-  return ctx || DEFAULT_MODULE_CONTEXT;
+  if (!ctx) throw new Error("MODULE_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface SyncContextType {
@@ -274,7 +279,8 @@ const DEFAULT_SYNC_CONTEXT: SyncContextType = {
 const SyncContext = createContext<SyncContextType | null>(null);
 export const useSync = (): SyncContextType => {
   const ctx = useContext(SyncContext);
-  return ctx || DEFAULT_SYNC_CONTEXT;
+  if (!ctx) throw new Error("SYNC_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface ThemeContextType {
@@ -892,7 +898,13 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         try {
           if (typeof window !== "undefined" && "BroadcastChannel" in window) {
             const bc = new BroadcastChannel("kwakopos_sync_channel");
-            bc.postMessage({ type: "SYNC_CONVERGED", ...result, timestamp: Date.now() });
+            bc.postMessage({
+              type: "SYNC_CONVERGED",
+              tenantId: targetTenantId,
+              branchId: targetBranchId,
+              ...result,
+              timestamp: Date.now(),
+            });
             bc.close();
           }
         } catch {
@@ -1013,6 +1025,17 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     bc.onmessage = (event) => {
       const data = event.data;
       if (!data) return;
+      const activeTenantId = user?.tenantId || currentTenantId || null;
+      const activeBranchId = user?.branchId || currentBranchId || null;
+      const messageTenantId = data.tenantId ? String(data.tenantId) : null;
+      const messageBranchId = data.branchId ? String(data.branchId) : null;
+      if (
+        (messageTenantId && activeTenantId && messageTenantId !== activeTenantId) ||
+        (messageBranchId && activeBranchId && messageBranchId !== activeBranchId)
+      ) {
+        return;
+      }
+
       if (data.type === "OUTBOX_MUTATION") {
         void db.refreshStoresFromNative([
           "syncOutbox", "sales", "products", "productVariants", "stockLedger",

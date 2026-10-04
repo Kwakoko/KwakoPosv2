@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>): React.ComponentType<any> =>
   lazy(loader) as React.ComponentType<any>;
 import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts.js";
-import { apiFetch, getStoredSession } from "./services/apiClient.js";
+import { apiFetch, getStoredSession } from "./services/applicationApiService.js";
 import { WindowManagerProvider } from "./context/WindowManagerContext.js";
 import { ToastProvider } from "./components/UI/Toast.js";
 import { ProductionErrorBoundary } from "./components/UI/ProductionErrorBoundary.js";

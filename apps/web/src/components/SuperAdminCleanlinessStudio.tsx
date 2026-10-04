@@ -33,7 +33,7 @@ import {
   ReadinessChecklist,
   IntegrityCheckResult,
 } from "../services/productionCleanupService.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 export const SuperAdminCleanlinessStudio: React.FC = () => {
   const { db } = useSync();

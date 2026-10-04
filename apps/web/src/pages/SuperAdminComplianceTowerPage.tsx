@@ -15,7 +15,7 @@ import {
   Eye,
   FileText,
 } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 interface GovernanceTowerOverview {
   totalDocuments: number;

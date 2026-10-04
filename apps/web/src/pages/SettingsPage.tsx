@@ -28,7 +28,7 @@ import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
 import { SUPPORTED_LOCALES, SupportedLocale } from "../i18n/types.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { ToggleSwitch } from "../components/UI/ToggleSwitch.js";
 import { TraVfdFiscalizationCard, TraVfdCardConfig } from "../components/TRA/TraVfdFiscalizationCard.js";
 import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";

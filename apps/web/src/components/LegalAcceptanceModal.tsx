@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ShieldCheck, Lock, CheckCircle2, AlertTriangle, FileText, ChevronRight } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 interface PendingDoc {
   documentId: string;

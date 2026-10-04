@@ -32,7 +32,7 @@ import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGenerat
 import { Sheet } from "../components/UI/Sheet.js";
 import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistrationWizardModal.js";
 import { NumberStepper } from "../components/UI/NumberStepper.js";
-import { safeUUID } from "../services/apiClient.js";
+import { safeUUID } from "../services/applicationApiService.js";
 import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";

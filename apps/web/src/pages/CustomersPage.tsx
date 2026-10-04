@@ -4,7 +4,7 @@ import {
   UserPlus, Sparkles, Plus, AlertCircle, CheckCircle, Wallet, Shield, RefreshCw
 } from "lucide-react";
 import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";

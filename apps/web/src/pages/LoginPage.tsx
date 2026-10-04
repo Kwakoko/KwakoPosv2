@@ -15,7 +15,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import "../auth.css";
-import { login, SuperAdminSetupRequiredError, MfaRequiredError } from "../services/apiClient.js";
+import { login, SuperAdminSetupRequiredError, MfaRequiredError } from "../services/applicationApiService.js";
 import { SuperAdminSetupModal } from "../components/SuperAdminSetupModal.js";
 import { useTranslation, useAuth } from "../context/KwakoPosContexts.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
