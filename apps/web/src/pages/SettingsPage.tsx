@@ -1,7 +1,7 @@
 /**
  * KwakoPosv2 — System Settings & Enterprise Configuration
  * ─────────────────────────────────────────────────────────────────────────────
- * Complete 10-tab enterprise settings command center:
+ * Complete 12-tab enterprise settings command center:
  *   1. Business Profile (TIN, VRN, Legal Name, Address, Fiscal Info)
  *   2. Language & Localization (English, French, Kiswahili live selection & format preview)
  *   3. POS Counter Settings (Printers, barcode scanners, cash drawer kick)
@@ -644,6 +644,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabTax")}</div></div>
           <div className="v2-space-y-4">
+            <div className="v2-flex v2-items-center v2-justify-between v2-py-2" style={{ borderBottom: "1px solid var(--surface-border)" }}>
+              <div>
+                <div className="v2-font-bold v2-text-sm">Enable VAT Calculation</div>
+                <div className="v2-text-xs v2-text-muted">Apply the configured VAT rate to taxable POS transactions.</div>
+              </div>
+              <input type="checkbox" checked={taxConfig.vatEnabled} onChange={(e) => setTaxConfig({ ...taxConfig, vatEnabled: e.target.checked })} />
+            </div>
             <div className="v2-grid v2-grid-3 v2-gap-4">
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.vatRate")}</label>
