@@ -23,7 +23,6 @@ describe("Settings P0/P1 closed-loop certification", () => {
 
   afterAll(async () => {
     if (!enabled) return;
-    await prisma.auditEvent.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
     await prisma.setting.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
     await prisma.syncOperation.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
     await prisma.branch.deleteMany({ where: { id: { in: [branchA, branchB] } } });
@@ -108,7 +107,7 @@ describe("Settings P0/P1 closed-loop certification", () => {
     if (!enabled) return;
     const engine = new WorldStandardPrismaSyncEngine(new PrismaProductRepository(), new PrismaStockRepository());
     const ctx: any = { tenantId: tenantA, branchId: branchA, userId: userA, roles: ["CASHIER"], permissions: [] };
-    await expect(engine.processPush(ctx, {
+    const denied: any = await engine.processPush(ctx, {
       deviceId: "settings-cashier",
       operations: [{
         operationId: randomUUID(),
@@ -119,6 +118,8 @@ describe("Settings P0/P1 closed-loop certification", () => {
         payload: { key: "tax.config", scope: "BRANCH", branchId: branchA, value: { vatRatePercent: 5 } },
         clientCreatedAt: new Date().toISOString(),
       }],
-    } as any)).rejects.toThrow("SETTINGS_MANAGE_REQUIRED");
+    } as any);
+    expect(denied.results?.[0]?.status).toBe("FAILED");
+    expect(denied.results?.[0]?.error).toBe("SETTINGS_MANAGE_REQUIRED");
   });
 });
