@@ -326,6 +326,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   await pwaV3.flushPersistence();
   const preservedBeforeUpgrade = pwaV3.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
   pwaV3.close();
+  // Allow the IndexedDB close event loop to settle before issuing the versioned reopen.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   // Re-open the same physical database at the authoritative V6 schema. This exercises
   // the real IndexedDB onupgradeneeded migration path while avoiding the higher-level
@@ -335,12 +337,15 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   await pwaV6.refreshStoresFromNative(["syncOutbox", "syncMetadata"]);
   const preservedAfterUpgrade = pwaV6.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
   const passF = preservedBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
+  console.log(
+    ` [F-EVIDENCE] PWA V3->V6 outbox preservation: before=${preservedBeforeUpgrade}, after=${preservedAfterUpgrade}`,
+  );
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
     durationMs: Date.now() - startF,
     status: passF ? "PASS" : "FAIL",
-    evidence: { fromVersion: 3, toVersion: 6, preservedBeforeUpgrade: preservedBeforeUpgrade, preservedAfterUpgrade: preservedAfterUpgrade },
+    evidence: { fromVersion: 3, toVersion: 6, preservedBeforeUpgrade, preservedAfterUpgrade },
     timestamp: new Date().toISOString(),
   });
   console.log(` [F/L] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
