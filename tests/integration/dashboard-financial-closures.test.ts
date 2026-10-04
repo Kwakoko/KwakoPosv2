@@ -197,7 +197,6 @@ describe("Dashboard financial closures", () => {
       await prisma.customer.deleteMany({ where: { tenantId } });
       await prisma.account.deleteMany({ where: { tenantId } });
       await prisma.auditEvent.deleteMany({ where: { tenantId } });
-      await prisma.syncChangeJournal.deleteMany({ where: { tenantId } }).catch(() => undefined);
       await prisma.branch.deleteMany({ where: { tenantId } });
       await prisma.tenant.deleteMany({ where: { id: tenantId } });
     }
