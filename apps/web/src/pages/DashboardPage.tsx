@@ -534,6 +534,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   }, [tenantId, branchId]);
 
   // ── Load Operational Data (IndexedDB + API) ────────────────────────────────
+  // Online financial KPIs remain PostgreSQL-authoritative; IndexedDB is only for
+  // operational/offline continuity and must never override an authoritative KPI snapshot.
   const loadData = useCallback(async () => {
     try {
       await db.ready;
