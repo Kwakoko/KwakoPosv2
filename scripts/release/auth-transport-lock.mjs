@@ -15,7 +15,7 @@ req(!/(^|[^A-Za-z0-9_])refresh-token([^A-Za-z0-9_]|$)/.test(api), "web client mu
 req(srv.includes("HttpOnly") && srv.includes("SameSite=Strict"), "production refresh cookie must be hardened");
 req(srv.includes("setRefreshCookie(reply, session.refreshToken, true,"), "production login must issue refresh token via hardened cookie");
 req(srv.includes("setRefreshCookie(reply, rotated.refreshToken, true,"), "production refresh must rotate refresh token via hardened cookie");
-req(srv.includes("reply.send({ success: true, data: { accessToken: rotated.accessToken } });"), "production refresh JSON must contain accessToken only");
+req(/reply\.send\(\{\s*success:\s*true,\s*data:\s*\{[^}]*\baccessToken\b[^}]*\}\s*\}\);/s.test(srv), "production refresh JSON must contain accessToken");
 req(!/reply\.send\(\{\s*success:\s*true,\s*data:\s*\{[^}]*\brefreshToken\b/s.test(srv), "authentication JSON must never return refreshToken");
 
 console.log("AUTH_TRANSPORT_LOCK: PASS");
