@@ -43,7 +43,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const session: StoredSession = {
       sessionId: "sess-12345",
       accessToken: "token-abc",
-      refreshToken: "refresh-xyz",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
@@ -64,7 +63,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     expect(retrieved).not.toBeNull();
     expect(retrieved?.sessionId).toBe("sess-12345");
     expect(retrieved?.accessToken).toBe("token-abc");
-    expect(retrieved?.refreshToken).toBe("refresh-xyz");
     expect(retrieved?.user.name).toBe("Amina Cashier");
   });
 
@@ -78,7 +76,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const session: StoredSession = {
       sessionId: "sess-valid-jwt",
       accessToken: fakeJwt,
-      refreshToken: "refresh-xyz",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
