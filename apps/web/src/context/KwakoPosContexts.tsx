@@ -725,22 +725,32 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     };
   }, [db]);
 
-  const login = async (email: string, password: string, mfaCode?: string): Promise<AuthUser> => {
+  const login = async (email: string, password: string, mfaCode?: string, rememberMe = false): Promise<AuthUser> => {
     setAuthError(null);
-    const loggedIn = await apiLogin(email, password, mfaCode);
+    sessionTerminationRef.current = false;
+    const loggedIn = await apiLogin(email, password, mfaCode, rememberMe);
     const authUser: AuthUser = {
-      id: loggedIn.id,
-      name: loggedIn.name,
-      email: loggedIn.email,
-      role: loggedIn.role,
-      tenantId: loggedIn.tenantId,
-      branchId: loggedIn.branchId,
-      tenantName: loggedIn.tenantName,
-      tenantSlug: loggedIn.tenantSlug,
-      branchName: loggedIn.branchName,
-      branchCode: loggedIn.branchCode,
+      id: loggedIn.id, name: loggedIn.name, email: loggedIn.email, role: loggedIn.role,
+      tenantId: loggedIn.tenantId, branchId: loggedIn.branchId, tenantName: loggedIn.tenantName,
+      tenantSlug: loggedIn.tenantSlug, branchName: loggedIn.branchName, branchCode: loggedIn.branchCode,
     };
+    const stored = getStoredSession();
+    const expiry = stored?.session?.expiresAt ? Date.parse(stored.session.expiresAt) : NaN;
+    const refreshExpiry = stored?.session?.refreshTokenExpiresAt ? Date.parse(stored.session.refreshTokenExpiresAt) : NaN;
+    setSessionExpiresAt(Number.isFinite(expiry) ? expiry : Date.now() + DEFAULT_SESSION_POLICY.absoluteTimeoutMs);
+    setSessionRefreshTokenExpiresAt(Number.isFinite(refreshExpiry) ? refreshExpiry : null);
+    const now = Date.now();
+    setSessionLastActivityAt(now);
+    sessionLastActivityRef.current = now;
+    setOfflineExpiresAt(null);
+    setSessionStatus("AUTHENTICATED_ONLINE");
+    setSessionWarningOpen(false);
+    setSessionRedirectPath(null);
+    const drafts = restoreSessionDrafts(authUser.tenantId, authUser.id);
+    setRestoredDrafts(drafts);
+    window.dispatchEvent(new CustomEvent("kwakopos:session-restored", { detail: { drafts } }));
     setUser(authUser);
+    sessionSyncService.broadcast("SESSION_LOGIN", { sessionId: stored?.sessionId || null });
     try {
       await db.ready;
       await db.refreshStoresFromNative();
@@ -751,27 +761,88 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     return authUser;
   };
 
-  const logout = async () => {
-    try {
-      // 1. Guarantee all microtask persistence writes are committed to IndexedDB before session teardown
-      await db.flushPersistence().catch((err) => console.warn("Flush persistence on logout:", err));
-      // 2. Clear remote session
-      await apiLogout();
-    } catch (err) {
-      console.warn("apiLogout error:", err);
-    } finally {
-      setUser(null);
-      setImpersonatedTenant(null);
-      try {
-        sessionStorage.removeItem("kwakopos:v2:impersonation");
-        localStorage.removeItem("kwakopos:v2:active-module");
-        localStorage.removeItem("kwakopos:v2:active-tab");
-      } catch { /* ignore */ }
-      setActiveModuleState("Retail");
-      setActiveTabState("Dashboard");
-      setAuthError(null);
+  const terminateSession = useCallback(async (
+    reason: "SESSION_TIMEOUT" | "USER_LOGOUT" | "SESSION_REVOKED" | "SESSION_LOCKED",
+    broadcast = true,
+    redirectOnExpiry = reason === "SESSION_TIMEOUT",
+  ) => {
+    if (sessionTerminationRef.current) return;
+    sessionTerminationRef.current = true;
+    const currentUser = user;
+    const currentPath = typeof window !== "undefined"
+      ? window.location.pathname + window.location.search + window.location.hash
+      : "/";
+    if (currentUser) {
+      captureRegisteredDrafts(currentUser.tenantId, currentUser.id);
+      await db.flushPersistence().catch(() => {});
     }
-  };
+    if (broadcast) {
+      const event = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : reason === "SESSION_REVOKED" ? "SESSION_REVOKED" : reason === "SESSION_LOCKED" ? "SESSION_LOCKED" : "SESSION_LOGOUT";
+      sessionSyncService.broadcast(event, { sessionId: getStoredSession()?.sessionId || null });
+    }
+    if (reason === "USER_LOGOUT" || reason === "SESSION_TIMEOUT") {
+      await apiLogout(reason).catch(() => {});
+    }
+    setUser(null);
+    setSessionWarningOpen(false);
+    setSessionStatus(reason === "SESSION_TIMEOUT" ? "EXPIRED" : reason === "SESSION_REVOKED" ? "REVOKED" : reason === "SESSION_LOCKED" ? "OFFLINE_LOCKED" : "LOGGED_OUT");
+    if (redirectOnExpiry && currentPath !== "/login" && currentPath !== "/auth/login") setSessionRedirectPath(currentPath);
+  }, [db, user]);
+
+  const logout = useCallback(async () => {
+    await terminateSession("USER_LOGOUT", true, false);
+    setImpersonatedTenant(null);
+    try {
+      sessionStorage.removeItem("kwakopos:v2:impersonation");
+      localStorage.removeItem("kwakopos:v2:active-module");
+      localStorage.removeItem("kwakopos:v2:active-tab");
+    } catch { /* ignore */ }
+    setActiveModuleState("Retail");
+    setActiveTabState("Dashboard");
+    setAuthError(null);
+    sessionTerminationRef.current = false;
+  }, [terminateSession]);
+
+  const recordSessionActivity = useCallback(() => {
+    if (!user || ["OFFLINE_LOCKED", "LOGGED_OUT", "EXPIRED"].includes(sessionStatus)) return;
+    const now = Date.now();
+    sessionLastActivityRef.current = now;
+    setSessionLastActivityAt(now);
+    if (isOnline) {
+      setSessionStatus("AUTHENTICATED_ONLINE");
+      setSessionWarningOpen(false);
+    }
+  }, [user, sessionStatus, isOnline]);
+
+  const staySignedIn = useCallback(async () => {
+    if (!user || sessionStatus === "OFFLINE_LOCKED") return;
+    setSessionStatus("REFRESHING");
+    try {
+      const refreshed = await apiRefreshSession();
+      if (!refreshed) throw new Error("SESSION_REFRESH_REJECTED");
+      const heartbeat = await apiHeartbeatSession();
+      const data = heartbeat?.data || heartbeat;
+      const activity = Date.parse(String(data?.lastActivityAt || "")) || Date.now();
+      const expiry = Date.parse(String(data?.expiresAt || ""));
+      const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
+      sessionLastActivityRef.current = activity;
+      setSessionLastActivityAt(activity);
+      if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
+      if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
+      setSessionStatus(isOnline ? "AUTHENTICATED_ONLINE" : "AUTHENTICATED_OFFLINE");
+      setSessionWarningOpen(false);
+    } catch (error) {
+      await terminateSession("SESSION_TIMEOUT", true, true);
+      throw error;
+    }
+  }, [user, sessionStatus, isOnline, terminateSession]);
+
+  const restoreDrafts = useCallback(() => {
+    if (!user) return [];
+    const drafts = restoreSessionDrafts(user.tenantId, user.id);
+    setRestoredDrafts(drafts);
+    return drafts;
+  }, [user]);
 
   // These claims are UX hints only. All protected operations remain server-authorized.
   const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
