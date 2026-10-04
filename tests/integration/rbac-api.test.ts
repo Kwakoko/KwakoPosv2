@@ -159,6 +159,7 @@ describe("Privileged RBAC PostgreSQL API", () => {
         userId,
         branchId,
         deviceId: "p0-rbac-device",
+        tokenFamilyId: randomUUID(),
         refreshTokenHash: "p0-rbac-refresh-hash",
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       },
