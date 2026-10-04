@@ -537,6 +537,35 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
       return;
     }
 
+    if (routePath === "/auth/session/event" && req.method === "POST") {
+      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      try {
+        const ctx = verifyAccessToken(token);
+        const event = String((req.body as any)?.event || "").toUpperCase();
+        const allowed = new Set(["SESSION_WARNING_SHOWN", "SESSION_RESTORED", "SESSION_REFRESHED", "SESSION_LOGOUT", "SESSION_TIMEOUT", "SESSION_REVOKED"]);
+        if (!allowed.has(event)) return reply.status(400).send({ success: false, error: { code: "INVALID_SESSION_EVENT", message: "Unsupported session event." } });
+        if (!ctx.sessionId) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Session required." } });
+        const validation = await globalSessionManager.validateSession(ctx.sessionId, {
+          tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, deviceId: ctx.deviceId, activity: false,
+        });
+        if (!validation.valid || !validation.session) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Session is not valid." } });
+        await recordSessionAudit({
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.sub,
+          deviceId: ctx.deviceId,
+          sessionId: ctx.sessionId,
+          action: event,
+          ipAddress: clientAddress(req),
+          userAgent: requestUserAgent(req),
+          metadata: (req.body as any)?.metadata || undefined,
+        });
+        return reply.send({ success: true });
+      } catch {
+        return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } });
+      }
+    }
+
     if (routePath === "/auth/session" || routePath === "/auth/session/validate" || routePath === "/auth/session/heartbeat") {
       const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
       try {
