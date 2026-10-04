@@ -681,41 +681,6 @@ function registerCanonicalProductionAuthentication(
   }
   const secureCookies = isProductionEnv(config);
 
-  supportOperationsRoutes(server);
-    supportControlTowerRoutes(server);
-  
-    server.post("/auth/super-admin/setup/start", async (req, reply) => {
-      const body = (req.body || {}) as SuperAdminSetupStartBody;
-      try {
-        const data = await beginSuperAdminSetup(String(body.setupToken || ""));
-        return reply.send({ success: true, data });
-      } catch {
-        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
-      }
-    });
-  
-    server.post("/auth/super-admin/setup/complete", async (req, reply) => {
-      const body = (req.body || {}) as SuperAdminSetupBody;
-      const setupToken = String(body.setupToken || "");
-      const newPassword = String(body.newPassword || "");
-      const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
-      const totpCode = String(body.totpCode || "");
-      if (!setupToken || !newPassword || !totpSecret || !totpCode) {
-        return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
-      }
-      try {
-        await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
-        return reply.send({ success: true, data: { completed: true } });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
-        return reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
-      }
-    });
-  
-    let supportScheduler: { stop: () => void } | undefined;
-    if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();
-    server.addHook("onClose", async () => { supportScheduler?.stop(); });
-  
     server.addHook("preValidation", async (req, reply) => {
       if (!productionPersistence) return;
       const routePath = req.url.split("?")[0];
@@ -1002,7 +967,44 @@ function registerCanonicalProductionAuthentication(
         clearRefreshCookie(reply, secureCookies);
         reply.send({ success: true, data: { loggedOut: true, reason } });
       }
+    })
+
+  supportOperationsRoutes(server);
+    supportControlTowerRoutes(server);
+  
+    server.post("/auth/super-admin/setup/start", async (req, reply) => {
+      const body = (req.body || {}) as SuperAdminSetupStartBody;
+      try {
+        const data = await beginSuperAdminSetup(String(body.setupToken || ""));
+        return reply.send({ success: true, data });
+      } catch {
+        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
+      }
     });
+  
+    server.post("/auth/super-admin/setup/complete", async (req, reply) => {
+      const body = (req.body || {}) as SuperAdminSetupBody;
+      const setupToken = String(body.setupToken || "");
+      const newPassword = String(body.newPassword || "");
+      const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
+      const totpCode = String(body.totpCode || "");
+      if (!setupToken || !newPassword || !totpSecret || !totpCode) {
+        return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
+      }
+      try {
+        await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
+        return reply.send({ success: true, data: { completed: true } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
+        return reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
+      }
+    });
+  
+    let supportScheduler: { stop: () => void } | undefined;
+    if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();
+    server.addHook("onClose", async () => { supportScheduler?.stop(); });
+  
+;
 }
 
 export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
@@ -1051,178 +1053,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // H-004 + H-006: Register rate-limiting and security headers middleware
   // Must be registered BEFORE route handlers to ensure all routes are protected.
   server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
-
-  // H-025: Graceful SIGTERM shutdown — drain in-flight requests before exit
-  const gracefulShutdown = async (signal: string) => {
-    server.log.info({ signal }, "KwakoPos API: Graceful shutdown initiated");
-    try {
-      await server.close();
-      server.log.info("KwakoPos API: Server closed cleanly");
-      if (productionPersistence) {
-        const { prisma } = await import("@kwakopos2/database");
-        await prisma.$disconnect();
-        server.log.info("KwakoPos API: Database connections closed");
-      }
-    } catch (err) {
-      server.log.error({ err }, "KwakoPos API: Error during graceful shutdown");
-    } finally {
-      process.exit(0);
-    }
-  };
-  // Only register once to avoid duplicate listeners in test environments
-  if (process.listenerCount("SIGTERM") === 0) process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
-  if (process.listenerCount("SIGINT") === 0) process.once("SIGINT", () => gracefulShutdown("SIGINT"));
-
-  const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
-  const catalogRepo = productionPersistence ? new PrismaCatalogRepository() : null;
-  const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
-  const syncEngine = productionPersistence
-    ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
-    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, legacyGlobalCommercialRepository, globalInMemoryStore);
-
-  const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;
-  const commercialRepository: any = productionPersistence ? new PrismaCommercialRepository() : legacyGlobalCommercialRepository;
-  const workforceRepository: any = productionPersistence ? new PrismaWorkforceRepository() : legacyGlobalWorkforceRepository;
-  const pluginRepository: any = productionPersistence ? new PrismaPluginRepository() : legacyGlobalPluginRepository;
-  const telecomRepository: any = productionPersistence ? new PrismaTelecomRepository() : legacyGlobalTelecomRepository;
-  const monetizationRepository: any = productionPersistence ? new PrismaMonetizationRepository() : legacyGlobalMonetizationRepository;
-
-  if (productionPersistence) {
-    const requiredPersistenceAuthorities = [
-      financeRepository,
-      commercialRepository,
-      workforceRepository,
-      pluginRepository,
-      telecomRepository,
-      monetizationRepository,
-    ];
-    const invalidAuthorities = requiredPersistenceAuthorities.filter(
-      (repository) => !String(repository?.constructor?.name || "").startsWith("Prisma"),
-    );
-    if (invalidAuthorities.length > 0) {
-      throw new Error("PERSISTENCE_FATAL: Production API repository authority must be PostgreSQL-backed.");
-    }
-  }
-
-  const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
-  // User/Role identity mutations are privileged PostgreSQL operations; never route them through syncOutbox or in-memory fallbacks.
-  const rbacMutationService = productionPersistence ? new PrivilegedRbacMutationService(prisma) : null;
-
-  // ── H-005: Hardened centralized error handler ──────────────────────────────
-  // All internal error detail is logged server-side ONLY.  Clients receive a
-  // sanitized message that never reveals stack traces, invariant codes, or any
-  // other implementation detail.  A requestId is attached to every error
-  // response so operators can correlate client reports with server logs.
-  server.setErrorHandler((error: any, req, reply) => {
-    // 1. Log the FULL error (message + stack) internally before any sanitization.
-    server.log.error(
-      { err: error, stack: error?.stack, requestId: req.headers["x-correlation-id"] },
-      "Unhandled error"
-    );
-
-    const isProduction = process.env["NODE_ENV"] === "production";
-
-    // 2. Resolve a tracing token from the inbound correlation header.
-    const requestId =
-      (req.headers["x-correlation-id"] as string | undefined) ?? "unknown";
-
-    // 3. Extract the raw message (never sent to clients in production).
-    const rawMessage: string =
-      error?.message ? String(error.message) : String(error);
-
-    // ── Safe-message resolver ──────────────────────────────────────────────
-    // Returns [httpStatus, clientCode, safeMessage].
-    const resolve = (): [number, string, string] => {
-      const code: string = error?.code ? String(error.code) : "";
-      const msg = rawMessage;
-
-      // RATE_LIMIT — pass through as-is (not sensitive).
-      if (code === "RATE_LIMIT" || code.startsWith("RATE_LIMIT"))
-        return [429, "RATE_LIMIT", "Too many requests."];
-
-      // Auth / session errors → 401.
-      if (
-        code === "UNAUTHORIZED" ||
-        code.includes("UNAUTHORIZED") ||
-        msg.includes("UNAUTHORIZED") ||
-        msg.toLowerCase().includes("token") ||
-        msg.toLowerCase().includes("session")
-      )
-        return [401, "UNAUTHORIZED", "Authentication required."];
-
-      // Tenant / cross-boundary / forbidden → 403.
-      if (
-        code === "FORBIDDEN" ||
-        code.includes("FORBIDDEN") ||
-        code === "TENANT_BOUNDARY_VIOLATION" ||
-        code === "INVARIANT_007_VIOLATION" ||
-        msg.includes("TENANT_BOUNDARY_VIOLATION") ||
-        msg.includes("EMPLOYEE_BOUNDARY_VIOLATION") ||
-        msg.includes("INVARIANT_007_VIOLATION") ||
-        msg.includes("Cross-tenant") ||
-        msg.toLowerCase().includes("access denied") ||
-        msg.startsWith("FORBIDDEN")
-      )
-        return [403, "FORBIDDEN", "Access denied."];
-
-      // Not-found → 404.
-      if (
-        code === "NOT_FOUND" ||
-        code.includes("NOT_FOUND") ||
-        msg.toLowerCase().includes("not found")
-      )
-        return [404, "NOT_FOUND", "Resource not found."];
-
-      // Duplicate / already-exists → 409.
-      if (
-        code.includes("DUPLICATE") ||
-        code.includes("EXISTS") ||
-        msg.includes("DUPLICATE") ||
-        msg.includes("EXISTS") ||
-        msg.toLowerCase().includes("already")
-      )
-        return [409, "CONFLICT", "Resource already exists."];
-
-      // Financial constraint violations → 409.
-      if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
-        return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
-
-      // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
-      if (
-        code.match(/^INVARIANT_/) ||
-        msg.match(/INVARIANT_/) ||
-        error?.validation ||
-        msg.toLowerCase().includes("invalid")
-      )
-        return [400, "BAD_REQUEST", "A business rule was violated."];
-
-      // Explicit HTTP status already set on the error object.
-      if (error?.statusCode) {
-        const s: number = error.statusCode as number;
-        const safeMsg = isProduction
-          ? s >= 500
-            ? "An internal error occurred."
-            : rawMessage   // 4xx with no specific mapping — safe to echo
-          : rawMessage;
-        return [s, code || "ERROR", safeMsg];
-      }
-
-      // Catch-all: 500 — never leak internal details in production.
-      const safeMsg = isProduction ? "An internal error occurred." : rawMessage;
-      return [500, "INTERNAL_SERVER_ERROR", safeMsg];
-    };
-
-    const [httpStatus, clientCode, safeMessage] = resolve();
-
-    return reply.status(httpStatus).send({
-      success: false,
-      error: {
-        code: clientCode,
-        message: safeMessage,
-        requestId,
-      },
-    });
-  });
 
   // Distributed Tracing & Correlation Hook
   server.addHook("onRequest", async (req, reply) => {
@@ -1418,6 +1248,180 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
       return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
     }
+  });
+
+
+
+  // H-025: Graceful SIGTERM shutdown — drain in-flight requests before exit
+  const gracefulShutdown = async (signal: string) => {
+    server.log.info({ signal }, "KwakoPos API: Graceful shutdown initiated");
+    try {
+      await server.close();
+      server.log.info("KwakoPos API: Server closed cleanly");
+      if (productionPersistence) {
+        const { prisma } = await import("@kwakopos2/database");
+        await prisma.$disconnect();
+        server.log.info("KwakoPos API: Database connections closed");
+      }
+    } catch (err) {
+      server.log.error({ err }, "KwakoPos API: Error during graceful shutdown");
+    } finally {
+      process.exit(0);
+    }
+  };
+  // Only register once to avoid duplicate listeners in test environments
+  if (process.listenerCount("SIGTERM") === 0) process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  if (process.listenerCount("SIGINT") === 0) process.once("SIGINT", () => gracefulShutdown("SIGINT"));
+
+  const productRepo = productionPersistence ? new PrismaProductRepository() : new ScopedProductRepository(globalInMemoryStore);
+  const catalogRepo = productionPersistence ? new PrismaCatalogRepository() : null;
+  const stockRepo = productionPersistence ? new PrismaStockRepository() : new ScopedStockRepository(globalInMemoryStore);
+  const syncEngine = productionPersistence
+    ? new PrismaSyncEngine(productRepo as PrismaProductRepository, stockRepo as PrismaStockRepository)
+    : new SyncEngine(productRepo as ScopedProductRepository, stockRepo as ScopedStockRepository, legacyGlobalCommercialRepository, globalInMemoryStore);
+
+  const financeRepository: any = productionPersistence ? new PrismaFinanceRepository() : globalFinanceRepository;
+  const commercialRepository: any = productionPersistence ? new PrismaCommercialRepository() : legacyGlobalCommercialRepository;
+  const workforceRepository: any = productionPersistence ? new PrismaWorkforceRepository() : legacyGlobalWorkforceRepository;
+  const pluginRepository: any = productionPersistence ? new PrismaPluginRepository() : legacyGlobalPluginRepository;
+  const telecomRepository: any = productionPersistence ? new PrismaTelecomRepository() : legacyGlobalTelecomRepository;
+  const monetizationRepository: any = productionPersistence ? new PrismaMonetizationRepository() : legacyGlobalMonetizationRepository;
+
+  if (productionPersistence) {
+    const requiredPersistenceAuthorities = [
+      financeRepository,
+      commercialRepository,
+      workforceRepository,
+      pluginRepository,
+      telecomRepository,
+      monetizationRepository,
+    ];
+    const invalidAuthorities = requiredPersistenceAuthorities.filter(
+      (repository) => !String(repository?.constructor?.name || "").startsWith("Prisma"),
+    );
+    if (invalidAuthorities.length > 0) {
+      throw new Error("PERSISTENCE_FATAL: Production API repository authority must be PostgreSQL-backed.");
+    }
+  }
+
+  const atomicCommercialFinance = productionPersistence ? new PrismaAtomicCommercialFinanceService() : null;
+  // User/Role identity mutations are privileged PostgreSQL operations; never route them through syncOutbox or in-memory fallbacks.
+  const rbacMutationService = productionPersistence ? new PrivilegedRbacMutationService(prisma) : null;
+
+  // ── H-005: Hardened centralized error handler ──────────────────────────────
+  // All internal error detail is logged server-side ONLY.  Clients receive a
+  // sanitized message that never reveals stack traces, invariant codes, or any
+  // other implementation detail.  A requestId is attached to every error
+  // response so operators can correlate client reports with server logs.
+  server.setErrorHandler((error: any, req, reply) => {
+    // 1. Log the FULL error (message + stack) internally before any sanitization.
+    server.log.error(
+      { err: error, stack: error?.stack, requestId: req.headers["x-correlation-id"] },
+      "Unhandled error"
+    );
+
+    const isProduction = process.env["NODE_ENV"] === "production";
+
+    // 2. Resolve a tracing token from the inbound correlation header.
+    const requestId =
+      (req.headers["x-correlation-id"] as string | undefined) ?? "unknown";
+
+    // 3. Extract the raw message (never sent to clients in production).
+    const rawMessage: string =
+      error?.message ? String(error.message) : String(error);
+
+    // ── Safe-message resolver ──────────────────────────────────────────────
+    // Returns [httpStatus, clientCode, safeMessage].
+    const resolve = (): [number, string, string] => {
+      const code: string = error?.code ? String(error.code) : "";
+      const msg = rawMessage;
+
+      // RATE_LIMIT — pass through as-is (not sensitive).
+      if (code === "RATE_LIMIT" || code.startsWith("RATE_LIMIT"))
+        return [429, "RATE_LIMIT", "Too many requests."];
+
+      // Auth / session errors → 401.
+      if (
+        code === "UNAUTHORIZED" ||
+        code.includes("UNAUTHORIZED") ||
+        msg.includes("UNAUTHORIZED") ||
+        msg.toLowerCase().includes("token") ||
+        msg.toLowerCase().includes("session")
+      )
+        return [401, "UNAUTHORIZED", "Authentication required."];
+
+      // Tenant / cross-boundary / forbidden → 403.
+      if (
+        code === "FORBIDDEN" ||
+        code.includes("FORBIDDEN") ||
+        code === "TENANT_BOUNDARY_VIOLATION" ||
+        code === "INVARIANT_007_VIOLATION" ||
+        msg.includes("TENANT_BOUNDARY_VIOLATION") ||
+        msg.includes("EMPLOYEE_BOUNDARY_VIOLATION") ||
+        msg.includes("INVARIANT_007_VIOLATION") ||
+        msg.includes("Cross-tenant") ||
+        msg.toLowerCase().includes("access denied") ||
+        msg.startsWith("FORBIDDEN")
+      )
+        return [403, "FORBIDDEN", "Access denied."];
+
+      // Not-found → 404.
+      if (
+        code === "NOT_FOUND" ||
+        code.includes("NOT_FOUND") ||
+        msg.toLowerCase().includes("not found")
+      )
+        return [404, "NOT_FOUND", "Resource not found."];
+
+      // Duplicate / already-exists → 409.
+      if (
+        code.includes("DUPLICATE") ||
+        code.includes("EXISTS") ||
+        msg.includes("DUPLICATE") ||
+        msg.includes("EXISTS") ||
+        msg.toLowerCase().includes("already")
+      )
+        return [409, "CONFLICT", "Resource already exists."];
+
+      // Financial constraint violations → 409.
+      if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
+        return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
+
+      // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
+      if (
+        code.match(/^INVARIANT_/) ||
+        msg.match(/INVARIANT_/) ||
+        error?.validation ||
+        msg.toLowerCase().includes("invalid")
+      )
+        return [400, "BAD_REQUEST", "A business rule was violated."];
+
+      // Explicit HTTP status already set on the error object.
+      if (error?.statusCode) {
+        const s: number = error.statusCode as number;
+        const safeMsg = isProduction
+          ? s >= 500
+            ? "An internal error occurred."
+            : rawMessage   // 4xx with no specific mapping — safe to echo
+          : rawMessage;
+        return [s, code || "ERROR", safeMsg];
+      }
+
+      // Catch-all: 500 — never leak internal details in production.
+      const safeMsg = isProduction ? "An internal error occurred." : rawMessage;
+      return [500, "INTERNAL_SERVER_ERROR", safeMsg];
+    };
+
+    const [httpStatus, clientCode, safeMessage] = resolve();
+
+    return reply.status(httpStatus).send({
+      success: false,
+      error: {
+        code: clientCode,
+        message: safeMessage,
+        requestId,
+      },
+    });
   });
 
   server.addHook("onResponse", async (req, reply) => {
