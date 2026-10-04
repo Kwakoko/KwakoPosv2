@@ -68,7 +68,6 @@ describe("Authentication credential authority", () => {
   it("registers the canonical authentication boundary before production routes", () => {
     const server = read("apps/api/src/server.ts");
     const buildStart = server.indexOf("export function buildServer");
-    const hookStart = server.indexOf('server.addHook("onRequest"', buildStart);
     const buildSection = server.slice(buildStart);
     const hookRelative = buildSection.indexOf('server.addHook("onRequest"');
     const firstRouteRelative = buildSection.search(/server\.(?:get|post|put|patch|delete)\(\s*"/);
