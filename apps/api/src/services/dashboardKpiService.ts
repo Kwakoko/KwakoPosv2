@@ -201,7 +201,7 @@ export async function getDashboardKpiSnapshot(
     const priorStart = new Date(windowStart);
     priorStart.setDate(priorStart.getDate() - windowDays);
 
-    const [dailyRows, returnDailyRows, paymentRows, topProductRows, hourlyRows] = await Promise.all([
+    const [dailyRows, returnDailyRows, paymentRows, paymentSummaryRows, topProductRows, hourlyRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
         `SELECT DATE(sold_at) AS day,
                 COALESCE(SUM(grand_total - tax_total),0) AS revenue,
@@ -247,7 +247,17 @@ export async function getDashboardKpiSnapshot(
           ORDER BY volume DESC`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
-      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
+      tx.$queryRawUnsafe<Array<{ total_volume: unknown; payment_count: bigint | number | string; order_count: bigint | number | string }>>(
+        `SELECT COALESCE(SUM(p.amount),0) AS total_volume,
+                COUNT(*) AS payment_count,
+                COUNT(DISTINCT p.sale_id) AS order_count
+           FROM payments p
+           JOIN sales s ON s.id = p.sale_id
+          WHERE p.tenant_id = $1 AND p.branch_id = $2
+            AND p.status = 'COMPLETED' AND s.status = 'COMPLETED'
+            AND s.sold_at >= $3 AND s.sold_at < $4`,
+        ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
+      ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
         `WITH sold AS (
            SELECT sl.product_id, sl.variant_id,
                   COALESCE(SUM(sl.line_total - sl.tax_amount),0) AS revenue,
@@ -333,7 +343,7 @@ export async function getDashboardKpiSnapshot(
     }
     const paymentTotalVolume = paymentRows.reduce((n,r)=>n+numberValue(r.volume),0);
     const paymentTotalCount = paymentRows.reduce((n,r)=>n+numberValue(r.count),0);
-    const paymentTotalOrderCount = paymentRows.reduce((n,r)=>n+numberValue(r.order_count),0);
+    const paymentTotalOrderCount = numberValue(paymentSummaryRows[0]?.order_count);
     const paymentChannels = paymentRows.map(r => {
       const volume = numberValue(r.volume);
       const count = numberValue(r.count);
@@ -341,7 +351,7 @@ export async function getDashboardKpiSnapshot(
       return {
         name: r.payment_method, volume, count, paymentCount: count, orderCount,
         volumeShare: paymentTotalVolume > 0 ? Math.round(volume/paymentTotalVolume*100) : 0,
-        countShare: paymentTotalOrderCount > 0 ? Math.round(orderCount/paymentTotalOrderCount*100) : 0,
+        countShare: paymentTotalCount > 0 ? Math.round(count/paymentTotalCount*100) : 0,
         aov: orderCount > 0 ? Math.round(volume/orderCount) : 0,
       };
     });
