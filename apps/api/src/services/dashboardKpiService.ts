@@ -320,6 +320,7 @@ export async function getDashboardKpiSnapshot(
               AND s."tenantId" = r."tenantId"
               AND s."branchId" = r."branchId"
             WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
+              AND (r."originalSaleId" IS NULL OR (s."tenantId" = $1 AND s."branchId" = $2))
               AND r."createdAt" >= $3 AND r."createdAt" < $4
             GROUP BY rl."variantId"
          ), aggregated AS (
@@ -473,6 +474,7 @@ export async function getDashboardKpiSnapshot(
          LEFT JOIN return_lines rl ON rl."returnId" = r."id"
         WHERE r."tenantId" = $1 AND r."branchId" = $2
           AND r."status" = 'COMPLETED'
+          AND (r."originalSaleId" IS NULL OR (s."tenantId" = $1 AND s."branchId" = $2))
           AND r."createdAt" >= CURRENT_DATE
           AND r."createdAt" < CURRENT_DATE + INTERVAL '1 day'`,
       ctx.tenantId, ctx.branchId,
