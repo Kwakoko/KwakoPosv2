@@ -109,7 +109,7 @@ export async function getDashboardKpiSnapshot(
     const revisionRows = await tx.$queryRawUnsafe<Array<{ revision: bigint | number | string | null }>>(
       `SELECT COALESCE(MAX(revision), 0) AS revision
          FROM sync_change_journal
-        WHERE tenant_id = $1 AND branch_id = $2`,
+        WHERE "tenantId" = $1 AND "branchId" = $2`,
       ctx.tenantId,
       ctx.branchId,
     );
@@ -118,18 +118,18 @@ export async function getDashboardKpiSnapshot(
     const [salesRows, inventoryRows, stockRows, customerRows, productRows, supplierRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_sales_today: unknown; discounts_today: unknown; gross_profit: unknown; cogs_today: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
         `SELECT
-           COALESCE(SUM(grand_total - tax_total) FILTER (WHERE status = 'COMPLETED'), 0) AS sales_today,
-           COALESCE(SUM(grand_total) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_sales_today,
-           COALESCE(SUM(discount_total) FILTER (WHERE status = 'COMPLETED'), 0) AS discounts_today,
-           COALESCE(SUM((grand_total - tax_total) - total_cost) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_profit,
-           COALESCE(SUM(total_cost) FILTER (WHERE status = 'COMPLETED'), 0) AS cogs_today,
-           COUNT(*) FILTER (WHERE status = 'COMPLETED') AS order_count,
-           COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed_orders
+           COALESCE(SUM("grandTotal" - "taxTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS sales_today,
+           COALESCE(SUM("grandTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS gross_sales_today,
+           COALESCE(SUM("discountTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS discounts_today,
+           COALESCE(SUM(("grandTotal" - "taxTotal") - "totalCost") FILTER (WHERE "status" = 'COMPLETED'), 0) AS gross_profit,
+           COALESCE(SUM("totalCost") FILTER (WHERE "status" = 'COMPLETED'), 0) AS cogs_today,
+           COUNT(*) FILTER (WHERE "status" = 'COMPLETED') AS order_count,
+           COUNT(*) FILTER (WHERE "status" = 'COMPLETED') AS completed_orders
          FROM sales
         WHERE tenant_id = $1
           AND branch_id = $2
-          AND sold_at >= CURRENT_DATE
-          AND sold_at < CURRENT_DATE + INTERVAL '1 day'`,
+          AND "soldAt" >= CURRENT_DATE
+          AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'`,
         ctx.tenantId,
         ctx.branchId,
       ),
@@ -143,22 +143,22 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ low_stock: bigint | number | string; out_of_stock: bigint | number | string }>>(
         `SELECT
-           COUNT(*) FILTER (WHERE pbs.current_quantity > 0 AND pbs.current_quantity <= pv.reorder_level) AS low_stock,
-           COUNT(*) FILTER (WHERE pbs.current_quantity <= 0) AS out_of_stock
+           COUNT(*) FILTER (WHERE pbs."currentQuantity" > 0 AND pbs."currentQuantity" <= pv."reorderLevel") AS low_stock,
+           COUNT(*) FILTER (WHERE pbs."currentQuantity" <= 0) AS out_of_stock
          FROM product_branch_stock pbs
          JOIN product_variants pv
            ON pv.id = pbs.variant_id
-          AND pv.tenant_id = pbs.tenant_id
-          AND pv.branch_id = pbs.branch_id
-        WHERE pbs.tenant_id = $1
-          AND pbs.branch_id = $2
-          AND pv.is_active = TRUE`,
+          AND pv."tenantId" = pbs."tenantId"
+          AND pv."branchId" = pbs."branchId"
+        WHERE pbs."tenantId" = $1
+          AND pbs."branchId" = $2
+          AND pv."isActive" = TRUE`,
         ctx.tenantId,
         ctx.branchId,
       ),
-      tx.$queryRawUnsafe<Array<{ customer_debts: unknown; customer_count: bigint | number | string }>>(
+      tx.$queryRawUnsafe<Array<{ customerDebts: unknown; customer_count: bigint | number | string }>>(
         `SELECT
-           COALESCE(SUM(current_balance), 0) AS customer_debts,
+           COALESCE(SUM(current_balance), 0) AS customerDebts,
            COUNT(*) FILTER (WHERE status = 'ACTIVE') AS customer_count
          FROM customers
         WHERE tenant_id = $1
@@ -204,88 +204,88 @@ export async function getDashboardKpiSnapshot(
     const [dailyRows, returnDailyRows, paymentRows, paymentSummaryRows, topProductRows, hourlyRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
         `SELECT DATE(sold_at) AS day,
-                COALESCE(SUM(grand_total - tax_total),0) AS revenue,
-                COALESCE(SUM((grand_total - tax_total) - total_cost),0) AS profit,
-                COALESCE(SUM(total_cost),0) AS cogs,
+                COALESCE(SUM("grandTotal" - "taxTotal"),0) AS revenue,
+                COALESCE(SUM(("grandTotal" - "taxTotal") - "totalCost"),0) AS profit,
+                COALESCE(SUM("totalCost"),0) AS cogs,
                 COUNT(*) AS orders_count
            FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2
-            AND status = 'COMPLETED'
-            AND sold_at >= $3
-            AND sold_at < $4
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "status" = 'COMPLETED'
+            AND "soldAt" >= $3
+            AND "soldAt" < $4
           GROUP BY DATE(sold_at)
           ORDER BY DATE(sold_at)`,
         ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ day: Date; refund_net: unknown; returned_cogs: unknown }>>(
-        `SELECT DATE(r.created_at) AS day,
-                COALESCE(SUM(r.total_refund_amount * CASE
-                  WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+        `SELECT DATE(r."createdAt") AS day,
+                COALESCE(SUM(r."totalRefundAmount" * CASE
+                  WHEN s."grandTotal" > 0 THEN 1 - (s."taxTotal" / s."grandTotal")
                   ELSE 1 END),0) AS refund_net,
-                COALESCE(SUM(rl.quantity_returned * pv.cost_price),0) AS returned_cogs
+                COALESCE(SUM(rl."quantityReturned" * pv."costPrice"),0) AS returned_cogs
            FROM returns r
-           LEFT JOIN sales s ON s.id = r.original_sale_id
-           LEFT JOIN return_lines rl ON rl.return_id = r.id
-           LEFT JOIN product_variants pv ON pv.id = rl.variant_id
-          WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r.status = 'COMPLETED'
-            AND r.created_at >= $3 AND r.created_at < $4
-          GROUP BY DATE(r.created_at)
-          ORDER BY DATE(r.created_at)` ,
+           LEFT JOIN sales s ON s.id = r."originalSaleId"
+           LEFT JOIN return_lines rl ON rl."returnId" = r.id
+           LEFT JOIN product_variants pv ON pv."id" = rl."variantId"
+          WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r."status" = 'COMPLETED'
+            AND r."createdAt" >= $3 AND r."createdAt" < $4
+          GROUP BY DATE(r."createdAt")
+          ORDER BY DATE(r."createdAt")` ,
         ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
       ),
-      tx.$queryRawUnsafe<Array<{ payment_method: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
-        `SELECT COALESCE(payment_method, 'CASH') AS payment_method,
-                COALESCE(SUM(p.amount),0) AS volume,
+      tx.$queryRawUnsafe<Array<{ paymentMethod: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
+        `SELECT COALESCE(paymentMethod, 'CASH') AS paymentMethod,
+                COALESCE(SUM(p."amount"),0) AS volume,
                 COUNT(*) AS count,
-                COUNT(DISTINCT p.sale_id) AS order_count
+                COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
-           JOIN sales s ON s.id = p.sale_id
-          WHERE p.tenant_id = $1 AND p.branch_id = $2
-            AND p.status = 'COMPLETED' AND s.status = 'COMPLETED'
-            AND s.sold_at >= $3 AND s.sold_at < $4
-          GROUP BY COALESCE(payment_method, 'CASH')
+           JOIN sales s ON s."id" = p."saleId"
+          WHERE p."tenantId" = $1 AND p."branchId" = $2
+            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND s."soldAt" >= $3 AND s."soldAt" < $4
+          GROUP BY COALESCE(paymentMethod, 'CASH')
           ORDER BY volume DESC`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ total_volume: unknown; payment_count: bigint | number | string; order_count: bigint | number | string }>>(
-        `SELECT COALESCE(SUM(p.amount),0) AS total_volume,
+        `SELECT COALESCE(SUM(p."amount"),0) AS total_volume,
                 COUNT(*) AS payment_count,
-                COUNT(DISTINCT p.sale_id) AS order_count
+                COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
-           JOIN sales s ON s.id = p.sale_id
-          WHERE p.tenant_id = $1 AND p.branch_id = $2
-            AND p.status = 'COMPLETED' AND s.status = 'COMPLETED'
-            AND s.sold_at >= $3 AND s.sold_at < $4`,
+           JOIN sales s ON s."id" = p."saleId"
+          WHERE p."tenantId" = $1 AND p."branchId" = $2
+            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND s."soldAt" >= $3 AND s."soldAt" < $4`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
         `WITH sold AS (
-           SELECT sl.product_id, sl.variant_id,
-                  COALESCE(SUM(sl.line_total - sl.tax_amount),0) AS revenue,
-                  COALESCE(SUM(sl.quantity),0) AS units
+           SELECT sl."productId", sl."variantId",
+                  COALESCE(SUM(sl."lineTotal" - sl."taxAmount"),0) AS revenue,
+                  COALESCE(SUM(sl."quantity"),0) AS units
              FROM sale_lines sl
-             JOIN sales s ON s.id = sl.sale_id
-            WHERE s.tenant_id = $1 AND s.branch_id = $2 AND s.status = 'COMPLETED'
-              AND s.sold_at >= $3 AND s.sold_at < $4
-            GROUP BY sl.product_id, sl.variant_id
+             JOIN sales s ON s."id" = sl."saleId"
+            WHERE s."tenantId" = $1 AND s."branchId" = $2 AND s."status" = 'COMPLETED'
+              AND s."soldAt" >= $3 AND s."soldAt" < $4
+            GROUP BY sl."productId", sl."variantId"
          ), returns_by_variant AS (
            SELECT rl.variant_id,
-                  COALESCE(SUM(rl.refund_line_total * CASE
-                    WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+                  COALESCE(SUM(rl."refundLineTotal" * CASE
+                    WHEN s."grandTotal" > 0 THEN 1 - (s."taxTotal" / s."grandTotal")
                     ELSE 1 END),0) AS refund_revenue,
-                  COALESCE(SUM(rl.quantity_returned),0) AS refund_units
+                  COALESCE(SUM(rl."quantityReturned"),0) AS refund_units
              FROM return_lines rl
-             JOIN returns r ON r.id = rl.return_id
-             LEFT JOIN sales s ON s.id = r.original_sale_id
-            WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r.status = 'COMPLETED'
-              AND r.created_at >= $3 AND r.created_at < $4
+             JOIN returns r ON r."id" = rl."returnId"
+             LEFT JOIN sales s ON s.id = r."originalSaleId"
+            WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r."status" = 'COMPLETED'
+              AND r."createdAt" >= $3 AND r."createdAt" < $4
             GROUP BY rl.variant_id
          )
         SELECT sold.product_id, p.name,
                COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0) AS revenue,
                GREATEST(0, COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) AS units,
-               COALESCE((SELECT SUM(pbs.current_quantity) FROM product_branch_stock pbs
-                          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
-                            AND pbs.product_id = sold.product_id),0) AS stock,
+               COALESCE((SELECT SUM(pbs."currentQuantity") FROM product_branch_stock pbs
+                          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+                            AND pbs."productId" = sold.product_id),0) AS stock,
                COALESCE(p.category,'General') AS category
           FROM sold
           JOIN products p ON p.id = sold.product_id
@@ -299,12 +299,12 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ hour: number; revenue: unknown; orders_count: bigint | number | string }>>(
         `SELECT EXTRACT(HOUR FROM sold_at)::int AS hour,
-                COALESCE(SUM(grand_total - tax_total),0) AS revenue,
+                COALESCE(SUM("grandTotal" - "taxTotal"),0) AS revenue,
                 COUNT(*) AS orders_count
            FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2
-            AND status = 'COMPLETED'
-            AND sold_at >= $3 AND sold_at < $4
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "status" = 'COMPLETED'
+            AND "soldAt" >= $3 AND "soldAt" < $4
           GROUP BY EXTRACT(HOUR FROM sold_at)::int
           ORDER BY revenue DESC
           LIMIT 1`,
@@ -350,7 +350,7 @@ export async function getDashboardKpiSnapshot(
       const count = numberValue(r.count);
       const orderCount = numberValue(r.order_count);
       return {
-        name: r.payment_method, volume, count, paymentCount: count, orderCount,
+        name: r.paymentMethod, volume, count, paymentCount: count, orderCount,
         volumeShare: paymentTotalVolume > 0 ? Math.round(volume/paymentTotalVolume*100) : 0,
         countShare: paymentTotalCount > 0 ? Math.round(count/paymentTotalCount*100) : 0,
         aov: orderCount > 0 ? Math.round(volume/orderCount) : 0,
@@ -377,19 +377,19 @@ export async function getDashboardKpiSnapshot(
     };
 
     const refundRows = await tx.$queryRawUnsafe<Array<{ refunds_today: unknown; net_refunds_today: unknown; returned_cogs_today: unknown }>>(
-      `SELECT COALESCE(SUM(r.total_refund_amount),0) AS refunds_today,
-              COALESCE(SUM(r.total_refund_amount * CASE
-                WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+      `SELECT COALESCE(SUM(r."totalRefundAmount"),0) AS refunds_today,
+              COALESCE(SUM(r."totalRefundAmount" * CASE
+                WHEN s."grandTotal" > 0 THEN 1 - (s."taxTotal" / s."grandTotal")
                 ELSE 1 END),0) AS net_refunds_today,
-              COALESCE(SUM(rl.quantity_returned * pv.cost_price),0) AS returned_cogs_today
+              COALESCE(SUM(rl."quantityReturned" * pv."costPrice"),0) AS returned_cogs_today
          FROM returns r
-         LEFT JOIN sales s ON s.id = r.original_sale_id
-         LEFT JOIN return_lines rl ON rl.return_id = r.id
-         LEFT JOIN product_variants pv ON pv.id = rl.variant_id
+         LEFT JOIN sales s ON s.id = r."originalSaleId"
+         LEFT JOIN return_lines rl ON rl."returnId" = r.id
+         LEFT JOIN product_variants pv ON pv."id" = rl."variantId"
         WHERE r.tenant_id = $1 AND r.branch_id = $2
-          AND r.status = 'COMPLETED'
-          AND r.created_at >= CURRENT_DATE
-          AND r.created_at < CURRENT_DATE + INTERVAL '1 day'`,
+          AND r."status" = 'COMPLETED'
+          AND r."createdAt" >= CURRENT_DATE
+          AND r."createdAt" < CURRENT_DATE + INTERVAL '1 day'`,
       ctx.tenantId, ctx.branchId,
     );
     const refundsToday = numberValue(refundRows[0]?.refunds_today);
@@ -426,7 +426,7 @@ export async function getDashboardKpiSnapshot(
       stockAlerts: lowStockCount + outOfStockCount,
       lowStockCount,
       outOfStockCount,
-      customerDebts: numberValue(customers.customer_debts),
+      customerDebts: numberValue(customers.customerDebts),
       customerCount: numberValue(customers.customer_count),
       productCount: numberValue(productRows[0]?.product_count),
       supplierCount: numberValue(supplierRows[0]?.supplier_count),
@@ -443,7 +443,7 @@ export async function getDashboardKpiSnapshot(
         AovToday: orderCount > 0 ? salesToday / orderCount : 0,
         ProductCount: numberValue(productRows[0]?.product_count),
         StockAlerts: lowStockCount + outOfStockCount,
-        CustomerDebts: numberValue(customers.customer_debts),
+        CustomerDebts: numberValue(customers.customerDebts),
         InventoryValue: numberValue(inventory.inventory_value),
         CompletedOrders: numberValue(sales.completed_orders),
         LowStock: lowStockCount,
