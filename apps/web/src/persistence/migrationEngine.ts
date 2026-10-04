@@ -123,11 +123,7 @@ export class MigrationEngine {
       }
     }
 
-    // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices.
-    // Existing business/outbox rows are immutable across schema upgrades. Capture the
-    // complete syncOutbox contents before touching its indexes, then restore every row
-    // under the same primary key in this same version-change transaction. This protects
-    // older clients whose physical IndexedDB outbox schema predates the current indexes.
+    // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices
     if (toVersion === 4) {
       const v4Stores = ["migrationJournal", "recoverySnapshots", "updateState"];
       for (const name of v4Stores) {
@@ -136,35 +132,7 @@ export class MigrationEngine {
         }
       }
 
-      if (db.objectStoreNames.contains("syncOutbox")) {
-        const outbox = transaction.objectStore("syncOutbox");
-        const snapshotStoreName = "__syncOutboxMigrationBackup";
-        if (!db.objectStoreNames.contains(snapshotStoreName)) {
-          db.createObjectStore(snapshotStoreName);
-        }
-        const backup = transaction.objectStore(snapshotStoreName);
-        const cursorRequest = outbox.openCursor();
-        cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result;
-          if (!cursor) {
-            const restoreRequest = backup.openCursor();
-            restoreRequest.onsuccess = () => {
-              const restoreCursor = restoreRequest.result;
-              if (!restoreCursor) return;
-              const original = restoreCursor.value as any;
-              const originalKey = restoreCursor.primaryKey;
-              outbox.put(original, originalKey);
-              restoreCursor.continue();
-            };
-            return;
-          }
-          backup.put(cursor.value, cursor.primaryKey);
-          cursor.continue();
-        };
-      }
-
-      // Add indexes on stores if transaction is active. Tenant scope is stored on the
-      // outbox record itself, not inside payload; index the authoritative field.
+      // Add indices on stores if transaction is active
       this.ensureStoreIndices(transaction);
     }
 
@@ -225,19 +193,8 @@ export class MigrationEngine {
 
       if (transaction.db.objectStoreNames.contains("syncOutbox")) {
         const store = transaction.objectStore("syncOutbox");
-        if (store.indexNames.contains("by_tenant")) {
-          try {
-            const index = store.index("by_tenant");
-            if (index.keyPath !== "tenantId") store.deleteIndex("by_tenant");
-          } catch {
-            try { store.deleteIndex("by_tenant"); } catch {}
-          }
-        }
         if (!store.indexNames.contains("by_tenant")) {
-          store.createIndex("by_tenant", "tenantId", { unique: false });
-        }
-        if (!store.indexNames.contains("by_branch")) {
-          store.createIndex("by_branch", "branchId", { unique: false });
+          store.createIndex("by_tenant", "payload.tenantId", { unique: false });
         }
       }
     } catch {
