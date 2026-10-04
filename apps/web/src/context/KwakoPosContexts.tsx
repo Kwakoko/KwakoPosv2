@@ -274,7 +274,8 @@ const DEFAULT_SYNC_CONTEXT: SyncContextType = {
 const SyncContext = createContext<SyncContextType | null>(null);
 export const useSync = (): SyncContextType => {
   const ctx = useContext(SyncContext);
-  return ctx || DEFAULT_SYNC_CONTEXT;
+  if (!ctx) throw new Error("SYNC_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface ThemeContextType {
@@ -892,7 +893,13 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         try {
           if (typeof window !== "undefined" && "BroadcastChannel" in window) {
             const bc = new BroadcastChannel("kwakopos_sync_channel");
-            bc.postMessage({ type: "SYNC_CONVERGED", ...result, timestamp: Date.now() });
+            bc.postMessage({
+              type: "SYNC_CONVERGED",
+              tenantId: targetTenantId,
+              branchId: targetBranchId,
+              ...result,
+              timestamp: Date.now(),
+            });
             bc.close();
           }
         } catch {
@@ -1013,6 +1020,17 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     bc.onmessage = (event) => {
       const data = event.data;
       if (!data) return;
+      const activeTenantId = user?.tenantId || currentTenantId || null;
+      const activeBranchId = user?.branchId || currentBranchId || null;
+      const messageTenantId = data.tenantId ? String(data.tenantId) : null;
+      const messageBranchId = data.branchId ? String(data.branchId) : null;
+      if (
+        (messageTenantId && activeTenantId && messageTenantId !== activeTenantId) ||
+        (messageBranchId && activeBranchId && messageBranchId !== activeBranchId)
+      ) {
+        return;
+      }
+
       if (data.type === "OUTBOX_MUTATION") {
         void db.refreshStoresFromNative([
           "syncOutbox", "sales", "products", "productVariants", "stockLedger",
