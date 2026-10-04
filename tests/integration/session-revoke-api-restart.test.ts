@@ -115,7 +115,8 @@ describe("session revoke survives API restart", () => {
 
   afterAll(async () => {
     await stopApi();
-    await prisma.tenant.delete({ where: { id: tenantId } });
+    // audit_events is append-only by design; CI uses an isolated PostgreSQL database per run,
+    // so teardown intentionally leaves immutable audit evidence intact rather than violating the invariant.
   }, 60_000);
 
   it("persists revocation in PostgreSQL and rejects the same token after a fresh API process starts", async () => {
