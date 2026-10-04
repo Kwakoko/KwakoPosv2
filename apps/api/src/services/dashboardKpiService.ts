@@ -219,17 +219,41 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ day: Date; refund_net: unknown; returned_cogs: unknown }>>(
         `SELECT DATE(r."createdAt") AS day,
-                COALESCE(SUM(r."totalRefundAmount" * CASE
-                  WHEN s."grandTotal" > 0 THEN 1 - (s."taxTotal" / s."grandTotal")
-                  ELSE 1 END),0) AS refund_net,
-                COALESCE(SUM((
-                  SELECT COALESCE(SUM(rl."quantityReturned" * pv."costPrice"),0)
-                    FROM return_lines rl
-                    JOIN product_variants pv ON pv."id" = rl."variantId"
-                   WHERE rl."returnId" = r."id"
-                )),0) AS returned_cogs
+                COALESCE(SUM(
+                  rl."refundLineTotal" * (
+                    1 - COALESCE(
+                      (
+                        SELECT SUM(sl."taxAmount") / NULLIF(SUM(sl."lineTotal"), 0)
+                          FROM sale_lines sl
+                         WHERE sl."saleId" = r."originalSaleId"
+                           AND sl."variantId" = rl."variantId"
+                      ),
+                      CASE
+                        WHEN s."grandTotal" > 0 THEN s."taxTotal" / s."grandTotal"
+                        ELSE 0
+                      END
+                    )
+                  )
+                ),0) AS refund_net,
+                COALESCE(SUM(
+                  rl."quantityReturned" * COALESCE(
+                    (
+                      SELECT SUM(sl."unitCost" * sl."quantity") / NULLIF(SUM(sl."quantity"), 0)
+                        FROM sale_lines sl
+                       WHERE sl."saleId" = r."originalSaleId"
+                         AND sl."variantId" = rl."variantId"
+                    ),
+                    (
+                      SELECT pv."costPrice"
+                        FROM product_variants pv
+                       WHERE pv."id" = rl."variantId"
+                    ),
+                    0
+                  )
+                ),0) AS returned_cogs
            FROM returns r
            LEFT JOIN sales s ON s."id" = r."originalSaleId"
+           LEFT JOIN return_lines rl ON rl."returnId" = r."id"
           WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
             AND r."createdAt" >= $3 AND r."createdAt" < $4
           GROUP BY DATE(r."createdAt")
@@ -381,14 +405,41 @@ export async function getDashboardKpiSnapshot(
 
     const refundRows = await tx.$queryRawUnsafe<Array<{ refunds_today: unknown; net_refunds_today: unknown; returned_cogs_today: unknown }>>(
       `SELECT COALESCE(SUM(r."totalRefundAmount"),0) AS refunds_today,
-              COALESCE(SUM(r."totalRefundAmount" * CASE
-                WHEN s."grandTotal" > 0 THEN 1 - (s."taxTotal" / s."grandTotal")
-                ELSE 1 END),0) AS net_refunds_today,
-              COALESCE(SUM(rl."quantityReturned" * pv."costPrice"),0) AS returned_cogs_today
+              COALESCE(SUM(
+                rl."refundLineTotal" * (
+                  1 - COALESCE(
+                    (
+                      SELECT SUM(sl."taxAmount") / NULLIF(SUM(sl."lineTotal"), 0)
+                        FROM sale_lines sl
+                       WHERE sl."saleId" = r."originalSaleId"
+                         AND sl."variantId" = rl."variantId"
+                    ),
+                    CASE
+                      WHEN s."grandTotal" > 0 THEN s."taxTotal" / s."grandTotal"
+                      ELSE 0
+                    END
+                  )
+                )
+              ),0) AS net_refunds_today,
+              COALESCE(SUM(
+                rl."quantityReturned" * COALESCE(
+                  (
+                    SELECT SUM(sl."unitCost" * sl."quantity") / NULLIF(SUM(sl."quantity"), 0)
+                      FROM sale_lines sl
+                     WHERE sl."saleId" = r."originalSaleId"
+                       AND sl."variantId" = rl."variantId"
+                  ),
+                  (
+                    SELECT pv."costPrice"
+                      FROM product_variants pv
+                     WHERE pv."id" = rl."variantId"
+                  ),
+                  0
+                )
+              ),0) AS returned_cogs_today
          FROM returns r
          LEFT JOIN sales s ON s."id" = r."originalSaleId"
-         LEFT JOIN return_lines rl ON rl."returnId" = r.id
-         LEFT JOIN product_variants pv ON pv."id" = rl."variantId"
+         LEFT JOIN return_lines rl ON rl."returnId" = r."id"
         WHERE r."tenantId" = $1 AND r."branchId" = $2
           AND r."status" = 'COMPLETED'
           AND r."createdAt" >= CURRENT_DATE
