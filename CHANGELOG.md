@@ -7,6 +7,8 @@ All notable changes to KwakoPos will be documented in this file.
 ## [2.13.0] - 2026-10-04
 
 ### ✨ New Features
+- **sync**: bridge durable domain events to event bus
+- **sync**: add durable domain event journal
 - **reports**: expose authoritative tenant-scoped report data API
 - **core**: materialize authoritative variant stock balance
 - **core**: consolidate conflict resolution and durable rollback authority
@@ -56,6 +58,42 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #50 from Kwakoko/fix/internal-communication-fabric-closed-loop
+- **auth**: align session persistence contract with server refresh handle
+- **web**: enforce application API boundary for UI
+- **web**: route login API imports through application facade
+- **sync**: prove durable domain event transaction boundary
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: add application API facade
+- **sync**: enforce communication fabric boundaries
+- **sync**: add durable domain event bridge coverage
+- **release**: v2.13.0
 - **settings**: prove direct API retry idempotency
 - **settings**: respect append-only audit lifecycle in isolated CI
 - **settings**: assert fail-closed result and preserve append-only audit
@@ -236,6 +274,21 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **cert**: correct forensic certification import path
+- **cert**: make cleanliness forensic gate self-contained
+- **governance**: align marketplace gate with live certification suite
+- **sync**: synthesize deterministic standard variant in production push
+- **sync**: normalize legacy product prices before variant synthesis
+- **inventory**: make fallback product variant identity deterministic
+- **security**: patch Fastify and transitive URL/IP dependencies
+- **ci**: update navigation lock for approved fabric imports
+- **web**: normalize fail-closed context errors
+- **web**: fail closed on missing operational context providers
+- **sync**: persist and deliver durable domain events
+- **sync**: fail closed on missing context and scope cross-tab events
+- **sync**: route retry panel through scoped client sync engine
+- **sync**: minimize cross-tab outbox broadcast payload
+- **sync**: scope legacy outbox dispatcher and minimize cross-tab payload
 - **settings**: close all P0/P1 remediation loops
 - **settings**: initialize idempotency journal before Settings replay lookup
 - **release-lock**: track Settings scope indicator checksum
@@ -569,7 +622,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1, Jack91186
+Credit to: Jack91186, Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
