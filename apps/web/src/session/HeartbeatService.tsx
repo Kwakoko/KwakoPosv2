@@ -4,16 +4,17 @@ import { apiFetch } from "../services/apiClient.js";
 interface HeartbeatServiceProps {
   enabled: boolean;
   intervalMs: number;
+  lastActivityAt: number;
   onFailure: (error: unknown) => void;
   onSuccess?: (data: any) => void;
 }
 
-export const HeartbeatService: React.FC<HeartbeatServiceProps> = ({ enabled, intervalMs, onFailure, onSuccess }) => {
+export const HeartbeatService: React.FC<HeartbeatServiceProps> = ({ enabled, intervalMs, lastActivityAt, onFailure, onSuccess }) => {
   const running = useRef(false);
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;
     const beat = async () => {
-      if (running.current || document.visibilityState === "hidden") return;
+      if (running.current || document.visibilityState === "hidden" || Date.now() - lastActivityAt > intervalMs) return;
       running.current = true;
       try {
         const result = await apiFetch<any>("/auth/session/heartbeat", { method: "POST" });
@@ -27,6 +28,6 @@ export const HeartbeatService: React.FC<HeartbeatServiceProps> = ({ enabled, int
     void beat();
     const id = window.setInterval(() => void beat(), Math.max(60_000, intervalMs));
     return () => window.clearInterval(id);
-  }, [enabled, intervalMs, onFailure, onSuccess]);
+  }, [enabled, intervalMs, lastActivityAt, onFailure, onSuccess]);
   return null;
 };
