@@ -22,6 +22,7 @@ import {
   persistenceStatusKey,
 } from "./persistence/persistenceStatus.js";
 import { normalizeSyncPayload } from "./services/payloadValidationService.js";
+import { countUniqueLocalConflictIds } from "./services/syncConflictPresentationService.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
@@ -472,7 +473,7 @@ export class ClientSyncEngine {
       clientVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.applicationVersion,
       schemaVersion: this.localDb.schemaVersion,
       serviceWorkerVersion: AUTHORITATIVE_COMPATIBILITY_MATRIX.pwaVersion,
-      conflictCount: Array.from(this.localDb.syncMetadata.keys()).filter((k) => k.startsWith("sync_conflict_")).length,
+      conflictCount: countUniqueLocalConflictIds(this.localDb.syncMetadata.entries()),
       reconciliationStatus: reconciliationStatus === "IN_SYNC" ? "IN_SYNC" : reconciliationStatus === "DIVERGENT" ? "DIVERGENT" : "UNKNOWN",
       bootstrapStatus: isBootstrapped ? "BOOTSTRAPPED" : "NOT_BOOTSTRAPPED",
       lastAuthoritativeSnapshot: lastBootstrap,
