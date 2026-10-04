@@ -44,6 +44,14 @@ describe("syncStatusLabel", () => {
   it("reports synced only after a successful sync with an empty clean queue and IN_SYNC reconciliation", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS" })).toBe("SYNCED");
   });
+
+  it("does not report synced when authoritative conflict count is unknown", () => {
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", openConflictCount: null })).toBe("VERIFYING");
+  });
+
+  it("reports conflict when authoritative server reports open conflicts", () => {
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", openConflictCount: 1 })).toBe("CONFLICT");
+  });
 });
 
 
