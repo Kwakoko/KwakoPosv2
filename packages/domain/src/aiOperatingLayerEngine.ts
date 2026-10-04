@@ -1,4 +1,6 @@
-import { AiBusinessSnapshot,AiEvidenceItem,AiInsightRecord,AiRecommendation,AiRiskLevel,AiSemanticMetricResult,TenantContext } from "@kwakopos2/contracts";
+import { AiBusinessSnapshot,AiEvidenceItem,AiInsightRecord,AiRecommendation,AiSemanticMetricResult,TenantContext } from "@kwakopos2/contracts";
+
+type AiRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export class AiOperatingLayerEngine {
   public generateInsightsAndRecommendations(ctx:TenantContext,snapshot:AiBusinessSnapshot,killSwitchActive=false){
