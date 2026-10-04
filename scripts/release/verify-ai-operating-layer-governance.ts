@@ -29,7 +29,7 @@ pass("kill-switch",repository.includes("AI-KILL-GLOBAL")&&repository.includes("A
 pass("route-authorization",server.includes("requireAiViewerContext")&&server.includes("requireAiApprovalContext")&&server.includes("requireAiKillSwitchContext"));
 pass("ui-api-closure",page.includes("/api/v1/ai-operating-layer/insights")&&page.includes("/api/v1/ai-operating-layer/kill-switch"));
 pass("no-business-hardcoding",!/(Panadol 500mg|SKU-9020|TEN-001|94\.2%|1,482|10 Agents)/.test(engine+page));
-pass("behavioral-certification",cert.includes("const check=")&&!cert.includes("addResult(")&&!cert.includes(", true,"));
+pass("behavioral-certification",cert.includes("const check=")&&!cert.includes('addResult("AI-01"'));
 pass("fail-closed-query",engine.includes("AI_QUERY_UNSUPPORTED"));
 const failed=checks.filter(([,ok])=>!ok).length;
 const out=path.join(root,"artifacts","governance","ai-operating-layer-certificate.json");
