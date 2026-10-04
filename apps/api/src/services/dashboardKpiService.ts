@@ -247,6 +247,8 @@ export async function getDashboardKpiSnapshot(
                       SELECT pv."costPrice"
                         FROM product_variants pv
                        WHERE pv."id" = rl."variantId"
+                        AND pv."tenantId" = $1
+                        AND pv."branchId" = $2
                     ),
                     0
                   )
@@ -458,6 +460,8 @@ export async function getDashboardKpiSnapshot(
                     SELECT pv."costPrice"
                       FROM product_variants pv
                      WHERE pv."id" = rl."variantId"
+                        AND pv."tenantId" = $1
+                        AND pv."branchId" = $2
                   ),
                   0
                 )
