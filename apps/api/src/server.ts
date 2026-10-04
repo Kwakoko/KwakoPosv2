@@ -3804,7 +3804,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const { globalRetailService } = await import("./services/retailService.js");
     const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
-    const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
+    const sale = await globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
     return reply.status(201).send({
       success: true,
       data: sale,
