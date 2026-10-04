@@ -8,6 +8,7 @@ const base = (): SyncStatusSnapshot => ({
   localRevision: "10",
   serverRevision: "10",
   syncEpoch: "epoch-1",
+  reconciliationStatus: "IN_SYNC",
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
@@ -31,7 +32,15 @@ describe("syncStatusLabel", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS", pendingOutboxCount: 1 })).toBe("PENDING");
   });
 
-  it("reports synced only after a successful sync with an empty clean queue", () => {
+  it("does not report synced before authoritative reconciliation is verified", () => {
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", reconciliationStatus: "UNKNOWN" })).toBe("VERIFYING");
+  });
+
+  it("reports a reconciliation divergence as a conflict", () => {
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", reconciliationStatus: "DIVERGENT" })).toBe("CONFLICT");
+  });
+
+  it("reports synced only after a successful sync with an empty clean queue and IN_SYNC reconciliation", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS" })).toBe("SYNCED");
   });
 });
