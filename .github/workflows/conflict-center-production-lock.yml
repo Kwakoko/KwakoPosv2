@@ -55,8 +55,8 @@ jobs:
       - name: Apply database migrations
         run: npm run db:migrate
       - name: Static Production Lock
-        run: npm run certify:conflict-center-lock
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Conflict Center Unit Contract
         run: npx vitest run tests/unit/sync-conflict-center-presentation.test.ts tests/unit/sync-status-label.test.ts --reporter=verbose
       - name: PostgreSQL Conflict Lifecycle
-        run: npm run certify:conflicts
+        run: npx tsx scripts/certify-sync-conflict-resolution.ts
