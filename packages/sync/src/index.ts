@@ -110,8 +110,8 @@ export class SyncEngine {
       }
 
       try {
-        if (["Role", "User", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
-          throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: Super Admin and Role entities cannot be mutated via sync payloads.");
+        if (["Role", "User", "Employee", "PlatformSecurity", "SuperAdmin"].includes(op.entityType) || JSON.stringify(op.payload || {}).includes("SUPER_ADMIN")) {
+          throw new Error("PRIVILEGE_ESCALATION_ATTEMPT_DENIED: privileged identity and HR entities cannot be mutated via sync payloads.");
         }
 
         if (op.entityType === "Product" && op.operationType === "CREATE") {

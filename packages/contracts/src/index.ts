@@ -2110,7 +2110,7 @@ export const EmployeeSchema = z.object({
   address: z.string().nullable().optional(),
   emergencyContact: z.string().nullable().optional(),
   dateOfBirth: z.string().or(z.date()).nullable().optional(),
-  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED"]).default("ACTIVE"),
+  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED", "ARCHIVED"]).default("ACTIVE"),
   hireDate: z.string().or(z.date()),
   terminationDate: z.string().or(z.date()).nullable().optional(),
   departmentId: z.string().uuid().nullable().optional(),
@@ -2150,7 +2150,7 @@ export const CreateEmployeeRequestSchema = z.object({
   baseSalary: z.number().nonnegative().optional(),
   hourlyRate: z.number().nonnegative().optional(),
   commissionRate: z.number().nonnegative().optional(),
-  pinCode: z.string().optional(),
+  pinCode: z.string().regex(/^\d{4,6}$/, "PIN must contain 4-6 digits").optional(),
 });
 export type CreateEmployeeRequest = z.infer<typeof CreateEmployeeRequestSchema>;
 
@@ -2166,7 +2166,7 @@ export const UpdateEmployeeRequestSchema = z.object({
   positionId: z.string().uuid().nullable().optional(),
   branchId: z.string().uuid().nullable().optional(),
   managerId: z.string().uuid().nullable().optional(),
-  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED"]).optional(),
+  status: z.enum(["ACTIVE", "ON_LEAVE", "SUSPENDED", "TERMINATED", "ARCHIVED"]).optional(),
   workType: z.enum(["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN", "CASUAL"]).optional(),
   contractType: z.enum(["PERMANENT", "FIXED_TERM", "PROBATION"]).optional(),
   baseSalary: z.number().nonnegative().optional(),
