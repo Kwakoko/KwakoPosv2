@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { syncStatusLabel, type SyncStatusSnapshot } from "../../apps/web/src/services/syncStatusService.js";
+import { isReplicaConverged, syncStatusLabel, type SyncStatusSnapshot } from "../../apps/web/src/services/syncStatusService.js";
 
 const base = (): SyncStatusSnapshot => ({
   tenantId: "tenant-1",
@@ -43,5 +43,20 @@ describe("syncStatusLabel", () => {
 
   it("reports synced only after a successful sync with an empty clean queue and IN_SYNC reconciliation", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS" })).toBe("SYNCED");
+  });
+});
+
+
+describe("authoritative replica convergence", () => {
+  it("requires an authoritative conflict count of zero and matching revisions", () => {
+    expect(isReplicaConverged({ ...base(), state: "SUCCESS", serverRevision: "12", localRevision: "12" })).toBe(true);
+  });
+
+  it("rejects verification when the authoritative conflict count is unknown", () => {
+    expect(isReplicaConverged({ ...base(), state: "SUCCESS", openConflictCount: null })).toBe(false);
+  });
+
+  it("rejects verification when local and server revisions differ", () => {
+    expect(isReplicaConverged({ ...base(), state: "SUCCESS", localRevision: "11", serverRevision: "12" })).toBe(false);
   });
 });
