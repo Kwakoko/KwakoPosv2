@@ -4,6 +4,15 @@ import { randomUUID } from "crypto";
 // browser persistence modules; ESM evaluates static dependencies before module-body
 // side effects, so a static polyfill import is too late for LocalIndexedDbStore.
 await import("fake-indexeddb/auto");
+if (typeof globalThis.indexedDB === "undefined") {
+  const fakeIndexedDbCore = await import("fake-indexeddb");
+  (globalThis as any).indexedDB = fakeIndexedDbCore.indexedDB;
+  (globalThis as any).IDBKeyRange = fakeIndexedDbCore.IDBKeyRange;
+}
+if (typeof globalThis.indexedDB === "undefined") {
+  throw new Error("SYNTHETIC_PWA_INDEXEDDB_UNAVAILABLE");
+}
+
 import {
   ScopedProductRepository,
   ScopedStockRepository,
