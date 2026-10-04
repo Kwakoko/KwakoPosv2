@@ -1465,5 +1465,4 @@ export {
 
 export * from "./inventoryAuthority.js";
 
-export * from "./aiInsightsRepository.js";\n
 export * from "./aiInsightsRepository.js";
