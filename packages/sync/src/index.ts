@@ -115,7 +115,10 @@ export class SyncEngine {
         }
 
         if (op.entityType === "Product" && op.operationType === "CREATE") {
-          const productPayload = op.payload as unknown as CreateProductRequest;
+          const productPayload = op.payload as unknown as CreateProductRequest & {
+            price?: number;
+            costPrice?: number;
+          };
           const hasExplicitVariantCreate = orderedOperations.some((candidate) =>
             candidate.entityType === "ProductVariant" &&
             candidate.operationType === "CREATE" &&
@@ -124,6 +127,8 @@ export class SyncEngine {
           this.productRepo.createProduct(ctx, {
             ...productPayload,
             id: op.entityId,
+            buyingPrice: productPayload.buyingPrice ?? productPayload.costPrice ?? 0,
+            sellingPrice: productPayload.sellingPrice ?? productPayload.price ?? 0,
             hasVariants: Boolean(productPayload.hasVariants || productPayload.variants?.length || hasExplicitVariantCreate),
           });
         } else if (op.entityType === "Product" && op.operationType === "UPDATE") {
