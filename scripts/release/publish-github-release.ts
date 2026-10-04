@@ -33,6 +33,10 @@ export async function publishGitHubRelease() {
 
   console.log(`[RELEASE] Version: ${identity.appVersion}`);
   console.log(`[RELEASE] Tag:     ${tag}`);
+  const headSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{40}$/i.test(identity.gitSha) || identity.gitSha !== headSha) {
+    throw new Error(`RELEASE_BLOCKED: release identity SHA ${identity.gitSha} does not match checked-out HEAD ${headSha}`);
+  }
   console.log(`[RELEASE] Git SHA: ${identity.gitSha}`);
 
   // Extract latest release notes from CHANGELOG.md if available
@@ -56,21 +60,26 @@ export async function publishGitHubRelease() {
   const githubToken = resolveGitHubToken();
   const repo = process.env.GITHUB_REPOSITORY || "Kwakoko/KwakoPosv2";
 
-  // Create local git tag if not already existing
+  // Create or reuse the local tag only when it is bound to this exact release SHA.
   try {
-    execSync(`git tag -a ${tag} -m "Release ${tag}"`, { stdio: "ignore" });
-    console.log(`✓ Local Git tag ${tag} created.`);
-  } catch {
-    // Tag may already exist locally
+    const existingTarget = execSync(`git rev-parse "${tag}^{commit}"`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (existingTarget !== identity.gitSha) {
+      throw new Error(`RELEASE_BLOCKED: local tag ${tag} points to ${existingTarget}, expected ${identity.gitSha}`);
+    }
+    console.log(`✓ Local Git tag ${tag} already binds to ${identity.gitSha}.`);
+  } catch (error) {
+    if (String(error).includes("RELEASE_BLOCKED:")) throw error;
+    execSync(`git tag -a ${tag} ${identity.gitSha} -m "Release ${tag}"`, { stdio: "ignore" });
+    console.log(`✓ Local Git tag ${tag} created at ${identity.gitSha}.`);
   }
 
-  // Push tag to remote if git origin available
-  try {
-    execSync(`git push origin ${tag}`, { stdio: "ignore" });
-    console.log(`✓ Git tag ${tag} pushed to remote origin.`);
-  } catch {
-    // Remote tag push optional fallback
+  execSync(`git push origin ${tag}`, { stdio: "inherit" });
+  execSync("git fetch origin --tags --force", { stdio: "ignore" });
+  const verifiedRemoteTarget = execSync(`git rev-parse "${tag}^{commit}"`, { encoding: "utf8" }).trim();
+  if (verifiedRemoteTarget !== identity.gitSha) {
+    throw new Error(`RELEASE_BLOCKED: remote tag ${tag} resolves to ${verifiedRemoteTarget}, expected ${identity.gitSha}`);
   }
+  console.log(`✓ Remote Git tag ${tag} verified against exact release SHA ${identity.gitSha}.`);
 
   if (githubToken && repo) {
     try {
@@ -131,6 +140,8 @@ export async function publishGitHubRelease() {
           } else {
             throw new Error(`RELEASE_BLOCKED: GitHub release creation returned HTTP ${response.status}: ${errText}`);
           }
+        } else {
+          throw new Error(`RELEASE_BLOCKED: GitHub release creation returned HTTP ${response.status}: ${errText}`);
         }
       }
     } catch (err: any) {
