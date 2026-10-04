@@ -124,9 +124,10 @@ export class MigrationEngine {
     }
 
     // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices.
-    // Existing business/outbox rows are immutable across schema upgrades: never replace
-    // or recreate the syncOutbox store. Re-assert every queued row in the upgrade
-    // transaction so a client restart can prove the same durable payload still exists.
+    // Existing business/outbox rows are immutable across schema upgrades. Capture the
+    // complete syncOutbox contents before touching its indexes, then restore every row
+    // under the same primary key in this same version-change transaction. This protects
+    // older clients whose physical IndexedDB outbox schema predates the current indexes.
     if (toVersion === 4) {
       const v4Stores = ["migrationJournal", "recoverySnapshots", "updateState"];
       for (const name of v4Stores) {
@@ -137,19 +138,32 @@ export class MigrationEngine {
 
       if (db.objectStoreNames.contains("syncOutbox")) {
         const outbox = transaction.objectStore("syncOutbox");
+        const snapshotStoreName = "__syncOutboxMigrationBackup";
+        if (!db.objectStoreNames.contains(snapshotStoreName)) {
+          db.createObjectStore(snapshotStoreName);
+        }
+        const backup = transaction.objectStore(snapshotStoreName);
         const cursorRequest = outbox.openCursor();
         cursorRequest.onsuccess = () => {
           const cursor = cursorRequest.result;
-          if (!cursor) return;
-          const value: any = cursor.value;
-          // Preserve the record under its original primary key without changing status,
-          // scope, idempotency key, or payload. This is deliberately a put-on-same-key.
-          cursor.update(value);
+          if (!cursor) {
+            const restoreRequest = backup.openCursor();
+            restoreRequest.onsuccess = () => {
+              const restoreCursor = restoreRequest.result;
+              if (!restoreCursor) return;
+              const original = restoreCursor.value as any;
+              const originalKey = restoreCursor.primaryKey;
+              outbox.put(original, originalKey);
+              restoreCursor.continue();
+            };
+            return;
+          }
+          backup.put(cursor.value, cursor.primaryKey);
           cursor.continue();
         };
       }
 
-      // Add indices on stores if transaction is active. Tenant scope is stored on the
+      // Add indexes on stores if transaction is active. Tenant scope is stored on the
       // outbox record itself, not inside payload; index the authoritative field.
       this.ensureStoreIndices(transaction);
     }
