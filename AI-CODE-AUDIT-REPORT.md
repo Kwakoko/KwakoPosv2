@@ -97,7 +97,7 @@ The system is structured as an npm workspaces monorepo:
 - **Finding:**  
   The codebase has two competing API server implementations:
   1. `server.ts`: A massive 4,810-line monolithic server containing legacy in-memory fallback routes and developmental auth bypasses.
-  2. `serverFixed.ts`: A 334-line wrapper created to intercept `/auth/login`, `/auth/refresh`, and setup routes before they reach `server.ts`.
+  2. `server.ts`: The single API entrypoint now owns `/auth/login`, `/auth/refresh`, session/setup routes, hardened cookie transport, and production security hooks.
   
   To make `server.ts` use persistent PostgreSQL repositories instead of in-memory maps, the project's build pipeline (`apps/api/package.json`) executes a script (`harden-production-finance.ts`) that **modifies `server.ts` via regex string manipulation prior to compilation**:
   ```typescript
@@ -529,7 +529,7 @@ gantt
     section Phase 2: Architecture & Schema (P1)
     Reconcile schema.prisma with Migrations :p2_1, after p1_4, 3d
     Abolish Regex Monkey-Patching in Build  :p2_2, after p2_1, 2d
-    Unify serverFixed.ts into Modular Routes :p2_3, after p2_2, 4d
+    Unify API authentication into server.ts :p2_3, after p2_2, 4d
     Migrate Rollback Repos to PostgreSQL    :p2_4, after p2_3, 3d
     section Phase 3: Performance & Scale (P2)
     Implement Stock Cache & SQL Aggregates  :p3_1, after p2_4, 3d
