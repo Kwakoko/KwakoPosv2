@@ -405,7 +405,14 @@ export class WorldStandardPrismaSyncEngine {
           action: "SETTING_UPDATED",
           entityType: "Setting",
           entityId: row.id,
-          metadata: { key, scope, operationType: op.operationType, settingVersion: row.version },
+          metadata: {
+            key,
+            scope,
+            operationType: op.operationType,
+            settingVersion: row.version,
+            beforeValue: existing?.value ?? null,
+            afterValue: op.operationType === "DELETE" ? null : row.value,
+          },
         },
       });
       return;
