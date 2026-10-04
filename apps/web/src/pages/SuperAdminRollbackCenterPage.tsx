@@ -5,7 +5,7 @@ import {
   Search, Filter, ExternalLink, Hash, Check, AlertOctagon,
 } from "lucide-react";
 import { useAuth } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 import type {
   RollbackRequest,
