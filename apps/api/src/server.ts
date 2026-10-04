@@ -1054,7 +1054,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Must be registered BEFORE route handlers to ensure all routes are protected.
   server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
 
-  // Distributed Tracing & Correlation Hook
+  // Canonical production authentication boundary + distributed tracing.
+  // Register this shared hook before every route so all protected production endpoints,
+  // including routes registered by modules, inherit the same JWT/session validation.
+  // Explicit public/authentication endpoints are allowlisted inside the hook.
   server.addHook("onRequest", async (req, reply) => {
     req.startTime = Date.now();
     const correlationId = (req.headers["x-correlation-id"] as string) || randomUUID();
