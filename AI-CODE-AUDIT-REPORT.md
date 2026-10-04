@@ -37,7 +37,7 @@ The dashboard below counts active findings. SEC-08 (browser token storage) and S
 | **SEC-03** | **CRITICAL** | Security (A01/A03) | **Arbitrary SQL Execution HTTP Backdoor (`/api/v1/super-admin/db/query`)** | `apps/api/src/routes/superAdminDatabaseRoutes.ts:81-111` |
 | **PERF-01** | **CRITICAL** | Performance | **$O(N)$ Unbounded In-Memory Stock Calculation (Heap Exhaustion)** | `packages/database/src/prismaRepositories.ts:426-429` |
 | **PERF-02** | **CRITICAL** | Performance | **Sync Engine Delta Memory Bomb (Full-Table Client Pull & JS Filtering)** | `packages/sync/src/prismaSyncEngine.ts:166-168` |
-| **ARCH-01** | **CRITICAL** | Architecture | **Split-Brain Server Duality & Build-Time Regex Code Patching** | `scripts/ci/harden-production-finance.ts:16-34` |
+| **ARCH-01** | **CRITICAL** | Architecture | **Build-Time Regex Source Mutation (server split-brain resolved)** | `scripts/ci/harden-production-finance.ts:16-34` |
 | **QUAL-01** | **CRITICAL** | AI Drift | **Synthetic / Fabricated Certification Scripts (Vanity `for` Loops)** | `scripts/certification/full-system-certification-engine.ts:53-57` |
 | **SEC-04** | **HIGH** | Security (A01) | **Super-Admin Authorization Bypass via `x-admin-role` Header & `*` Wildcard** | `apps/api/src/routes/superAdminDatabaseRoutes.ts:16-21` |
 | **SEC-05** | **HIGH** | Security (A07) | **Super-Admin 2FA Setup Leaks Valid TOTP Code (`currentOtp`) in Response** | `apps/api/src/services/superAdminSecurityService.ts:260-268` |
