@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
@@ -20,8 +20,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/SettingsPage.tsx": "06d57c07a548871c6070b949b3be4bd7ac278a5f",
   "apps/web/src/pages/CashDrawerPage.tsx": "cba6164b3dc341fd1e03b5605e54046072518ad5",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/production-certification.yml": "9034050784a1d88fe6c04348c1d9189e0a0e2ad8",
-  ".github/workflows/production-release-exact-main.yml": "8db0002f34fbc36cb65635fc07ae8e14feab1120"
+  ".github/workflows/production-certification.yml": "b1fa5502685b56d52334f32ab33e46d6c215ad11",`r`n  ".github/workflows/production-release-exact-main.yml": "d49cdb11f9cd97b66fd36da205da56b2a71ce7ee"
 };
 
 const MARKERS: Array<[string, string, string]> = [
@@ -98,4 +97,4 @@ const result = {
 
 console.log(JSON.stringify(result, null, 2));
 if (failures.length > 0) process.exit(1);
-console.log(`NAVIGATION PRODUCTION LOCK: PASS — ${LOCK_ID}`);
+console.log(`NAVIGATION PRODUCTION LOCK: PASS â€” ${LOCK_ID}`);

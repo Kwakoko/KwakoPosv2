@@ -80,32 +80,20 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       saleIds.push(saleId);
 
       // Record stock deductions locally (deducts variant, writes ledger, records pending StockAdjustment)
-      recordPosSaleDeductions(db, {
+      await recordPosSaleDeductions(db, {
         saleId,
         items: [{ productId, variantId, qty: 2, unitCost: 28000 }],
         tenantId: "tenant-integ-1",
         branchId: "branch-integ-1",
       });
 
-      // Enqueue to outbox before any network attempt
-      await enqueueOutbox(
-        {
-          entityType: "Sale",
-          entityId: saleId,
-          operationType: "CREATE",
-          tenantId: "tenant-integ-1",
-          branchId: "branch-integ-1",
-          payload: {
-            id: saleId,
-            items: [{ variantId, qty: 2, price: 35000 }],
-            total: 70000,
-          },
-        },
-        db
-      );
+      // recordPosSaleDeductions atomically queues the StockAdjustment mutation.
+      // Do not create a second Sale outbox entry in this transport drill: the
+      // authoritative server sale path generates the stock ledger, while the
+      // local inventory mutation is already represented by the StockAdjustment outbox.
     }
 
-    // Verify 5 items pending in outbox
+    // Verify one durable StockAdjustment outbox item per offline sale
     const pendingItems = await db.outbox.where("status").equals("PENDING").toArray();
     expect(pendingItems.length).toBe(5);
 
