@@ -136,8 +136,14 @@ export async function runBusinessFlowJourneys(): Promise<{
       operationId: randomUUID(),
       idempotencyKey: `PHARM-BATCH-${randomUUID()}`,
     });
-    const session = commRepo.openCashSession(ctx, { openingCash: 50000 });
-    const posRes = commRepo.createPosSale(ctx, {
+    // The cashier is a separate physical operator from the Retail journey;
+    // one cashier cannot have two simultaneous open cash sessions.
+    const pharmacyCtx: TenantContext = {
+      ...ctx,
+      userId: `USER-PHARMACY-${randomUUID().slice(0, 8)}`,
+    };
+    const session = commRepo.openCashSession(pharmacyCtx, { openingCash: 50000 });
+    const posRes = commRepo.createPosSale(pharmacyCtx, {
       cashSessionId: session.id,
       items: [{ productId: prod.id, variantId: varId, quantity: 1, unitPrice: 15000, unitCost: 8000 }],
       payments: [{ amount: 15000, paymentMethod: "CASH" }],
