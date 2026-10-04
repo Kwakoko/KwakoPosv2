@@ -327,10 +327,11 @@ export async function getDashboardKpiSnapshot(
       const returned = returnDayMap.get(key);
       const priorReturned = priorReturnDayMap.get(prior.toISOString().slice(0,10));
       const revenue = numberValue(row?.revenue) - numberValue(returned?.refund_net);
-      const cogs = numberValue(row?.cogs);
-      const profit = revenue - cogs + numberValue(returned?.returned_cogs);
+      const cogs = Math.max(0, numberValue(row?.cogs) - numberValue(returned?.returned_cogs));
+      const profit = revenue - cogs;
       const priorRevenue = numberValue(priorRow?.revenue) - numberValue(priorReturned?.refund_net);
-      const priorProfit = priorRevenue - numberValue(priorRow?.cogs) + numberValue(priorReturned?.returned_cogs);
+      const priorCogs = Math.max(0, numberValue(priorRow?.cogs) - numberValue(priorReturned?.returned_cogs));
+      const priorProfit = priorRevenue - priorCogs;
       totalRevenue += revenue; totalCOGS += cogs; totalProfit += profit;
       priorTotalRevenue += priorRevenue; priorTotalProfit += priorProfit;
       chartPoints.push({
@@ -396,10 +397,11 @@ export async function getDashboardKpiSnapshot(
     const returnedCogsToday = numberValue(refundRows[0]?.returned_cogs_today);
     const grossSalesToday = numberValue(sales.gross_sales_today);
     const discountsToday = numberValue(sales.discounts_today);
-    const cogsToday = numberValue(sales.cogs_today);
     const grossRevenueToday = numberValue(sales.sales_today);
+    const cogsBeforeReturnsToday = numberValue(sales.cogs_today);
     const salesToday = grossRevenueToday - netRefundsToday;
-    const grossProfitToday = salesToday - cogsToday + returnedCogsToday;
+    const cogsToday = Math.max(0, cogsBeforeReturnsToday - returnedCogsToday);
+    const grossProfitToday = salesToday - cogsToday;
     const orderCount = numberValue(sales.order_count);
     const lowStockCount = numberValue(stock.low_stock);
     const outOfStockCount = numberValue(stock.out_of_stock);
