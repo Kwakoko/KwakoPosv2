@@ -70,8 +70,7 @@ jobs:
             echo "Release commit detected: $subject"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Block duplicate unpublished release candidates
+          fi      - name: Block duplicate unpublished release candidates
         if: steps.guard.outputs.skip != 'true'
         shell: bash
         run: |
@@ -176,103 +175,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
- | head -n1 || true)"
-          if [[ -z "$LATEST_TAG" ]]; then
-            echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag exists." >&2
-            exit 1
-          fi
-          if [[ "$VERSION" != "${LATEST_TAG#v}" ]]; then
-            export VERSION LATEST_TAG
-            node --input-type=module - <<'NODE'
-            import fs from "node:fs";
-            const { compareSemVer } = await import("./packages/config/src/semverEngine.ts");
-            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            if (compareSemVer(p.version, process.env.LATEST_TAG.slice(1)) > 0) {
-              console.log(`RELEASE_CANDIDATE_PENDING: v${p.version} is already committed ahead of ${process.env.LATEST_TAG}; no duplicate release commit will be created.`);
-              process.exit(0);
-            }
-            process.exit(1);
-            NODE
-          fi
-
-      - name: Wait for required mainline checks
-        if: steps.guard.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          workflows=("CI Quality Gates" "Security & Vulnerability Scanning")
-          deadline=$((SECONDS + 1800))
-          for workflow in "${workflows[@]}"; do
-            while true; do
-              result="$(gh run list --workflow "$workflow" --commit "$GITHUB_SHA" --limit 1 --json status,conclusion --jq 'if length == 0 then "" else .[0].status + "|" + (.[0].conclusion // "") end' 2>/dev/null || true)"
-              case "$result" in
-                completed\|success) break ;;
-                completed\|*) echo "RELEASE_BLOCKED: $workflow failed for $GITHUB_SHA ($result)" >&2; exit 1 ;;
-                "")
-                  if (( SECONDS >= deadline )); then echo "RELEASE_BLOCKED: $workflow did not publish a completed run for $GITHUB_SHA within 30 minutes." >&2; exit 1; fi
-                  sleep 10 ;;
-                *)
-                  if (( SECONDS >= deadline )); then echo "RELEASE_BLOCKED: $workflow remained incomplete for $GITHUB_SHA for 30 minutes." >&2; exit 1; fi
-                  sleep 10 ;;
-              esac
-            done
-          done
-          echo "Required mainline CI and security checks are green for $GITHUB_SHA."
-
-      - name: Calculate automatic SemVer bump
-        if: steps.guard.outputs.skip != 'true'
-        run: npx tsx scripts/release/prepare-release.ts
-      - name: Resolve authoritative release candidate
-        if: steps.guard.outputs.skip != 'true'
-        id: candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [[ "$LATEST_TAG" != "v${VERSION}" ]]; then
-            echo "needs_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs_release=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Commit release candidate
-        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
-        id: commit_release
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          [[ -n "$LATEST_TAG" ]] || { echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag"; exit 1; }
-          [[ "$VERSION" != "${LATEST_TAG#v}" ]] || { echo "RELEASE_BLOCKED: release candidate did not advance beyond $LATEST_TAG"; exit 1; }
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "RELEASE_BLOCKED: tag v${VERSION} already exists; refusing duplicate release tag"; exit 1;
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore(release): v${VERSION}"
-          git push origin HEAD:main
-          RELEASE_SHA="$(git rev-parse HEAD)"
-          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Dispatch exact production certification
-        if: steps.commit_release.outputs.release_sha != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.commit_release.outputs.release_sha }}
-        run: |
-          set -euo pipefail
-          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - <<EOF
-          {"event_type":"certify-release","client_payload":{"release_sha":"$RELEASE_SHA"}}
-          EOF
-          echo "Production certification dispatched for $RELEASE_SHA"
-
-      - name: Verify authoritative SemVer state
-        shell: bash
-        run: |
-          set -euo pipefail
-          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
+          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\\d+\\.\\d+\\.\\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
