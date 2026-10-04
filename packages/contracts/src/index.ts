@@ -155,8 +155,7 @@ export const LoginResponseSchema = z.object({
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
 export const RefreshTokenRequestSchema = z.object({
-  refreshToken: z.string(),
-  deviceId: z.string().min(1),
+  sessionId: z.string().min(1),
 });
 export type RefreshTokenRequest = z.infer<typeof RefreshTokenRequestSchema>;
 
