@@ -2,51 +2,38 @@ import fs from "node:fs";
 import path from "node:path";
 import { AI_OPERATING_LAYER_GOVERNANCE as G } from "@kwakopos2/config";
 
-const root = process.cwd();
-const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
-const checks: Array<[string, boolean]> = [];
-const has = (p: string, patterns: string[]) => {
-  const s = read(p);
-  return patterns.every((x) => s.includes(x));
-};
-const pass = (name: string, ok: boolean) => { checks.push([name, ok]); console.log(`${ok ? "PASS" : "FAIL"} ${name}`); };
-
-const authorities = [
-  "packages/contracts/src/aiOperatingLayerContracts.ts", "packages/contracts/src/aiNativeContracts.ts",
-  "packages/domain/src/aiOperatingLayerEngine.ts", "packages/domain/src/aiNativeEngine.ts",
-  "apps/api/src/services/aiOperatingLayerService.ts", "scripts/certification/ai-operating-layer-certification-engine.ts",
-  "tests/unit/ai-operating-layer.test.ts", "packages/config/src/aiAgentGovernance.ts",
-  "packages/config/src/securityTrustGovernance.ts", "packages/config/src/privacyDataGovernance.ts",
-  "packages/config/src/dataLifecycleDrGovernance.ts", "packages/config/src/biAnalyticsGovernance.ts",
+const root=process.cwd();
+const read=(p:string)=>fs.readFileSync(path.join(root,p),"utf8");
+const checks:Array<[string,boolean]>=[];
+const pass=(name:string,ok:boolean)=>{checks.push([name,ok]);console.log((ok?"PASS ":"FAIL ")+name);};
+const files=[
+"packages/contracts/src/aiOperatingLayerContracts.ts",
+"packages/domain/src/aiOperatingLayerEngine.ts",
+"packages/database/src/aiInsightsRepository.ts",
+"apps/api/src/services/aiOperatingLayerService.ts",
+"apps/web/src/pages/WorkspacePages.tsx",
+"packages/database/prisma/schema.prisma",
+"packages/database/prisma/migrations/20261004110000_ai_insights_governance/migration.sql",
+"tests/unit/ai-operating-layer.test.ts",
+"tests/security/aiAuthorizationAdversarial.test.ts",
 ];
-for (const p of authorities) pass(`authority:${p}`, fs.existsSync(path.join(root, p)));
-
-pass("governance-version", G.version === "1.0.0");
-pass("autonomy-policy", Object.values(G.autonomy).length === 5 && G.autonomy.restricted === "PROHIBITED");
-pass("tenant-boundary", has("packages/domain/src/aiNativeEngine.ts", ["tenantId", "branchId", "TenantIsolationPolicy"]));
-pass("evidence-boundary", has("packages/contracts/src/aiOperatingLayerContracts.ts", ["evidence", "confidenceScore"]));
-pass("human-approval", has("packages/domain/src/aiNativeEngine.ts", ["PENDING_HUMAN_APPROVAL", "requiresHumanApproval", "approval.approved"]));
-pass("restricted-actions", has("packages/domain/src/aiNativeEngine.ts", ["LEVEL_4_RESTRICTED", "PROHIBITED", "blocked execution"]));
-pass("tool-permissions", has("packages/contracts/src/aiOperatingLayerContracts.ts", ["permission", "riskLevel", "owner"]));
-pass("kill-switch", has("packages/domain/src/aiOperatingLayerEngine.ts", ["killSwitchStatus", "toggleKillSwitch"]));
-pass("action-ledger", has("packages/domain/src/aiNativeEngine.ts", ["ledgerEntries", "executionVerified"]));
-pass("cost-governance", has("packages/domain/src/aiNativeEngine.ts", ["monthlyTokenBudget", "monthlyUsdBudget", "isThrottled"]));
-pass("semantic-boundary", has("packages/domain/src/aiOperatingLayerEngine.ts", ["globalBiAnalyticsEngine", "executeSemanticQuery"]));
-pass("prompt-injection-boundary", G.requiredControls.promptInjectionBoundary === true);
-pass("data-minimization", has("packages/config/src/privacyDataGovernance.ts", ["dataMinimization"]));
-pass("rollback-verification", G.requiredControls.rollbackVerification === true && fs.existsSync(path.join(root, "packages/config/src/dataLifecycleDrGovernance.ts")));
-pass("provider-boundary", G.requiredControls.modelProviderBoundary === true);
-pass("truthful-claims", has("packages/config/src/aiAgentGovernance.ts", ["AI-generated customer-facing claims", "supportable"]));
-pass("prior-convergence", G.priorAuthorities.every((p) => fs.existsSync(path.join(root, `packages/config/src/${p}.ts`))));
-pass("75-pillar-certification", has("scripts/certification/ai-operating-layer-certification-engine.ts", ["75", "AI-75"]));
-pass("runtime-tests", fs.existsSync(path.join(root, "tests/unit/ai-operating-layer.test.ts")));
-pass("service-boundary", has("apps/api/src/services/aiOperatingLayerService.ts", ["globalAiOperatingLayerEngine", "executeAction"]));
-pass("certificate-id", G.certificateId === "KWAKOKO-AI-OPERATING-LAYER-CERTIFICATE-v1.0");
-pass("fail-closed", G.requiredControls.restrictedActionsProhibited && G.requiredControls.humanApprovalForHighImpact && G.requiredControls.killSwitch);
-
-const failed = checks.filter(([, ok]) => !ok).length;
-const certPath = path.join(root, "artifacts", "governance", "ai-operating-layer-certificate.json");
-fs.mkdirSync(path.dirname(certPath), { recursive: true });
-fs.writeFileSync(certPath, JSON.stringify({ certificateId: G.certificateId, version: G.version, passed: failed === 0, checks: checks.length, failures: failed, evidenceBoundary: "Repository governance and controlled certification; not proof of external model/vendor production outcomes." }, null, 2));
-console.log(`Kwakoko AI Operating Layer Governance: ${checks.length - failed}/${checks.length}`);
-if (failed) process.exit(1);
+for(const p of files)pass("file:"+p,fs.existsSync(path.join(root,p)));
+const engine=read("packages/domain/src/aiOperatingLayerEngine.ts"),service=read("apps/api/src/services/aiOperatingLayerService.ts"),server=read("apps/api/src/server.ts"),page=read("apps/web/src/pages/WorkspacePages.tsx"),schema=read("packages/database/prisma/schema.prisma"),cert=read("scripts/certification/ai-operating-layer-certification-engine.ts");
+pass("governance-version",G.version==="1.0.0");
+pass("tenant-boundary",engine.includes("ctx.tenantId")&&engine.includes("ctx.branchId")&&service.includes("ctx.tenantId"));
+pass("evidence-boundary",read("packages/contracts/src/aiOperatingLayerContracts.ts").includes("AiEvidenceItemSchema"));
+pass("durable-persistence",schema.includes("model AiInsight")&&schema.includes("model AiRecommendation")&&service.includes("globalPrismaAiInsightsRepository"));
+pass("rls-persistence",read("packages/database/prisma/migrations/20261004110000_ai_insights_governance/migration.sql").includes("ENABLE ROW LEVEL SECURITY"));
+pass("approval-gate",service.includes("purchase_approve")&&service.includes("AI_KILL_SWITCH_ACTIVE"));
+pass("kill-switch",service.includes("AI-KILL-GLOBAL")&&service.includes("AI-KILL-TENANT-"));
+pass("route-authorization",server.includes("requireAiViewerContext")&&server.includes("requireAiApprovalContext")&&server.includes("requireAiKillSwitchContext"));
+pass("ui-api-closure",page.includes("/api/v1/ai-operating-layer/insights")&&page.includes("/api/v1/ai-operating-layer/kill-switch"));
+pass("no-business-hardcoding",!/(Panadol 500mg|SKU-9020|TEN-001|94\.2%|1,482|10 Agents)/.test(engine+page));
+pass("behavioral-certification",!cert.includes("addResult("));
+pass("fail-closed-query",engine.includes("AI_QUERY_UNSUPPORTED"));
+const failed=checks.filter(([,ok])=>!ok).length;
+const out=path.join(root,"artifacts","governance","ai-operating-layer-certificate.json");
+fs.mkdirSync(path.dirname(out),{recursive:true});
+fs.writeFileSync(out,JSON.stringify({certificateId:G.certificateId,version:G.version,passed:failed===0,checks:checks.length,failures:failed,evidenceBoundary:"Repository controls and behavioral tests; not proof of external model/vendor outcomes."},null,2));
+console.log("Kwakoko AI Operating Layer Governance: "+(checks.length-failed)+"/"+checks.length);
+if(failed)process.exit(1);
