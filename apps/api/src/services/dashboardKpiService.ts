@@ -232,25 +232,43 @@ export async function getDashboardKpiSnapshot(
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string }>>(
-        `SELECT sl.product_id,
-                p.name,
-                COALESCE(SUM(sl.line_total),0) AS revenue,
-                COALESCE(SUM(sl.quantity),0) AS units,
-                COALESCE((SELECT SUM(pbs.current_quantity)
-                            FROM product_branch_stock pbs
-                           WHERE pbs.tenant_id = s.tenant_id
-                             AND pbs.branch_id = s.branch_id
-                             AND pbs.product_id = sl.product_id),0) AS stock,
-                COALESCE(p.category,'General') AS category
-           FROM sale_lines sl
-           JOIN sales s ON s.id = sl.sale_id
-           JOIN products p ON p.id = sl.product_id
-          WHERE s.tenant_id = $1 AND s.branch_id = $2
-            AND s.status = 'COMPLETED'
-            AND s.sold_at >= $3 AND s.sold_at < $4
-          GROUP BY sl.product_id, p.name, p.category
-          ORDER BY revenue DESC
-          LIMIT 20`,
+        `WITH sold AS (
+           SELECT sl.product_id, sl.variant_id,
+                  COALESCE(SUM(sl.line_total - sl.tax_amount),0) AS revenue,
+                  COALESCE(SUM(sl.quantity),0) AS units
+             FROM sale_lines sl
+             JOIN sales s ON s.id = sl.sale_id
+            WHERE s.tenant_id = $1 AND s.branch_id = $2 AND s.status = 'COMPLETED'
+              AND s.sold_at >= $3 AND s.sold_at < $4
+            GROUP BY sl.product_id, sl.variant_id
+         ), returns_by_variant AS (
+           SELECT rl.variant_id,
+                  COALESCE(SUM(rl.refund_line_total * CASE
+                    WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+                    ELSE 1 END),0) AS refund_revenue,
+                  COALESCE(SUM(rl.quantity_returned),0) AS refund_units
+             FROM return_lines rl
+             JOIN returns r ON r.id = rl.return_id
+             LEFT JOIN sales s ON s.id = r.original_sale_id
+            WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r.status = 'COMPLETED'
+              AND r.created_at >= $3 AND r.created_at < $4
+            GROUP BY rl.variant_id
+         )
+        SELECT sold.product_id, p.name,
+               COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0) AS revenue,
+               GREATEST(0, COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) AS units,
+               COALESCE((SELECT SUM(pbs.current_quantity) FROM product_branch_stock pbs
+                          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
+                            AND pbs.product_id = sold.product_id),0) AS stock,
+               COALESCE(p.category,'General') AS category
+          FROM sold
+          JOIN products p ON p.id = sold.product_id
+          LEFT JOIN returns_by_variant rbv ON rbv.variant_id = sold.variant_id
+         GROUP BY sold.product_id, p.name, p.category
+        HAVING (COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0)) > 0
+            OR (COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) > 0
+         ORDER BY revenue DESC
+         LIMIT 20` ,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ hour: number; revenue: unknown; orders_count: bigint | number | string }>>(
