@@ -15,7 +15,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import "../auth.css";
-import { login, SuperAdminSetupRequiredError, MfaRequiredError } from "../services/applicationApiService.js";
+import { apiFetch, login, SuperAdminSetupRequiredError, MfaRequiredError } from "../services/applicationApiService.js";
 import { SuperAdminSetupModal } from "../components/SuperAdminSetupModal.js";
 import { useTranslation, useAuth } from "../context/KwakoPosContexts.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
@@ -93,11 +93,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/system/version")
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to fetch release");
-        return r.json();
-      })
+    apiFetch<any>("/api/system/version")
+      
       .then((j) => {
         if (!alive) return;
         const identity = j?.data || j;
