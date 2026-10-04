@@ -1,80 +1,58 @@
 import { z } from "zod";
 
-// 1. AI Command Center Overview Schema
-export const AiCommandCenterOverviewSchema = z.object({
-  overviewId: z.string(),
-  tenantId: z.string(),
-  activeAgentsCount: z.number().int().nonnegative(),
-  pendingApprovalsCount: z.number().int().nonnegative(),
-  recentActionsCount: z.number().int().nonnegative(),
-  totalCostUsd: z.number().nonnegative(),
-  modelHealthStatus: z.enum(["HEALTHY", "DEGRADED", "OFFLINE"]),
+export const AiRiskLevelEnum=z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]);
+export type AiRiskLevel=z.infer<typeof AiRiskLevelEnum>;
+export const AiEvidenceClassEnum=z.enum(["MEASURED","CALCULATED","ESTIMATED","PREDICTED","RECOMMENDED"]);
+export type AiEvidenceClass=z.infer<typeof AiEvidenceClassEnum>;
+export const AiEvidenceItemSchema=z.object({
+  sourceType:z.enum(["PRODUCT_VARIANT","STOCK_LEDGER","SALE_LINE","BI_METRIC"]),
+  sourceId:z.string(), label:z.string(),
+  value:z.union([z.string(),z.number(),z.boolean()]).optional(),
+  observedAt:z.string(), evidenceClass:AiEvidenceClassEnum,
 });
-
-export type AiCommandCenterOverview = z.infer<typeof AiCommandCenterOverviewSchema>;
-
-// 2. AI Insight Record Schema
-export const AiInsightRecordSchema = z.object({
-  insightId: z.string(),
-  title: z.string(),
-  observation: z.string(),
-  evidence: z.array(z.string()),
-  interpretation: z.string(),
-  impact: z.string(),
-  recommendedNextStep: z.string(),
-  confidenceScore: z.number().min(0).max(1),
+export type AiEvidenceItem=z.infer<typeof AiEvidenceItemSchema>;
+export const AiInsightRecordSchema=z.object({
+  insightId:z.string(),tenantId:z.string(),branchId:z.string(),dedupeKey:z.string(),
+  title:z.string(),observation:z.string(),evidence:z.array(AiEvidenceItemSchema),
+  interpretation:z.string(),impact:z.string(),recommendedNextStep:z.string(),
+  confidenceScore:z.number().min(0).max(1),evidenceClass:AiEvidenceClassEnum,
+  sourceKind:z.enum(["DETERMINISTIC_RULE","BI_SEMANTIC_METRIC"]),sourceMetricId:z.string().optional(),
+  status:z.enum(["ACTIVE","STALE","RESOLVED"]),createdAt:z.string(),updatedAt:z.string(),
 });
-
-export type AiInsightRecord = z.infer<typeof AiInsightRecordSchema>;
-
-// 3. AI Recommendation Schema
-export const AiRecommendationSchema = z.object({
-  recommendationId: z.string(),
-  title: z.string(),
-  summary: z.string(),
-  evidence: z.array(z.string()),
-  expectedImpact: z.string(),
-  riskLevel: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
-  policyStatus: z.enum(["VALIDATED", "REJECTED"]),
-  approvalStatus: z.enum(["PENDING", "APPROVED", "REJECTED"]),
-  createdAt: z.string(),
+export type AiInsightRecord=z.infer<typeof AiInsightRecordSchema>;
+export const AiRecommendationSchema=z.object({
+  recommendationId:z.string(),tenantId:z.string(),branchId:z.string(),insightId:z.string().optional(),
+  title:z.string(),summary:z.string(),evidence:z.array(AiEvidenceItemSchema),expectedImpact:z.string(),
+  riskLevel:AiRiskLevelEnum,policyStatus:z.enum(["VALIDATED","REJECTED"]),
+  approvalStatus:z.enum(["PENDING","APPROVED","REJECTED","EXPIRED"]),
+  approvedByUserId:z.string().optional(),approvedAt:z.string().optional(),expiresAt:z.string().optional(),
+  createdAt:z.string(),updatedAt:z.string(),
 });
-
-export type AiRecommendation = z.infer<typeof AiRecommendationSchema>;
-
-// 4. AI Tool Definition Schema
-export const AiToolDefinitionSchema = z.object({
-  toolId: z.string(),
-  name: z.string(),
-  inputSchema: z.record(z.any()),
-  outputSchema: z.record(z.any()),
-  permission: z.string(),
-  riskLevel: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
-  owner: z.string(),
+export type AiRecommendation=z.infer<typeof AiRecommendationSchema>;
+export const AiActionLedgerRecordSchema=z.object({
+  ledgerId:z.string(),tenantId:z.string(),branchId:z.string(),recommendationId:z.string(),
+  eventType:z.enum(["CREATED","APPROVED","REJECTED","EXECUTED","VERIFIED","FAILED"]),
+  actionExecuted:z.string(),executedByIdentity:z.string(),executionVerified:z.boolean(),
+  verificationDetails:z.string(),timestamp:z.string(),
 });
-
-export type AiToolDefinition = z.infer<typeof AiToolDefinitionSchema>;
-
-// 5. AI Agent Definition Schema
-export const AiAgentDefinitionSchema = z.object({
-  agentId: z.string(),
-  name: z.string(),
-  purpose: z.string(),
-  permissions: z.array(z.string()),
-  tools: z.array(z.string()),
-  autonomyLevel: z.enum(["SUGGEST", "RECOMMEND", "APPROVE", "GUARDED", "AUTONOMOUS"]),
+export type AiActionLedgerRecord=z.infer<typeof AiActionLedgerRecordSchema>;
+export const AiOperatingHealthSummarySchema=z.object({
+  tenantId:z.string(),branchId:z.string(),activeInsightsCount:z.number().int().nonnegative(),
+  pendingApprovalsCount:z.number().int().nonnegative(),approvedRecommendationsCount:z.number().int().nonnegative(),
+  ledgerEntriesCount:z.number().int().nonnegative(),killSwitchActive:z.boolean(),
+  dataGrounded:z.boolean(),aiPlatformOperational:z.boolean(),
 });
-
-export type AiAgentDefinition = z.infer<typeof AiAgentDefinitionSchema>;
-
-// 6. AI Operating Health Summary Schema
-export const AiOperatingHealthSummarySchema = z.object({
-  activeAgentsCount: z.number().int().nonnegative(),
-  totalToolsCount: z.number().int().nonnegative(),
-  pendingApprovalsCount: z.number().int().nonnegative(),
-  ledgerEntriesCount: z.number().int().nonnegative(),
-  killSwitchActive: z.boolean(),
-  aiPlatformOperational: z.boolean(),
+export type AiOperatingHealthSummary=z.infer<typeof AiOperatingHealthSummarySchema>;
+export const AiBusinessSnapshotSchema=z.object({
+  now:z.string(),
+  variants:z.array(z.object({
+    variantId:z.string(),productId:z.string(),productName:z.string(),sku:z.string(),
+    inventoryQuantity:z.number(),reservedQuantity:z.number(),reorderLevel:z.number(),
+    sellingPrice:z.number(),costPrice:z.number(),active:z.boolean(),
+  })),
+  stockByVariant:z.record(z.number()),unitsSoldLast7DaysByVariant:z.record(z.number()),salesDaysByVariant:z.record(z.number()),
 });
-
-export type AiOperatingHealthSummary = z.infer<typeof AiOperatingHealthSummarySchema>;
+export type AiBusinessSnapshot=z.infer<typeof AiBusinessSnapshotSchema>;
+export interface AiSemanticMetricResult{metricId:string;metricName:string;calculatedValue:number;evidence:AiEvidenceItem[];}
+export const AiKillSwitchScopeEnum=z.enum(["GLOBAL","TENANT"]);
+export type AiKillSwitchScope=z.infer<typeof AiKillSwitchScopeEnum>;
