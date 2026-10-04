@@ -354,7 +354,7 @@ export class SyncEngine {
       serverTimestamp: anchor.toISOString(),
       ...deltaData,
       integrityChecksum: computePayloadChecksum(deltaData),
-    };
+    } as SyncDeltaResponse;
   }
 
   processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): SyncBootstrapResponse {
