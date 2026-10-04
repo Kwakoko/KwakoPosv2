@@ -15,7 +15,7 @@ import {
   switchContext as apiSwitchContext,
   safeUUID,
 } from "../services/apiClient.js";
-import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
 import { dispatchDrawerOutbox, recoverInterruptedDrawerOutbox } from "../services/cashDrawerOutboxService.js";
@@ -893,8 +893,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       setSyncStatus(syncStatusService.getSnapshot(syncScope));
 
       if (result && (result.pulled > 0 || result.pushed > 0)) {
-        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...result } }));
-        window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+        publishDataChanged({ action: "SYNC_CONVERGED", ...result });
+        publishDataChanged({ action: "INVENTORY_CHANGED" });
         try {
           if (typeof window !== "undefined" && "BroadcastChannel" in window) {
             const bc = new BroadcastChannel("kwakopos_sync_channel");
@@ -956,8 +956,8 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       const syncScope = { tenantId: targetTenantId, branchId: targetBranchId };
       await syncStatusService.refreshCounts(syncScope);
       setSyncStatus(syncStatusService.getSnapshot(syncScope));
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", bootstrapped: true } }));
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+      publishDataChanged({ action: "SYNC_CONVERGED", bootstrapped: true });
+      publishDataChanged({ action: "INVENTORY_CHANGED" });
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : "Bootstrap failed");
     } finally {
@@ -1049,10 +1049,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       } else if (data.type === "SYNC_CONVERGED") {
         void db.refreshStoresFromNative().then(() => {
           setPendingOutboxCount(db.getPendingOutbox((user?.tenantId || currentTenantId) || undefined, (user?.branchId || currentBranchId) || undefined).length);
-          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
-          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+          publishDataChanged({ action: "SYNC_CONVERGED", ...data });
+          publishDataChanged({ action: "INVENTORY_CHANGED" });
         }).catch(() => {
-          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SYNC_CONVERGED", ...data } }));
+          publishDataChanged({ action: "SYNC_CONVERGED", ...data });
         });
       }
     };

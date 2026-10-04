@@ -27,7 +27,7 @@ import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslat
 import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
-import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
 import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
@@ -307,7 +307,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setQuickCustomerModal(false);
     playSuccessChime();
     toast.success("Customer Registered", `${trimmed} is now selected for this sale.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
+    publishDataChanged({ action: "CUSTOMER_CREATED", customer: newCust });
   };
 
   // Held carts are session-local durable state stored only in tenant/branch-scoped IndexedDB.
@@ -875,7 +875,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setHoldCartModal(false);
     playBeep(550, 80);
     toast.info("Cart Held", `"${newHold.name}" (${money(newHold.total)}) safely parked.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_HELD", hold: newHold } }));
+    publishDataChanged({ action: "CART_HELD", hold: newHold });
   };
 
   const handleResumeCart = (held: HeldCartRecord) => {
@@ -889,7 +889,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setResumeCartModal(false);
     playBeep(700, 80);
     toast.info("Cart Resumed", `Resumed "${held.name}" into active counter.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_RESUMED", hold: held } }));
+    publishDataChanged({ action: "CART_RESUMED", hold: held });
   };
 
   const handleDiscardHeldCart = (held: HeldCartRecord, e?: React.MouseEvent) => {
@@ -899,7 +899,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     persistHeldCarts(updated);
     playBeep(440, 80);
     toast.info("Held Cart Discarded", `Deleted parked order "${held.name}".`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CART_DISCARDED", hold: held } }));
+    publishDataChanged({ action: "CART_DISCARDED", hold: held });
   };
 
   // Validation guard: prevent empty sales and sales with grand total <= 0
@@ -1237,7 +1237,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     toast.success("Sale Completed", `Receipt #${saleId} issued successfully.`);
 
     // 7. Broadcast event so Dashboard, Inventory, Cash Drawer and other tabs update live
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SALE_COMPLETED", sale: saleRecord } }));
+    publishDataChanged({ action: "SALE_COMPLETED", sale: saleRecord });
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1365,7 +1365,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setSelectedOrderToReturn(null);
     setReturnItems({});
     setIsReturnsModalOpen(false);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SALE_RETURNED" } }));
+    publishDataChanged({ action: "SALE_RETURNED" });
   };
 
   // Keyboard Function Keys Listener (F1 - F9, Esc, Enter)

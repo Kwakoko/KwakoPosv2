@@ -7,7 +7,7 @@ import {
 } from "@kwakopos2/domain";
 import type { LocalIndexedDbStore, OutboxItem } from "../indexedDb.js";
 import { safeUUID } from "./apiClient.js";
-import { DATA_CHANGED_EVENT } from "./dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "./dataChangeEvent.js";
 
 export const STOCK_CHANGED_EVENT = "kwakopos:stock-changed";
 
@@ -380,7 +380,7 @@ export async function queueStockAdjustment(
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: command.productId, variantId: command.variantId, quantityAfter } }));
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    publishDataChanged({ action: "INVENTORY_CHANGED" });
     window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { operationId, entityType: "StockAdjustment" } }));
   }
 
@@ -590,7 +590,7 @@ export async function recordPosSaleDeductions(
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } }));
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    publishDataChanged({ action: "INVENTORY_CHANGED" });
   }
 }
 
@@ -629,5 +629,5 @@ export async function recordPosSaleRefundRestock(
     const outboxItem: OutboxItem = { id: adjustmentId, entityType: "StockAdjustment", entityId: adjustmentId, operationType: "CREATE", payload: { ...adjustmentRecord, ledgerId, unitCost, quantityBefore, quantityAfter, idempotencyKey: adjustmentRecord.idempotencyKey }, clientCreatedAt: occurredAt, idempotencyKey: adjustmentRecord.idempotencyKey, status: "PENDING", tenantId, branchId };
     await db.executeAtomicMutation({ writes: [ { store: "productVariants", key: resolvedVariantId, value: updatedVariant }, { store: "products", key: prod.id, value: updatedProd }, { store: "stockLedger", key: ledgerId, value: ledgerRecord }, { store: "stockAdjustments", key: adjustmentId, value: adjustmentRecord } ], outboxItem, tenantContext: ctx });
   }
-  if (typeof window !== "undefined") { window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } })); window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } })); }
+  if (typeof window !== "undefined") { window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { saleId, items } })); publishDataChanged({ action: "INVENTORY_CHANGED" }); }
 }
