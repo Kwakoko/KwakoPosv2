@@ -223,8 +223,20 @@ export async function runProductionCleanlinessCertification(): Promise<{
   if (!forensicPassed && fs.existsSync(forensicEvidencePath)) {
     try {
       const forensicData = JSON.parse(fs.readFileSync(forensicEvidencePath, "utf8"));
-      forensicPassed = forensicData.verdict === "PASS" && forensicData.files?.parseFailures === 0;
-    } catch {}
+      forensicPassed =
+        forensicData.verdict === "PASS" &&
+        forensicData.files?.parseFailures === 0 &&
+        forensicData.files?.controlFailures === 0 &&
+        forensicData.files?.suspiciousFiles === 0;
+      if (!forensicPassed) {
+        console.log("[CLN-10 FORENSIC DIAGNOSTICS]", JSON.stringify({
+          files: forensicData.files,
+          failures: forensicData.failures,
+        }));
+      }
+    } catch (error) {
+      console.log("[CLN-10 FORENSIC READ FAILURE]", String(error));
+    }
   }
   addPillar(
     "CLN-10",
