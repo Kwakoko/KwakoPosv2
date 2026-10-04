@@ -47,13 +47,9 @@ export function parseSemVerParts(v: string): [number, number, number] {
   return [major, minor, patch];
 }
 
-export function compareSemVer(v1: string, v2: string): number {
-  const [maj1, min1, pat1] = parseSemVerParts(v1);
-  const [maj2, min2, pat2] = parseSemVerParts(v2);
-  if (maj1 !== maj2) return maj1 - maj2;
-  if (min1 !== min2) return min1 - min2;
-  return pat1 - pat2;
-}
+import { compareSemVer as compareAuthoritativeSemVer } from "../../../../packages/config/src/semverEngine.js";
+
+export const compareSemVer = compareAuthoritativeSemVer;
 
 export function validateReleaseCompatibility(
   candidate: {
