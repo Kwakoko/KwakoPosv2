@@ -219,8 +219,8 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     offlineBehavior: "Local settings persistence",
     syncBehavior: "Tenant settings delta sync",
     auditBehavior: "AuditEvent: SETTING_UPDATED",
-    status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
+    status: "CLOSED_LOOP_VERIFIED",
+    evidenceRef: "tests/integration/settings-closed-loop.test.ts & apps/web/src/clientSyncEngine.ts"
   },
   {
     controlId: "UI-R14",
