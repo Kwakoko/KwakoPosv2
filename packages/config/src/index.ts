@@ -44,7 +44,7 @@ function resolvePackageVersion(): string {
     typeof fs?.readFileSync !== "function" ||
     typeof process.cwd !== "function"
   ) {
-    return "2.13.0";
+    return "0.0.0-dev";
   }
   try {
     const pkgPath = path.resolve(process.cwd(), "package.json");
@@ -55,7 +55,7 @@ function resolvePackageVersion(): string {
   } catch {
     // Runtime may not include repository metadata; APP_VERSION can provide the value explicitly.
   }
-  return "2.13.0";
+  return "0.0.0-dev";
 }
 if (typeof process !== "undefined" && typeof (process as any)?.loadEnvFile === "function") {
   try {
@@ -172,8 +172,12 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<str
   const auth = loadAuthoritativeRelease();
   const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST || auth.containerDigest;
   const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION || auth.cloudRunRevision;
-  const appVersion = config.APP_VERSION || auth.appVersion || "2.12.5";
-  const gitSha = config.GIT_SHA && /^[0-9a-f]{40}$/i.test(config.GIT_SHA) ? config.GIT_SHA : auth.gitSha || resolveRealGitSha();
+  const appVersion = config.APP_VERSION || auth.appVersion;
+  if (!appVersion) throw new Error("RELEASE_IDENTITY_FAILURE: application version is unavailable.");
+  const resolvedGitSha = resolveRealGitSha();
+  const gitSha = config.GIT_SHA && /^[0-9a-f]{40}$/i.test(config.GIT_SHA)
+    ? config.GIT_SHA
+    : (/^[0-9a-f]{40}$/i.test(resolvedGitSha) ? resolvedGitSha : auth.gitSha);
   const gitTag = config.APP_VERSION ? `v${config.APP_VERSION}` : (auth.gitTag || `v${appVersion}`);
 
   if (process.env.NODE_ENV === "production-certification") {
