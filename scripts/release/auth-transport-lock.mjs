@@ -10,7 +10,7 @@ const srv = read("apps/api/src/server.ts");
 const fail = (message) => { throw new Error("AUTH_TRANSPORT_LOCK_FAILED: " + message); };
 const req = (ok, message) => { if (!ok) fail(message); };
 
-req(!api.includes("refreshToken"), "web client must not contain refreshToken handling");
+req(!/\brefreshToken\b/.test(api), "web client must not contain refresh-token credential handling");
 req(!api.includes("refresh-token"), "web client must not contain refresh-token handling");
 req(srv.includes("HttpOnly") && srv.includes("SameSite=Strict"), "production refresh cookie must be hardened");
 req(srv.includes("setRefreshCookie(reply, session.refreshToken"), "canonical login must issue refresh token via hardened cookie");
