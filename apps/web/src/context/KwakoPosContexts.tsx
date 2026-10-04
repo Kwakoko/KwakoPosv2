@@ -14,6 +14,7 @@ import {
   restoreSession,
   switchContext as apiSwitchContext,
   safeUUID,
+  getDeviceId,
   refreshSession as apiRefreshSession,
   validateSession as apiValidateSession,
   heartbeatSession as apiHeartbeatSession,
@@ -752,7 +753,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       tenantId: authUser.tenantId,
       branchId: authUser.branchId,
       userId: authUser.id,
-      deviceId: "web-session",
+      deviceId: getDeviceId(),
       status: "AUTHENTICATED_ONLINE",
       authenticatedAt: now,
       lastOnlineAt: now,
@@ -900,7 +901,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
           tenantId: user.tenantId,
           branchId: user.branchId,
           userId: user.id,
-          deviceId: "web-session",
+          deviceId: getDeviceId(),
           status: "AUTHENTICATED_ONLINE",
           authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
           lastOnlineAt: Date.now(),
@@ -1756,7 +1757,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
                       />
                       <SessionWarningModal
                         open={sessionWarningOpen && Boolean(user) && isOnline}
-                        remainingMs={sessionIdleRemainingMs}
+                        remainingMs={Math.min(sessionIdleRemainingMs, sessionAbsoluteRemainingMs)}
                         onStaySignedIn={() => void staySignedIn()}
                         onLogout={() => void logout()}
                       />
