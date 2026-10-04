@@ -155,23 +155,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
   }, [db]);
 
-  // Cart State with Session Auto-Persistence
-  const activeCartKey = useMemo(
-    () => `kwakopos_active_cart_${currentTenantId || "default"}_${currentBranchId || "main"}`,
-    [currentTenantId, currentBranchId]
-  );
-
-  const [cart, setCart] = useState<PosCartItem[]>(() => {
-    try {
-      const key = `kwakopos_active_cart_${currentTenantId || "default"}_${currentBranchId || "main"}`;
-      const cached = localStorage.getItem(key);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  });
+  // Cart State with IndexedDB-only session persistence.
+  // IndexedDB is the sole durable local authority; hydration completes before persistence is enabled.
+  const [cart, setCart] = useState<PosCartItem[]>([]);
+  const [activeCartHydrated, setActiveCartHydrated] = useState(false);
 
   // Barcode Label Generator Modal State
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
@@ -188,10 +175,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [lineNoteInput, setLineNoteInput] = useState("");
 
   useEffect(() => {
-    try {
-      if (cart.length > 0) localStorage.setItem(activeCartKey, JSON.stringify(cart));
-      else localStorage.removeItem(activeCartKey);
-    } catch {}
+    if (!activeCartHydrated) return;
     try {
       db.saveConfigurationLocal(
         "pos_active_cart",
@@ -201,7 +185,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     } catch (error) {
       console.warn("[POS] Failed to persist active cart to IndexedDB", error);
     }
-  }, [cart, activeCartKey, db, currentTenantId, currentBranchId]);
+  }, [cart, activeCartHydrated, db, currentTenantId, currentBranchId]);
 
   useEffect(() => {
     let active = true;
@@ -212,9 +196,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           "pos_active_cart",
           currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
         );
-        if (active && Array.isArray(persisted)) setCart(persisted);
+        if (active) {
+          if (Array.isArray(persisted)) setCart(persisted);
+          setActiveCartHydrated(true);
+        }
       } catch (error) {
         console.warn("[POS] Failed to hydrate active cart from IndexedDB", error);
+        if (active) setActiveCartHydrated(true);
       }
     };
     void hydrateActiveCart();
@@ -322,33 +310,12 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
   };
 
-  // Held Carts State with Authoritative Dual Persistence (LocalStorage + IndexedDB)
-  const heldCartsKey = useMemo(
-    () => `kwakopos_held_carts_${currentTenantId || "default"}_${currentBranchId || "main"}`,
-    [currentTenantId, currentBranchId]
-  );
-
-  const [heldCarts, setHeldCarts] = useState<HeldCartRecord[]>(() => {
-    try {
-      const key = `kwakopos_held_carts_${currentTenantId || "default"}_${currentBranchId || "main"}`;
-      const cached = localStorage.getItem(key);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.warn("[POS] Failed to read initial held carts from localStorage:", e);
-    }
-    return [];
-  });
+  // Held carts are session-local durable state stored only in tenant/branch-scoped IndexedDB.
+  const [heldCarts, setHeldCarts] = useState<HeldCartRecord[]>([]);
+  const [heldCartsHydrated, setHeldCartsHydrated] = useState(false);
 
   const persistHeldCarts = useCallback(
     (records: HeldCartRecord[]) => {
-      try {
-        localStorage.setItem(heldCartsKey, JSON.stringify(records));
-      } catch (e) {
-        console.warn("[POS] Failed to write held carts to localStorage:", e);
-      }
       try {
         db.saveConfigurationLocal(
           "pos_held_carts",
@@ -356,10 +323,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
         );
       } catch (e) {
-        console.warn("[POS] Failed to save held carts to local DB:", e);
+        console.warn("[POS] Failed to save held carts to IndexedDB:", e);
       }
     },
-    [db, currentTenantId, currentBranchId, heldCartsKey]
+    [db, currentTenantId, currentBranchId]
   );
 
   useEffect(() => {
@@ -371,34 +338,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           "pos_held_carts",
           currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
         );
-        if (Array.isArray(fromDb)) {
-          if (isMounted) {
-            setHeldCarts(fromDb);
-            localStorage.setItem(heldCartsKey, JSON.stringify(fromDb));
-          }
-        } else {
-          const fromLocal = localStorage.getItem(heldCartsKey);
-          if (fromLocal) {
-            const parsed = JSON.parse(fromLocal);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              if (isMounted) setHeldCarts(parsed);
-              db.saveConfigurationLocal(
-                "pos_held_carts",
-                parsed,
-                currentTenantId ? { tenantId: currentTenantId, branchId: currentBranchId || undefined } : undefined
-              );
-            }
-          }
+        if (isMounted) {
+          setHeldCarts(Array.isArray(fromDb) ? fromDb : []);
+          setHeldCartsHydrated(true);
         }
       } catch (e) {
-        console.warn("[POS] Failed to hydrate held carts from db:", e);
+        console.warn("[POS] Failed to hydrate held carts from IndexedDB:", e);
+        if (isMounted) setHeldCartsHydrated(true);
       }
     };
     void loadHeldCarts();
     return () => {
       isMounted = false;
     };
-  }, [db, currentTenantId, currentBranchId, heldCartsKey]);
+  }, [db, currentTenantId, currentBranchId]);
+
+  useEffect(() => {
+    if (!heldCartsHydrated) return;
+    persistHeldCarts(heldCarts);
+  }, [heldCarts, heldCartsHydrated, persistHeldCarts]);
 
   const [holdCartModal, setHoldCartModal] = useState(false);
   const [resumeCartModal, setResumeCartModal] = useState(false);
