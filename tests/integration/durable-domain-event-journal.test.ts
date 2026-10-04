@@ -52,10 +52,10 @@ describe("Production durable domain-event bridge", () => {
            FROM domain_event_journal
           WHERE tenant_id = $1
             AND branch_id = $2
-            AND event_id = $3`,
+            AND correlation_id = $3`,
         tenantId,
         branchId,
-        "domain:" + operationId + ":CUSTOMER_CREATED",
+        "DEVICE-DOMAIN-EVENT-1/" + operationId,
       );
 
       expect(rows).toHaveLength(1);
