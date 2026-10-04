@@ -286,7 +286,21 @@ export class PrismaCommercialRepository {
   }
 
   async getSales(ctx: TenantContext) {
-    return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { customer: true, lines: { include: { product: true, variant: true } }, payments: true }, orderBy: { soldAt: "desc" }, take: 100 }));
+    const sales = await db.sale.findMany({
+      where: tenantWhere(ctx),
+      include: { customer: true, lines: { include: { product: true, variant: true } }, payments: true },
+      orderBy: { soldAt: "desc" },
+      take: 100,
+    });
+    const cashierIds = Array.from(new Set(sales.map((sale: any) => sale.soldById).filter(Boolean)));
+    const cashiers = cashierIds.length > 0
+      ? await db.user.findMany({ where: { ...tenantWhere(ctx), id: { in: cashierIds } }, select: { id: true, name: true } })
+      : [];
+    const cashierNames = new Map(cashiers.map((user: any) => [user.id, user.name]));
+    return normalize(sales.map((sale: any) => ({
+      ...sale,
+      cashierName: sale.soldById ? (cashierNames.get(sale.soldById) || null) : null,
+    })));
   }
 
   async getSaleById(ctx: TenantContext, id: string) {
