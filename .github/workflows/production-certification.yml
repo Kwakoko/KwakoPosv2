@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   production-candidate-certification:
-    name: Candidate → Build → Tests → Certification — No Production Mutation
+    name: Candidate â†’ Build â†’ Tests â†’ Certification â€” No Production Mutation
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -54,7 +54,7 @@ jobs:
           git diff --exit-code -- package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Production Navigation Lock — route/submenu contract
+      - name: Production Navigation Lock â€” route/submenu contract
         run: npm run certify:navigation-lock
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
@@ -74,37 +74,36 @@ jobs:
         run: npm run test:integration
       - name: Run multi-device sync convergence tests
         run: npm run test:sync
-      - name: Run synthetic monitoring
+      - name: Start local API for executable security acceptance tests
+      - name: Run synthetic monitoring        shell: bash
+      - name: Run synthetic monitoring        env:
+      - name: Run synthetic monitoring          PORT: "3000"
+      - name: Run synthetic monitoring          HOST: "127.0.0.1"
+      - name: Run synthetic monitoring          JWT_SECRET: "ci-security-local-only-not-for-production"
+      - name: Run synthetic monitoring          START_SERVER: "true"
+      - name: Run synthetic monitoring          SYNC_CERTIFICATION_PRISMA: "true"
+      - name: Run synthetic monitoring        run: |
+      - name: Run synthetic monitoring          set -euo pipefail
+      - name: Run synthetic monitoring          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+      - name: Run synthetic monitoring          echo $! > /tmp/kwakopos-candidate-security-api.pid
+      - name: Run synthetic monitoring          for i in $(seq 1 60); do
+      - name: Run synthetic monitoring            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+      - name: Run synthetic monitoring              exit 0
+      - name: Run synthetic monitoring            fi
+      - name: Run synthetic monitoring            sleep 1
+      - name: Run synthetic monitoring          done
+      - name: Run synthetic monitoring          cat /tmp/kwakopos-candidate-security-api.log
+      - name: Run synthetic monitoring          exit 1
+      - name: Run synthetic monitoring      - name: Run security certification
+      - name: Run synthetic monitoring        env:
+      - name: Run synthetic monitoring          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
+      - name: Run synthetic monitoring        run: npm run certify:security
         run: npx tsx scripts/ops/synthetic-monitor.ts
       - name: Run foundation certification
         run: npm run certify
       - name: Run full-system certification campaign
         run: npm run certify:campaign
-      - name: Start local API for executable security acceptance tests
-        shell: bash
-        env:
-          PORT: "3000"
-          HOST: "127.0.0.1"
-          JWT_SECRET: "ci-security-local-only-not-for-production"
-          START_SERVER: "true"
-          SYNC_CERTIFICATION_PRISMA: "true"
-        run: |
-          set -euo pipefail
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
-          echo $! > /tmp/kwakopos-candidate-security-api.pid
-          for i in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat /tmp/kwakopos-candidate-security-api.log
-          exit 1
-      - name: Run security certification
-        env:
-          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
-        run: npm run certify:security
-      - name: Stop local API
+
         if: always()
         shell: bash
         run: |
