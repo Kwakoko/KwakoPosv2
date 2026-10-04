@@ -828,20 +828,17 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
           });
           void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
         })
-        .catch(async (err: unknown) => {
+        .catch((err: unknown) => {
           if (!alive) return;
-          // Only terminate the session on genuine authentication failures (401).
-          // Network errors, timeouts, and other transient failures must NOT log
-          // the user out — that is the source of the post-login flash.
-          const status = (err as any)?.status ?? (err as any)?.response?.status;
-          const isAuthError = status === 401 || status === 403;
-          if (isAuthError && navigator.onLine) {
-            await terminateSession("SESSION_TIMEOUT", true, true);
-          }
-          // Non-auth errors (network down, 5xx, timeout) are silently ignored;
-          // the heartbeat and idle-timer logic will handle real session expiry.
+          // NEVER terminate the session from the validate catch.
+          // The access token is memory-only and is lost on every page reload.
+          // A 401 here almost always means the token hasn't been refreshed yet,
+          // NOT that the server session is revoked. The authoritative expiry
+          // mechanism is the idle/absolute timeout ticker (setInterval below).
+          // Terminating here was the root cause of the post-login flash to LoginPage.
+          console.warn("[Session] Validate transient failure (token may still be refreshing):", (err as any)?.status);
         });
-    }, 200);
+    }, 1500);
     return () => { alive = false; clearTimeout(delay); };
   // Intentionally exclude sessionExpiresAt: including it causes the effect to
   // re-run every time validation updates the expiry, creating an infinite loop.
