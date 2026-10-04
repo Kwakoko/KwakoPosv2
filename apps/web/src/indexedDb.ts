@@ -1088,7 +1088,17 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { items: outboxItems } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", items: outboxItems, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            items: outboxItems.map((item) => ({
+              tenantId: item.tenantId,
+              branchId: item.branchId,
+              operationId: item.id,
+              entityType: item.entityType,
+              entityId: item.entityId,
+            })),
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
