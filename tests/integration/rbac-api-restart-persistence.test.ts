@@ -3,8 +3,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
+import path from "node:path";
 
-const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
+const ROOT = process.cwd();
 const PORT = 3012;
 const BASE = "http://127.0.0.1:" + PORT;
 
@@ -26,7 +27,7 @@ describe("RBAC API mutations survive exact API restart", () => {
   };
 
   async function startApi() {
-    const tsx = ROOT + "\\node_modules\\tsx\\dist\\cli.mjs";
+    const tsx = path.resolve(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
     api = spawn(process.execPath, [tsx, "apps/api/src/serverFixed.ts"], {
       cwd: ROOT,
       env: {
