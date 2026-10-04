@@ -319,7 +319,7 @@ export async function getDashboardKpiSnapshot(
              LEFT JOIN sales s ON s."id" = r."originalSaleId"
               AND s."tenantId" = r."tenantId"
               AND s."branchId" = r."branchId"
-            WHERE r."tenantId" = $1 AND r."branchId" = $2 AND s."tenantId" = $1 AND s."branchId" = $2 AND r."status" = 'COMPLETED'
+            WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
               AND r."createdAt" >= $3 AND r."createdAt" < $4
             GROUP BY rl."variantId"
          ), aggregated AS (
