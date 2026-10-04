@@ -1,5 +1,9 @@
-import "fake-indexeddb/auto";
 import { randomUUID } from "crypto";
+
+// The synthetic monitor runs as a Node process. Load fake IndexedDB before importing
+// browser persistence modules; ESM evaluates static dependencies before module-body
+// side effects, so a static polyfill import is too late for LocalIndexedDbStore.
+await import("fake-indexeddb/auto");
 import {
   ScopedProductRepository,
   ScopedStockRepository,
@@ -12,8 +16,8 @@ import {
   globalInMemoryStore,
 } from "@kwakopos2/database";
 import { SyncEngine } from "@kwakopos2/sync";
-import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
-import { ClientSyncEngine } from "../../apps/web/src/clientSyncEngine.js";
+const { LocalIndexedDbStore } = await import("../../apps/web/src/indexedDb.js");
+const { ClientSyncEngine } = await import("../../apps/web/src/clientSyncEngine.js");
 import {
   calculateAvailableStock,
   assertInventoryLedgerIntegrity,
