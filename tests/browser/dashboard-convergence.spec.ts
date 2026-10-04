@@ -584,8 +584,8 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
           create: [{
             id: randomUUID(),
             variantId,
-            quantityReturned: 1,
-            refundUnitPrice: 590,
+            quantityReturned: 0.5,
+            refundUnitPrice: 1180,
             refundLineTotal: 590,
             condition: 'GOOD',
           }],
@@ -594,9 +594,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     });
     const financialSnapshot = await readDashboardSnapshot(pageA, tenantId, branchId);
     expect(financialSnapshot.salesToday).toBe(2000);
-    expect(financialSnapshot.grossProfit).toBe(1000);
+    expect(financialSnapshot.grossProfit).toBe(1100);
     expect(financialSnapshot.netSalesToday).toBe(2000);
-    expect(financialSnapshot.cogsToday).toBe(1000);
+    expect(financialSnapshot.cogsToday).toBe(900);
     expect(financialSnapshot.analytics.paymentTotalVolume).toBe(2680);
     expect(financialSnapshot.analytics.paymentTotalCount).toBe(3);
     expect(financialSnapshot.analytics.paymentTotalOrderCount).toBe(2);
@@ -610,12 +610,12 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(cardChannel?.paymentCount).toBe(1);
     expect(mobileChannel?.orderCount).toBe(1);
     expect(mobileChannel?.paymentCount).toBe(1);
-    expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1);
+    expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1.5);
     expect(financialSnapshot.analytics.topProducts[0]?.revenue).toBe(2000);
     expect(financialSnapshot.analytics.totalRevenue).toBe(2000);
-    expect(financialSnapshot.analytics.totalCOGS).toBe(1000);
-    expect(financialSnapshot.analytics.totalProfit).toBe(1000);
-    expect(financialSnapshot.analytics.marginPct).toBe('50.0');
+    expect(financialSnapshot.analytics.totalCOGS).toBe(900);
+    expect(financialSnapshot.analytics.totalProfit).toBe(1100);
+    expect(financialSnapshot.analytics.marginPct).toBe('55.0');
     // Browser C: real logout -> login -> dashboard recovery.
     await pageC.locator("#topbar-user-btn").click();
     const signOutResponse = pageC.waitForResponse((response) =>
