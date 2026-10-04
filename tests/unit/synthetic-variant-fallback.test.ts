@@ -57,6 +57,7 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
         findUnique: async () => null,
         create: async ({ data }: any) => data,
       },
+      cashSession: { findUnique: async () => ({ id: "cash-session-syn", tenantId: tenantCtx.tenantId, branchId: tenantCtx.branchId, cashierId: tenantCtx.userId, status: "OPEN" }) },
       product: {
         findUnique: async ({ where }: any) => mockStore.products.get(where.id) || null,
         update: async ({ where, data }: any) => {
@@ -143,12 +144,15 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
         create: async () => ({ id: "acc-dummy-1" }),
       },
       journalEntry: {
+        findUnique: async () => null,
         count: async () => 0,
         create: async ({ data }: any) => data,
       },
       journalLine: {
+        findMany: async () => [],
         create: async ({ data }: any) => data,
       },
+      auditEvent: { create: async () => ({ id: randomUUID() }) },
       $executeRawUnsafe: async (sql: string, ...params: any[]) => {
         if (sql.includes("sync_conflict_record")) {
           mockStore.conflicts.push({ sql, params });
@@ -161,7 +165,7 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
     };
   });
 
-  it("auto-provisions synthetic variant when sale references ${productId}-default", async () => {
+  it("fails closed when sale references an unregistered synthetic fallback variant", async () => {
     const service = new PrismaAtomicCommercialFinanceService(mockDb);
     const productId = randomUUID();
     const syntheticVariantId = `${productId}-default`;
@@ -180,6 +184,7 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
     const saleReq = {
       id: randomUUID(),
       idempotencyKey: `SALE-${randomUUID()}`,
+      cashSessionId: "cash-session-syn",
       items: [
         {
           productId,
@@ -197,15 +202,9 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
       ],
     };
 
-    // Should succeed and auto-create synthetic variant instead of throwing FINANCE_VARIANT_BOUNDARY_VIOLATION
-    const result = await service.createSale(tenantCtx, saleReq);
-    expect(result.sale).toBeDefined();
+    await expect(service.createSale(tenantCtx, saleReq)).rejects.toThrow("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+    expect(mockStore.variants.has(syntheticVariantId)).toBe(false);
 
-    // Verify synthetic variant was created in store
-    const createdVariant = mockStore.variants.get(syntheticVariantId);
-    expect(createdVariant).toBeDefined();
-    expect(createdVariant.attributes?.isSynthetic).toBe(true);
-    expect(createdVariant.name).toBe("Standard");
   });
 
   it("detects oversell and logs conflict in sync_conflict_record", async () => {
@@ -237,6 +236,7 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
     const saleReq = {
       id: randomUUID(),
       idempotencyKey: `SALE-OVERSELL-${randomUUID()}`,
+      cashSessionId: "cash-session-syn",
       items: [
         {
           productId,

@@ -13,6 +13,7 @@ export interface ReleaseManifest {
   releaseChannel: string;
   releasedAt: string;
   certification: "PASS" | "FAIL";
+  brand: { parentBrand: string; platform: string; posCapability: string; };
   compatibility: {
     databaseSchemaVersion: number;
     syncProtocolVersion: number;
@@ -64,6 +65,7 @@ export function generateReleaseManifest(options?: {
     releaseChannel,
     releasedAt: new Date().toISOString(),
     certification,
+    brand: { parentBrand: "Kwakoko", platform: "Kwakoko Business Operating System", posCapability: "KwakoPos" },
     compatibility: {
       databaseSchemaVersion: 4,
       syncProtocolVersion: 2,

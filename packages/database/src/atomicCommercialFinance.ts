@@ -80,13 +80,15 @@ export class PrismaAtomicCommercialFinanceService {
         }
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
+      const variantProductIds = new Map<string, string>();
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || v.productId !== item.productId || v.isActive === false) {
+        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
+        variantProductIds.set(item.variantId, v.productId);
       }
-      const lines = req.items.map((item: any) => { const c = PricingTaxEngine.calculateLineItem({ unitPrice: item.unitPrice, unitCost: item.unitCost || 0, quantity: item.quantity, discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined }); return { id: crypto.randomUUID(), productId: item.productId, variantId: item.variantId, quantity: item.quantity, unitPrice: c.unitPrice, unitCost: c.unitCost, discountAmount: c.discountAmount, taxAmount: c.taxAmount, lineTotal: c.lineTotal }; });
+      const lines = req.items.map((item: any) => { const c = PricingTaxEngine.calculateLineItem({ unitPrice: item.unitPrice, unitCost: item.unitCost || 0, quantity: item.quantity, discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined }); return { id: crypto.randomUUID(), productId: item.productId ?? variantProductIds.get(item.variantId), variantId: item.variantId, quantity: item.quantity, unitPrice: c.unitPrice, unitCost: c.unitCost, discountAmount: c.discountAmount, taxAmount: c.taxAmount, lineTotal: c.lineTotal }; });
       const totals = PricingTaxEngine.calculateSaleTotals(lines.map((l: any) => ({ lineTotal: l.lineTotal, totalCost: l.unitCost * l.quantity, discountAmount: l.discountAmount, taxAmount: l.taxAmount })), req.discountTotal || 0);
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
@@ -157,10 +159,10 @@ export class PrismaAtomicCommercialFinanceService {
         if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
         const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
+        if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
 
-        if (qtyBefore + 0.000001 < qtySold) throw new Error(`INSUFFICIENT_STOCK:${l.variantId}`);
-        const isOversell = false;
-        const shortfall = 0;
+        const isOversell = qtyBefore < qtySold;
+        const shortfall = isOversell ? qtySold - qtyBefore : 0;
         const qtyAfter = Math.max(0, qtyBefore - qtySold);
 
         if (isOversell) {
@@ -270,6 +272,7 @@ export class PrismaAtomicCommercialFinanceService {
         const v = await tx.productVariant.findUnique({ where: { id: i.variantId } });
         const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: i.variantId } });
         const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
+        if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
         const qtyAfter = qtyBefore + qtyReceived;
         const prodId = v?.productId || item.variantId;
 

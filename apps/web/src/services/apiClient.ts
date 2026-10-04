@@ -43,7 +43,6 @@ export class MfaRequiredError extends Error {
 export interface StoredSession {
   sessionId: string;
   accessToken?: string;
-  refreshToken?: string;
   user: LoginResponseUser;
 }
 
@@ -71,7 +70,6 @@ export function getStoredSession(): StoredSession | null {
     return {
       sessionId: parsed.sessionId,
       accessToken: parsed.accessToken,
-      refreshToken: (parsed as any).refreshToken,
       user: parsed.user as LoginResponseUser,
     };
   } catch {
@@ -178,15 +176,14 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       const result = await requestJson<{
         success: boolean;
-        data?: { accessToken: string; refreshToken?: string };
+        data?: { accessToken: string };
       }>(
         "/auth/refresh",
         {
           method: "POST",
           body: JSON.stringify({
             sessionId: stored.sessionId,
-              refreshToken: stored.refreshToken,
-              deviceId: getDeviceId(),
+            deviceId: getDeviceId(),
             email: stored.user.email,
             tenantId: stored.user.tenantId,
             branchId: stored.user.branchId,
@@ -222,7 +219,6 @@ export async function login(email: string, password: string, mfaCode?: string): 
   setStoredSession({
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
-    refreshToken: result.data.refreshToken,
     user: result.data.user,
   });
   return result.data.user;
@@ -322,7 +318,6 @@ export interface SwitchContextResponse {
     user: LoginResponseUser;
     tenantName?: string;
     branchName?: string;
-    refreshToken?: string;
     isImpersonating?: boolean;
   };
   error?: { code?: string; message?: string };
@@ -338,11 +333,9 @@ export async function switchContext(
   }, true);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Failed to switch context");
   accessToken = result.data.accessToken;
-  const existing = getStoredSession();
   setStoredSession({
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
-    refreshToken: result.data.refreshToken,
     user: result.data.user,
   });
   return {

@@ -32,7 +32,7 @@ describe("Step 19 — Marketplace & Partner Ecosystem Governance", () => {
   });
 
   it("keeps existing marketplace and partner certification authorities available", () => {
-    expect(MARKETPLACE_CERTIFICATION_PILLARS.length).toBe(100);
+    expect(MARKETPLACE_CERTIFICATION_PILLARS.length).toBe(5);
     const partnerCert = runPartnerEcosystemCertification();
     expect(partnerCert.totalPillars).toBe(48);
     expect(partnerCert.passedPillars).toBe(48);

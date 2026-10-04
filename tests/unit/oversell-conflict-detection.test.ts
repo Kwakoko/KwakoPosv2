@@ -45,6 +45,7 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
         count: async () => 0,
         update: async ({ where, data }: any) => ({ id: where.id, ...data }),
       },
+      cashSession: { findUnique: async () => ({ id: "cash-session-oversell", tenantId: tenantCtx.tenantId, branchId: tenantCtx.branchId, cashierId: tenantCtx.userId, status: "OPEN" }) },
       drawerOperation: {
         findUnique: async () => null,
         create: async ({ data }: any) => data,
@@ -131,10 +132,12 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
         create: async () => ({ id: "acc-dummy" }),
       },
       journalEntry: {
+        findUnique: async () => null,
         count: async () => 0,
         create: async ({ data }: any) => data,
       },
       journalLine: {
+        findMany: async () => [],
         create: async ({ data }: any) => data,
       },
       auditEvent: {
@@ -203,6 +206,7 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       id: saleId,
       operationId: `OP-OVERSELL-${saleId}`,
       idempotencyKey: `IDEM-OVERSELL-${saleId}`,
+      cashSessionId: "cash-session-oversell",
       items: [
         {
           productId,
