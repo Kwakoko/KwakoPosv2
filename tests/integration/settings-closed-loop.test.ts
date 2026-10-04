@@ -21,13 +21,9 @@ describe("Settings P0/P1 closed-loop certification", () => {
     await prisma.branch.create({ data: { id: branchB, tenantId: tenantB, name: "Main B", code: "SET-B", isMain: true } });
   });
 
-  afterAll(async () => {
-    if (!enabled) return;
-    await prisma.setting.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
-    await prisma.syncOperation.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
-    await prisma.branch.deleteMany({ where: { id: { in: [branchA, branchB] } } });
-    await prisma.tenant.deleteMany({ where: { id: { in: [tenantA, tenantB] } } });
-  });
+  // CI uses an isolated ephemeral PostgreSQL database. Audit events are append-only
+  // and intentionally cannot be deleted or cascaded, so no destructive fixture cleanup runs here.
+
 
   it("persists branch Settings, writes audit/journal, and isolates tenants", async () => {
     if (!enabled) return;
