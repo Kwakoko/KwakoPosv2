@@ -156,12 +156,12 @@ describe("Dashboard financial closures", () => {
 
       expect(snapshot.salesToday).toBe(500);
       expect(snapshot.netSalesToday).toBe(500);
-      expect(snapshot.cogsToday).toBe(0);
-      expect(snapshot.grossProfit).toBe(500);
+      expect(snapshot.cogsToday).toBe(300);
+      expect(snapshot.grossProfit).toBe(200);
       expect(snapshot.analytics.totalRevenue).toBe(500);
-      expect(snapshot.analytics.totalCOGS).toBe(0);
-      expect(snapshot.analytics.totalProfit).toBe(500);
-      expect(snapshot.analytics.marginPct).toBe("100.0");
+      expect(snapshot.analytics.totalCOGS).toBe(300);
+      expect(snapshot.analytics.totalProfit).toBe(200);
+      expect(snapshot.analytics.marginPct).toBe("40.0");
       expect(snapshot.analytics.paymentTotalVolume).toBe(1180);
       expect(snapshot.analytics.paymentTotalCount).toBe(2);
       expect(snapshot.analytics.paymentTotalOrderCount).toBe(1);
