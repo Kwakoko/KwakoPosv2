@@ -237,7 +237,7 @@ export async function getDashboardKpiSnapshot(
         ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ paymentMethod: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
-        `SELECT COALESCE(p."paymentMethod", 'CASH') AS paymentMethod,
+        `SELECT COALESCE(p."paymentMethod", 'CASH') AS "paymentMethod",
                 COALESCE(SUM(p."amount"),0) AS volume,
                 COUNT(*) AS count,
                 COUNT(DISTINCT p."saleId") AS order_count
