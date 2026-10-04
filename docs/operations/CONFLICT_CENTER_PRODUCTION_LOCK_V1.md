@@ -37,4 +37,6 @@ The lock explicitly protects against:
 
 CI check name: `Conflict Center Production Lock v1`.
 
+Lock version: `v1` · Enforcement status: `MANDATORY`.
+
 Do not weaken, bypass, rename, or remove this contract without a deliberate production-governance change that updates the lock, its tests, and its required CI check together.
