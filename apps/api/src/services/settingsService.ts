@@ -94,6 +94,9 @@ export class SettingsService {
     const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
     if (!allowed) throw new Error("SETTINGS_MANAGE_REQUIRED");
     return prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe("CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq");
+      await tx.$executeRawUnsafe("CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'settings', created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+      await tx.$executeRawUnsafe("CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)");
       const results: any[] = [];
       for (const record of records) {
         const key = String(record.key || "").trim();
@@ -141,9 +144,6 @@ export class SettingsService {
           },
         });
 
-        await tx.$executeRawUnsafe("CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq");
-        await tx.$executeRawUnsafe("CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'settings', created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
-        await tx.$executeRawUnsafe("CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)");
         await tx.$executeRawUnsafe(
           "INSERT INTO sync_change_journal (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source) VALUES ($1,$2,$3,'Setting',$4,$5,$6::jsonb,'settings') ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING",
           ctx.tenantId, ctx.branchId, operationId, row.id, operationType, JSON.stringify(operationType === "DELETE" ? { ...row, key, scope, _deleted: true } : { ...row, key, scope }),
