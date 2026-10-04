@@ -21,7 +21,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
-import { apiFetch, safeUUID } from "../services/apiClient.js";
+import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
 
