@@ -151,6 +151,8 @@ describe("Privileged RBAC PostgreSQL API", () => {
     });
     expect(transfer).not.toBeNull();
 
+    await prisma.device.create({ data: { id: randomUUID(), deviceId: "p0-rbac-device", tenantId, userId, name: "RBAC Test Device", platform: "test", browser: "vitest" } });
+
     await prisma.deviceSession.create({
       data: {
         id: randomUUID(),
