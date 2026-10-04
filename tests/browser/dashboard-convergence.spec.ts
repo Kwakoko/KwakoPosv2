@@ -593,6 +593,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
       },
     });
     const financialSnapshot = await readDashboardSnapshot(pageA, tenantId, branchId);
+    expect(financialSnapshot.grossSalesToday).toBe(2500);
+    expect(financialSnapshot.discountsToday).toBe(0);
+    expect(financialSnapshot.refundsToday).toBe(590);
     expect(financialSnapshot.salesToday).toBe(2000);
     expect(financialSnapshot.grossProfit).toBe(700);
     expect(financialSnapshot.netSalesToday).toBe(2000);
