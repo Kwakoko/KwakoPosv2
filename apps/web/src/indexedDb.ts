@@ -146,6 +146,7 @@ export const AUTHORITATIVE_SCHEMA_VERSION = 6;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
+  if (item.entityType === "Setting" || item.entityType === "FeatureFlag") return 1;
   if (item.entityType === "Category" || item.entityType === "Brand") return 5;
   if (item.entityType === "Product" && item.operationType === "CREATE") return 10;
   if (item.entityType === "Product" && item.operationType === "UPDATE") return 20;
