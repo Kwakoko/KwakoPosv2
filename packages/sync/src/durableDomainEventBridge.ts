@@ -1,9 +1,22 @@
 import { DomainEventBusEngine } from "@kwakopos2/domain";
+import { createHash } from "node:crypto";
 import type { DomainEventEnvelope, SyncPushRequest, TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "@kwakopos2/database";
 
 type SyncOperation = SyncPushRequest["operations"][number];
 
+function deterministicEventUuid(operationId: string, eventType: string): string {
+  const digest = createHash("sha256")
+    .update(operationId + ":" + eventType)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  // UUID v5-compatible version/variant bits; deterministic and schema-valid.
+  digest[12] = "5";
+  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16], 16) % 4];
+  const hex = digest.join("");
+  return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+}
 const ENGINE_BY_ENTITY: Record<string, string> = {
   Product: "core.product_catalog",
   ProductVariant: "core.product_catalog",
@@ -69,7 +82,7 @@ export function buildDomainEvent(
 ): DomainEventEnvelope {
   const eventType = domainEventTypeForOperation(op.entityType, op.operationType);
   return {
-    eventId: `domain:${op.operationId}:${eventType}`,
+    eventId: deterministicEventUuid(op.operationId, eventType),
     timestamp: new Date().toISOString(),
     eventType,
     engineId: ENGINE_BY_ENTITY[op.entityType] || "core.sync_gateway",
