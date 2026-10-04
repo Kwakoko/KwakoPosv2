@@ -14,6 +14,7 @@ const baseStatus = () => ({
 });
 
 describe("Conflict Center presentation invariants", () => {
+  // These invariants protect the production convergence claim from false-zero UI states.
   it("deduplicates the two local metadata keys for one conflict", () => {
     const entries: [string, string][] = [
       ["sync_conflict_conflict:123", JSON.stringify({ conflictId: "conflict:123" })],
