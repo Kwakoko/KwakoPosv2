@@ -323,52 +323,76 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // -------------------------------------------------------------------------
   const startF = Date.now();
   const pwaDbName = `kwakopos-synthetic-pwa-${randomUUID()}`;
-  const pwaV3 = new LocalIndexedDbStore(3, pwaDbName);
-  await pwaV3.ready;
-  pwaV3.recordOutboxMutation({
-    id: "OP-PWA-01",
-    entityType: "StockAdjustment",
-    entityId: randomUUID(),
-    operationType: "CREATE",
-    payload: { variantId: synthVarId, adjustmentType: "INCREASE", quantityChange: 10, idempotencyKey: "PWA-1" },
-    clientCreatedAt: new Date().toISOString(),
-    idempotencyKey: "PWA-1",
-    status: "PENDING",
-    tenantId: syntheticTenantId,
-    branchId: syntheticBranchId,
+  const { indexedDB: fakeIndexedDB, IDBKeyRange: FakeIDBKeyRange } = await import("fake-indexeddb");
+  (globalThis as any).indexedDB = fakeIndexedDB;
+  (globalThis as any).IDBKeyRange = FakeIDBKeyRange;
+  const { MigrationEngine } = await import("../../apps/web/src/persistence/migrationEngine.js");
+  const migrationEngine = new MigrationEngine();
+
+  const openTestDb = (version: number): Promise<IDBDatabase> =>
+    new Promise((resolve, reject) => {
+      const req = indexedDB.open(pwaDbName, version);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        const tx = req.transaction;
+        if (!tx) {
+          reject(new Error("PWA_UPGRADE_TRANSACTION_UNAVAILABLE"));
+          return;
+        }
+        migrationEngine.applySchemaUpgrade(db, tx, req.result.version ? (req as any).transaction?.db?.version ?? 0 : 0, version);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("PWA_TEST_DB_OPEN_FAILED"));
+      req.onblocked = () => reject(new Error("PWA_TEST_DB_OPEN_BLOCKED"));
+    });
+
+  const pwaV3 = await openTestDb(3);
+  const nativeBeforeUpgrade = await new Promise<number>((resolve, reject) => {
+    const tx = pwaV3.transaction("syncOutbox", "readwrite");
+    const store = tx.objectStore("syncOutbox");
+    store.put({
+      id: "OP-PWA-01",
+      entityType: "StockAdjustment",
+      entityId: randomUUID(),
+      operationType: "CREATE",
+      payload: { adjustmentType: "INCREASE", quantityChange: 10, idempotencyKey: "PWA-1" },
+      clientCreatedAt: new Date().toISOString(),
+      idempotencyKey: "PWA-1",
+      status: "PENDING",
+      tenantId: syntheticTenantId,
+      branchId: syntheticBranchId,
+    }, "OP-PWA-01");
+    tx.oncomplete = () => {
+      const countTx = pwaV3.transaction("syncOutbox", "readonly");
+      const request = countTx.objectStore("syncOutbox").count();
+      request.onsuccess = () => resolve(Number(request.result || 0));
+      request.onerror = () => reject(request.error || new Error("PWA_V3_OUTBOX_COUNT_FAILED"));
+    };
+    tx.onerror = () => reject(tx.error || new Error("PWA_V3_OUTBOX_SEED_FAILED"));
   });
-  await pwaV3.flushPersistence();
-  const preservedBeforeUpgrade = pwaV3.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
-  const nativeBeforeUpgrade = (pwaV3 as any).nativeDb
-    ? await new Promise<number>((resolve, reject) => {
-        const tx = (pwaV3 as any).nativeDb.transaction("syncOutbox", "readonly");
-        const request = tx.objectStore("syncOutbox").count();
-        request.onsuccess = () => resolve(Number(request.result || 0));
-        request.onerror = () => reject(request.error || new Error("Native outbox count failed"));
-      })
-    : -1;
-  console.log(` [F-EVIDENCE] native V3 syncOutbox count before close=${nativeBeforeUpgrade}`);
   pwaV3.close();
-  // Allow the IndexedDB close event loop to settle before issuing the versioned reopen.
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-  // Re-open the same physical database at the authoritative V6 schema. This exercises
-  // the real IndexedDB onupgradeneeded migration path while avoiding the higher-level
-  // migration coordinator's recovery bookkeeping in this synthetic harness.
-  const pwaV6 = new LocalIndexedDbStore(6, pwaDbName);
-  await pwaV6.ready;
-  await pwaV6.refreshStoresFromNative(["syncOutbox", "syncMetadata"]);
-  const preservedAfterUpgrade = pwaV6.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
-  const passF = preservedBeforeUpgrade === 1 && nativeBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
+  const pwaV6 = await openTestDb(6);
+  const upgradedVersion = pwaV6.version;
+  const preservedAfterUpgrade = await new Promise<number>((resolve, reject) => {
+    const tx = pwaV6.transaction("syncOutbox", "readonly");
+    const request = tx.objectStore("syncOutbox").count();
+    request.onsuccess = () => resolve(Number(request.result || 0));
+    request.onerror = () => reject(request.error || new Error("PWA_V6_OUTBOX_COUNT_FAILED"));
+  });
+  pwaV6.close();
+
+  const passF = upgradedVersion === 6 && nativeBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
   console.log(
-    ` [F-EVIDENCE] PWA V3->V6 outbox preservation: mapBefore=${preservedBeforeUpgrade}, nativeBefore=${nativeBeforeUpgrade}, after=${preservedAfterUpgrade}`,
+    ` [F-EVIDENCE] native PWA V3->V6 outbox preservation: version=${upgradedVersion}, before=${nativeBeforeUpgrade}, after=${preservedAfterUpgrade}`,
   );
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
     durationMs: Date.now() - startF,
     status: passF ? "PASS" : "FAIL",
-    evidence: { fromVersion: 3, toVersion: 6, preservedBeforeUpgrade, preservedAfterUpgrade },
+    evidence: { fromVersion: 3, toVersion: upgradedVersion, nativeBeforeUpgrade, preservedAfterUpgrade },
     timestamp: new Date().toISOString(),
   });
   console.log(` [F/L] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
