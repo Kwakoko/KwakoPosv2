@@ -1464,4 +1464,6 @@ export {
 } from "./prismaProductionRepositories.js";
 
 export * from "./inventoryAuthority.js";
-\nexport * from "./aiInsightsRepository.js";\n
+
+export * from "./aiInsightsRepository.js";\n
+export * from "./aiInsightsRepository.js";
