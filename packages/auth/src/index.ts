@@ -137,7 +137,7 @@ export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: s
   };
   return jwt.sign(normalized, getJwtSecret(), {
     algorithm: JWT_ALGORITHM,
-    expiresIn: ACCESS_TOKEN_TTL,
+    expiresIn: ACCESS_TOKEN_TTL as any,
     issuer: JWT_ISSUER,
     audience: JWT_AUDIENCE,
   });
@@ -288,7 +288,6 @@ export class SessionManager {
       ? {
           tenantId: inputOrTenantId,
           userId: String(userId || ""),
-          branchId: "",
           deviceId: String(deviceId || "device-client"),
           branchId: "branch-default",
           idleTimeoutMs: 30 * 60_000,
@@ -335,7 +334,7 @@ export class SessionManager {
     return { sessionId, refreshToken, expiresAt, refreshTokenExpiresAt };
   }
 
-  async validateSession(sessionId: string, context?: { tenantId?: string; branchId?: string; userId?: string; deviceId?: string; now?: Date }): Promise<SessionValidation> {
+  async validateSession(sessionId: string, context?: { tenantId?: string; branchId?: string; userId?: string; deviceId?: string; activity?: boolean; now?: Date }): Promise<SessionValidation> {
     this.requireProductionStore();
     const session = await this.get(sessionId);
     if (!session) return { valid: false, code: "SESSION_NOT_FOUND" };
