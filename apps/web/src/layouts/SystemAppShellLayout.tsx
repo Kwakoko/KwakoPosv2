@@ -58,6 +58,7 @@ import { SyncTelemetryHUD } from "../components/SyncTelemetryHUD.js";
 import { SyncConflictResolutionModal } from "../components/SyncConflictResolutionModal.js";
 import { useWindowManager } from "../context/WindowManagerContext.js";
 import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
+import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -2477,17 +2478,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
       setSyncConflictCount(0);
       return;
     }
-    const ids = new Set<string>();
-    for (const [key, value] of db.syncMetadata.entries()) {
-      if (!key.startsWith("sync_conflict_")) continue;
-      try {
-        const parsed = JSON.parse(value);
-        ids.add(String(parsed?.conflictId || key.replace("sync_conflict_", "")));
-      } catch {
-        ids.add(key.replace("sync_conflict_", ""));
-      }
-    }
-    setSyncConflictCount(ids.size);
+    setSyncConflictCount(countUniqueLocalConflictIds(db.syncMetadata.entries()));
   }, [db]);
 
   useEffect(() => {
@@ -2499,13 +2490,16 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
     const onConflictResolved = () => {
       refreshSyncConflicts();
     };
+    const onOpenConflictCenter = () => setIsConflictModalOpen(true);
     window.addEventListener("kwakopos:sync-conflict-detected", onConflictDetected);
     window.addEventListener("kwakopos:sync-conflict-resolved", onConflictResolved);
     window.addEventListener("kwakopos:persistence-status-changed", refreshSyncConflicts);
+    window.addEventListener("kwakopos:open-conflict-center", onOpenConflictCenter);
     return () => {
       window.removeEventListener("kwakopos:sync-conflict-detected", onConflictDetected);
       window.removeEventListener("kwakopos:sync-conflict-resolved", onConflictResolved);
       window.removeEventListener("kwakopos:persistence-status-changed", refreshSyncConflicts);
+      window.removeEventListener("kwakopos:open-conflict-center", onOpenConflictCenter);
     };
   }, [refreshSyncConflicts]);
 
@@ -2789,7 +2783,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
       />
 
       <WindowManagerContainer />
-      <SyncTelemetryHUD />
+      <SyncTelemetryHUD onOpenConflictCenter={() => setIsConflictModalOpen(true)} />
       <SyncConflictResolutionModal
         isOpen={isConflictModalOpen}
         onClose={() => {
