@@ -176,9 +176,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST D: Browser A -> Server -> Browser B Multi-Device Sync
   // -------------------------------------------------------------------------
   const startD = Date.now();
-  const bADb = new LocalIndexedDbStore();
+  const bADb = new LocalIndexedDbStore(6, `kwakopos-synthetic-D-A-${randomUUID()}`);
   const bAEngine = new ClientSyncEngine("device-synth-A", bADb);
-  const bBDb = new LocalIndexedDbStore();
+  const bBDb = new LocalIndexedDbStore(6, `kwakopos-synthetic-D-B-${randomUUID()}`);
   const bBEngine = new ClientSyncEngine("device-synth-B", bBDb);
 
   const synthVarId = randomUUID();
@@ -255,7 +255,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST E: Offline Mutation Outbox Queuing & Reconnect Sync
   // -------------------------------------------------------------------------
   const startE = Date.now();
-  const offlineDb = new LocalIndexedDbStore();
+  const offlineDb = new LocalIndexedDbStore(6, `kwakopos-synthetic-E-${randomUUID()}`);
   const offlineEngine = new ClientSyncEngine("device-synth-offline", offlineDb);
 
   offlineDb.recordOutboxMutation({
@@ -441,8 +441,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST K: Multi-Device Outbox Convergence (Device A -> Server -> Device B)
   // -------------------------------------------------------------------------
   const startK = Date.now();
-  const dbA = new LocalIndexedDbStore();
-  const dbB = new LocalIndexedDbStore();
+  const dbA = new LocalIndexedDbStore(6, `kwakopos-synthetic-K-A-${randomUUID()}`);
+  const dbB = new LocalIndexedDbStore(6, `kwakopos-synthetic-K-B-${randomUUID()}`);
   const engineA = new ClientSyncEngine("device-k-a", dbA);
   const engineB = new ClientSyncEngine("device-k-b", dbB);
 
@@ -648,8 +648,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F06: Multi-Device Financial Mutation Sync Convergence
   // -------------------------------------------------------------------------
   const startF06 = Date.now();
-  const dbStoreF06A = new LocalIndexedDbStore();
-  const dbStoreF06B = new LocalIndexedDbStore();
+  const dbStoreF06A = new LocalIndexedDbStore(6, `kwakopos-synthetic-F06-A-${randomUUID()}`);
+  const dbStoreF06B = new LocalIndexedDbStore(6, `kwakopos-synthetic-F06-B-${randomUUID()}`);
   const engineF06A = new ClientSyncEngine("device-fin-a", dbStoreF06A);
   const engineF06B = new ClientSyncEngine("device-fin-b", dbStoreF06B);
 
