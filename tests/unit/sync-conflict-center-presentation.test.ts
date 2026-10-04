@@ -5,6 +5,8 @@ import {
 } from "../../apps/web/src/services/syncConflictPresentationService.js";
 
 const baseStatus = () => ({
+  state: "SUCCESS" as const,
+  openConflictCount: 0,
   reconciliationStatus: "IN_SYNC" as const,
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
@@ -22,7 +24,7 @@ describe("Conflict Center presentation invariants", () => {
     expect(countUniqueLocalConflictIds(entries)).toBe(2);
   });
 
-  it("accepts zero-divergence wording only for IN_SYNC with no queues", () => {
+  it("accepts zero-divergence wording only after successful reconciliation with no queues or server conflicts", () => {
     expect(getConflictCenterReplicaState(baseStatus())).toBe("VERIFIED");
   });
 
@@ -44,5 +46,13 @@ describe("Conflict Center presentation invariants", () => {
 
   it("does not claim convergence before reconciliation has been established", () => {
     expect(getConflictCenterReplicaState({ ...baseStatus(), reconciliationStatus: "UNKNOWN" })).toBe("NOT_VERIFIED");
+  });
+
+  it("does not claim convergence when an authoritative server conflict remains", () => {
+    expect(getConflictCenterReplicaState({ ...baseStatus(), openConflictCount: 1 })).toBe("NOT_VERIFIED");
+  });
+
+  it("does not claim convergence before the sync run is successful", () => {
+    expect(getConflictCenterReplicaState({ ...baseStatus(), state: "IDLE" })).toBe("NOT_VERIFIED");
   });
 });
