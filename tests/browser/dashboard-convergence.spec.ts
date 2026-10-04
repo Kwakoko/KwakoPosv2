@@ -345,6 +345,8 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
         },
         { timeout: 30000, intervals: [500, 1000, 2000] },
       ).toBe(1);
+      const productCard = page.getByText("Total Products", { exact: true }).locator("..");
+      await expect(productCard).toContainText("1", { timeout: 30000 });
       await expect(page.getByText(/Data as of: Revision/).first()).toBeVisible({ timeout: 30000 });
     }
 

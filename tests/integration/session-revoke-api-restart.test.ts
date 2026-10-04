@@ -1,11 +1,12 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { once } from "node:events";
 import { hashPassword } from "@kwakopos2/auth";
 import { prisma } from "@kwakopos2/database";
 
-const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
+const ROOT = process.cwd();
 const API_PORT = 3011;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -22,7 +23,7 @@ describe("session revoke survives API restart", () => {
   let apiPidBeforeRestart: number | null = null;
 
   const startApi = async (): Promise<void> => {
-    const tsxCli = `${ROOT}\\node_modules\\tsx\\dist\\cli.mjs`;
+    const tsxCli = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
     api = spawn(process.execPath, [tsxCli, "apps/api/src/testServerFixed.ts"], {
       cwd: ROOT,
       env: {
@@ -32,6 +33,7 @@ describe("session revoke survives API restart", () => {
         PORT: String(API_PORT),
         KWAKOPOS_MOCK_AUTH: "false",
         KWAKOPOS_DISABLE_SUPPORT_AUTOMATION: "true",
+        JWT_SECRET: process.env.JWT_SECRET || "kwakopos-ci-session-restart-test-secret-20261004",
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -71,7 +73,11 @@ describe("session revoke survives API restart", () => {
       await once(killer, "exit");
     } else {
       api.kill("SIGTERM");
-      await once(api, "exit");
+      await Promise.race([
+        once(api, "exit"),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+      if (api.exitCode === null) api.kill("SIGKILL");
     }
     api = null;
   };
