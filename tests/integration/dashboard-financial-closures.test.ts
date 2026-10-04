@@ -143,8 +143,8 @@ describe("Dashboard financial closures", () => {
             create: [{
               id: randomUUID(),
               variantId,
-              quantityReturned: 1,
-              refundUnitPrice: 590,
+              quantityReturned: 0.5,
+              refundUnitPrice: 1180,
               refundLineTotal: 590,
               condition: "GOOD",
             }],
@@ -153,9 +153,7 @@ describe("Dashboard financial closures", () => {
       });
 
       const snapshot = await getDashboardKpiSnapshot(ctx, "7d");
-      const debugSales = await prisma.sale.findMany({ where: { tenantId, branchId }, select: { status: true, soldAt: true, grandTotal: true, taxTotal: true, totalCost: true, grossProfit: true } });
-      const debugReturns = await prisma.return.findMany({ where: { tenantId, branchId }, select: { status: true, createdAt: true, totalRefundAmount: true, originalSaleId: true } });
-      console.log("[DASHBOARD-FIN-CLOSURE-DEBUG]", JSON.stringify({ snapshot, debugSales, debugReturns, now: new Date().toISOString() }));
+
       expect(snapshot.salesToday).toBe(500);
       expect(snapshot.netSalesToday).toBe(500);
       expect(snapshot.cogsToday).toBe(0);
