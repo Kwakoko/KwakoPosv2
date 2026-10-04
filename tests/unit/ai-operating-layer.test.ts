@@ -1,56 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { AiOperatingLayerEngine } from "@kwakopos2/domain";
-import { runAiOperatingLayerCertification } from "../../scripts/certification/ai-operating-layer-certification-engine.js";
+import type { AiBusinessSnapshot, TenantContext } from "@kwakopos2/contracts";
 
-describe("Phase 33 — KwakoPos AI Operating Layer OS Test Suite", () => {
-  const engine = new AiOperatingLayerEngine();
+const ctx:TenantContext={tenantId:"11111111-1111-4111-8111-111111111111",branchId:"22222222-2222-4222-8222-222222222222",userId:"33333333-3333-4333-8333-333333333333",roles:["MANAGER"],permissions:["INVENTORY_VIEW","FINANCIAL_REPORT_VIEW","PURCHASE_APPROVE"]};
+const snapshot:AiBusinessSnapshot={now:"2026-10-04T10:00:00.000Z",variants:[{variantId:"44444444-4444-4444-8444-444444444444",productId:"55555555-5555-4555-8555-555555555555",productName:"Test Product",sku:"TEST-001",inventoryQuantity:3,reservedQuantity:0,reorderLevel:5,sellingPrice:100,costPrice:60,active:true}],stockByVariant:{"44444444-4444-4444-8444-444444444444":3},unitsSoldLast7DaysByVariant:{"44444444-4444-4444-8444-444444444444":14},salesDaysByVariant:{"44444444-4444-4444-8444-444444444444":7}};
 
-  it("should register specialist agents and execute governed Ask AI semantic queries", () => {
-    const regRes = engine.registerAgent({
-      agentId: "agent-sales-test",
-      name: "Sales Performance Agent",
-      purpose: "Analyzes daily sales ATV and customer purchase patterns",
-      permissions: ["sales.read"],
-      tools: ["tool-get-sales-summary"],
-      autonomyLevel: "RECOMMEND",
-    });
-    expect(regRes.success).toBe(true);
-
-    const askRes = engine.askAi("What is gross margin?", ["finance.read"]);
-    expect(askRes.answer).toContain("42.5%");
-    expect(askRes.evidence.length).toBeGreaterThan(0);
+describe("AI Insights Engine — data-grounded behavior",()=>{
+  const engine=new AiOperatingLayerEngine();
+  it("generates tenant/branch-scoped insight from supplied snapshot",()=>{
+    const result=engine.generateInsightsAndRecommendations(ctx,snapshot);
+    expect(result.insights).toHaveLength(1);
+    expect(result.insights[0].tenantId).toBe(ctx.tenantId);
+    expect(result.insights[0].branchId).toBe(ctx.branchId);
+    expect(result.insights[0].title).toContain("Test Product");
+    expect(result.insights[0].observation).toContain("3 available units");
+    expect(result.insights[0].evidence.some(e=>e.sourceId===snapshot.variants[0].variantId)).toBe(true);
   });
-
-  it("should generate evidence-backed recommendations, explain, and execute approved actions with audit ledger", () => {
-    const genRes = engine.generateInsightsAndRecommendations("TEN-001");
-    expect(genRes.recommendations.length).toBeGreaterThan(0);
-
-    const recId = genRes.recommendations[0].recommendationId;
-    const expRes = engine.explainRecommendation(recId);
-    expect(expRes.found).toBe(true);
-
-    const execRes = engine.executeApprovedAction(recId, "ADM-001");
-    expect(execRes.success).toBe(true);
-    expect(execRes.ledgerEntry?.executionVerified).toBe(true);
+  it("does not create a reorder recommendation when above reorder level",()=>{
+    const healthy={...snapshot,variants:[{...snapshot.variants[0],reorderLevel:2}]};
+    const result=engine.generateInsightsAndRecommendations(ctx,healthy);
+    expect(result.recommendations).toHaveLength(0);
+    expect(result.insights[0].title).toContain("No immediate stockout risk");
   });
-
-
-  it("should activate kill switch and halt AI operations gracefully while system remains healthy", () => {
-    const killRes = engine.toggleKillSwitch("GLOBAL", true);
-    expect(killRes).toBe(true);
-
-    const askRes = engine.askAi("Test query", ["finance.read"]);
-    expect(askRes.answer).toContain("Kill Switch");
-
-    // Restore kill switch
-    engine.toggleKillSwitch("GLOBAL", false);
+  it("uses the supplied governed metric and fails closed on unsupported queries",()=>{
+    const metric={metricId:"m-gross-margin",metricName:"Gross Margin Percentage",calculatedValue:37.5,evidence:[]};
+    expect(engine.askAi(ctx,"What is gross margin?",["financial_report_view"],metric).answer).toContain("37.50%");
+    expect(()=>engine.askAi(ctx,"Tell me everything",["financial_report_view"],metric)).toThrow("AI_QUERY_UNSUPPORTED");
+    expect(()=>engine.askAi(ctx,"What is gross margin?",["inventory_view"],metric)).toThrow("FORBIDDEN");
   });
-
-  it("should pass 100% of the 75-Pillar AI Operating Layer OS certification campaign", () => {
-    const cert = runAiOperatingLayerCertification();
-    expect(cert.totalPillars).toBe(75);
-    expect(cert.passedPillars).toBe(75);
-    expect(cert.failedPillars).toBe(0);
-    expect(cert.successRatePct).toBe(100);
+  it("halts generation when the persisted kill-switch state is active",()=>{
+    const result=engine.generateInsightsAndRecommendations(ctx,snapshot,true);
+    expect(result.insights).toHaveLength(0);
+    expect(result.recommendations).toHaveLength(0);
   });
 });
