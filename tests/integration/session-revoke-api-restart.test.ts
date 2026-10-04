@@ -24,7 +24,7 @@ describe("session revoke survives API restart", () => {
 
   const startApi = async (): Promise<void> => {
     const tsxCli = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
-    api = spawn(process.execPath, [tsxCli, "apps/api/src/testServerFixed.ts"], {
+    api = spawn(process.execPath, [tsxCli, "apps/api/src/server.ts"], {
       cwd: ROOT,
       env: {
         ...process.env,
