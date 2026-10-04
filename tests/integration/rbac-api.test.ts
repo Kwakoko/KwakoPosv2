@@ -6,6 +6,7 @@ import { prisma } from "@kwakopos2/database";
 import { globalLegalGovernanceService } from "../../apps/api/src/services/legalGovernanceService.js";
 import type { FastifyInstance } from "fastify";
 
+// Release-loop regression coverage: every DeviceSession fixture must include branchId and tokenFamilyId.
 describe("Privileged RBAC PostgreSQL API", () => {
   let app: FastifyInstance;
   const tenantId = randomUUID();
