@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, X, ShieldAlert, Layers } from "lucide-react";
 import { apiFetch } from "../services/applicationApiService.js";
+import { useTenant, useBranch } from "../context/KwakoPosContexts.js";
+import { syncStatusService, useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
+import { getConflictCenterReplicaState } from "../services/syncConflictPresentationService.js";
 
 export interface SyncConflictItem {
   id: string;
@@ -29,6 +32,13 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
   const [conflicts, setConflicts] = useState<SyncConflictItem[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const { currentTenantId } = useTenant();
+  const { currentBranchId } = useBranch();
+  const syncStatus = useAuthoritativeSyncStatus({
+    tenantId: currentTenantId || null,
+    branchId: currentBranchId || null,
+  });
+  const replicaState = getConflictCenterReplicaState(syncStatus);
 
   const loadConflicts = async () => {
     if (!localDb) return;
@@ -83,9 +93,19 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
   useEffect(() => {
     if (!isOpen) return;
     void loadConflicts();
-    const timer = window.setInterval(() => void loadConflicts(), 5000);
+    void syncStatusService.refreshCounts({
+      tenantId: currentTenantId || null,
+      branchId: currentBranchId || null,
+    });
+    const timer = window.setInterval(() => {
+      void loadConflicts();
+      void syncStatusService.refreshCounts({
+        tenantId: currentTenantId || null,
+        branchId: currentBranchId || null,
+      });
+    }, 5000);
     return () => window.clearInterval(timer);
-  }, [isOpen, localDb]);
+  }, [isOpen, localDb, currentTenantId, currentBranchId]);
 
   const handleResolve = async (
     conflict: SyncConflictItem,
@@ -141,6 +161,10 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
         });
       }
       setMessage("Conflict " + conflict.id + " resolved by " + action + ".");
+      await syncStatusService.refreshCounts({
+        tenantId: currentTenantId || null,
+        branchId: currentBranchId || null,
+      });
       await loadConflicts();
     } catch (err: any) {
       setMessage("Failed to resolve conflict: " + (err?.message || String(err)));
@@ -246,13 +270,34 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
                 color: "var(--muted, #94a3b8)",
               }}
             >
-              <CheckCircle2 size={40} color="#10b981" style={{ margin: "0 auto 0.75rem" }} />
+              {replicaState === "VERIFIED" ? (
+                <CheckCircle2 size={40} color="#10b981" style={{ margin: "0 auto 0.75rem" }} />
+              ) : (
+                <ShieldAlert
+                  size={40}
+                  color={replicaState === "DIVERGENT" ? "#ef4444" : "#f59e0b"}
+                  style={{ margin: "0 auto 0.75rem" }}
+                />
+              )}
               <p style={{ margin: 0, fontWeight: 600, fontSize: "0.95rem" }}>
-                Zero Divergence: All local mutations are fully synchronized.
+                {replicaState === "VERIFIED"
+                  ? "Replica verified — no open sync conflicts."
+                  : replicaState === "DIVERGENT"
+                    ? "No open conflicts — replica is divergent."
+                    : "No open conflicts — replica verification pending."}
               </p>
               <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem" }}>
-                No oversell discrepancies or parent-child conversion conflicts detected.
+                {replicaState === "VERIFIED"
+                  ? "Authoritative reconciliation is in sync, with no pending, failed, or abandoned mutations."
+                  : replicaState === "DIVERGENT"
+                    ? "The last authoritative reconciliation reported divergence. Do not treat this as zero divergence."
+                    : "No open server conflict is recorded, but zero-divergence has not been established yet."}
               </p>
+              {(syncStatus.pendingOutboxCount > 0 || syncStatus.failedOutboxCount > 0 || syncStatus.abandonedOutboxCount > 0) && (
+                <p style={{ margin: "0.65rem 0 0", fontSize: "0.78rem", fontWeight: 700 }}>
+                  Pending: {syncStatus.pendingOutboxCount} · Failed: {syncStatus.failedOutboxCount} · Abandoned: {syncStatus.abandonedOutboxCount}
+                </p>
+              )}
             </div>
           ) : (
             conflicts.map((c) => (
