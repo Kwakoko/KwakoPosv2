@@ -194,10 +194,16 @@ export class SyncEngine {
           const expensesMap = (this.store as any).expenses || new Map();
           expensesMap.set(op.entityId, { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, ...op.payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
           (this.store as any).expenses = expensesMap;
-        } else if (op.entityType === "Setting" && (op.operationType === "CREATE" || op.operationType === "UPDATE")) {
+        } else if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
           const settingsMap = (this.store as any).settings || new Map();
-          settingsMap.set(`${ctx.tenantId}:${op.entityId}`, { id: op.entityId, tenantId: ctx.tenantId, ...op.payload, updatedAt: new Date().toISOString() });
+          const key = String((op.payload as any)?.key || op.entityId);
+          if (op.operationType === "DELETE") {
+            settingsMap.set(`${ctx.tenantId}:${key}`, { id: op.entityId, tenantId: ctx.tenantId, key, isActive: false, _deleted: true, updatedAt: new Date().toISOString() });
+          } else {
+            settingsMap.set(`${ctx.tenantId}:${key}`, { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, ...op.payload, isActive: true, updatedAt: new Date().toISOString() });
+          }
           (this.store as any).settings = settingsMap;
+
         } else if (op.entityType === "Customer" && op.operationType === "CREATE") {
           this.commercialRepo.createCustomer(ctx, { ...(op.payload as unknown as CreateCustomerRequest), id: op.entityId });
         } else if (op.entityType === "Supplier" && op.operationType === "CREATE") {

@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { LocalIndexedDbStore } from '../../apps/web/src/indexedDb.js';
+import { loadConfig, getReleaseIdentity } from '../../packages/config/src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +36,7 @@ export class BrowserWorkflowVerificationEngine {
     this.db = new LocalIndexedDbStore();
   }
 
-  public runAllBrowserWorkflows(): boolean {
+  public async runAllBrowserWorkflows(): Promise<boolean> {
     console.log('\n========================================================================');
     console.log('🚀 KWAKOPOS 2.0 REAL BROWSER E2E WORKFLOW VERIFICATION ENGINE');
     console.log('========================================================================');
@@ -47,17 +48,18 @@ export class BrowserWorkflowVerificationEngine {
     this.verifyPurchasingWorkflow();
     this.verifyFinanceWorkflow();
     this.verifyReportsWorkflow();
-    this.verifySettingsWorkflow();
+    await this.verifySettingsWorkflow();
     this.verifyUsersRbacWorkflow();
     this.verifySuperAdminWorkflow();
     this.verifyIndustryModuleWorkflow();
 
     const allPassed = this.results.every(r => r.passed);
+    const releaseIdentity = getReleaseIdentity(loadConfig({ NODE_ENV: "test" }));
     const evidenceBundle = {
-      releaseVersion: "2.5.0",
-      environment: "production",
+      releaseVersion: releaseIdentity.version,
+      environment: releaseIdentity.environment,
       timestamp: new Date().toISOString(),
-      gitSha: "bac4f23",
+      gitSha: releaseIdentity.gitSha,
       totalJourneys: this.results.length,
       passedJourneys: this.results.filter(r => r.passed).length,
       overallResult: allPassed ? "PRODUCTION_CERTIFIED" : "VERIFICATION_FAILED",
@@ -172,16 +174,27 @@ export class BrowserWorkflowVerificationEngine {
     console.log(' ✓ [JRN-07] Reports & Analytics Workflow: VERIFIED');
   }
 
-  private verifySettingsWorkflow() {
+  private async verifySettingsWorkflow() {
+    const tenantA = "00000000-0000-4000-8000-000000000801";
+    const tenantB = "00000000-0000-4000-8000-000000000802";
+    const branchA = "00000000-0000-4000-8000-000000000811";
+    const branchB = "00000000-0000-4000-8000-000000000812";
+    this.db.saveConfigurationLocal("tax.config", { vatRatePercent: 18, currencyCode: "TZS" }, { tenantId: tenantA, branchId: branchA });
+    await this.db.flushPersistence();
+    const scoped = this.db.getConfigurationLocal("tax.config", { tenantId: tenantA, branchId: branchA });
+    const crossTenant = this.db.getConfigurationLocal("tax.config", { tenantId: tenantB, branchId: branchB });
+    const passed = Number(scoped?.vatRatePercent) === 18 && crossTenant === undefined;
     this.results.push({
       journeyId: 'JRN-08-SETTINGS',
       routeName: 'Hierarchical Settings Manager',
       routePath: '/settings',
-      passed: true,
-      assertionsCount: 2,
-      evidenceDetails: 'Inherited Tenant and Branch tax/currency hierarchy verified.'
+      passed,
+      assertionsCount: 4,
+      evidenceDetails: passed
+        ? 'Tenant/branch-scoped local Settings persistence and cross-tenant read isolation verified.'
+        : 'Settings persistence or isolation failed.'
     });
-    console.log(' ✓ [JRN-08] Hierarchical Settings Workflow: VERIFIED');
+    console.log(` [JRN-08] Settings Workflow: ${passed ? 'VERIFIED' : 'FAILED'}`);
   }
 
   private verifyUsersRbacWorkflow() {
@@ -222,7 +235,9 @@ export class BrowserWorkflowVerificationEngine {
 }
 
 const runner = new BrowserWorkflowVerificationEngine();
-const success = runner.runAllBrowserWorkflows();
-if (!success) {
+void runner.runAllBrowserWorkflows().then((success) => {
+  if (!success) process.exit(1);
+}).catch((error) => {
+  console.error(error);
   process.exit(1);
-}
+});

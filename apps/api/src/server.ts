@@ -8,6 +8,7 @@ import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { traVfdRoutes } from "./routes/traVfdRoutes.js";
+import { globalSettingsService } from "./services/settingsService.js";
 import { startTraVfdReconciliationWorker } from "./services/traVfdService.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
@@ -3789,31 +3790,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  server.get("/api/v1/retail/settings", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
+  server.get("/api/v1/settings", async (req, reply) => {
     const ctx = requireTenantContext(req);
-    return reply.status(200).send({
-      success: true,
-      data: globalRetailService.getSettings(ctx),
-    });
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.read") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_READ_REQUIRED", message: "settings.read permission is required." } });
+    return reply.send({ success: true, data: await globalSettingsService.getEffectiveSettings(ctx) });
+  });
+
+  server.put("/api/v1/settings", async (req, reply) => {
+    const ctx = requireTenantContext(req);
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
+    const body = (req.body as any) || {};
+    const records = Array.isArray(body.records) ? body.records : [body];
+    return reply.send({ success: true, data: await globalSettingsService.upsertBatch(ctx, records) });
+  });
+
+  server.get("/api/v1/retail/settings", async (req, reply) => {
+    const ctx = requireTenantContext(req);
+    const settings = await globalSettingsService.getSettings(ctx);
+    return reply.send({ success: true, data: settings["retail.config"] });
   });
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
     const ctx = requireTenantContext(req);
-    const body = (req.body as any) || {};
-    const updated = globalRetailService.updateSettings(ctx, body);
-    return reply.status(200).send({
-      success: true,
-      data: updated,
-    });
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
+    const result = await globalSettingsService.upsertBatch(ctx, [{ key: "retail.config", value: (req.body as any) || {}, scope: "BRANCH" }]);
+    return reply.send({ success: true, data: result[0] });
   });
 
   server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
     const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
-    const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
+    const sale = await globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
     return reply.status(201).send({
       success: true,
       data: sale,

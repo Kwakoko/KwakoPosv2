@@ -56,6 +56,20 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **settings**: prove direct API retry idempotency
+- **settings**: respect append-only audit lifecycle in isolated CI
+- **settings**: assert fail-closed result and preserve append-only audit
+- **settings**: add dedicated P0/P1 closed-loop workflow
+- **settings**: restore production-certified parity after real closed-loop evidence
+- **settings**: certify update and delete lifecycle without resurrection
+- **settings**: remove obsolete in-memory Retail Settings authority
+- **settings**: require closed-loop Settings evidence
+- **settings**: certify persistence RBAC audit and tenant isolation
+- **settings**: preserve canonical service after bootstrap wiring
+- **settings**: bind Settings status to closed-loop evidence
+- **settings**: make browser Settings verification executable
+- **settings**: await canonical retail settings checkout
+- **release**: v2.13.0
 - **core**: align privileged sync authority contract
 - **release**: v2.13.0
 - **release**: v2.13.0
@@ -222,6 +236,50 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **settings**: close all P0/P1 remediation loops
+- **settings**: initialize idempotency journal before Settings replay lookup
+- **release-lock**: track Settings scope indicator checksum
+- **settings**: expose effective configuration scope in Settings UI
+- **settings**: harden Settings service RBAC and concurrent upserts
+- **settings**: correct untyped Prisma transaction query
+- **sync**: apply Settings in legacy delta path without resurrection
+- **sync**: deliver Settings tombstones in legacy date deltas
+- **settings**: make direct Settings mutations idempotent
+- **settings**: keep database-free unit tests on canonical Settings defaults
+- **certification**: use canonical Settings parity status type
+- **release-lock**: track repaired SettingsPage checksum
+- **settings**: repair Settings JSX conditional closures
+- **settings**: wire VAT enablement and correct Settings tab contract
+- **certification**: remove stale Settings evidence release identity
+- **release-lock**: reconcile current Settings and release-control hashes
+- **settings**: persist locale currency and inventory threshold controls
+- **settings**: update navigation lock to certified SettingsPage
+- **settings**: record full Settings before/after audit state
+- **settings**: enforce settings.manage on sync mutation path
+- **settings**: eliminate final legacy config key and false integration readiness
+- **settings**: remove remaining unscoped POS tax reads
+- **sync**: prioritize Settings before dependent client mutations
+- **settings**: repair canonical Setting sync handler structure
+- **settings**: repair atomic Settings outbox method structure
+- **settings**: hydrate canonical Settings during bootstrap
+- **settings**: enforce Settings management permission in UI
+- **settings**: grant admins explicit Settings read access
+- **settings**: enforce Settings read permission boundary
+- **settings**: resolve existing Setting records for revision journal
+- **settings**: align in-memory Settings sync with canonical tombstones
+- **settings**: preserve stable Setting identity across updates
+- **settings**: make Settings UI tenant-scoped and durably synchronized
+- **settings**: await canonical retail settings during checkout
+- **settings**: make retail runtime consume canonical Settings
+- **settings**: correct retail Settings compatibility endpoint
+- **settings**: scope POS tax configuration by tenant and branch
+- **settings**: apply authoritative Settings delta into scoped IndexedDB
+- **settings**: enforce scoped local config and atomic Settings outbox
+- **settings**: persist Settings in PostgreSQL sync authority
+- **settings**: route Settings through canonical service and RBAC
+- **settings**: add canonical settings service
+- **settings**: add canonical settings migration
+- **settings**: add canonical PostgreSQL Setting model
 - **core**: repair Employee outbox guard syntax
 - **core**: align Employee HR table with canonical fields
 - **core**: close Employee P0/P1 production gaps
