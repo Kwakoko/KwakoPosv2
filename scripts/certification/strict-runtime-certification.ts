@@ -29,9 +29,10 @@ sourceContains("apps/api/src/serverFixed.ts", "requireSecuritySecrets");
 sourceContains("apps/api/src/serverFixed.ts", "ensureSuperAdminSecurity");
 sourceContains("apps/api/src/serverFixed.ts", "verifySuperAdminMfa");
 sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"Sale\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
+sourceContains("packages/sync/src/prismaSyncEngine.ts", "TenantScopedSyncEngine as PrismaSyncEngine");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "entityType === \"Sale\"");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
 
