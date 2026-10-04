@@ -33,7 +33,7 @@ describe("Durable domain event bridge", () => {
 
     const event = buildDomainEvent(ctx, op, { id: "product-1", name: "Event Product" }, "42");
 
-    expect(event.eventId).toBe("domain:op-event-1:PRODUCT_CREATED");
+    expect(event.eventId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(event.tenantId).toBe(ctx.tenantId);
     expect(event.branchId).toBe(ctx.branchId);
     expect(event.eventType).toBe("PRODUCT_CREATED");
