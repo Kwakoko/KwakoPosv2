@@ -959,7 +959,16 @@ export class LocalIndexedDbStore {
     return tenantId ? all.filter((r) => r.tenantId === tenantId) : all;
   }
 
-  recordOutboxMutation(item: OutboxItem, ctx?: TenantScopedContext): void {\n  async enqueueSettingsMutations(
+  recordOutboxMutation(item: OutboxItem, ctx?: TenantScopedContext): void {
+    assertSyncOutboxEntityTypeAllowed(String(item.entityType));
+    if (ctx?.tenantId && !item.tenantId) {
+      item = { ...item, tenantId: ctx.tenantId, branchId: ctx.branchId || item.branchId };
+    }
+    this.syncOutbox.set(item.id, item);
+    this.persist("syncOutbox", item.id, item);
+  }
+
+  async enqueueSettingsMutations(
     records: Array<{ key: string; value: unknown; scope?: "TENANT" | "BRANCH" | "USER"; operationType?: "CREATE" | "UPDATE" | "DELETE" }>,
     ctx: TenantScopedContext,
   ): Promise<void> {
@@ -985,15 +994,6 @@ export class LocalIndexedDbStore {
       });
     }
     await this.executeAtomicMutation({ writes, outboxItems, tenantContext: ctx });
-  }
-
-
-    assertSyncOutboxEntityTypeAllowed(String(item.entityType));
-    if (ctx?.tenantId && !item.tenantId) {
-      item = { ...item, tenantId: ctx.tenantId, branchId: ctx.branchId || item.branchId };
-    }
-    this.syncOutbox.set(item.id, item);
-    this.persist("syncOutbox", item.id, item);
   }
 
   async executeAtomicMutation(params: {
