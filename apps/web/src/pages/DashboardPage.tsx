@@ -664,7 +664,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             paymentMethod: s.payments?.length > 1 ? 'Split' : (s.paymentMethod || s.method || s.payments?.[0]?.paymentMethod || 'Cash'),
             syncStatus: 'Synced',
             customer: s.customer?.name || s.customerName || s.customer?.displayName || 'Walk-In Customer',
-            cashierName: s.cashierName || s.cashier || s.user || s.soldByName || s.soldById || 'Cashier',
+            cashierName: s.cashierName || s.cashier || s.user || s.soldByName || 'Cashier',
             module: s.module,
             branch_id: s.branchId || s.branch_id,
             items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : Array.isArray(s.lines) ? s.lines : []).map((it: any) => ({
@@ -2780,11 +2780,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-sm font-black">Recent Orders</CardTitle>
-              <CardDescription className="text-[11px]">Latest ${Math.min(orders.length, 6)} transactions</CardDescription>
+              <CardDescription className="text-[11px]">Latest {Math.min(orders.length, 6)} transactions</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black bg-primary/10 text-primary dark:bg-primary/20 px-2.5 py-1 rounded-full">
-                {orders.length} total
+                {orders.length} loaded
               </span>
               <button
                 onClick={() => handleNav('Receipts')}
