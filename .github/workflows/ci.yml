@@ -35,6 +35,8 @@ jobs:
         run: npm ci
       - name: Database Generation
         run: npm run db:generate
+      - name: Production Auth Transport Lock
+        run: npm run release:auth-lock
       - name: Lint
         run: npm run lint
       - name: Build
