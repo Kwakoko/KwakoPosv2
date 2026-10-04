@@ -143,7 +143,6 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
 export const LoginResponseSchema = z.object({
   accessToken: z.string(),
-  refreshToken: z.string(),
   user: z.object({
     id: z.string().uuid(),
     tenantId: z.string().uuid(),
