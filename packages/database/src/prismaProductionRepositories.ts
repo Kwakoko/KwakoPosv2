@@ -286,7 +286,7 @@ export class PrismaCommercialRepository {
   }
 
   async getSales(ctx: TenantContext) {
-    return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }));
+    return normalize(await db.sale.findMany({ where: tenantWhere(ctx), include: { customer: true, lines: { include: { product: true, variant: true } }, payments: true }, orderBy: { soldAt: "desc" }, take: 100 }));
   }
 
   async getSaleById(ctx: TenantContext, id: string) {
