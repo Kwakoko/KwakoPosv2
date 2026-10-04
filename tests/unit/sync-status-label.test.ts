@@ -9,6 +9,7 @@ const base = (): SyncStatusSnapshot => ({
   serverRevision: "10",
   syncEpoch: "epoch-1",
   reconciliationStatus: "IN_SYNC",
+  openConflictCount: 0,
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
