@@ -23,7 +23,7 @@ import {
   DollarSign, Hash, LucideIcon, Trash2, AlertTriangle, FileText, Sparkles,
   ShieldCheck, ArrowRight, CreditCard
 } from "lucide-react";
-import { useTenant, useBranch, useModule, useSync, useTranslation, useLocale, useFormatters } from "../context/KwakoPosContexts.js";
+import { useTenant, useBranch, useModule, useSync, useTranslation, useLocale, useFormatters, useRbac } from "../context/KwakoPosContexts.js";
 import { useToast } from "../components/UI/Toast.js";
 import { HoldToConfirmButton } from "../components/UI/HoldToConfirmButton.js";
 import { tenantStoreCleanupService } from "../services/tenantStoreCleanupService.js";
@@ -45,6 +45,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   const { currentTenantId, currentTenantName, currentTenantSlug } = useTenant();
   const { setActiveTab: setGlobalActiveTab } = useModule();
   const { currentBranchName, currentBranchId } = useBranch();
+  const { hasPermission } = useRbac();
+  const canManageSettings = hasPermission("settings.manage") || hasPermission("*");
   const { db } = useSync();
   const toast = useToast();
   const { t } = useTranslation();
@@ -421,7 +423,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             {t("settings.enterpriseConfig")}
           </p>
         </div>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={handleSave} type="button">
+        <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void handleSave()} type="button" disabled={!canManageSettings} title={!canManageSettings ? "settings.manage permission is required" : undefined}>
           <Save size={13} /> {t("settings.saveChanges")}
         </button>
       </div>
