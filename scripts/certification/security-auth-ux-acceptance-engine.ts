@@ -319,7 +319,7 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
     {
       id: "SEC-CERT-03", priority: "P0", category: "Certification Integrity", title: "Authoritative Server Cookie Transport",
       run: async () => ({
-        passed: sourceContains("apps/api/src/serverFixed.ts", "HttpOnly") && sourceContains("apps/api/src/serverFixed.ts", "SameSite=Strict"),
+        passed: sourceContains("apps/api/src/server.ts", "HttpOnly") && sourceContains("apps/api/src/server.ts", "SameSite=Strict"),
         details: "Production auth path issues refresh tokens through hardened HttpOnly/SameSite cookie transport",
       }),
     },
