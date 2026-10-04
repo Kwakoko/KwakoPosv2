@@ -267,6 +267,44 @@ function requireSuperAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+function requireAiViewerContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+  const allowed = roles.some((r) => ["SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN", "MANAGER", "AUDITOR"].includes(r)) ||
+    permissions.includes("*") ||
+    permissions.some((p) => ["inventory_view", "report_view", "financial_report_view"].includes(p));
+  if (!allowed) throw new Error("FORBIDDEN: AI Insights permission required.");
+  return ctx;
+}
+
+function requireAiApprovalContext(req: FastifyRequest): TenantContext {
+  const ctx = requireTenantContext(req);
+  const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+  const allowed = roles.some((r) => ["SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN", "MANAGER"].includes(r)) ||
+    permissions.includes("*") ||
+    permissions.some((p) => ["purchase_approve", "finance_create", "journal_post"].includes(p));
+  if (!allowed) throw new Error("FORBIDDEN: AI recommendation approval permission required.");
+  return ctx;
+}
+
+function requireAiKillSwitchContext(req: FastifyRequest, scope: "GLOBAL" | "TENANT"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
+  const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
+  if (scope === "GLOBAL") {
+    if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")) {
+      throw new Error("FORBIDDEN: Super Admin privileges required for global AI kill switch.");
+    }
+  } else {
+    const allowed = roles.some((r) => ["SUPER_ADMIN", "SUPERADMIN", "OWNER", "ADMIN"].includes(r)) ||
+      permissions.includes("*") || permissions.includes("admin:*");
+    if (!allowed) throw new Error("FORBIDDEN: Tenant administrator privileges required.");
+  }
+  return ctx;
+}
+
 function requireAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
