@@ -38,7 +38,7 @@ describe("syncStatusLabel", () => {
   });
 
   it("never reports synced while authoritative server conflicts exist", () => {
-    expect(syncStatusLabel({ ...base(), state: "SUCCESS", openConflictCount: 1 })).toBe("SYNCED");
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", openConflictCount: 1 })).toBe("CONFLICT");
   });
 
   it("reports a reconciliation divergence as a conflict", () => {
