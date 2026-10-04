@@ -1001,6 +1001,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         : (item.countShare || (item.count > 0 ? 1 : 0));
       return {
         ...item,
+        paymentCount: item.paymentCount ?? item.count,
+        orderCount: item.orderCount ?? item.count,
         value: Math.max(pieValue, 1),
         rawMetric: paymentMetricMode === "volume" ? item.volume : item.count,
         color: cfg.color, icon: cfg.icon, badgeBg: cfg.badgeBg, textColor: cfg.textColor,
