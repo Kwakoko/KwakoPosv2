@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { randomUUID } from "node:crypto";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { enqueueOutbox, processOutbox, retryWithBackoff } from "../../apps/web/src/atomicOutbox.js";
 import { reconcileInventory } from "../../apps/web/src/clientSyncEngine.js";
@@ -11,7 +12,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
   const productId = "prod-integ-100";
 
   beforeEach(async () => {
-    db = new LocalIndexedDbStore(4);
+    db = new LocalIndexedDbStore(4, `kwakopos-outbox-integration-${randomUUID()}`);
     await db.ready;
 
     const prod: Product = {
