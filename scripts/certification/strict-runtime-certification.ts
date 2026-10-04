@@ -8,7 +8,7 @@ const sourceContains = (relative: string, needle: string, forbidden = false) => 
 
 for (const file of [
   "apps/web/src/main.tsx","apps/web/src/App.tsx","apps/web/src/context/KwakoPosContexts.tsx","apps/web/src/services/apiClient.ts","apps/web/src/indexedDb.ts","apps/web/src/versionManager.ts",
-  "apps/api/src/server.ts","apps/api/src/server.ts","packages/sync/src/worldStandardPrismaSyncEngine.ts","packages/database/src/atomicCommercialFinance.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
+  "apps/api/src/server.ts","packages/sync/src/worldStandardPrismaSyncEngine.ts","packages/database/src/atomicCommercialFinance.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
   "apps/web/dist/index.html","apps/web/dist/manifest.json","apps/web/dist/sw.js","apps/api/dist/server.js",
 ]) requireFile(file);
 
