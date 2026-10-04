@@ -280,57 +280,122 @@ export const DiagnosticsPage: React.FC = () => {
 
 // ─── AI INSIGHTS PAGE ─────────────────────────────────────────────────────────
 
-export interface AiPageProps {
-  activeTab?: string;
-}
+export interface AiPageProps { activeTab?: string; }
+
+type AiInsightView = {
+  insightId:string; tenantId:string; branchId:string; title:string; observation:string;
+  evidence:Array<{sourceType:string;sourceId:string;label:string;value?:string|number|boolean;observedAt:string;evidenceClass:string}>;
+  interpretation:string; impact:string; recommendedNextStep:string; confidenceScore:number; status:string;
+};
+type AiRecommendationView = {
+  recommendationId:string; tenantId:string; branchId:string; insightId?:string; title:string; summary:string;
+  evidence:AiInsightView["evidence"]; expectedImpact:string; riskLevel:string; policyStatus:string; approvalStatus:string;
+  approvedByUserId?:string; createdAt:string;
+};
+type AiHealthView = {
+  activeInsightsCount:number; pendingApprovalsCount:number; approvedRecommendationsCount:number;
+  ledgerEntriesCount:number; killSwitchActive:boolean; dataGrounded:boolean; aiPlatformOperational:boolean;
+};
 
 export const AiPage: React.FC<AiPageProps> = () => {
-  const [killSwitch, setKillSwitch] = useState(false);
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
-        <div>
-          <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>AI Operating Layer</h1>
-          <p className="v2-text-xs v2-text-muted" style={{ marginTop: ".1rem" }}>KwakoPos intelligent insights & automation policy gateway</p>
-        </div>
-        <button
-          className={`v2-btn v2-btn-sm ${killSwitch ? "v2-btn-danger" : "v2-btn-success"}`}
-          onClick={() => setKillSwitch((v) => !v)}
-          type="button"
-        >
-          <Zap size={13} /> KILL SWITCH: {killSwitch ? "ACTIVE" : "INACTIVE"}
-        </button>
+  const [insights,setInsights]=useState<AiInsightView[]>([]);
+  const [recommendations,setRecommendations]=useState<AiRecommendationView[]>([]);
+  const [health,setHealth]=useState<AiHealthView|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [workingId,setWorkingId]=useState<string|null>(null);
+  const [error,setError]=useState<string|null>(null);
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const [i,r,h]=await Promise.all([
+        apiFetch<{success:boolean;data:AiInsightView[]}>("/api/v1/ai-operating-layer/insights"),
+        apiFetch<{success:boolean;data:AiRecommendationView[]}>("/api/v1/ai-operating-layer/recommendations"),
+        apiFetch<{success:boolean;data:AiHealthView}>("/api/v1/ai-operating-layer/dashboard"),
+      ]);
+      setInsights(Array.isArray(i.data)?i.data:[]);
+      setRecommendations(Array.isArray(r.data)?r.data:[]);
+      setHealth(h.data||null);
+      setError(null);
+    }catch(e){setError(e instanceof Error?e.message:"Unable to load AI Insights.");}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{void load();},[load]);
+
+  const approve=async(id:string)=>{
+    setWorkingId(id);
+    try{
+      await apiFetch("/api/v1/ai-operating-layer/approve",{method:"POST",body:JSON.stringify({recommendationId:id})});
+      await load();
+    }catch(e){setError(e instanceof Error?e.message:"Unable to approve recommendation.");}
+    finally{setWorkingId(null);}
+  };
+
+  const toggleKillSwitch=async()=>{
+    const enabled=!(health?.killSwitchActive??false);
+    setWorkingId("KILL_SWITCH");
+    try{
+      await apiFetch("/api/v1/ai-operating-layer/kill-switch",{method:"POST",body:JSON.stringify({scope:"TENANT",enabled})});
+      await load();
+    }catch(e){setError(e instanceof Error?e.message:"Unable to change AI kill switch.");}
+    finally{setWorkingId(null);}
+  };
+
+  const averageConfidence=insights.length?insights.reduce((s,i)=>s+i.confidenceScore,0)/insights.length:0;
+
+  return <div className="v2-animate-page-enter">
+    <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
+      <div>
+        <h1 className="v2-text-xl v2-font-black" style={{letterSpacing:"-.02em"}}>AI Insights Engine</h1>
+        <p className="v2-text-xs v2-text-muted" style={{marginTop:".1rem"}}>Tenant-scoped, evidence-backed business insights</p>
       </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label="Active Agents"      value={killSwitch ? "0 Agents" : "10 Agents"} desc="Vertical AI agents"   icon={<Sparkles size={18} />}   accent={killSwitch ? "#f87171" : "#38bdf8"} />
-        <KpiCard label="Guarded Executions" value="1,482"                                 desc="Policy-guarded runs"  icon={<Activity size={18} />}   accent="#818cf8" />
-        <KpiCard label="Level 4 Violations" value="0"                                     desc="Critical boundary breaches" icon={<Shield size={18} />} accent="#4ade80" />
-        <KpiCard label="Avg Confidence"     value="94.2%"                                 desc="Model accuracy score" icon={<Star size={18} />}        accent="#fbbf24" />
-      </div>
-      {[
-        { title: "Revenue Forecasting", desc: "7-day ahead revenue prediction using ARIMA + seasonal decomposition.", status: killSwitch ? "HALTED" : "RUNNING", confidence: "92.4%" },
-        { title: "Demand Sensing",      desc: "Real-time inventory reorder signal generation from sales velocity.", status: killSwitch ? "HALTED" : "RUNNING", confidence: "96.1%" },
-        { title: "Customer Churn Risk", desc: "Identifies customers at risk of churning using RFM + ML scoring.",   status: killSwitch ? "HALTED" : "STANDBY", confidence: "88.7%" },
-        { title: "Anomaly Detection",   desc: "Flags suspicious transactions, duplicate payments, outlier sales.",  status: killSwitch ? "HALTED" : "RUNNING", confidence: "99.1%" },
-      ].map((agent) => (
-        <div key={agent.title} className="v2-card v2-mb-4">
-          <div className="v2-card-body v2-flex v2-items-center v2-gap-4">
-            <div style={{ width: 40, height: 40, borderRadius: "var(--radius-lg)", background: "var(--accent-muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Sparkles size={18} style={{ color: "var(--accent)" }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div className="v2-text-sm v2-font-black">{agent.title}</div>
-              <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".15rem" }}>{agent.desc}</div>
-            </div>
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <span className={`badge ${agent.status === "RUNNING" ? "v2-badge-success" : agent.status === "HALTED" ? "v2-badge-danger" : "v2-badge-muted"}`}>{agent.status}</span>
-              <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".3rem" }}>Confidence: {agent.confidence}</div>
-            </div>
-          </div>
-        </div>
-      ))}
+      <button
+        className={health?.killSwitchActive?"v2-btn v2-btn-sm v2-btn-danger":"v2-btn v2-btn-sm v2-btn-success"}
+        onClick={()=>void toggleKillSwitch()} disabled={workingId==="KILL_SWITCH"} type="button"
+      >
+        <Zap size={13}/> KILL SWITCH: {health?.killSwitchActive?"ACTIVE":"INACTIVE"}
+      </button>
     </div>
-  );
+
+    {error&&<div className="badge v2-badge-danger v2-mb-4">{error}</div>}
+    <div className="metrics-grid kpi-grid-4 v2-mb-4">
+      <KpiCard label="Active Insights" value={health?.activeInsightsCount??(loading?"…":0)} desc="Durable PostgreSQL insight records" icon={<Sparkles size={18}/>} accent="#a855f7"/>
+      <KpiCard label="Pending Approvals" value={health?.pendingApprovalsCount??(loading?"…":0)} desc="Recommendations awaiting review" icon={<Shield size={18}/>} accent="#818cf8"/>
+      <KpiCard label="Approved" value={health?.approvedRecommendationsCount??0} desc="Persisted approval state" icon={<CheckCircle size={18}/>} accent="#4ade80"/>
+      <KpiCard label="Avg Confidence" value={(averageConfidence*100).toFixed(1)+"%"} desc={health?.dataGrounded?"Evidence-grounded":"Unavailable"} icon={<Star size={18}/>} accent="#fbbf24"/>
+    </div>
+
+    {loading?<LoadingRows rows={5}/>:insights.length===0?<Empty icon={<Sparkles size={22}/>} message="No active AI insights are available for this tenant and branch."/>:
+      <div className="v2-space-y-4">{insights.map((insight)=><div key={insight.insightId} className="v2-card"><div className="v2-card-body">
+        <div className="v2-flex v2-items-center v2-justify-between v2-gap-3">
+          <div><div className="v2-text-sm v2-font-black">{insight.title}</div><div className="v2-text-xs v2-text-muted" style={{marginTop:".25rem"}}>{insight.observation}</div></div>
+          <span className="badge v2-badge-accent">{(insight.confidenceScore*100).toFixed(0)}% confidence</span>
+        </div>
+        <div className="v2-grid-2 v2-gap-3" style={{marginTop:".75rem"}}>
+          <div><div className="v2-text-xs v2-font-bold">Interpretation</div><div className="v2-text-xs v2-text-muted" style={{marginTop:".15rem"}}>{insight.interpretation}</div></div>
+          <div><div className="v2-text-xs v2-font-bold">Impact</div><div className="v2-text-xs v2-text-muted" style={{marginTop:".15rem"}}>{insight.impact}</div></div>
+        </div>
+        <div style={{marginTop:".75rem"}}><div className="v2-text-xs v2-font-bold">Evidence</div><div className="v2-flex v2-gap-2" style={{flexWrap:"wrap",marginTop:".35rem"}}>
+          {insight.evidence.map(e=><span key={e.sourceType+"-"+e.sourceId} className="badge v2-badge-muted">{e.label}: {String(e.value??e.sourceId)}</span>)}
+        </div></div>
+        <div className="v2-text-xs v2-text-muted" style={{marginTop:".75rem"}}>Next step: {insight.recommendedNextStep}</div>
+      </div></div>)}</div>
+    }
+
+    {recommendations.length>0&&<div className="v2-card" style={{marginTop:"1rem"}}>
+      <div className="v2-card-header"><div className="v2-card-title">Recommendations</div></div>
+      <div className="v2-card-body">{recommendations.map(rec=><div key={rec.recommendationId} className="v2-flex v2-items-center v2-justify-between v2-gap-3" style={{padding:".65rem 0",borderBottom:"1px solid var(--border-subtle)"}}>
+        <div style={{flex:1}}>
+          <div className="v2-text-sm v2-font-black">{rec.title}</div>
+          <div className="v2-text-xs v2-text-muted" style={{marginTop:".15rem"}}>{rec.summary}</div>
+          <div className="v2-text-xs v2-text-muted" style={{marginTop:".15rem"}}>Risk: {rec.riskLevel} · Policy: {rec.policyStatus} · Status: {rec.approvalStatus}</div>
+        </div>
+        {rec.approvalStatus==="PENDING"&&<button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={()=>void approve(rec.recommendationId)} disabled={workingId===rec.recommendationId}>
+          {workingId===rec.recommendationId?<RefreshCw size={13} className="v2-animate-spin"/>:<Check size={13}/>} Approve
+        </button>}
+      </div>)}</div>
+    </div>}
+  </div>;
 };
 
 // CashDrawerPage, ReceiptsPage, TrashPage, HelpPage are exported from dedicated module files
