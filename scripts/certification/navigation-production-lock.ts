@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
 
 const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-10-03";
@@ -41,10 +42,20 @@ const MARKERS: Array<[string, string, string]> = [
   ["exact-main-production-release-hook", ".github/workflows/production-release-exact-main.yml", "npm run certify:navigation-lock"]
 ];
 
-function gitBlobSha(content: string): string {
-  const bytes = Buffer.from(content, "utf8");
-  const header = Buffer.from(`blob ${bytes.length}\0`, "utf8");
-  return createHash("sha1").update(Buffer.concat([header, bytes])).digest("hex");
+function gitBlobSha(content: string, relativePath: string): string {
+  // Hash the canonical Git-cleaned representation so Windows CRLF checkouts
+  // produce the same blob SHA as GitHub/Linux CI.
+  try {
+    return execFileSync(
+      "git",
+      ["hash-object", "--path=" + relativePath, "--stdin"],
+      { input: Buffer.from(content, "utf8"), encoding: "utf8" },
+    ).trim();
+  } catch {
+    const bytes = Buffer.from(content, "utf8");
+    const header = Buffer.from(`blob ${bytes.length}\0`, "utf8");
+    return createHash("sha1").update(Buffer.concat([header, bytes])).digest("hex");
+  }
 }
 
 function read(relativePath: string): string {
@@ -58,7 +69,7 @@ const checked: Record<string, { expected: string; actual: string; pass: boolean 
 
 for (const [relativePath, expected] of Object.entries(LOCKED_BLOBS)) {
   try {
-    const actual = gitBlobSha(read(relativePath));
+    const actual = gitBlobSha(read(relativePath), relativePath);
     const pass = actual === expected;
     checked[relativePath] = { expected, actual, pass };
     if (!pass) failures.push(`LOCK_DRIFT: ${relativePath} expected ${expected} got ${actual}`);
