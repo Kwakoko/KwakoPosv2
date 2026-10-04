@@ -33,8 +33,8 @@ describe("pending outbox scope validation", () => {
     db.syncOutbox.set("blank-branch", item("blank-branch", "tenant-a", "  "));
 
     expect(db.getPendingOutbox("tenant-a", "branch-a").map((x) => x.id)).toEqual(["valid"]);
-    expect(db.getPendingOutbox("tenant-a").map((x) => x.id)).toEqual(["valid", "other-branch"]);
-    expect(db.getPendingOutbox().map((x) => x.id)).toEqual(["valid", "other-tenant", "other-branch"]);
+    expect(db.getPendingOutbox("tenant-a").map((x) => x.id)).toEqual(["other-branch", "valid"]);
+    expect(db.getPendingOutbox().map((x) => x.id)).toEqual(["other-branch", "other-tenant", "valid"]);
   });
 
   it("rejects incomplete metadata even when the requested scope is omitted", () => {
