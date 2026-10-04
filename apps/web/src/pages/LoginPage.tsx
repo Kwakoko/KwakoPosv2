@@ -42,6 +42,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
   const [setupToken, setSetupToken] = useState("");
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(false);
   const [setupSuccessMessage, setSetupSuccessMessage] = useState<string | null>(null);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -63,7 +65,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
     }
     setBusy(true);
     try {
-      const authUser = await authLogin(trimmedEmail, password, mfaRequired ? mfaCode.trim() : undefined);
+      const authUser = await authLogin(trimmedEmail, password, mfaRequired ? mfaCode.trim() : undefined, rememberMe);
       if (authUser.role === "SUPER_ADMIN") {
         window.history.pushState({}, "", "/super-admin");
         window.dispatchEvent(new PopStateEvent("popstate"));
@@ -92,6 +94,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSessionExpiredNotice(params.get("reason") === "session_expired");
     let alive = true;
     apiFetch<any>("/api/system/version")
       
@@ -201,6 +205,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
           </div>
         )}
 
+        {sessionExpiredNotice && (
+          <div className="v2-card v2-mb-4" role="status" aria-live="polite" style={{ border: "1px solid var(--accent)", background: "color-mix(in srgb, var(--accent) 10%, transparent)", padding: "0.8rem" }}>
+            <div className="v2-text-xs v2-font-bold">Your session expired because of inactivity.</div>
+            <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".2rem" }}>Please sign in again.</div>
+          </div>
+        )}
+
         {error && (
           <div className="v2-card v2-auth-error v2-mb-4" role="alert">
             <div className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-font-bold">
@@ -228,6 +239,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, provision
               </button>
             </div>
           </div>
+
+          <label className="v2-flex v2-items-center v2-gap-2 v2-text-xs v2-text-muted" style={{ cursor: "pointer" }}>
+            <input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
+            <span>Remember this device</span>
+          </label>
 
           {mfaRequired && (
             <div>

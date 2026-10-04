@@ -82,6 +82,7 @@ model Tenant {
   traVfdFiscalizations   TraVfdFiscalization[]
   traVfdOutbox           TraVfdOutbox[]
 
+  devices                Device[]
   @@map("tenants")
 }
 
@@ -187,6 +188,7 @@ model User {
   branch       Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
   role         Role            @relation(fields: [roleId], references: [id])
   sessions     DeviceSession[]
+  devices      Device[]
   cashSessions CashSession[]
 
   @@unique([tenantId, email])
@@ -194,18 +196,63 @@ model User {
   @@map("users")
 }
 
+model Device {
+  id          String    @id @default(uuid())
+  deviceId    String    @unique
+  tenantId    String
+  userId      String
+  name        String?
+  platform    String?
+  browser     String?
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  lastSyncAt  DateTime?
+  revokedAt   DateTime?
+  revokeReason String?
+  status      String    @default("ACTIVE")
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions    DeviceSession[]
+
+  @@index([tenantId, userId])
+  @@index([deviceId])
+  @@map("devices")
+}
+
 model DeviceSession {
-  id               String    @id @default(uuid())
-  tenantId         String
-  userId           String
-  deviceId         String
-  refreshTokenHash String
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                    String    @id @default(uuid())
+  tenantId              String
+  userId                String
+  branchId              String
+  deviceId              String
+  refreshTokenHash      String
+  tokenFamilyId         String
+  expiresAt              DateTime
+  refreshTokenExpiresAt  DateTime
+  lastActivityAt        DateTime  @default(now())
+  lastValidatedAt       DateTime  @default(now())
+  revokedAt             DateTime?
+  revokeReason          String?
+  status                String    @default("ACTIVE")
+  permissionsVersion    Int       @default(1)
+  tenantVersion         Int       @default(1)
+  ipAddress             String?
+  userAgent             String?
+  platform              String?
+  rememberMe            Boolean   @default(false)
+  offlineStartedAt      DateTime?
+  offlineExpiresAt      DateTime?
+  idleTimeoutMs         Int       @default(1800000)
+  createdAt             DateTime  @default(now())
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device                Device?   @relation(fields: [deviceId], references: [deviceId])
 
   @@index([tenantId, userId, deviceId])
+  @@index([tenantId, branchId, status])
+  @@index([tokenFamilyId])
+  @@index([status, expiresAt])
+  @@index([expiresAt])
+  @@index([createdAt])
   @@map("device_sessions")
 }
 

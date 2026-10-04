@@ -14,7 +14,21 @@ import {
   restoreSession,
   switchContext as apiSwitchContext,
   safeUUID,
+  getDeviceId,
+  refreshSession as apiRefreshSession,
+  validateSession as apiValidateSession,
+  heartbeatSession as apiHeartbeatSession,
+  recordSessionEvent as apiRecordSessionEvent,
 } from "../services/apiClient.js";
+import {
+  IdleDetector,
+  HeartbeatService,
+  SessionWarningModal,
+  TimeoutRedirect,
+  sessionSyncService,
+} from "../session/index.js";
+import { captureRegisteredDrafts, restoreSessionDrafts, type SessionDraft } from "../session/sessionDraftStore.js";
+import { saveDurableSessionState, clearDurableSessionState } from "../session/sessionStateStore.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
@@ -84,7 +98,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   error: string | null;
-  login: (email: string, password: string, mfaCode?: string) => Promise<AuthUser>;
+  login: (email: string, password: string, mfaCode?: string, rememberMe?: boolean) => Promise<AuthUser>;
   logout: () => Promise<void>;
   dismissLoading: () => void;
   impersonatedTenant: ImpersonatedTenant | null;
@@ -103,6 +117,95 @@ const DEFAULT_AUTH_CONTEXT: AuthContextType = {
   startImpersonation: async () => {},
   stopImpersonation: async () => {},
 };
+
+export type ClientSessionStatus =
+  | "UNKNOWN"
+  | "AUTHENTICATING"
+  | "AUTHENTICATED_ONLINE"
+  | "AUTHENTICATED_OFFLINE"
+  | "REFRESHING"
+  | "REAUTH_REQUIRED"
+  | "OFFLINE_LOCKED"
+  | "EXPIRED"
+  | "REVOKED"
+  | "LOGGED_OUT";
+
+export interface ClientSessionPolicy {
+  idleTimeoutMs: number;
+  absoluteTimeoutMs: number;
+  warningDurationMs: number;
+  refreshTokenDurationMs: number;
+  rememberMeDurationMs: number;
+  offlineGracePeriodMs: number;
+  heartbeatIntervalMs: number;
+  refreshThresholdMs: number;
+  forceLogoutOnBrowserClose: boolean;
+  allowMultipleDevices: boolean;
+  maxConcurrentSessions: number;
+  forceLogoutOnPasswordChange: boolean;
+  singleDeviceLogin: boolean;
+  trustedDevices: boolean;
+  autoRedirect: boolean;
+  restoreLastPage: boolean;
+}
+
+export interface SessionContextType {
+  status: ClientSessionStatus;
+  policy: ClientSessionPolicy;
+  lastActivityAt: number;
+  expiresAt: number | null;
+  refreshTokenExpiresAt: number | null;
+  offlineExpiresAt: number | null;
+  idleRemainingMs: number;
+  absoluteRemainingMs: number;
+  warningOpen: boolean;
+  isLocked: boolean;
+  restoredDrafts: SessionDraft[];
+  recordActivity: () => void;
+  staySignedIn: () => Promise<void>;
+  logoutNow: () => Promise<void>;
+  restoreDrafts: () => SessionDraft[];
+}
+
+const DEFAULT_SESSION_POLICY: ClientSessionPolicy = {
+  idleTimeoutMs: 30 * 60_000,
+  absoluteTimeoutMs: 8 * 60 * 60_000,
+  warningDurationMs: 2 * 60_000,
+  refreshTokenDurationMs: 14 * 24 * 60 * 60_000,
+  rememberMeDurationMs: 30 * 24 * 60 * 60_000,
+  offlineGracePeriodMs: 24 * 60 * 60_000,
+  heartbeatIntervalMs: 5 * 60_000,
+  refreshThresholdMs: 5 * 60_000,
+  forceLogoutOnBrowserClose: false,
+  allowMultipleDevices: true,
+  maxConcurrentSessions: 5,
+  forceLogoutOnPasswordChange: true,
+  singleDeviceLogin: false,
+  trustedDevices: true,
+  autoRedirect: true,
+  restoreLastPage: true,
+};
+
+const DEFAULT_SESSION_CONTEXT: SessionContextType = {
+  status: "UNKNOWN",
+  policy: DEFAULT_SESSION_POLICY,
+  lastActivityAt: 0,
+  expiresAt: null,
+  refreshTokenExpiresAt: null,
+  offlineExpiresAt: null,
+  idleRemainingMs: 0,
+  absoluteRemainingMs: 0,
+  warningOpen: false,
+  isLocked: false,
+  restoredDrafts: [],
+  recordActivity: () => {},
+  staySignedIn: async () => {},
+  logoutNow: async () => {},
+  restoreDrafts: () => [],
+};
+
+const SessionContext = createContext<SessionContextType>(DEFAULT_SESSION_CONTEXT);
+export const useSession = (): SessionContextType => useContext(SessionContext);
 
 const AuthContext = createContext<AuthContextType | null>(null);
 export const useAuth = (): AuthContextType => {
@@ -384,6 +487,26 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light" ? "light" : "dark",
   );
   const [rawOnline, setRawOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [sessionStatus, setSessionStatus] = useState<ClientSessionStatus>("UNKNOWN");
+  const [sessionPolicy, setSessionPolicy] = useState<ClientSessionPolicy>(DEFAULT_SESSION_POLICY);
+  const [sessionLastActivityAt, setSessionLastActivityAt] = useState<number>(() => Date.now());
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(() => {
+    const raw = getStoredSession()?.session?.expiresAt;
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [sessionRefreshTokenExpiresAt, setSessionRefreshTokenExpiresAt] = useState<number | null>(() => {
+    const raw = getStoredSession()?.session?.refreshTokenExpiresAt;
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [offlineExpiresAt, setOfflineExpiresAt] = useState<number | null>(null);
+  const [sessionWarningOpen, setSessionWarningOpen] = useState(false);
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const [sessionRedirectPath, setSessionRedirectPath] = useState<string | null>(null);
+  const [restoredDrafts, setRestoredDrafts] = useState<SessionDraft[]>([]);
+  const sessionTerminationRef = useRef(false);
+  const sessionLastActivityRef = useRef(sessionLastActivityAt);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState(false);
   const isOnline = isSimulatedOffline ? false : rawOnline;
   const [isSyncing, setIsSyncing] = useState(false);
@@ -516,22 +639,47 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     };
   }, [db]);
 
-  const login = async (email: string, password: string, mfaCode?: string): Promise<AuthUser> => {
+  const login = async (email: string, password: string, mfaCode?: string, rememberMe = false): Promise<AuthUser> => {
     setAuthError(null);
-    const loggedIn = await apiLogin(email, password, mfaCode);
+    sessionTerminationRef.current = false;
+    const loggedIn = await apiLogin(email, password, mfaCode, rememberMe);
     const authUser: AuthUser = {
-      id: loggedIn.id,
-      name: loggedIn.name,
-      email: loggedIn.email,
-      role: loggedIn.role,
-      tenantId: loggedIn.tenantId,
-      branchId: loggedIn.branchId,
-      tenantName: loggedIn.tenantName,
-      tenantSlug: loggedIn.tenantSlug,
-      branchName: loggedIn.branchName,
-      branchCode: loggedIn.branchCode,
+      id: loggedIn.id, name: loggedIn.name, email: loggedIn.email, role: loggedIn.role,
+      tenantId: loggedIn.tenantId, branchId: loggedIn.branchId, tenantName: loggedIn.tenantName,
+      tenantSlug: loggedIn.tenantSlug, branchName: loggedIn.branchName, branchCode: loggedIn.branchCode,
     };
+    const stored = getStoredSession();
+    const expiry = stored?.session?.expiresAt ? Date.parse(stored.session.expiresAt) : NaN;
+    const refreshExpiry = stored?.session?.refreshTokenExpiresAt ? Date.parse(stored.session.refreshTokenExpiresAt) : NaN;
+    setSessionExpiresAt(Number.isFinite(expiry) ? expiry : Date.now() + DEFAULT_SESSION_POLICY.absoluteTimeoutMs);
+    setSessionRefreshTokenExpiresAt(Number.isFinite(refreshExpiry) ? refreshExpiry : null);
+    const now = Date.now();
+    setSessionLastActivityAt(now);
+    sessionLastActivityRef.current = now;
+    setOfflineExpiresAt(null);
+    setSessionStatus("AUTHENTICATED_ONLINE");
+    setSessionWarningOpen(false);
+    void saveDurableSessionState({
+      sessionId: stored?.sessionId || "",
+      tenantId: authUser.tenantId,
+      branchId: authUser.branchId,
+      userId: authUser.id,
+      deviceId: getDeviceId(),
+      status: "AUTHENTICATED_ONLINE",
+      authenticatedAt: now,
+      lastOnlineAt: now,
+      lastActivityAt: now,
+      serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+      lastValidatedAt: now,
+      localLogoutPending: false,
+    });
+    void apiRecordSessionEvent("SESSION_RESTORED", { source: "login" });
+    setSessionRedirectPath(null);
+    const drafts = restoreSessionDrafts(authUser.tenantId, authUser.id);
+    setRestoredDrafts(drafts);
+    window.dispatchEvent(new CustomEvent("kwakopos:session-restored", { detail: { drafts } }));
     setUser(authUser);
+    sessionSyncService.broadcast("SESSION_LOGIN", { sessionId: stored?.sessionId || null });
     try {
       await db.ready;
       await db.refreshStoresFromNative();
@@ -542,27 +690,202 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     return authUser;
   };
 
-  const logout = async () => {
-    try {
-      // 1. Guarantee all microtask persistence writes are committed to IndexedDB before session teardown
-      await db.flushPersistence().catch((err) => console.warn("Flush persistence on logout:", err));
-      // 2. Clear remote session
-      await apiLogout();
-    } catch (err) {
-      console.warn("apiLogout error:", err);
-    } finally {
-      setUser(null);
-      setImpersonatedTenant(null);
-      try {
-        sessionStorage.removeItem("kwakopos:v2:impersonation");
-        localStorage.removeItem("kwakopos:v2:active-module");
-        localStorage.removeItem("kwakopos:v2:active-tab");
-      } catch { /* ignore */ }
-      setActiveModuleState("Retail");
-      setActiveTabState("Dashboard");
-      setAuthError(null);
+  const terminateSession = useCallback(async (
+    reason: "SESSION_TIMEOUT" | "USER_LOGOUT" | "SESSION_REVOKED" | "SESSION_LOCKED",
+    broadcast = true,
+    redirectOnExpiry = reason === "SESSION_TIMEOUT",
+  ) => {
+    if (sessionTerminationRef.current) return;
+    sessionTerminationRef.current = true;
+    const currentUser = user;
+    const currentPath = typeof window !== "undefined"
+      ? window.location.pathname + window.location.search + window.location.hash
+      : "/";
+    if (currentUser) {
+      captureRegisteredDrafts(currentUser.tenantId, currentUser.id);
+      await db.flushPersistence().catch(() => {});
     }
-  };
+    if (broadcast) {
+      const event = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : reason === "SESSION_REVOKED" ? "SESSION_REVOKED" : reason === "SESSION_LOCKED" ? "SESSION_LOCKED" : "SESSION_LOGOUT";
+      sessionSyncService.broadcast(event, { sessionId: getStoredSession()?.sessionId || null });
+    }
+    if (reason === "USER_LOGOUT" || reason === "SESSION_TIMEOUT") {
+      await apiLogout(reason).catch(() => {});
+    }
+    setUser(null);
+    setSessionWarningOpen(false);
+    void clearDurableSessionState();
+    setSessionStatus(reason === "SESSION_TIMEOUT" ? "EXPIRED" : reason === "SESSION_REVOKED" ? "REVOKED" : reason === "SESSION_LOCKED" ? "OFFLINE_LOCKED" : "LOGGED_OUT");
+    if (redirectOnExpiry && currentPath !== "/login" && currentPath !== "/auth/login") setSessionRedirectPath(currentPath);
+  }, [db, user]);
+
+  const logout = useCallback(async () => {
+    await terminateSession("USER_LOGOUT", true, false);
+    setImpersonatedTenant(null);
+    try {
+      sessionStorage.removeItem("kwakopos:v2:impersonation");
+      localStorage.removeItem("kwakopos:v2:active-module");
+      localStorage.removeItem("kwakopos:v2:active-tab");
+    } catch { /* ignore */ }
+    setActiveModuleState("Retail");
+    setActiveTabState("Dashboard");
+    setAuthError(null);
+    sessionTerminationRef.current = false;
+  }, [terminateSession]);
+
+  const recordSessionActivity = useCallback(() => {
+    if (!user || ["OFFLINE_LOCKED", "LOGGED_OUT", "EXPIRED"].includes(sessionStatus)) return;
+    const now = Date.now();
+    sessionLastActivityRef.current = now;
+    setSessionLastActivityAt(now);
+    if (isOnline) {
+      setSessionStatus("AUTHENTICATED_ONLINE");
+      setSessionWarningOpen(false);
+    }
+  }, [user, sessionStatus, isOnline]);
+
+  const staySignedIn = useCallback(async () => {
+    if (!user || sessionStatus === "OFFLINE_LOCKED") return;
+    setSessionStatus("REFRESHING");
+    try {
+      const refreshed = await apiRefreshSession();
+      if (!refreshed) throw new Error("SESSION_REFRESH_REJECTED");
+      const heartbeat = await apiHeartbeatSession();
+      const data = heartbeat?.data || heartbeat;
+      const activity = Date.parse(String(data?.lastActivityAt || "")) || Date.now();
+      const expiry = Date.parse(String(data?.expiresAt || ""));
+      const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
+      sessionLastActivityRef.current = activity;
+      setSessionLastActivityAt(activity);
+      if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
+      if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
+      setSessionStatus(isOnline ? "AUTHENTICATED_ONLINE" : "AUTHENTICATED_OFFLINE");
+      setSessionWarningOpen(false);
+    } catch (error) {
+      await terminateSession("SESSION_TIMEOUT", true, true);
+      throw error;
+    }
+  }, [user, sessionStatus, isOnline, terminateSession]);
+
+  const restoreDrafts = useCallback(() => {
+    if (!user) return [];
+    const drafts = restoreSessionDrafts(user.tenantId, user.id);
+    setRestoredDrafts(drafts);
+    return drafts;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!isOnline) {
+      const absolute = sessionExpiresAt || (Date.now() + sessionPolicy.absoluteTimeoutMs);
+      const offlineUntil = Math.min(absolute, Date.now() + sessionPolicy.offlineGracePeriodMs);
+      setOfflineExpiresAt(offlineUntil);
+      setSessionStatus("AUTHENTICATED_OFFLINE");
+      return;
+    }
+
+    let alive = true;
+    void apiValidateSession()
+      .then((result) => {
+        if (!alive) return;
+        const data = result?.data || result;
+        const expiry = Date.parse(String(data?.expiresAt || ""));
+        const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
+        const idleMinutes = Number(data?.policy?.idleTimeoutMinutes);
+        const warningSeconds = Number(data?.policy?.warningDurationSeconds);
+        if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
+        if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
+        setSessionPolicy((current) => ({
+          ...current,
+          idleTimeoutMs: Number.isFinite(idleMinutes) ? idleMinutes * 60_000 : current.idleTimeoutMs,
+          warningDurationMs: Number.isFinite(warningSeconds) ? warningSeconds * 1000 : current.warningDurationMs,
+        }));
+        const serverActivity = Date.parse(String(data?.lastActivityAt || ""));
+        if (Number.isFinite(serverActivity)) {
+          setSessionLastActivityAt(serverActivity);
+          sessionLastActivityRef.current = serverActivity;
+        }
+        setSessionStatus("AUTHENTICATED_ONLINE");
+        setOfflineExpiresAt(null);
+        void saveDurableSessionState({
+          sessionId: String(getStoredSession()?.sessionId || ""),
+          tenantId: user.tenantId,
+          branchId: user.branchId,
+          userId: user.id,
+          deviceId: getDeviceId(),
+          status: "AUTHENTICATED_ONLINE",
+          authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
+          lastOnlineAt: Date.now(),
+          lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
+          serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+          lastValidatedAt: Date.now(),
+          localLogoutPending: false,
+        });
+        void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
+      })
+      .catch(async () => {
+        if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
+      });
+    return () => { alive = false; };
+  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
+
+  useEffect(() => {
+    if (!user) return;
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      setSessionNow(now);
+      if (!isOnline) {
+        const until = offlineExpiresAt || Math.min(
+          sessionExpiresAt || (now + sessionPolicy.absoluteTimeoutMs),
+          now + sessionPolicy.offlineGracePeriodMs,
+        );
+        if (now >= until) {
+          setSessionStatus("OFFLINE_LOCKED");
+          setSessionWarningOpen(false);
+        }
+        return;
+      }
+      const absoluteRemaining = sessionExpiresAt == null ? Number.POSITIVE_INFINITY : sessionExpiresAt - now;
+      const idleRemaining = sessionLastActivityAt + sessionPolicy.idleTimeoutMs - now;
+      const remaining = Math.min(absoluteRemaining, idleRemaining);
+      if (absoluteRemaining <= 0 || idleRemaining <= 0) {
+        void terminateSession("SESSION_TIMEOUT", true, true);
+        return;
+      }
+      if (remaining <= sessionPolicy.warningDurationMs) {
+        if (!sessionWarningOpen) {
+          sessionSyncService.broadcast("SESSION_WARNING", { sessionId: getStoredSession()?.sessionId || null, remainingMs: remaining });
+          void apiRecordSessionEvent("SESSION_WARNING_SHOWN", { remainingMs: remaining });
+        }
+        setSessionWarningOpen(true);
+      } else if (sessionWarningOpen) {
+        setSessionWarningOpen(false);
+      }
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [user, isOnline, offlineExpiresAt, sessionExpiresAt, sessionLastActivityAt, sessionPolicy, sessionWarningOpen, terminateSession]);
+
+  useEffect(() => sessionSyncService.subscribe((event) => {
+    if (!user) return;
+    const currentId = String(getStoredSession()?.sessionId || "");
+    const eventId = String(event.payload?.sessionId || "");
+    if (event.type === "SESSION_WARNING") {
+      if (!eventId || eventId === currentId) setSessionWarningOpen(true);
+      return;
+    }
+    if (!["SESSION_TIMEOUT", "SESSION_REVOKED", "SESSION_LOCKED", "SESSION_LOGOUT"].includes(event.type)) return;
+    if (eventId && eventId !== currentId) return;
+    void terminateSession(
+      event.type === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" :
+      event.type === "SESSION_REVOKED" ? "SESSION_REVOKED" :
+      event.type === "SESSION_LOCKED" ? "SESSION_LOCKED" : "USER_LOGOUT",
+      false,
+      event.type === "SESSION_TIMEOUT",
+    );
+  }), [user, terminateSession]);
+
+  const sessionIdleRemainingMs = Math.max(0, sessionLastActivityAt + sessionPolicy.idleTimeoutMs - sessionNow);
+  const sessionAbsoluteRemainingMs = Math.max(0, (sessionExpiresAt || sessionNow) - sessionNow);
 
   // These claims are UX hints only. All protected operations remain server-authorized.
   const claims = useMemo(() => decodeClaims(getAccessToken()), [user]);
@@ -1315,7 +1638,52 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
               <SyncContext.Provider value={syncValue}>
                 <ThemeContext.Provider value={themeValue}>
                   <I18nProvider userLocale={(user as any)?.locale} tenantLocale={null}>
-                    {children}
+                    <SessionContext.Provider value={{
+                      status: sessionStatus,
+                      policy: sessionPolicy,
+                      lastActivityAt: sessionLastActivityAt,
+                      expiresAt: sessionExpiresAt,
+                      refreshTokenExpiresAt: sessionRefreshTokenExpiresAt,
+                      offlineExpiresAt,
+                      idleRemainingMs: sessionIdleRemainingMs,
+                      absoluteRemainingMs: sessionAbsoluteRemainingMs,
+                      warningOpen: sessionWarningOpen,
+                      isLocked: sessionStatus === "OFFLINE_LOCKED",
+                      restoredDrafts,
+                      recordActivity: recordSessionActivity,
+                      staySignedIn,
+                      logoutNow: logout,
+                      restoreDrafts,
+                    }}>
+                      <IdleDetector enabled={Boolean(user)} onActivity={recordSessionActivity} />
+                      <HeartbeatService
+                        enabled={Boolean(user && isOnline && sessionStatus === "AUTHENTICATED_ONLINE")}
+                        intervalMs={sessionPolicy.heartbeatIntervalMs}
+                        lastActivityAt={sessionLastActivityAt}
+                        onFailure={(error) => {
+                          if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+                          const message = error instanceof Error ? error.message : String(error);
+                          if (/expired|authentication|unauthorized|session/i.test(message)) void terminateSession("SESSION_TIMEOUT", true, true);
+                        }}
+                      />
+                      <SessionWarningModal
+                        open={sessionWarningOpen && Boolean(user) && isOnline}
+                        remainingMs={Math.min(sessionIdleRemainingMs, sessionAbsoluteRemainingMs)}
+                        onStaySignedIn={() => void staySignedIn()}
+                        onLogout={() => void logout()}
+                      />
+                      <TimeoutRedirect active={Boolean(sessionRedirectPath)} redirectPath={sessionRedirectPath} />
+                      {sessionStatus === "OFFLINE_LOCKED" && (
+                        <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 9998, background: "rgba(15,23,42,.96)", color: "#fff", display: "grid", placeItems: "center", padding: "2rem", textAlign: "center" }}>
+                          <div style={{ maxWidth: 560 }}>
+                            <h2 style={{ marginTop: 0 }}>Session Locked — Connection Required</h2>
+                            <p>Your offline authorization period has ended. Your business data and pending synchronization records are preserved.</p>
+                            <p>Reconnect to validate the session and continue.</p>
+                          </div>
+                        </div>
+                      )}
+                      {children}
+                    </SessionContext.Provider>
                   </I18nProvider>
                 </ThemeContext.Provider>
               </SyncContext.Provider>

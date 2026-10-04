@@ -13,7 +13,17 @@ export interface LoginResponseUser {
 
 export interface LoginResponse {
   success: boolean;
-  data?: { accessToken: string; sessionId: string; user: LoginResponseUser };
+  data?: {
+    accessToken: string;
+    sessionId: string;
+    user: LoginResponseUser;
+    session?: {
+      status?: string;
+      expiresAt?: string;
+      refreshTokenExpiresAt?: string;
+      policy?: Record<string, number | boolean>;
+    };
+  };
   error?: { code?: string; message?: string };
 }
 
@@ -44,6 +54,12 @@ export interface StoredSession {
   sessionId: string;
   accessToken?: string;
   user: LoginResponseUser;
+  session?: {
+    status?: string;
+    expiresAt?: string;
+    refreshTokenExpiresAt?: string;
+    policy?: Record<string, number | boolean>;
+  };
 }
 
 interface ApiErrorPayload {
@@ -79,6 +95,7 @@ export function getStoredSession(): StoredSession | null {
     return {
       sessionId: parsed.sessionId,
       user: parsed.user as LoginResponseUser,
+      session: parsed.session,
     };
   } catch {
     try {
@@ -96,13 +113,22 @@ export function setStoredSession(session: StoredSession | null): void {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
   } else {
-    // Persist only the durable session identity. Never persist the bearer access token.
+    // Persist only non-secret session metadata. Force-browser-close policy and
+    // non-remembered sessions stay in sessionStorage; remembered sessions may use localStorage.
     const serialized = JSON.stringify({
       sessionId: session.sessionId,
       user: session.user,
+      session: session.session,
     });
-    try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
-    try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+    const forceBrowserClose = session.session?.policy?.forceLogoutOnBrowserClose === true;
+    const rememberMe = session.session?.policy?.rememberMe === true;
+    if (!forceBrowserClose && rememberMe) {
+      try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+      try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    } else {
+      try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
+      try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    }
   }
 }
 
@@ -202,10 +228,10 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-export async function login(email: string, password: string, mfaCode?: string): Promise<LoginResponseUser> {
+export async function login(email: string, password: string, mfaCode?: string, rememberMe = false): Promise<LoginResponseUser> {
   const result = await requestJson<LoginResponse>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password, deviceId: getDeviceId(), mfaCode }),
+    body: JSON.stringify({ email, password, deviceId: getDeviceId(), mfaCode, rememberMe }),
   }, false);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Authentication failed");
   accessToken = result.data.accessToken;
@@ -213,8 +239,40 @@ export async function login(email: string, password: string, mfaCode?: string): 
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
     user: result.data.user,
+    session: result.data.session,
   });
   return result.data.user;
+}
+
+export async function refreshSession(): Promise<boolean> {
+  const stored = getStoredSession();
+  if (!stored?.sessionId) return false;
+  const result = await requestJson<{ success: boolean; data?: { accessToken: string; sessionId?: string } }>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ sessionId: stored.sessionId }),
+  }, false);
+  if (!result.success || !result.data?.accessToken) return false;
+  accessToken = result.data.accessToken;
+  return true;
+}
+
+export async function validateSession(): Promise<any> {
+  return requestJson<any>("/auth/session/validate", { method: "GET" }, false);
+}
+
+export async function recordSessionEvent(event: string, metadata?: Record<string, unknown>): Promise<void> {
+  try {
+    await requestJson("/auth/session/event", {
+      method: "POST",
+      body: JSON.stringify({ event, metadata }),
+    }, false);
+  } catch {
+    // Observability must not break the active session.
+  }
+}
+
+export async function heartbeatSession(): Promise<any> {
+  return requestJson<any>("/auth/session/heartbeat", { method: "POST" }, false);
 }
 
 export interface SuperAdminSetupDetails {
@@ -268,15 +326,16 @@ export async function restoreSession(): Promise<LoginResponseUser | null> {
     return getStoredSession()?.user || stored.user;
   }
 
-  // Preserve stored user so offline POS sessions do not get logged out on page refresh
-  return stored.user;
+  // Only retain the durable identity when the browser is actually offline.
+  if (typeof navigator !== "undefined" && !navigator.onLine) return stored.user;
+  return null;
 }
 
-export async function logout(): Promise<void> {
+export async function logout(reason = "USER_LOGOUT"): Promise<void> {
   const stored = getStoredSession();
   try {
     if (stored?.sessionId) {
-      await requestJson("/auth/logout", { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId }) }, false);
+      await requestJson("/auth/logout", { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId, reason }) }, false);
     }
   } catch (err) {
     console.warn("apiLogout error:", err);
@@ -333,7 +392,7 @@ export function safeUUID(): string {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function getDeviceId(): string {
+export function getDeviceId(): string {
   if (typeof window === "undefined") return "server-rendered-client";
   const key = "kwakopos:v2:device-id";
   try {
