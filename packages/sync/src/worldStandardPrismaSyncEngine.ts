@@ -195,7 +195,9 @@ export class WorldStandardPrismaSyncEngine {
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
         case "Sale": return await db.sale.findUnique({ where: { id: op.entityId }, include: { lines: true, payments: true } });
+        case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
+        case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         default: return op.payload;
       }
     } catch {
@@ -611,9 +613,148 @@ const now = new Date();
       return;
     }
 
+    if (op.entityType === "Receipt" && op.operationType === "CREATE") {
+      const sale = await tx.sale.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          OR: [{ id: (op.payload as any).transactionId }, { saleNumber: (op.payload as any).transactionId }],
+        },
+        include: { lines: true, payments: true },
+      });
+      if (!sale) throw new Error("RECEIPT_AUTHORITATIVE_SALE_NOT_FOUND");
+      const existingByTransaction = await tx.receipt.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, transactionId: sale.id },
+        include: { items: true },
+      });
+      if (existingByTransaction) return;
+
+      const now = new Date();
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const sequenceKey = `receipt:${ctx.tenantId}:${ctx.branchId}:${dayStart.toISOString().slice(0, 10)}`;
+      await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, sequenceKey);
+      const seqRows = await tx.$queryRawUnsafe(
+        `SELECT COALESCE(MAX((substring("receiptNumber" from '([0-9]+)$'))::bigint), 0) + 1 AS seq
+           FROM receipts
+          WHERE "tenantId" = $1 AND "branchId" = $2
+            AND "createdAt" >= $3 AND "createdAt" < $4`,
+        ctx.tenantId, ctx.branchId, dayStart, dayEnd,
+      ) as Array<{ seq: bigint | number | string }>;
+      const receiptNumber = ReceiptNumberGenerator.generate({
+        tenantPrefix: ctx.tenantId.slice(0, 3),
+        branchPrefix: ctx.branchId.slice(0, 3),
+        sequenceType: "DAILY",
+        sequenceNumber: Number(seqRows[0]?.seq ?? 1),
+        date: now,
+      });
+      const grandTotal = Number(sale.grandTotal);
+      const signatureTimestamp = now.toISOString();
+      const digitalSignature = ReceiptEngine.calculateDigitalSignature(receiptNumber, sale.id, grandTotal, signatureTimestamp);
+      const paidAmount = sale.payments.filter((p: any) => p.status === "COMPLETED").reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const changeAmount = Math.max(0, paidAmount - grandTotal);
+      await tx.receipt.create({
+        data: {
+          id: op.entityId || randomUUID(),
+          receiptNumber,
+          transactionId: sale.id,
+          transactionType: "POS_SALE",
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          cashierId: sale.soldById || ctx.userId,
+          cashierName: null,
+          customerId: sale.customerId,
+          subtotal: Number(sale.subtotal),
+          discountTotal: Number(sale.discountTotal),
+          taxTotal: Number(sale.taxTotal),
+          grandTotal,
+          paidAmount,
+          changeAmount,
+          paymentMethod: sale.payments[0]?.paymentMethod || "CASH",
+          currency: (op.payload as any).currency || "TZS",
+          exchangeRate: 1,
+          status: "COMPLETED",
+          deviceId: req.deviceId,
+          createdAt: now,
+          syncStatus: "SYNCED",
+          digitalSignature,
+          qrCodePayload: ReceiptEngine.generateQrCodePayload(
+            sale.id, receiptNumber, sale.id,
+            process.env.RECEIPT_VERIFICATION_URL || "https://pos.kwako.app/verify-receipt",
+            digitalSignature,
+          ),
+          barcodePayload: ReceiptEngine.generateBarcodePayload(receiptNumber),
+          items: {
+            create: sale.lines.map((line: any) => ({
+              id: randomUUID(),
+              productId: line.productId,
+              variantId: line.variantId,
+              sku: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.sku || line.variantId,
+              name: (op.payload as any).items?.find((x: any) => x.variantId === line.variantId)?.name || line.variantId,
+              qty: Number(line.quantity),
+              unitPrice: Number(line.unitPrice),
+              discount: Number(line.discountAmount),
+              taxRate: 0,
+              taxAmount: Number(line.taxAmount),
+              lineTotal: Number(line.lineTotal),
+            })),
+          },
+          auditLogs: {
+            create: {
+              action: "CREATED_FROM_AUTHORITATIVE_SALE_SYNC",
+              actorId: ctx.userId,
+              deviceId: req.deviceId,
+              branchId: ctx.branchId,
+              details: JSON.stringify({ saleId: sale.id, operationId: op.operationId }),
+            },
+          },
+        },
+      });
+      return;
+    }
+
+    if (op.entityType === "PurchaseOrder" && op.operationType === "CREATE") {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const existing = await tx.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      if (supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_ACTIVE");
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (!items.length) throw new Error("PURCHASE_ORDER_ITEMS_REQUIRED");
+      const variants = await tx.productVariant.findMany({ where: { id: { in: items.map((i: any) => i.variantId) }, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (variants.length !== items.length) throw new Error("PURCHASE_ORDER_VARIANT_BOUNDARY_VIOLATION");
+      const totalAmount = items.reduce((sum: number, i: any) => sum + Number(i.quantityOrdered) * Number(i.unitCost), 0);
+      const orderNumber = payload.orderNumber || `PUR-MAIN-${Date.now()}`;
+      await tx.purchaseOrder.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, orderNumber,
+        supplierId: payload.supplierId, status: payload.status || "DRAFT", totalAmount,
+        notes: payload.notes ?? null, createdById: ctx.userId, approvedById: payload.status === "APPROVED" ? ctx.userId : null,
+        items: { create: items.map((i: any) => ({ id: i.id || randomUUID(), variantId: i.variantId, quantityOrdered: i.quantityOrdered, quantityReceived: i.quantityReceived || 0, unitCost: i.unitCost, totalCost: Number(i.quantityOrdered) * Number(i.unitCost) })) },
+      } });
+      return;
+    }
+
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      return;
+    }
+
+    if (op.entityType === "Payment" && op.operationType === "CREATE") {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
+      if (existing) return;
+      const amount = Number(payload.amount);
+      if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+      await tx.payment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`, purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount, paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
       return;
     }
 

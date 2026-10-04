@@ -21,6 +21,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
+import { apiFetch, safeUUID } from "../services/apiClient.js";
 
 type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
 
@@ -178,88 +179,64 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     return productionCleanupService.isProductionLocked();
   }, []);
 
-  // Load Authoritative State from Local DB & Auto-Purge Fabricated Data (CLN-01, CLN-03, CLN-04)
+  // PostgreSQL is the purchasing authority. IndexedDB is used only as an offline cache/pending-operation view.
   const loadProcurement = useCallback(async () => {
     try {
       await db.ready;
-      const ctx = currentTenantId ? { tenantId: currentTenantId } : undefined;
+      const [supplierRes, orderRes, receiptRes] = await Promise.all([
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/suppliers"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts"),
+      ]);
 
-      // 1. Catalog Products
       const prods = Array.from(db.products.values())
         .filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive")
-        .map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          sku: p.sku,
-          buyingPrice: Number(p.buyingPrice || p.costPrice || 0),
-        }));
+        .map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) }));
       setCatalogProducts(prods);
 
-      // 2. Suppliers - Auto-prune fabricated records from local DB
-      const savedSuppliers = db.getConfigurationLocal("procurement_suppliers", ctx);
-      if (Array.isArray(savedSuppliers)) {
-        const cleanSups = savedSuppliers.filter((s: any) => !isDemoSupplier(s));
-        if (cleanSups.length !== savedSuppliers.length) {
-          db.saveConfigurationLocal("procurement_suppliers", cleanSups, ctx);
-        }
-        setSuppliers(cleanSups);
-      } else {
-        const localSups = Array.from(db.suppliers.values()).filter((s: any) => !isDemoSupplier(s));
-        setSuppliers(localSups);
-      }
-
-      // Sanitize db.suppliers memory store
-      if (db.suppliers) {
-        for (const [id, sup] of Array.from(db.suppliers.entries())) {
-          if (isDemoSupplier(sup)) {
-            db.suppliers.delete(id);
-            (db as any).persist?.("suppliers", id, null);
-          }
-        }
-      }
-
-      // 3. Purchase Orders - Auto-prune fabricated POs from local DB
-      const savedOrders = db.getConfigurationLocal("procurement_purchase_orders", ctx);
-      if (Array.isArray(savedOrders)) {
-        const cleanOrders = savedOrders.filter((o: any) => !isDemoOrder(o));
-        if (cleanOrders.length !== savedOrders.length) {
-          db.saveConfigurationLocal("procurement_purchase_orders", cleanOrders, ctx);
-        }
-        setOrders(cleanOrders);
-      } else {
-        setOrders([]);
-      }
-
-      // 4. Goods Receipt Notes - Auto-prune fabricated GRNs from local DB
-      const savedGrns = db.getConfigurationLocal("procurement_grns", ctx);
-      if (Array.isArray(savedGrns)) {
-        const cleanGrns = savedGrns.filter((g: any) => !isDemoGrn(g));
-        if (cleanGrns.length !== savedGrns.length) {
-          db.saveConfigurationLocal("procurement_grns", cleanGrns, ctx);
-        }
-        setGrns(cleanGrns);
-      } else {
-        setGrns([]);
-      }
+      setSuppliers((Array.isArray(supplierRes.data) ? supplierRes.data : []).map((s: any) => ({ ...s, balance: Number(s.outstandingBalance || 0), creditLimit: Number(s.creditLimit || 0) })));
+      const supplierById = new Map((supplierRes.data || []).map((s: any) => [s.id, s]));
+      setOrders((orderRes.data || []).map((o: any) => ({
+        id: o.id, poNumber: o.orderNumber, supplierId: o.supplierId,
+        supplier: supplierById.get(o.supplierId)?.name || o.supplierId,
+        supplierName: supplierById.get(o.supplierId)?.name || o.supplierId,
+        itemsCount: Array.isArray(o.items) ? o.items.length : 0,
+        items: (o.items || []).map((i: any) => ({
+          productId: i.variantId, sku: "", name: "", qtyOrdered: Number(i.quantityOrdered),
+          qtyReceived: Number(i.quantityReceived || 0), unitCost: Number(i.unitCost), totalCost: Number(i.totalCost),
+          variantId: i.variantId,
+        })),
+        subtotal: Number(o.totalAmount), vatAmount: 0, total: Number(o.totalAmount),
+        status: o.status === "RECEIVED" ? "Completed" : o.status === "CANCELLED" ? "Cancelled" : o.status === "DRAFT" ? "Draft" : "Approved",
+        expected: o.orderedAt, date: o.orderedAt, notes: o.notes || undefined,
+      })));
+      setGrns((receiptRes.data || []).map((r: any) => ({
+        id: r.id, poId: r.purchaseOrderId || "",
+        supplier: supplierById.get(r.supplierId)?.name || r.supplierId,
+        warehouse: currentBranchName || "Main Store", receivedAt: r.receivedAt,
+        batchNumber: r.items?.[0]?.batchNumber || undefined, expiryDate: r.items?.[0]?.expiryDate || undefined,
+        itemsCount: Array.isArray(r.items) ? r.items.length : 0,
+        totalValue: (r.items || []).reduce((s: number, i: any) => s + Number(i.totalCost || 0), 0), status: "VERIFIED",
+      })));
     } catch (e) {
-      console.warn("[Purchasing] Hydration notice:", e);
-      setSuppliers([]);
-      setOrders([]);
+      // Offline: never resurrect configuration snapshots. Show only authoritative local entities and pending outbox mutations.
+      const tenantId = currentTenantId;
+      setSuppliers(Array.from(db.suppliers.values()).filter((s: any) => s.tenantId === tenantId && s.branchId === currentBranchId));
+      const pending = Array.from((db as any).syncOutbox?.values?.() || []).filter((o: any) => o.tenantId === tenantId && o.branchId === currentBranchId && o.status === "PENDING");
+      setOrders(pending.filter((o: any) => o.entityType === "PurchaseOrder").map((o: any) => ({
+        id: o.entityId, poNumber: o.payload.orderNumber || o.entityId, supplierId: o.payload.supplierId,
+        supplier: o.payload.supplierId, supplierName: o.payload.supplierId, itemsCount: o.payload.items?.length || 0,
+        items: (o.payload.items || []).map((i: any) => ({ productId: i.variantId, sku: "", name: "", qtyOrdered: Number(i.quantityOrdered), qtyReceived: 0, unitCost: Number(i.unitCost), totalCost: Number(i.quantityOrdered) * Number(i.unitCost), variantId: i.variantId })),
+        subtotal: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), vatAmount: 0,
+        total: (o.payload.items || []).reduce((s: number, i: any) => s + Number(i.quantityOrdered) * Number(i.unitCost), 0), status: "Draft", expected: new Date().toISOString(), date: new Date().toISOString(),
+      })));
       setGrns([]);
+      setCatalogProducts(Array.from(db.products.values()).filter((p: any) => !p.deletedAt && p.status !== "Inactive").map((p: any) => ({ id: p.id, name: p.name, sku: p.sku, buyingPrice: Number(p.buyingPrice || p.costPrice || 0) })));
     }
-  }, [db, currentTenantId]);
-
-  useEffect(() => {
-    void loadProcurement();
-    const handleEvent = () => { void loadProcurement(); };
-    window.addEventListener(DATA_CHANGED_EVENT, handleEvent);
-    return () => window.removeEventListener(DATA_CHANGED_EVENT, handleEvent);
-  }, [loadProcurement]);
+  }, [db, currentTenantId, currentBranchId, currentBranchName]);
 
   // Check if demo supplier or procurement records are present
-  const hasDemoData = useMemo(() => {
-    return suppliers.some(isDemoSupplier) || orders.some(isDemoOrder) || grns.some(isDemoGrn);
-  }, [suppliers, orders, grns]);
+  const hasDemoData = false; // Production Purchasing never treats valid PostgreSQL records as demo data.
 
   // Clean Fabricated Procurement Data (Pillars CLN-01, CLN-03, CLN-04)
 
@@ -302,72 +279,50 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const creditUtil = totalCreditLimit > 0 ? Math.round((totalOutstanding / totalCreditLimit) * 100) : 0;
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
-  const handleAddSupplier = (e: React.FormEvent) => {
+  const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supplierForm.name || !supplierForm.phone) return;
-
-    const newSup = {
-      id: `SUP-${String(suppliers.length + 1).padStart(3, "0")}`,
-      name: supplierForm.name.trim(),
-      category: supplierForm.category,
-      tin: supplierForm.tin.trim(),
-      vrn: supplierForm.vrn.trim(),
-      phone: supplierForm.phone.trim(),
-      mpesa: "paybill: 202600",
-      balance: 0,
-      creditLimit: Number(supplierForm.creditLimit),
-      status: "Active",
-    };
-
-    const updated = [newSup, ...suppliers];
-    setSuppliers(updated);
-    db.saveConfigurationLocal("procurement_suppliers", updated, currentTenantId ? { tenantId: currentTenantId } : undefined);
-    setShowSupplierModal(false);
-    setSupplierForm({ name: "", category: "General", tin: "", vrn: "", phone: "", creditLimit: 5000000 });
-    playSuccessChime();
-    toast.success("Supplier Added", `Supplier "${newSup.name}" registered with TIN/VRN compliance.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_CREATED", supplier: newSup } }));
+    if (!supplierForm.name || !currentTenantId || !currentBranchId) return;
+    const id = safeUUID();
+    const payload = { id, supplierCode: undefined, name: supplierForm.name.trim(), phone: supplierForm.phone.trim() || undefined, taxPin: supplierForm.tin.trim() || undefined };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/suppliers", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("Supplier creation failed");
+      await loadProcurement();
+      setShowSupplierModal(false); setSupplierForm({ name: "", category: "General", tin: "", vrn: "", phone: "", creditLimit: 5000000 });
+      playSuccessChime(); toast.success("Supplier Added", `Supplier "${payload.name}" registered.`);
+    } catch {
+      await db.executeAtomicMutation({
+        writes: [{ store: "suppliers", key: id, value: { ...payload, id, tenantId: currentTenantId, branchId: currentBranchId, outstandingBalance: 0, status: "ACTIVE", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }],
+        outboxItem: { id: safeUUID(), entityType: "Supplier", entityId: id, operationType: "CREATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey: id, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      await loadProcurement(); toast.info("Supplier Queued", "Supplier will be committed to PostgreSQL when connectivity returns.");
+    }
   };
 
-  // Create PO
-  const handleCreatePo = (status: "Draft" | "Approved" = "Approved") => {
-    if (!poSupplier) {
-      toast.warning("Supplier Required", "Please select a supplier for this PO.");
-      return;
+  const handleCreatePo = async (status: "Draft" | "Approved" = "Draft") => {
+    if (!poSupplier || !currentTenantId || !currentBranchId) return toast.warning("Supplier Required", "Select a supplier and active branch.");
+    const supplier = suppliers.find((s: any) => s.id === poSupplier);
+    const validLines = poLines.filter((l) => l.productId && l.qtyOrdered > 0);
+    if (!validLines.length) return toast.warning("Line Items Required", "Add at least one product variant with quantity > 0.");
+    const id = safeUUID();
+    const items = validLines.map((l) => ({ id: safeUUID(), variantId: l.productId, quantityOrdered: l.qtyOrdered, unitCost: l.unitCost }));
+    const payload = { id, supplierId: supplier?.id || poSupplier, notes: undefined, items };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/purchases", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("PO creation failed");
+      if (status === "Approved" && res.data?.id) {
+        await apiFetch(`/api/v1/purchases/${encodeURIComponent(res.data.id)}/approve`, { method: "POST", body: JSON.stringify({}) });
+      }
+      await loadProcurement(); setShowPoModal(false); playSuccessChime(); toast.success(status === "Approved" ? "Purchase Order Approved" : "Purchase Order Drafted", `PO ${res.data?.orderNumber || id} committed to PostgreSQL.`);
+    } catch {
+      await db.executeAtomicMutation({
+        writes: [],
+        outboxItem: { id: safeUUID(), entityType: "PurchaseOrder", entityId: id, operationType: "CREATE", payload, clientCreatedAt: new Date().toISOString(), idempotencyKey: id, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      await loadProcurement(); setShowPoModal(false); toast.info("Purchase Order Queued", "PO will be committed to PostgreSQL when connectivity returns.");
     }
-    const validLines = poLines.filter((l) => l.name && l.qtyOrdered > 0);
-    if (validLines.length === 0) {
-      toast.warning("Line Items Required", "Please add at least one product with quantity > 0.");
-      return;
-    }
-
-    const subtotal = validLines.reduce((s, l) => s + l.totalCost, 0);
-    const vat = poApplyVat ? Math.round(subtotal * 0.18) : 0;
-    const grandTotal = subtotal + vat;
-    const poNumber = `PO-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const newPo: PurchaseOrderRecord = {
-      id: poNumber,
-      poNumber,
-      supplier: poSupplier,
-      supplierName: poSupplier,
-      itemsCount: validLines.length,
-      items: validLines,
-      subtotal,
-      vatAmount: vat,
-      total: grandTotal,
-      status,
-      expected: poExpectedDate,
-      date: new Date().toISOString().slice(0, 10),
-    };
-
-    const updated = [newPo, ...orders];
-    setOrders(updated);
-    db.saveConfigurationLocal("procurement_purchase_orders", updated, currentTenantId ? { tenantId: currentTenantId } : undefined);
-    setShowPoModal(false);
-    playSuccessChime();
-    toast.success("Purchase Order Created", `PO #${poNumber} issued to ${poSupplier} (${fmt(grandTotal)}).`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: newPo } }));
   };
 
   // Open GRN Modal for a PO
@@ -384,201 +339,64 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
     setShowGrnModal(true);
   };
 
-  // Confirm GRN Delivery Intake & Restock Inventory
+  // Confirm GRN: the server transaction owns inventory, StockLedger and receipt persistence.
   const handleConfirmGrn = async () => {
-    if (!selectedPoForGrn) return;
-    if (!currentTenantId || !currentBranchId) {
-      toast.error("GRN Not Saved", "An active tenant and branch are required.");
-      return;
+    if (!selectedPoForGrn || !currentTenantId || !currentBranchId) return;
+    const receivedItems = selectedPoForGrn.items.map((item) => ({
+      variantId: (item as any).variantId || item.productId,
+      quantityReceived: Number(grnReceivedQtys[item.sku || item.productId] || 0),
+      unitCost: Number(item.unitCost || 0),
+      batchNumber: grnBatchNumber || undefined,
+      expiryDate: grnExpiryDate || undefined,
+    })).filter((i) => i.quantityReceived > 0);
+    if (!receivedItems.length) return toast.warning("Nothing Received", "Enter at least one received quantity.");
+    const operationId = safeUUID();
+    const payload = { purchaseOrderId: selectedPoForGrn.id, supplierId: selectedPoForGrn.supplierId, deviceId: operationId, operationId, idempotencyKey: operationId, items: receivedItems, notes: `GRN for ${selectedPoForGrn.poNumber}` };
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/purchases/receipts", { method: "POST", body: JSON.stringify(payload) });
+      if (!res.success) throw new Error("Receipt failed");
+      await loadProcurement(); setShowGrnModal(false); setSelectedPoForGrn(null); playSuccessChime();
+      toast.success("Delivery Received", "Purchase receipt committed; StockLedger and inventory projection updated by the server.");
+    } catch {
+      const receiptId = safeUUID();
+      await db.executeAtomicMutation({
+        writes: [],
+        outboxItem: { id: receiptId, entityType: "PurchaseReceipt", entityId: receiptId, operationType: "CREATE", payload: { ...payload, id: receiptId }, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+        tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+      });
+      setShowGrnModal(false); setSelectedPoForGrn(null); toast.info("Delivery Queued", "Receipt will commit atomically when connectivity returns.");
     }
-    const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
-    const grnId = `GRN-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const nowIso = new Date().toISOString();
-    const nowStr = nowIso.replace("T", " ").slice(0, 16);
-    const writes: Array<{ store: any; key: string; value?: any; delete?: boolean }> = [];
-    const receivedItems: Array<Record<string, unknown>> = [];
-
-    let totalIntakeUnits = 0;
-    let totalIntakeValue = 0;
-
-    // 1. Update each product's stock in local DB & post Stock Ledger records
-    for (const item of selectedPoForGrn.items) {
-      const itemKey = item.sku || item.productId;
-      const receivedCount = grnReceivedQtys[itemKey] || 0;
-      if (receivedCount > 0) {
-        totalIntakeUnits += receivedCount;
-        totalIntakeValue += receivedCount * item.unitCost;
-
-        // Find product in catalog
-        let prod = db.products.get(item.productId) as any;
-        if (!prod) {
-          for (const p of db.products.values()) {
-            if (p.sku === item.sku || p.name === item.name) {
-              prod = p;
-              break;
-            }
-          }
-        }
-
-        if (prod) {
-          const variant = [...db.productVariants.values()].find((v: any) =>
-            v.productId === prod.id && v.tenantId === currentTenantId && v.branchId === currentBranchId && (!item.sku || v.sku === item.sku)
-          );
-          if (!variant) {
-            toast.error("GRN Not Saved", `No branch-scoped variant was found for ${item.name || item.productId}.`);
-            return;
-          }
-          const prevStock = [...db.stockLedger.values()]
-            .filter((l: any) => l.tenantId === currentTenantId && l.branchId === currentBranchId && l.variantId === variant.id)
-            .reduce((sum: number, l: any) => sum + Number(l.quantityChange ?? l.quantity ?? 0), 0);
-          const nextStock = prevStock + receivedCount;
-          const updatedProd = {
-            ...prod,
-            stock: nextStock,
-            availableStock: nextStock,
-            totalStock: nextStock,
-            batchNumber: grnBatchNumber || prod.batchNumber,
-            expiryDate: grnExpiryDate || prod.expiryDate,
-            status: "Active",
-            updatedAt: new Date().toISOString(),
-          };
-          writes.push({ store: "products", key: item.productId, value: updatedProd });
-
-          // Post audit ledger entry
-          const ledgerId = `led-grn-${grnId}-${variant.id}`;
-          writes.push({
-            store: "stockLedger",
-            key: ledgerId,
-            value: {
-              id: ledgerId,
-              productId: item.productId,
-              variantId: variant.id,
-              sku: item.sku,
-              name: item.name,
-              quantity: receivedCount,
-              quantityChange: receivedCount,
-              quantityBefore: prevStock,
-              quantityAfter: nextStock,
-              balanceAfter: nextStock,
-              unitCost: item.unitCost,
-              totalCost: receivedCount * item.unitCost,
-              reason: `INBOUND_GRN_RECEIPT - ${grnId} (PO: ${selectedPoForGrn.poNumber})`,
-              ref: grnId,
-              movementType: "PURCHASE",
-              referenceType: "PURCHASE_RECEIPT",
-              referenceId: grnId,
-              timestamp: nowIso,
-              occurredAt: nowIso,
-              tenantId: currentTenantId,
-              branchId: currentBranchId,
-            },
-          });
-          receivedItems.push({
-            variantId: variant.id,
-            quantityReceived: receivedCount,
-            unitCost: item.unitCost,
-            batchNumber: grnBatchNumber || undefined,
-            expiryDate: grnExpiryDate || undefined,
-          });
-        }
-      }
-    }
-
-    if (!receivedItems.length) return;
-
-    // 2. Create GRN Record
-    const newGrn: GrnRecord = {
-      id: grnId,
-      poId: selectedPoForGrn.poNumber,
-      supplier: selectedPoForGrn.supplier,
-      warehouse: grnWarehouse || currentBranchName || "Main Store",
-      receivedAt: nowStr,
-      batchNumber: grnBatchNumber,
-      expiryDate: grnExpiryDate,
-      itemsCount: selectedPoForGrn.items.length,
-      totalValue: totalIntakeValue,
-      status: "VERIFIED",
-    };
-
-    const updatedGrns = [newGrn, ...grns];
-    writes.push({ store: "receipts", key: grnId, value: { ...newGrn, tenantId: currentTenantId, branchId: currentBranchId } });
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_grns`, value: { key: "procurement_grns", value: updatedGrns, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    // 3. Update PO status & received quantities
-    const updatedOrders = orders.map((o) => {
-      if (o.id === selectedPoForGrn.id) {
-        const updatedItems = o.items.map((it) => {
-          const itemKey = it.sku || it.productId;
-          const rec = grnReceivedQtys[itemKey] || 0;
-          return { ...it, qtyReceived: it.qtyReceived + rec };
-        });
-        const allReceived = updatedItems.every((it) => it.qtyReceived >= it.qtyOrdered);
-        return {
-          ...o,
-          items: updatedItems,
-          status: allReceived ? "Completed" as const : "Approved" as const,
-        };
-      }
-      return o;
-    });
-
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_purchase_orders`, value: { key: "procurement_purchase_orders", value: updatedOrders, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    // 4. Update supplier payable balance
-    const supMatch = suppliers.find((s) => s.name === selectedPoForGrn.supplier);
-    const updatedSups = supMatch
-      ? suppliers.map((s) => s.id === supMatch.id ? { ...s, balance: s.balance + totalIntakeValue } : s)
-      : suppliers;
-    writes.push({ store: "configuration", key: `${currentTenantId}:${currentBranchId}:procurement_suppliers`, value: { key: "procurement_suppliers", value: updatedSups, tenantId: currentTenantId, branchId: currentBranchId, updatedAt: nowIso } });
-
-    const receiptOutbox = {
-      id: grnId,
-      entityType: "PurchaseReceipt" as const,
-      entityId: grnId,
-      operationType: "CREATE" as const,
-      payload: {
-        id: grnId,
-        purchaseOrderId: selectedPoForGrn.id,
-        supplierId: selectedPoForGrn.supplierId || supMatch?.id,
-        items: receivedItems,
-        notes: `GRN ${grnId} / ${selectedPoForGrn.poNumber}`,
-      },
-      clientCreatedAt: nowIso,
-      idempotencyKey: grnId,
-      status: "PENDING" as const,
-      tenantId: currentTenantId,
-      branchId: currentBranchId,
-    };
-    await db.executeAtomicMutation({ writes, outboxItem: receiptOutbox, tenantContext });
-
-    setGrns(updatedGrns);
-    setOrders(updatedOrders);
-    setSuppliers(updatedSups);
-    setShowGrnModal(false);
-    setSelectedPoForGrn(null);
-    playSuccessChime();
-    toast.success("Delivery Received & Stock Updated", `GRN #${grnId} verified. Added ${totalIntakeUnits} stock units across inventory.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "GRN_VERIFIED", grn: newGrn } }));
   };
 
-  // Settle Supplier Debt
-  const handleSettleDebt = (e: React.FormEvent) => {
+  // Supplier settlement is an authoritative financial mutation; no local balance writes.
+  const handleSettleDebt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payingSupplier || debtPayAmount <= 0) return;
-
-    const newBalance = Math.max(0, payingSupplier.balance - debtPayAmount);
-    const updatedSups = suppliers.map((s) =>
-      s.id === payingSupplier.id ? { ...s, balance: newBalance } : s
-    );
-    setSuppliers(updatedSups);
-    db.saveConfigurationLocal("procurement_suppliers", updatedSups, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-    playSuccessChime();
-    toast.success("Payment Dispatched", `Paid ${fmt(debtPayAmount)} to ${payingSupplier.name} via ${debtPayMethod}. Remaining balance: ${fmt(newBalance)}.`);
-    setPayingSupplier(null);
-    setDebtPayAmount(0);
-    setDebtPayRef("");
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "SUPPLIER_PAID" } }));
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>("/api/v1/finance/payables/settle-supplier", {
+        method: "POST", body: JSON.stringify({
+          supplierId: payingSupplier.id, amount: debtPayAmount, paymentMethod: debtPayMethod,
+          providerReference: debtPayRef || undefined, idempotencyKey: safeUUID(),
+        }),
+      });
+      if (!res.success) throw new Error("Settlement failed");
+      await loadProcurement();
+      playSuccessChime(); toast.success("Payment Posted", `Paid ${fmt(debtPayAmount)} to ${payingSupplier.name}.`);
+      setPayingSupplier(null); setDebtPayAmount(0); setDebtPayRef("");
+    } catch (err: any) {
+      if (currentTenantId && currentBranchId) {
+        const operationId = safeUUID();
+        await db.executeAtomicMutation({
+          writes: [],
+          outboxItem: { id: operationId, entityType: "Payment", entityId: operationId, operationType: "CREATE", payload: { supplierId: payingSupplier.id, amount: debtPayAmount, paymentMethod: debtPayMethod, providerReference: debtPayRef || undefined }, clientCreatedAt: new Date().toISOString(), idempotencyKey: operationId, status: "PENDING", tenantId: currentTenantId, branchId: currentBranchId },
+          tenantContext: { tenantId: currentTenantId, branchId: currentBranchId },
+        });
+        setPayingSupplier(null); setDebtPayAmount(0); setDebtPayRef("");
+        toast.info("Payment Queued", "Supplier payment is durably queued and will settle against PostgreSQL when connectivity returns.");
+      } else {
+        toast.error("Payment Not Posted", err?.message || "Supplier payment could not be committed.");
+      }
+    }
   };
 
   return (
