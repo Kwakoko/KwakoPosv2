@@ -75,28 +75,6 @@ export async function commitLocalOutboxes(
   } finally {
     dbAny.__kwakoAtomicMutationInFlight = previousAtomicFlag;
   }
-  try {
-    if (typeof window !== "undefined") {
-      for (const item of outboxItems) {
-        window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item } }));
-        if ("BroadcastChannel" in window) {
-          const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({
-            type: "OUTBOX_MUTATION",
-            tenantId: item.tenantId,
-            branchId: item.branchId,
-            operationId: item.id,
-            entityType: item.entityType,
-            entityId: item.entityId,
-            timestamp: Date.now(),
-          });
-          bc.close();
-        }
-      }
-    }
-  } catch {
-    /* broadcast must never affect durable mutation success */
-  }
   return outboxItems;
 }
 
