@@ -139,6 +139,11 @@ describe("Synthetic Fallback Variant Auto-Provisioning", () => {
           return data;
         },
       },
+      setting: {
+        // These unit fixtures use a minimal Prisma transaction mock. An empty
+        // branch tax-config result preserves the production default of no VAT.
+        findMany: async () => [],
+      },
       account: {
         findFirst: async () => ({ id: "acc-dummy-1" }),
         create: async () => ({ id: "acc-dummy-1" }),
