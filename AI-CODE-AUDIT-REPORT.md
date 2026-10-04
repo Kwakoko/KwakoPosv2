@@ -4,6 +4,7 @@
 **Audit Date:** September 14, 2026  
 **Target Codebase:** `c:\Users\Administrator\Desktop\Projects\KwakoPos v2.0.0`  
 **Classification:** HIGH-STAKES SYSTEM FORENSICS & SECURITY AUDIT  
+**Remediation Reconciliation:** October 4, 2026  
 
 ---
 
@@ -18,10 +19,10 @@ While the platform features extensive domain modeling, granular role contracts, 
 | Severity | Architecture & Deps | OWASP Top 10 Security | Performance & Scalability | Code Quality & AI Drift | Total |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **CRITICAL** | 1 | 3 | 2 | 1 | **7** |
-| **HIGH** | 2 | 5 | 3 | 3 | **13** |
-| **MEDIUM** | 2 | 4 | 1 | 2 | **9** |
+| **HIGH** | 2 | 4 | 3 | 3 | **12** |
+| **MEDIUM** | 2 | 3 | 1 | 2 | **8** |
 | **LOW / INFO** | 1 | 0 | 0 | 2 | **3** |
-| **TOTAL** | **6** | **12** | **6** | **8** | **32** |
+| **TOTAL** | **6** | **10** | **6** | **8** | **30** |
 
 ---
 
@@ -312,30 +313,27 @@ Execution of `npm audit` and package manifest inspection reveals critical supply
 - **Impact:**  
   Any authenticated administrator can invoke destructive endpoints (such as tenant deletions or rollback executions) without being challenged for step-up credentials.
 
-#### [MEDIUM] SEC-09: Weak Legacy Password Hashing Fallback
-- **Vulnerability Type:** CWE-916: Use of Password Hash With Insufficient Computational Effort
-- **Location:** `packages/auth/src/index.ts:108-114`
-- **Code:**
-  ```typescript
-  const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
-  const expected = Buffer.from(storedHash);
-  const actual = Buffer.from(legacyHash);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-  ```
-- **Finding:**  
-  For legacy hashes, the system falls back to a single SHA-256 round using `password + getJwtSecret()`. This couples password verification directly to the cluster `JWT_SECRET` (if the secret is rotated, all legacy password verifications break) and provides no work-factor protection against GPU cracking.
+#### [RESOLVED] SEC-09: Legacy secret-dependent SHA-256 password fallback removed
+- **Status:** Resolved in the current authentication implementation.
+- **Location:** `packages/auth/src/index.ts`
+- **Current behavior:**  
+  `comparePassword` accepts Argon2id hashes and retains the existing scrypt compatibility path; unsupported legacy formats now fail closed. The prior SHA-256 derivation using `password + JWT_SECRET` has been removed, eliminating the weak work factor and the coupling between password verification and JWT secret rotation.
+- **Migration note:**  
+  New and rehashed passwords use Argon2id. Existing scrypt hashes remain temporarily verifiable so successful authentication can trigger migration to Argon2id; unsupported SHA-256 hashes are no longer accepted.
 
 ---
 
 ### 2.4 CSRF & Browser Client Security
 
-#### [HIGH] SEC-08: Sensitive Tokens Stored in Web `localStorage`
-- **Vulnerability Type:** CWE-922: Insecure Storage of Sensitive Information
-- **Location:** `apps/web/src/services/apiClient.ts:55-89`
-- **Finding:**  
-  The web client stores both `accessToken` AND `refreshToken` in `window.localStorage` under the key `kwakopos:v2:session`. Any Cross-Site Scripting (XSS) vulnerability on the domain allows complete extraction of persistent sessions.
-- **Remediation:**  
-  Rely exclusively on `HttpOnly`, `Secure`, `SameSite=Strict` cookies for refresh tokens. Store access tokens only in application memory.
+#### [RESOLVED] SEC-08: Browser credential storage has been migrated to split-token transport
+- **Status:** Resolved in the current authentication implementation.
+- **Location:** `apps/web/src/services/apiClient.ts`; `apps/api/src/server.ts`
+- **Current behavior:**  
+  The browser stores only non-secret session metadata (for example `sessionId`, user identity, expiry/policy metadata) in `localStorage` or `sessionStorage` according to the session policy. Bearer access tokens are memory-only; any legacy persisted `accessToken` is stripped during session restoration.
+- **Refresh credential transport:**  
+  The refresh token is never persisted in browser storage and is not returned in authentication JSON. The API issues and rotates the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, `Max-Age`, and `Secure` in production. The client sends only `sessionId` in the refresh request body and relies on `credentials: "include"` for automatic cookie transmission.
+- **Residual security note:**  
+  This prevents JavaScript from directly reading the refresh credential, but it does not eliminate the impact of an XSS flaw that can execute authenticated actions from the victim's browser while the session is active.
 
 #### [MEDIUM] SEC-10: Missing CSRF Tokens & Permissive CORS Defaults
 - **Location:** `apps/api/src/server.ts:250-254`, `apps/api/src/middleware/securityMiddleware.ts:27-28`
