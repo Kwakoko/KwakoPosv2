@@ -204,8 +204,8 @@ export async function getDashboardKpiSnapshot(
     const [dailyRows, paymentRows, topProductRows, hourlyRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
         `SELECT DATE(sold_at) AS day,
-                COALESCE(SUM(grand_total),0) AS revenue,
-                COALESCE(SUM(gross_profit),0) AS profit,
+                COALESCE(SUM(grand_total - tax_total),0) AS revenue,
+                COALESCE(SUM((grand_total - tax_total) - total_cost),0) AS profit,
                 COALESCE(SUM(total_cost),0) AS cogs,
                 COUNT(*) AS orders_count
            FROM sales
@@ -217,10 +217,11 @@ export async function getDashboardKpiSnapshot(
           ORDER BY DATE(sold_at)`,
         ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
       ),
-      tx.$queryRawUnsafe<Array<{ payment_method: string; volume: unknown; count: bigint | number | string }>>(
+      tx.$queryRawUnsafe<Array<{ payment_method: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
         `SELECT COALESCE(payment_method, 'CASH') AS payment_method,
                 COALESCE(SUM(p.amount),0) AS volume,
-                COUNT(*) AS count
+                COUNT(*) AS count,
+                COUNT(DISTINCT p.sale_id) AS order_count
            FROM payments p
            JOIN sales s ON s.id = p.sale_id
           WHERE p.tenant_id = $1 AND p.branch_id = $2
@@ -254,7 +255,7 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ hour: number; revenue: unknown; orders_count: bigint | number | string }>>(
         `SELECT EXTRACT(HOUR FROM sold_at)::int AS hour,
-                COALESCE(SUM(grand_total),0) AS revenue,
+                COALESCE(SUM(grand_total - tax_total),0) AS revenue,
                 COUNT(*) AS orders_count
            FROM sales
           WHERE tenant_id = $1 AND branch_id = $2
@@ -294,13 +295,16 @@ export async function getDashboardKpiSnapshot(
     }
     const paymentTotalVolume = paymentRows.reduce((n,r)=>n+numberValue(r.volume),0);
     const paymentTotalCount = paymentRows.reduce((n,r)=>n+numberValue(r.count),0);
+    const paymentTotalOrderCount = paymentRows.reduce((n,r)=>n+numberValue(r.order_count),0);
     const paymentChannels = paymentRows.map(r => {
-      const volume = numberValue(r.volume), count = numberValue(r.count);
+      const volume = numberValue(r.volume);
+      const count = numberValue(r.count);
+      const orderCount = numberValue(r.order_count);
       return {
-        name: r.payment_method, volume, count,
+        name: r.payment_method, volume, count, paymentCount: count, orderCount,
         volumeShare: paymentTotalVolume > 0 ? Math.round(volume/paymentTotalVolume*100) : 0,
-        countShare: paymentTotalCount > 0 ? Math.round(count/paymentTotalCount*100) : 0,
-        aov: count > 0 ? Math.round(volume/count) : 0,
+        countShare: paymentTotalOrderCount > 0 ? Math.round(orderCount/paymentTotalOrderCount*100) : 0,
+        aov: orderCount > 0 ? Math.round(volume/orderCount) : 0,
       };
     });
     const topProductsTotalTracked = topProductRows.length;
@@ -318,8 +322,8 @@ export async function getDashboardKpiSnapshot(
       profitDeltaPct: priorTotalProfit > 0 ? (((totalProfit-priorTotalProfit)/priorTotalProfit)*100).toFixed(1) : null,
       priorTotalRevenue,
       peakHour: peak ? { hour: `${String(Number(peak.hour)).padStart(2,"0")}:00`, revenue:numberValue(peak.revenue), ordersCount:numberValue(peak.orders_count) } : null,
-      paymentChannels, paymentTotalVolume, paymentTotalCount,
-      paymentOverallAov: paymentTotalCount > 0 ? Math.round(paymentTotalVolume/paymentTotalCount) : 0,
+      paymentChannels, paymentTotalVolume, paymentTotalCount, paymentTotalOrderCount,
+      paymentOverallAov: paymentTotalOrderCount > 0 ? Math.round(paymentTotalVolume/paymentTotalOrderCount) : 0,
       topProducts, topProductsTotalTracked,
     };
 
