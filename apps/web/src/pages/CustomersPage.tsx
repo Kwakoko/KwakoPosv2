@@ -6,7 +6,7 @@ import {
 import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
-import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 
 export interface CustomerRecord {
@@ -212,7 +212,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
         writes: [{ store: "customers", key: newCust.id, value: newCust }],
       });
       setCustomers((prev) => [newCust, ...prev]);
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_CREATED", customer: newCust } }));
+      publishDataChanged({ action: "CUSTOMER_CREATED", customer: newCust });
     } else if (selectedCust) {
       const updatedCust: CustomerRecord = {
         ...selectedCust,
@@ -231,7 +231,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
         writes: [{ store: "customers", key: updatedCust.id, value: updatedCust }],
       });
       setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_UPDATED", customer: updatedCust } }));
+      publishDataChanged({ action: "CUSTOMER_UPDATED", customer: updatedCust });
     }
     setIsFormOpen(false);
     resetForm();
@@ -280,7 +280,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
       });
       setCustomers((prev) => prev.filter((item) => item.id !== c.id));
       toast.success("Profile Deleted", `Customer ${c.name} was removed.`);
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DELETED", customerId: c.id } }));
+      publishDataChanged({ action: "CUSTOMER_DELETED", customerId: c.id });
     }
   };
 
@@ -311,7 +311,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     });
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_DEBT_PAID", customer: updatedCust } }));
+    publishDataChanged({ action: "CUSTOMER_DEBT_PAID", customer: updatedCust });
 
     setIsPayOpen(false);
     setSelectedCust(null);
@@ -336,7 +336,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = () => {
     });
 
     setCustomers((prev) => prev.map((c) => (c.id === selectedCust.id ? updatedCust : c)));
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust } }));
+    publishDataChanged({ action: "CUSTOMER_WALLET_UPDATED", customer: updatedCust });
 
     setIsWalletOpen(false);
     setSelectedCust(null);
