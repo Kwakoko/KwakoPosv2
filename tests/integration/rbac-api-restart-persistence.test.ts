@@ -38,6 +38,7 @@ describe("RBAC API mutations survive exact API restart", () => {
         PORT: String(PORT),
         KWAKOPOS_MOCK_AUTH: "false",
         KWAKOPOS_DISABLE_SUPPORT_AUTOMATION: "true",
+        JWT_SECRET: process.env.JWT_SECRET || "kwakopos-ci-rbac-restart-test-secret-20261004",
       },
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
