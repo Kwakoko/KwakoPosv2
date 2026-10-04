@@ -328,9 +328,9 @@ Execution of `npm audit` and package manifest inspection reveals critical supply
 - **Status:** Resolved in the current authentication implementation.
 - **Location:** `apps/web/src/services/apiClient.ts`; `apps/api/src/server.ts`
 - **Current behavior:**  
-  The browser stores only non-secret session metadata (for example `sessionId`, user identity, expiry/policy metadata) in `localStorage` or `sessionStorage` according to the session policy. Bearer access tokens are memory-only; any legacy persisted `accessToken` is stripped during session restoration.
+  The browser persists only non-secret session metadata: `sessionId`, user identity, and session policy/expiry metadata. Remembered sessions may use `localStorage`; otherwise the session record uses `sessionStorage`. The `StoredSession.accessToken` field is retained only for source/API compatibility; `setStoredSession()` serializes no access token, and `getStoredSession()` strips any legacy persisted access token during migration. The live bearer access token exists only in the module's in-memory `accessToken` variable.
 - **Refresh credential transport:**  
-  The refresh token is never persisted in browser storage and is not returned in authentication JSON. The API issues and rotates the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, `Max-Age`, and `Secure` in production. The client sends only `sessionId` in the refresh request body and relies on `credentials: "include"` for automatic cookie transmission.
+  The refresh token is never persisted in browser storage and is never returned in authentication JSON. Login and refresh issue/rotate the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, `Max-Age`, and `Secure` in production. The client calls `/auth/refresh` with only `sessionId` and `credentials: "include"`, so the browser supplies the HttpOnly cookie automatically. Logout clears the same cookie.
 - **Residual security note:**  
   This prevents JavaScript from directly reading the refresh credential, but it does not eliminate the impact of an XSS flaw that can execute authenticated actions from the victim's browser while the session is active.
 
