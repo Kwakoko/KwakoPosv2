@@ -225,7 +225,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const getBaseTaxRate = useCallback(() => {
     try {
-      const cfg = db.getConfigurationLocal?.("tax_config") as any;
+      const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
       if (cfg && cfg.vatEnabled && typeof cfg.vatRatePercent === "number") {
         return cfg.vatRatePercent / 100;
       }
