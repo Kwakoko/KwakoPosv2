@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LocalIndexedDbStore } from "../indexedDb.js";
+import { apiFetch } from "./applicationApiService.js";
 
 export const SYNC_STATUS_STATES = [
   "IDLE",
@@ -25,6 +26,8 @@ export interface SyncStatusSnapshot extends SyncStatusScope {
   syncEpoch: string | null;
   /** Last authoritative reconciliation result persisted by the sync engine. */
   reconciliationStatus: "IN_SYNC" | "DIVERGENT" | "UNKNOWN";
+  /** Number of OPEN conflicts reported by authoritative PostgreSQL. null means not verified. */
+  openConflictCount: number | null;
   pendingOutboxCount: number;
   failedOutboxCount: number;
   /** Items permanently abandoned after exceeding the server-rejection retry cap. */
@@ -46,6 +49,7 @@ const emptySnapshot = (): SyncStatusSnapshot => ({
   serverRevision: null,
   syncEpoch: null,
   reconciliationStatus: "UNKNOWN",
+  openConflictCount: null,
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
@@ -99,6 +103,8 @@ export class SyncStatusService {
       tenantId: scope.tenantId,
       branchId: scope.branchId,
       state: previous.state === "SYNCING" ? "SYNCING" : "IDLE",
+      reconciliationStatus: "UNKNOWN",
+      openConflictCount: null,
       lastSyncedAt: previous.lastSyncedAt,
       lastSyncDurationMs: previous.lastSyncDurationMs,
     };
@@ -192,11 +198,26 @@ export class SyncStatusService {
       const abandoned = this.db.getAbandonedOutbox
         ? this.db.getAbandonedOutbox(tenantId, branchId).length
         : 0;
+
+      // The conflict count is authoritative only when the server confirms it.
+      // Network failure must never turn an unknown conflict state into zero.
+      let openConflictCount = this.snapshot.openConflictCount;
+      if (tenantId && branchId && typeof navigator !== "undefined" && navigator.onLine) {
+        try {
+          const response = await apiFetch<any>("/sync/conflicts?status=OPEN");
+          openConflictCount = Array.isArray(response?.data) ? response.data.length : 0;
+        } catch {
+          // Preserve the previous value (or null) so an unreachable server is
+          // never presented as a verified zero-conflict state.
+        }
+      }
+
       this.update({
         pendingOutboxCount: pending,
         failedOutboxCount: failed,
         abandonedOutboxCount: abandoned,
         reconciliationStatus,
+        ...(openConflictCount !== undefined ? { openConflictCount } : {}),
         localRevision,
         syncEpoch,
         ...(authoritativeServerRevision !== null ? { serverRevision: authoritativeServerRevision } : {}),
@@ -264,6 +285,19 @@ export function useAuthoritativeSyncStatus(scope?: Partial<SyncStatusScope>): Sy
   }, [scope?.tenantId, scope?.branchId]);
 
   return snapshot;
+}
+
+export function isReplicaConverged(snapshot: SyncStatusSnapshot): boolean {
+  return (
+    snapshot.state === "SUCCESS" &&
+    snapshot.reconciliationStatus === "IN_SYNC" &&
+    snapshot.pendingOutboxCount === 0 &&
+    snapshot.failedOutboxCount === 0 &&
+    snapshot.abandonedOutboxCount === 0 &&
+    snapshot.openConflictCount === 0 &&
+    snapshot.serverRevision !== null &&
+    snapshot.localRevision === snapshot.serverRevision
+  );
 }
 
 export function syncStatusLabel(snapshot: SyncStatusSnapshot): string {
