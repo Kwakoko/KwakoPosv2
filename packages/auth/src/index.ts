@@ -290,11 +290,13 @@ export class SessionManager {
           userId: String(userId || ""),
           branchId: "",
           deviceId: String(deviceId || "device-client"),
+          branchId: "branch-default",
+          idleTimeoutMs: 30 * 60_000,
           absoluteLifetimeMs: typeof expiresInDays === "number" ? expiresInDays * 24 * 60 * 60_000 : 8 * 60 * 60_000,
           refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000,
         }
       : inputOrTenantId;
-    if (!input.tenantId || !input.userId || !input.branchId || !input.deviceId) throw new Error("SESSION_CONTEXT_REQUIRED");
+    if (!input.tenantId || !input.userId || !input.deviceId) throw new Error("SESSION_CONTEXT_REQUIRED");
     const sessionId = randomBytes(16).toString("hex");
     const tokenFamilyId = randomBytes(16).toString("hex");
     const refreshToken = generateRefreshToken();
@@ -406,6 +408,13 @@ export class SessionManager {
     const now = new Date();
     const session = await this.get(sessionId);
     if (!session || session.revokedAt || session.status !== "ACTIVE" || session.expiresAt <= now || session.refreshTokenExpiresAt <= now) return null;
+    if (session.lastActivityAt.getTime() + session.idleTimeoutMs <= now.getTime()) {
+      session.status = "EXPIRED";
+      session.revokedAt = now;
+      session.revokeReason = "SESSION_TIMEOUT";
+      await this.persist(session);
+      return null;
+    }
     const providedHash = this.hashToken(providedRefreshToken);
 
     if (this.storeProvider?.atomicRotateRefreshToken) {
