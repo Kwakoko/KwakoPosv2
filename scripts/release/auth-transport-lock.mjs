@@ -12,7 +12,7 @@ const req = (ok, message) => { if (!ok) fail(message); };
 
 req(!/\brefreshToken\b/.test(api), "web client must not contain refresh-token credential handling");
 req(!api.includes("refresh-token"), "web client must not contain refresh-token handling");
-req(srv.includes("HttpOnly") && srv.includes("SameSite=Strict"), "production refresh cookie must be hardened");
+req(srv.includes("HttpOnly") && srv.includes("SameSite=Strict") && srv.includes('; Secure'), "production refresh cookie must use the HttpOnly; Secure; SameSite=Strict design");
 req(srv.includes("setRefreshCookie(reply, session.refreshToken"), "canonical login must issue refresh token via hardened cookie");
 req(srv.includes("setRefreshCookie(reply, rotated.refreshToken"), "canonical refresh must rotate refresh token via hardened cookie");
 req(/reply\.send\(\{ success: true, data: \{ accessToken: rotated\.accessToken, sessionId:/.test(srv), "canonical refresh JSON must contain accessToken/sessionId only");
