@@ -60,4 +60,4 @@ EXPOSE 8080
 
 # Launch the single canonical API server implementation. Authentication and
 # production hardening are registered directly in server.ts.
-CMD ["node", "apps/api/dist/apps/api/src/server.js"]
+CMD ["node", "apps/api/dist/server.js"]
