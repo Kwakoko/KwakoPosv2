@@ -62,7 +62,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const retrieved = getStoredSession();
     expect(retrieved).not.toBeNull();
     expect(retrieved?.sessionId).toBe("sess-12345");
-    expect(retrieved?.accessToken).toBe("token-abc");
+    expect(retrieved?.accessToken).toBeUndefined();
     // Refresh-token credentials are intentionally not persisted in browser storage.
     // The sessionId is the durable refresh handle for the HTTP-only server session.
     expect((retrieved as any)?.refreshToken).toBeUndefined();
@@ -72,16 +72,9 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     expect(retrieved?.user.name).toBe("Amina Cashier");
   });
 
-  it("restores active unexpired JWT session instantly without requiring network refresh", async () => {
-    // Generate valid unexpired JWT payload (exp in 1 hour)
-    const exp = Math.floor(Date.now() / 1000) + 3600;
-    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-    const payload = btoa(JSON.stringify({ sub: "usr-01", email: "cashier@kwakopos.com", exp }));
-    const fakeJwt = `${header}.${payload}.signature`;
-
+  it("restores a durable session through the server refresh handle", async () => {
     const session: StoredSession = {
-      sessionId: "sess-valid-jwt",
-      accessToken: fakeJwt,
+      sessionId: "sess-valid-refresh",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
@@ -94,15 +87,20 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
 
     setStoredSession(session);
 
-    // Mock fetch to ensure no network calls are needed for unexpired token
-    const fetchSpy = vi.fn();
+    const refreshedJwt = "header.payload.signature";
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { accessToken: refreshedJwt } }),
+    });
     vi.stubGlobal("fetch", fetchSpy);
 
     const user = await restoreSession();
     expect(user).not.toBeNull();
     expect(user?.email).toBe("cashier@kwakopos.com");
-    expect(getAccessToken()).toBe(fakeJwt);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(getAccessToken()).toBe(refreshedJwt);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/auth/refresh");
   });
 
   it("does NOT wipe stored session on refresh failures or network drops", async () => {

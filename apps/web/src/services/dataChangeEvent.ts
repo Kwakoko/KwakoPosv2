@@ -15,7 +15,7 @@ export interface DataChangeDetail {
 export type DataChangeHandler = (detail: DataChangeDetail) => void;
 
 export function publishDataChanged(
-  detail: Omit<DataChangeDetail, "timestamp">,
+  detail: DataChangeDetail,
 ): void {
   if (typeof window === "undefined") return;
   const eventDetail: DataChangeDetail = {
