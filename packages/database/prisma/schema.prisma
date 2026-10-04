@@ -241,6 +241,7 @@ model DeviceSession {
   rememberMe            Boolean   @default(false)
   offlineStartedAt      DateTime?
   offlineExpiresAt      DateTime?
+  idleTimeoutMs         Int       @default(1800000)
   createdAt             DateTime  @default(now())
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   device                Device?   @relation(fields: [deviceId], references: [deviceId])
