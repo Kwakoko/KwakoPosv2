@@ -17,7 +17,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/InventoryPage.tsx": "41342cbfc43a0c5a2667143ab25361c20acee7a4",
   "apps/web/src/pages/PurchasingPage.tsx": "cdaf018cc7cffe91150a1b262f1b2d118c24981a",
   "apps/web/src/pages/ReportsPage.tsx": "c236231b947976563b71d4aef08309e921882705",
-  "apps/web/src/pages/SettingsPage.tsx": "e535324f50ae425322f335a6fde3c99ea527d552",
+  "apps/web/src/pages/SettingsPage.tsx": "65df8f00487c7d753c93a060878144ca27ca0d0b",
   "apps/web/src/pages/CashDrawerPage.tsx": "cba6164b3dc341fd1e03b5605e54046072518ad5",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
   ".github/workflows/production-certification.yml": "9034050784a1d88fe6c04348c1d9189e0a0e2ad8",
