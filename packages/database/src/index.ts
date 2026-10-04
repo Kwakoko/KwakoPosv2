@@ -224,7 +224,7 @@ export class ScopedProductRepository {
 
     if (createdVariants.length === 0 && !req.hasVariants) {
       createdVariants.push({
-        id: randomUUID(),
+        id: `${productId}-default`,
         tenantId: ctx.tenantId,
         branchId: ctx.branchId,
         productId,
