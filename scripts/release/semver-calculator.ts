@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { calculateNextVersion, parseSemVer, formatSemVer, ReleaseBumpType } from "@kwakopos2/config";
+import { calculateNextVersion, determineBumpFromCommits, isValidSemVer, ReleaseBumpType } from "@kwakopos2/config";
 
 export interface VersionCalculationResult {
   currentVersion: string;
@@ -18,14 +18,18 @@ export function calculateAndSyncNextVersion(): VersionCalculationResult {
 
   const rootPkgPath = path.resolve(process.cwd(), "package.json");
   const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
-  const currentVersion = rootPkg.version || "2.5.0";
+  const currentVersion = rootPkg.version;
+  if (!currentVersion) throw new Error("SEMVER_BLOCKED: package.json version is missing.");
 
   let baselineTag = "";
   let commitMessages: string[] = [];
 
   try {
-    // Find latest git tag
-    baselineTag = execSync("git describe --tags --abbrev=0", { encoding: "utf8" }).trim();
+    baselineTag = execSync("git tag --merged HEAD --sort=-v:refname", { encoding: "utf8" })
+      .split("\n")
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .filter(isValidSemVer)[0] || "";
   } catch {
     baselineTag = "";
   }
@@ -38,7 +42,8 @@ export function calculateAndSyncNextVersion(): VersionCalculationResult {
     commitMessages = [];
   }
 
-  const nextVersion = calculateNextVersion(currentVersion, commitMessages);
+  const bumpType = determineBumpFromCommits(commitMessages);
+  const nextVersion = calculateNextVersion(baselineTag ? baselineTag.replace(/^v/, "") : currentVersion, commitMessages);
   const isVersionChanged = nextVersion !== currentVersion;
 
   console.log(`[SEMVER_CALCULATOR] Current Version: ${currentVersion}`);
@@ -56,7 +61,7 @@ export function calculateAndSyncNextVersion(): VersionCalculationResult {
   const result: VersionCalculationResult = {
     currentVersion,
     nextVersion,
-    bumpType: isVersionChanged ? "PATCH" : "NONE",
+    bumpType: isVersionChanged ? bumpType : "NONE",
     commitsEvaluatedCount: commitMessages.length,
     commitMessages,
     isVersionChanged,
