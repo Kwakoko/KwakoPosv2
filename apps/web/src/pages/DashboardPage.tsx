@@ -1215,7 +1215,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
       // Tab 4: "4. TOP PRODUCTS LEADERBOARD"
       const ws4Data: any[][] = [
-        ['Rank', 'Product Name', 'Category', 'Stock On Hand', 'Units Sold Today', 'Total Revenue (Tsh)', 'Stock Alert Status'],
+        ['Rank', 'Product Name', 'Category', 'Stock On Hand', 'Units Sold (Selected Period)', 'Net Revenue (Tsh)', 'Stock Alert Status'],
         ...topProductsAnalytics.items.map(p => [
           Number(p.rank || 0),
           p.name,
@@ -2453,15 +2453,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                     ) : (
                       <>
                         <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Orders'}
+                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Payment Records'}
                         </span>
                         <span className="text-sm font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Orders`}
+                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Payments`}
                         </span>
                         <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-medium">
                           {paymentMetricMode === 'volume'
                             ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'payments' : 'payments'} · ${paymentChannelSummary.totalOrderCount} ${paymentChannelSummary.totalOrderCount === 1 ? 'order' : 'orders'}`
-                            : `Avg order ${fmtCcy(paymentChannelSummary.overallAov)}`}
+                            : `Distinct orders ${paymentChannelSummary.totalOrderCount} · Avg order ${fmtCcy(paymentChannelSummary.overallAov)}`}
                         </span>
                       </>
                     )}
