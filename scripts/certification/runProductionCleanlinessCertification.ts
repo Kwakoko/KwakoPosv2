@@ -23,7 +23,7 @@ import { createHash } from "crypto";
 import { execFileSync } from "child_process";
 import { tenantStoreCleanupService } from "../../apps/web/src/services/tenantStoreCleanupService.js";
 import { productionCleanupService } from "../../apps/web/src/services/productionCleanupService.js";
-import { runRepositoryForensicIntegrityCertification } from "../release/repository-forensic-integrity.js";
+import { runRepositoryForensicIntegrityCertification } from "../certification/repository-forensic-integrity.js";
 
 export interface CleanlinessPillar {
   pillarId: string;
