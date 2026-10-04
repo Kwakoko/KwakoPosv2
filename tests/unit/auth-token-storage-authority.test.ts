@@ -64,4 +64,24 @@ describe("Authentication credential authority", () => {
     expect(clientRefresh).not.toContain('tenantId: stored.user.tenantId');
   });
 
+
+  it("registers the canonical authentication boundary before production routes", () => {
+    const server = read("apps/api/src/server.ts");
+    const buildStart = server.indexOf("export function buildServer");
+    const hookStart = server.indexOf('server.addHook("onRequest"', buildStart);
+    const firstRouteStart = server.search(/server\.(?:get|post|put|patch|delete)\(\s*"/, buildStart);
+    const canonicalRegistration = server.indexOf("registerCanonicalProductionAuthentication(server, config, productionPersistence)", buildStart);
+
+    expect(buildStart).toBeGreaterThanOrEqual(0);
+    expect(hookStart).toBeGreaterThan(buildStart);
+    expect(firstRouteStart).toBeGreaterThan(hookStart);
+    expect(canonicalRegistration).toBeGreaterThan(hookStart);
+    expect(server).toContain("const payload = verifyAccessToken(token)");
+  });
+
+  it("does not retain the superseded serverFixed authentication implementation", () => {
+    expect(fs.existsSync(path.join(root, "apps/api/src/serverFixed.ts"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "apps/api/src/testServerFixed.ts"))).toBe(false);
+  });
+
 });
