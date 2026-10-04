@@ -30,10 +30,11 @@ export function countUniqueLocalConflictIds(entries: Iterable<[string, unknown]>
 export function getConflictCenterReplicaState(
   snapshot: Pick<
     SyncStatusSnapshot,
-    "reconciliationStatus" | "pendingOutboxCount" | "failedOutboxCount" | "abandonedOutboxCount"
+    "reconciliationStatus" | "openConflictCount" | "pendingOutboxCount" | "failedOutboxCount" | "abandonedOutboxCount"
   >,
 ): ConflictCenterReplicaState {
   if (snapshot.reconciliationStatus === "DIVERGENT") return "DIVERGENT";
+  if (snapshot.openConflictCount !== 0) return "NOT_VERIFIED";
 
   if (
     snapshot.reconciliationStatus === "IN_SYNC" &&
