@@ -89,6 +89,10 @@ export class SettingsService {
 
   async upsertBatch(ctx: TenantContext, records: Array<any>) {
     if (!records.length) throw new Error("SETTINGS_BATCH_EMPTY");
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) throw new Error("SETTINGS_MANAGE_REQUIRED");
     return prisma.$transaction(async (tx: any) => {
       const results: any[] = [];
       for (const record of records) {
@@ -113,6 +117,7 @@ export class SettingsService {
           }
           throw new Error("SETTINGS_IDEMPOTENCY_REPLAY");
         }
+        await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `kwakopos:settings:${ctx.tenantId}:${scope}:${key}:${branchId || ""}:${userId || ""}`);
         const existing = await tx.setting.findFirst({
           where: { tenantId: ctx.tenantId, key, scope, branchId, userId, isActive: true },
           orderBy: { updatedAt: "desc" },
