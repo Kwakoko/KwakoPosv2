@@ -45,8 +45,8 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
       expect(delta.categories.some((c: any) => c.id === categoryId && c.isActive === false)).toBe(true);
       expect(delta.brands.some((b: any) => b.id === brandId && b.isActive === false)).toBe(true);
       await client2.applyServerDelta(delta);
-      const client2Cats = client2.getConfigurationLocal("inventory_categories_meta", { tenantId: tenantA });
-      const client2Brands = client2.getConfigurationLocal("inventory_brands_meta", { tenantId: tenantA });
+      const client2Cats = client2.getConfigurationLocal("inventory_categories_meta", { tenantId: tenantA, branchId: branchA });
+      const client2Brands = client2.getConfigurationLocal("inventory_brands_meta", { tenantId: tenantA, branchId: branchA });
       expect(client2Cats.some((c: any) => c.id === categoryId)).toBe(false); expect(client2Brands.some((b: any) => b.id === brandId)).toBe(false);
       expect(client2Cats.some((c: any) => c.id === replacementCategoryId)).toBe(true); expect(client2Brands.some((b: any) => b.id === replacementBrandId)).toBe(true);
       expect(edited.name).toBe("Audit Category Edited"); expect(editedBrand.name).toBe("Audit Brand Edited");
