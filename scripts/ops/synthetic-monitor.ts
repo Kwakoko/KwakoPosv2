@@ -340,7 +340,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     syntheticTenantId,
     durationMs: Date.now() - startF,
     status: passF ? "PASS" : "FAIL",
-    evidence: { version: migration.newVersion, preserved: migration.preservedOutboxCount },
+    evidence: { fromVersion: 3, toVersion: 6, preservedBeforeUpgrade: preservedBeforeUpgrade, preservedAfterUpgrade: preservedAfterUpgrade },
     timestamp: new Date().toISOString(),
   });
   console.log(` [F/L] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
