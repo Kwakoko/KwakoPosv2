@@ -45,6 +45,19 @@ function pick(input: any, keys: string[]) {
   return out;
 }
 
+function sanitizeEmployee(row: any): any {
+  if (!row) return row;
+  const { pinCodeHash: _pinCodeHash, ...safe } = row;
+  return normalize(safe);
+}
+
+function employeeCanAccessBranch(ctx: TenantContext, branchId: string): boolean {
+  if (branchId === ctx.branchId) return true;
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((p) => String(p).trim().toLowerCase()));
+  return roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.has("*") || permissions.has("branch.switch");
+}
+
 export class PrismaCommercialRepository {
   constructor(private readonly atomic = new PrismaAtomicCommercialFinanceService()) {}
 
@@ -491,35 +504,156 @@ export class PrismaWorkforceRepository {
   async getJobPositions(ctx: TenantContext) { return normalize(await db.jobPosition.findMany({ where:{tenantId:ctx.tenantId}, orderBy:{title:"asc"} })); }
   async createJobPosition(ctx: TenantContext, req: any) { return normalize(await db.jobPosition.create({ data: { id:req.id||undefined, tenantId:ctx.tenantId, departmentId:req.departmentId??null, title:req.title, positionCode:req.positionCode.toUpperCase(), jobDescription:req.jobDescription??null, payClassification:req.payClassification||"SALARY", defaultSalary:req.defaultSalary??0, defaultHourlyRate:req.defaultHourlyRate??0, defaultCommissionRate:req.defaultCommissionRate??0, schedulePolicy:req.schedulePolicy??null } })); }
 
-  async getEmployees(ctx: TenantContext) { return normalize(await db.employee.findMany({ where:tenantWhere(ctx,false), orderBy:{createdAt:"asc"} })); }
-  async getEmployeeById(ctx: TenantContext, id: string) { return findOne("employee",id,ctx,false); }
+  async getEmployees(ctx: TenantContext) {
+    const rows = await db.employee.findMany({ where: tenantWhere(ctx, true), orderBy: { createdAt: "asc" } });
+    return rows.map(sanitizeEmployee);
+  }
+
+  async getEmployeeById(ctx: TenantContext, id: string) {
+    if (!id) throw new Error("EMPLOYEE_ID_REQUIRED");
+    const row = await db.employee.findFirst({ where: { id, ...tenantWhere(ctx, true) } });
+    return sanitizeEmployee(row);
+  }
+
+  private async requireEmployeeEntity(tx: any, ctx: TenantContext, id: string) {
+    if (!id) throw new Error("EMPLOYEE_ID_REQUIRED");
+    const row = await tx.employee.findFirst({ where: { id, ...tenantWhere(ctx, true) } });
+    if (!row) throw new Error("EMPLOYEE_BOUNDARY_VIOLATION");
+    return row;
+  }
+
+  private async validateEmployeeReferences(tx: any, ctx: TenantContext, input: any, branchId: string, employeeId?: string) {
+    if (!employeeCanAccessBranch(ctx, branchId)) throw new Error("EMPLOYEE_BRANCH_FORBIDDEN");
+    const branch = await tx.branch.findFirst({ where: { id: branchId, tenantId: ctx.tenantId } });
+    if (!branch) throw new Error("EMPLOYEE_BRANCH_INVALID");
+    if (input.userId) {
+      const user = await tx.user.findFirst({ where: { id: input.userId, tenantId: ctx.tenantId } });
+      if (!user || String(user.branchId) !== String(branchId)) throw new Error("EMPLOYEE_USER_INVALID");
+      const linked = await tx.employee.findFirst({ where: { tenantId: ctx.tenantId, userId: input.userId, ...(employeeId ? { NOT: { id: employeeId } } : {}) } });
+      if (linked) throw new Error("EMPLOYEE_USER_ALREADY_LINKED");
+    }
+    if (input.departmentId) {
+      const department = await tx.department.findFirst({ where: { id: input.departmentId, tenantId: ctx.tenantId, branchId } });
+      if (!department) throw new Error("EMPLOYEE_DEPARTMENT_INVALID");
+    }
+    if (input.positionId) {
+      const position = await tx.jobPosition.findFirst({ where: { id: input.positionId, tenantId: ctx.tenantId } });
+      if (!position) throw new Error("EMPLOYEE_POSITION_INVALID");
+      if (input.departmentId && position.departmentId && String(position.departmentId) !== String(input.departmentId)) throw new Error("EMPLOYEE_POSITION_DEPARTMENT_MISMATCH");
+    }
+    if (input.managerId) {
+      const manager = await tx.employee.findFirst({ where: { id: input.managerId, tenantId: ctx.tenantId, branchId } });
+      if (!manager || String(manager.id) === String(employeeId || "")) throw new Error("EMPLOYEE_MANAGER_INVALID");
+    }
+    return branch;
+  }
+
   async createEmployee(ctx: TenantContext, req: any) {
-    const number = req.employeeNumber || `EMP-${String((await db.employee.count({where:{tenantId:ctx.tenantId}}))+1).padStart(5,"0")}`;
-    return normalize(await db.$transaction(async (tx:any)=>{
-      const employee = await tx.employee.create({data:{ id:req.id||undefined, tenantId:ctx.tenantId, branchId:req.branchId||ctx.branchId, userId:req.userId??null,
-        employeeNumber:number, firstName:req.firstName, lastName:req.lastName, preferredName:req.preferredName??null, phone:req.phone??null, email:req.email??null,
-        address:req.address??null, emergencyContact:req.emergencyContact??null, dateOfBirth:req.dateOfBirth?new Date(req.dateOfBirth):null,
-        hireDate:req.hireDate?new Date(req.hireDate):undefined, departmentId:req.departmentId??null, positionId:req.positionId??null, managerId:req.managerId??null,
-        workType:req.workType||"FULL_TIME", contractType:req.contractType||"PERMANENT", pinCodeHash:req.pinCode ? EmployeeEngine.hashPin(req.pinCode) : null }});
-      const initialRecord = await tx.employmentRecord.create({data:{ tenantId:ctx.tenantId, employeeId:employee.id, effectiveDate:employee.hireDate,
-        changeType:"HIRE", departmentId:employee.departmentId, positionId:employee.positionId, branchId:employee.branchId, managerId:employee.managerId,
-        contractType:employee.contractType, payRate:employee.baseSalary, createdById:ctx.userId }});
-      return {employee,initialRecord};
+    const branchId = String(req.branchId || ctx.branchId);
+    return normalize(await db.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", `kwakopos:employee-number:${ctx.tenantId}`);
+      await this.validateEmployeeReferences(tx, ctx, req, branchId);
+      const count = await tx.employee.count({ where: { tenantId: ctx.tenantId } });
+      const number = String(req.employeeNumber || `EMP-${String(count + 1).padStart(4, "0")}`).trim().toUpperCase();
+      if (await tx.employee.findFirst({ where: { tenantId: ctx.tenantId, employeeNumber: number } })) throw new Error("EMPLOYEE_NUMBER_EXISTS");
+      const employee = await tx.employee.create({ data: {
+        id: req.id || undefined, tenantId: ctx.tenantId, branchId, userId: req.userId ?? null,
+        employeeNumber: number, firstName: req.firstName.trim(), lastName: req.lastName.trim(),
+        preferredName: req.preferredName?.trim() || null, phone: req.phone?.trim() || null,
+        email: req.email?.trim().toLowerCase() || null, address: req.address?.trim() || null,
+        emergencyContact: req.emergencyContact?.trim() || null, dateOfBirth: req.dateOfBirth ? new Date(req.dateOfBirth) : null,
+        hireDate: req.hireDate ? new Date(req.hireDate) : undefined, departmentId: req.departmentId ?? null,
+        positionId: req.positionId ?? null, managerId: req.managerId ?? null, workType: req.workType || "FULL_TIME",
+        contractType: req.contractType || "PERMANENT", baseSalary: req.baseSalary ?? 0, hourlyRate: req.hourlyRate ?? 0,
+        commissionRate: req.commissionRate ?? 0, pinCodeHash: req.pinCode ? EmployeeEngine.hashPin(req.pinCode) : null,
+        profilePhotoUrl: null,
+      }});
+      const initialRecord = await tx.employmentRecord.create({ data: {
+        tenantId: ctx.tenantId, employeeId: employee.id, effectiveDate: employee.hireDate, changeType: "HIRE",
+        departmentId: employee.departmentId, positionId: employee.positionId, branchId: employee.branchId,
+        managerId: employee.managerId, contractType: employee.contractType,
+        payRate: employee.baseSalary ?? employee.hourlyRate ?? null, createdById: ctx.userId, reason: "Initial employment",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId, userId: ctx.userId, deviceId: "employee-service",
+        action: "EMPLOYEE_CREATED", entityType: "Employee", entityId: employee.id,
+        metadata: { employeeNumber: number, userId: employee.userId, branchId },
+      }});
+      return { employee: sanitizeEmployee(employee), initialRecord: normalize(initialRecord) };
+    }).catch((error: any) => {
+      if (error?.code === "P2002") throw new Error("EMPLOYEE_NUMBER_EXISTS");
+      throw error;
     }));
   }
 
-  async updateEmployee(ctx: TenantContext, id:string, req:any, reason?:string) {
-    const existing = await this.requireEntity("employee",ctx,id,false);
-    const data=pick(req,["firstName","lastName","preferredName","phone","email","address","emergencyContact","departmentId","positionId","branchId","managerId","status","workType","contractType","baseSalary","hourlyRate","commissionRate","profilePhotoUrl"]);
-    const updated=await db.employee.update({where:{id},data});
-    if(reason || data.departmentId || data.positionId || data.status || data.baseSalary || data.hourlyRate) {
-      await db.employmentRecord.create({data:{tenantId:ctx.tenantId,employeeId:id,effectiveDate:new Date(),changeType:"STATUS_CHANGE",
-        departmentId:updated.departmentId,positionId:updated.positionId,branchId:updated.branchId,managerId:updated.managerId,contractType:updated.contractType,
-        payRate:updated.baseSalary||updated.hourlyRate||null,reason:reason||null,createdById:ctx.userId}});
-    }
-    return normalize(updated);
+  async updateEmployee(ctx: TenantContext, id: string, req: any, reason?: string) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await this.requireEmployeeEntity(tx, ctx, id);
+      const branchId = req.branchId === undefined || req.branchId === null ? String(existing.branchId || ctx.branchId) : String(req.branchId);
+      await this.validateEmployeeReferences(tx, ctx, { ...req, userId: undefined }, branchId, id);
+      const data = pick(req, ["firstName","lastName","preferredName","phone","email","address","emergencyContact","departmentId","positionId","branchId","managerId","status","workType","contractType","baseSalary","hourlyRate","commissionRate","profilePhotoUrl"]);
+      for (const key of ["firstName","lastName","preferredName","phone","email","address","emergencyContact"]) {
+        if (data[key] !== undefined && typeof data[key] === "string") data[key] = data[key].trim();
+      }
+      if (data.email) data.email = data.email.toLowerCase();
+      data.branchId = branchId;
+      if (data.status === "TERMINATED" || data.status === "ARCHIVED") data.terminationDate = existing.terminationDate || new Date();
+      else if (data.status === "ACTIVE" && existing.status === "TERMINATED") data.terminationDate = null;
+      const positionChanged = data.positionId !== undefined && String(data.positionId || "") !== String(existing.positionId || "");
+      const departmentChanged = data.departmentId !== undefined && String(data.departmentId || "") !== String(existing.departmentId || "");
+      const branchChanged = String(branchId) !== String(existing.branchId || "");
+      const payChanged = (data.baseSalary !== undefined && Number(data.baseSalary) !== Number(existing.baseSalary || 0)) || (data.hourlyRate !== undefined && Number(data.hourlyRate) !== Number(existing.hourlyRate || 0)) || (data.commissionRate !== undefined && Number(data.commissionRate) !== Number(existing.commissionRate || 0));
+      const statusChanged = data.status !== undefined && String(data.status) !== String(existing.status);
+      const contractChanged = data.contractType !== undefined && String(data.contractType) !== String(existing.contractType || "");
+      const updated = await tx.employee.update({ where: { id }, data });
+      if (positionChanged || departmentChanged || branchChanged || payChanged || statusChanged || contractChanged || Boolean(reason)) {
+        let changeType = "STATUS_CHANGE";
+        if (statusChanged && data.status === "TERMINATED") changeType = "TERMINATION";
+        else if (positionChanged) changeType = "PROMOTION";
+        else if (branchChanged || departmentChanged) changeType = "TRANSFER";
+        else if (payChanged) changeType = "PAY_ADJUSTMENT";
+        await tx.employmentRecord.updateMany({ where: { tenantId: ctx.tenantId, employeeId: id, endDate: null }, data: { endDate: new Date() } });
+        await tx.employmentRecord.create({ data: {
+          tenantId: ctx.tenantId, employeeId: id, effectiveDate: new Date(), changeType,
+          departmentId: updated.departmentId, positionId: updated.positionId, branchId: updated.branchId, managerId: updated.managerId,
+          contractType: updated.contractType, payRate: updated.baseSalary ?? updated.hourlyRate ?? null,
+          reason: reason || `Updated via ${changeType}`, createdById: ctx.userId,
+        }});
+      }
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: String(updated.branchId || ctx.branchId),
+        userId: ctx.userId, deviceId: "employee-service", action: "EMPLOYEE_UPDATED", entityType: "Employee", entityId: id,
+        metadata: { changedFields: Object.keys(data), reason: reason || null },
+      }});
+      return sanitizeEmployee(updated);
+    }));
   }
-  async getEmploymentHistory(ctx:TenantContext,id:string){await this.requireEntity("employee",ctx,id,false);return normalize(await db.employmentRecord.findMany({where:{tenantId:ctx.tenantId,employeeId:id},orderBy:{effectiveDate:"asc"}}));}
+
+  async archiveEmployee(ctx: TenantContext, id: string, reason?: string) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await this.requireEmployeeEntity(tx, ctx, id);
+      if (existing.status === "ARCHIVED") return sanitizeEmployee(existing);
+      const updated = await tx.employee.update({ where: { id }, data: { status: "ARCHIVED", terminationDate: existing.terminationDate || new Date() } });
+      await tx.employmentRecord.updateMany({ where: { tenantId: ctx.tenantId, employeeId: id, endDate: null }, data: { endDate: new Date() } });
+      await tx.employmentRecord.create({ data: {
+        tenantId: ctx.tenantId, employeeId: id, effectiveDate: new Date(), changeType: "STATUS_CHANGE",
+        departmentId: updated.departmentId, positionId: updated.positionId, branchId: updated.branchId, managerId: updated.managerId,
+        contractType: updated.contractType, payRate: updated.baseSalary ?? updated.hourlyRate ?? null,
+        reason: reason || "Employee archived", createdById: ctx.userId,
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: String(updated.branchId || ctx.branchId),
+        userId: ctx.userId, deviceId: "employee-service", action: "EMPLOYEE_ARCHIVED", entityType: "Employee", entityId: id,
+        metadata: { reason: reason || null },
+      }});
+      return sanitizeEmployee(updated);
+    }));
+  }
+
+  async getEmploymentHistory(ctx: TenantContext, id: string) {
+    const employee = await this.requireEmployeeEntity(db, ctx, id);
+    return normalize(await db.employmentRecord.findMany({ where: { tenantId: ctx.tenantId, employeeId: employee.id }, orderBy: { effectiveDate: "asc" } }));
+  }
 
   async getShiftTemplates(ctx:TenantContext){return normalize(await db.shiftTemplate.findMany({where:tenantWhere(ctx),orderBy:{name:"asc"}}));}
   async createShiftTemplate(ctx:TenantContext,req:any){return normalize(await db.shiftTemplate.create({data:{id:req.id||undefined,tenantId:ctx.tenantId,branchId:req.branchId||ctx.branchId,departmentId:req.departmentId??null,name:req.name,startTime:req.startTime,endTime:req.endTime,breakDurationMinutes:req.breakDurationMinutes??60,workdays:req.workdays||[],requiredHeadcount:req.requiredHeadcount??1}}));}
