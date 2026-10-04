@@ -28,8 +28,8 @@ describe("Authentication credential authority", () => {
 
     expect(refresh).toContain("prisma.user.findFirst");
     expect(refresh).toContain("sessionUser.role?.permissions");
-    expect(refresh).toContain("roles: [effectiveRole]");
-    expect(refresh).toContain("permissions: effectivePermissions");
+    expect(refresh).toContain('roles: [String(sessionUser.role?.name || "ADMIN")]');
+    expect(refresh).toContain("permissions,");
     expect(refresh).not.toContain('roles: ["ADMIN"]');
     expect(refresh).not.toContain('permissions: ["*"]');
   });
