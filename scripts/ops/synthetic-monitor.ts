@@ -308,8 +308,10 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F: PWA Schema Migration Preservation
   // -------------------------------------------------------------------------
   const startF = Date.now();
-  const pwaDb = new LocalIndexedDbStore(3, `kwakopos-synthetic-pwa-${randomUUID()}`);
-  pwaDb.recordOutboxMutation({
+  const pwaDbName = `kwakopos-synthetic-pwa-${randomUUID()}`;
+  const pwaV3 = new LocalIndexedDbStore(3, pwaDbName);
+  await pwaV3.ready;
+  pwaV3.recordOutboxMutation({
     id: "OP-PWA-01",
     entityType: "StockAdjustment",
     entityId: randomUUID(),
@@ -321,8 +323,18 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     tenantId: syntheticTenantId,
     branchId: syntheticBranchId,
   });
-  const migration = await pwaDb.migrateToVersion(6);
-  const passF = migration.previousVersion === 3 && migration.newVersion === 6 && migration.preservedOutboxCount === 1;
+  await pwaV3.flushPersistence();
+  const preservedBeforeUpgrade = pwaV3.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
+  pwaV3.close();
+
+  // Re-open the same physical database at the authoritative V6 schema. This exercises
+  // the real IndexedDB onupgradeneeded migration path while avoiding the higher-level
+  // migration coordinator's recovery bookkeeping in this synthetic harness.
+  const pwaV6 = new LocalIndexedDbStore(6, pwaDbName);
+  await pwaV6.ready;
+  await pwaV6.refreshStoresFromNative(["syncOutbox", "syncMetadata"]);
+  const preservedAfterUpgrade = pwaV6.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
+  const passF = preservedBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
