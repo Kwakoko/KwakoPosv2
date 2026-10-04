@@ -17,6 +17,7 @@ import {
   refreshSession as apiRefreshSession,
   validateSession as apiValidateSession,
   heartbeatSession as apiHeartbeatSession,
+  recordSessionEvent as apiRecordSessionEvent,
 } from "../services/apiClient.js";
 import {
   IdleDetector,
@@ -26,6 +27,7 @@ import {
   sessionSyncService,
 } from "../session/index.js";
 import { captureRegisteredDrafts, restoreSessionDrafts, type SessionDraft } from "../session/sessionDraftStore.js";
+import { saveDurableSessionState, clearDurableSessionState } from "../session/sessionStateStore.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
@@ -745,6 +747,21 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     setOfflineExpiresAt(null);
     setSessionStatus("AUTHENTICATED_ONLINE");
     setSessionWarningOpen(false);
+    void saveDurableSessionState({
+      sessionId: stored?.sessionId || "",
+      tenantId: authUser.tenantId,
+      branchId: authUser.branchId,
+      userId: authUser.id,
+      deviceId: "web-session",
+      status: "AUTHENTICATED_ONLINE",
+      authenticatedAt: now,
+      lastOnlineAt: now,
+      lastActivityAt: now,
+      serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+      lastValidatedAt: now,
+      localLogoutPending: false,
+    });
+    void apiRecordSessionEvent("SESSION_RESTORED", { source: "login" });
     setSessionRedirectPath(null);
     const drafts = restoreSessionDrafts(authUser.tenantId, authUser.id);
     setRestoredDrafts(drafts);
@@ -785,6 +802,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
     setUser(null);
     setSessionWarningOpen(false);
+    void clearDurableSessionState();
     setSessionStatus(reason === "SESSION_TIMEOUT" ? "EXPIRED" : reason === "SESSION_REVOKED" ? "REVOKED" : reason === "SESSION_LOCKED" ? "OFFLINE_LOCKED" : "LOGGED_OUT");
     if (redirectOnExpiry && currentPath !== "/login" && currentPath !== "/auth/login") setSessionRedirectPath(currentPath);
   }, [db, user]);
@@ -877,6 +895,21 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         }
         setSessionStatus("AUTHENTICATED_ONLINE");
         setOfflineExpiresAt(null);
+        void saveDurableSessionState({
+          sessionId: String(getStoredSession()?.sessionId || ""),
+          tenantId: user.tenantId,
+          branchId: user.branchId,
+          userId: user.id,
+          deviceId: "web-session",
+          status: "AUTHENTICATED_ONLINE",
+          authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
+          lastOnlineAt: Date.now(),
+          lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
+          serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+          lastValidatedAt: Date.now(),
+          localLogoutPending: false,
+        });
+        void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
       })
       .catch(async () => {
         if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
@@ -908,7 +941,10 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
         return;
       }
       if (remaining <= sessionPolicy.warningDurationMs) {
-        if (!sessionWarningOpen) sessionSyncService.broadcast("SESSION_WARNING", { sessionId: getStoredSession()?.sessionId || null, remainingMs: remaining });
+        if (!sessionWarningOpen) {
+          sessionSyncService.broadcast("SESSION_WARNING", { sessionId: getStoredSession()?.sessionId || null, remainingMs: remaining });
+          void apiRecordSessionEvent("SESSION_WARNING_SHOWN", { remainingMs: remaining });
+        }
         setSessionWarningOpen(true);
       } else if (sessionWarningOpen) {
         setSessionWarningOpen(false);
