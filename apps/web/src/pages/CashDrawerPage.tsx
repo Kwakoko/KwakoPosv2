@@ -28,7 +28,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
