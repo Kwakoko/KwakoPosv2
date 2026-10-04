@@ -44,6 +44,33 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       updatedAt: new Date().toISOString(),
     };
     db.saveVariantLocal(variant);
+
+    // Ledger is the inventory authority. Seed the baseline as an opening-stock
+    // ledger fact so POS deductions never derive authority from inventoryQuantity alone.
+    db.stockLedger.set(`opening-${variantId}`, {
+      id: `opening-${variantId}`,
+      tenantId: "tenant-integ-1",
+      branchId: "branch-integ-1",
+      productId,
+      variantId,
+      movementType: "OPENING_STOCK",
+      referenceType: "ADJUSTMENT",
+      referenceId: `opening-${variantId}`,
+      quantityBefore: 0,
+      quantityChange: 100,
+      quantity: 100,
+      quantityAfter: 100,
+      unitCost: 28000,
+      totalCost: 2800000,
+      deviceId: "TEST-FIXTURE",
+      operationId: `opening-${variantId}`,
+      idempotencyKey: `OPENING-${variantId}`,
+      notes: "Integration fixture baseline",
+      synced: true,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    } as any);
+    await db.flushPersistence();
   });
 
   it("adds 5 offline sales, retries with exponential backoff on failure, and reconciles ledger and inventory consistently", async () => {
@@ -159,7 +186,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
 
     // 6. Verify ledger integrity: 5 distinct sale entries exist totaling -10
     const ledgerEntries = Array.from(db.stockLedger.values()).filter(
-      (entry) => entry.variantId === variantId
+      (entry) => entry.variantId === variantId && String((entry as any).referenceId || "").startsWith("SALE-OFFLINE-SEQ-"),
     );
     expect(ledgerEntries.length).toBe(5);
     const totalDeducted = ledgerEntries.reduce(
