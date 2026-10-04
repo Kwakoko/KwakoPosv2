@@ -39,3 +39,24 @@ The certification asserts:
 
 ## Remaining operational distinction
 Device-local sync queue and active cash-shift state remain device/terminal operational state; they are not treated as enterprise business KPIs.
+
+
+## Final Dashboard Analytics Production Closure — 2026-10-04
+
+The dashboard financial surface is now protected by an explicit production lock.
+
+### Closed findings
+- Payment and return analytics enforce tenant + branch ownership across relational joins.
+- Top Products exposes independent revenue and units rankings and the UI reorders by the selected metric.
+- Recent Orders resolves cashier identity through the tenant-scoped authoritative User record.
+- Payment donut geometry uses raw metric values; rounded percentages remain presentation-only.
+- Recent Orders labels distinguish loaded rows from global totals and label synchronization status explicitly.
+
+### Certification
+- Dedicated integration certification: `tests/integration/dashboard-final-closures.test.ts`.
+- Existing financial closure certification retained: `tests/integration/dashboard-financial-closures.test.ts`.
+- `certify:dashboard-lock` hashes the audited source/workflow files and checks the semantic invariants.
+- The dashboard lock is wired into CI, production candidate certification, and exact-main production release.
+- Local exact-branch validation passed both dashboard integration suites and both production locks with exit code 0.
+
+A dashboard change is not release-ready merely because a narrower functional test is green. A change to any locked dashboard source, certification test, package hook, or production workflow produces lock drift and blocks certification until the lock is intentionally reviewed and refreshed.
