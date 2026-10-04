@@ -39,7 +39,28 @@ export function compareSemVer(v1, v2) {
     if (s1.prerelease && !s2.prerelease)
         return -1;
     if (s1.prerelease && s2.prerelease) {
-        return s1.prerelease.localeCompare(s2.prerelease);
+        const left = s1.prerelease.split(".");
+        const right = s2.prerelease.split(".");
+        const length = Math.max(left.length, right.length);
+        for (let i = 0; i < length; i += 1) {
+            if (left[i] === undefined)
+                return -1;
+            if (right[i] === undefined)
+                return 1;
+            const leftNumeric = /^\d+$/.test(left[i]);
+            const rightNumeric = /^\d+$/.test(right[i]);
+            if (leftNumeric && rightNumeric) {
+                const diff = Number(left[i]) - Number(right[i]);
+                if (diff !== 0)
+                    return diff;
+            }
+            else if (leftNumeric !== rightNumeric) {
+                return leftNumeric ? -1 : 1;
+            }
+            else if (left[i] !== right[i]) {
+                return left[i] < right[i] ? -1 : 1;
+            }
+        }
     }
     return 0;
 }
