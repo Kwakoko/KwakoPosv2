@@ -243,6 +243,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [D/F] ${passD ? "✓" : "✗"} Synthetic Test D (Multi-Device Convergence to Browser B = 75): ${passD ? "PASS" : "FAIL"}`);
+  bADb.close();
+  bBDb.close();
 
   // -------------------------------------------------------------------------
   // SYNTHETIC TEST E: Offline Mutation Outbox Queuing & Reconnect Sync
@@ -285,6 +287,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [E/F] ${passE ? "✓" : "✗"} Synthetic Test E (Offline Outbox Durability & Sync Clearance): ${passE ? "PASS" : "FAIL"}`);
+  offlineDb.close();
 
   // -------------------------------------------------------------------------
   // SYNTHETIC TEST F: PWA Schema Migration Preservation
@@ -311,6 +314,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [F/L] ${passF ? "✓" : "✗"} Synthetic Test F (PWA Schema Upgrade Outbox Preservation): ${passF ? "PASS" : "FAIL"}`);
+  pwaDb.close();
 
   // -------------------------------------------------------------------------
   // SYNTHETIC TEST G: Product -> Variant -> Sale -> Stock Ledger Deduction (100 - 5 = 95)
@@ -465,6 +469,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [K/L] ${passK ? "✓" : "✗"} Synthetic Test K (Multi-Device A -> Server -> B Sync Convergence): ${passK ? "PASS" : "FAIL"}`);
+  dbA.close();
+  dbB.close();
 
   // -------------------------------------------------------------------------
   // SYNTHETIC TEST L: Cashier Session Lifecycle & Drawer Variance Reconciliation
@@ -663,6 +669,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     timestamp: new Date().toISOString(),
   });
   console.log(` [F06/F08] ${passF06 ? "✓" : "✗"} Synthetic Test F06 (Multi-Device Financial Mutation Sync Convergence): ${passF06 ? "PASS" : "FAIL"}`);
+  dbStoreF06A.close();
+  dbStoreF06B.close();
 
 
   // -------------------------------------------------------------------------
