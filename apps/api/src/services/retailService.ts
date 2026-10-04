@@ -33,7 +33,6 @@ export class RetailService {
   private stockRepo: ScopedStockRepository;
   private commercialRepo: ScopedCommercialRepository;
 
-  private settingsMap: Map<string, RetailSettings> = new Map();
   private promotionsMap: Map<string, RetailPromotion> = new Map();
   private auditEventsMap: Map<string, RetailAuditEvent[]> = new Map();
 
