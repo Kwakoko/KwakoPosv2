@@ -8,6 +8,7 @@ import { globalReleaseService } from "./services/releaseService.js";
 import { globalReceiptService } from "./services/receiptService.js";
 import { receiptRoutes } from "./routes/receiptRoutes.js";
 import { traVfdRoutes } from "./routes/traVfdRoutes.js";
+import { globalSettingsService } from "./services/settingsService.js";
 import { startTraVfdReconciliationWorker } from "./services/traVfdService.js";
 import { tenantOnboardingRoutes } from "./routes/tenantOnboardingRoutes.js";
 import { legalGovernanceRoutes } from "./routes/legalGovernanceRoutes.js";
@@ -93,6 +94,8 @@ import {
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
   CreateExpenseRequestSchema,
+  PayExpenseRequestSchema,
+  VoidExpenseRequestSchema,
   CreateAccountRequestSchema,
   UpdateAccountRequestSchema,
   CreateFiscalYearRequestSchema,
@@ -277,6 +280,17 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
+  const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
+  const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
+  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
+  return ctx;
+}
+
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
   /** Pre-loaded config — skips env re-read when provided. */
@@ -437,6 +451,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         code === "TENANT_BOUNDARY_VIOLATION" ||
         code === "INVARIANT_007_VIOLATION" ||
         msg.includes("TENANT_BOUNDARY_VIOLATION") ||
+        msg.includes("EMPLOYEE_BOUNDARY_VIOLATION") ||
         msg.includes("INVARIANT_007_VIOLATION") ||
         msg.includes("Cross-tenant") ||
         msg.toLowerCase().includes("access denied") ||
@@ -523,9 +538,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       environment: config.NODE_ENV,
     });
 
-    if (req.url.startsWith("/api/v1/workforce/") && !req.url.startsWith("/api/v1/workforce-ops/")) {
-      req.raw.url = req.url.replace("/api/v1/workforce/", "/api/v1/workforce-ops/");
-    } else if (req.url === "/api/v1/commercial/portfolio") {
+    if (req.url === "/api/v1/commercial/portfolio") {
       req.raw.url = "/api/v1/commercial/summary";
     }
 
@@ -1948,6 +1961,33 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return ctx;
   };
 
+  const normalizeExpenseResponse = (expense: any) => {
+    if (!expense) return expense;
+    return {
+      ...expense,
+      amount: Number(expense.amount),
+      incurredAt: expense.incurredAt instanceof Date ? expense.incurredAt.toISOString() : expense.incurredAt,
+      createdAt: expense.createdAt instanceof Date ? expense.createdAt.toISOString() : expense.createdAt,
+      updatedAt: expense.updatedAt instanceof Date ? expense.updatedAt.toISOString() : expense.updatedAt,
+      paidAt: expense.paidAt instanceof Date ? expense.paidAt.toISOString() : expense.paidAt,
+      voidedAt: expense.voidedAt instanceof Date ? expense.voidedAt.toISOString() : expense.voidedAt,
+    };
+  };
+
+  const assertExpenseAuthority = (req: any, action: "view" | "create" | "void") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+    const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const hasWildcard = permissions.includes("*");
+    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
+    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
+    const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
+    const allowed = action === "view" ? canView : action === "create" ? canCreate : canVoid;
+    if (!allowed) throw new Error("FORBIDDEN: Expense finance permission required");
+    return ctx;
+  };
+
   // Cash Sessions & Drawer Reconciliation
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
@@ -1961,12 +2001,56 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: session || null };
   });
 
-  server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
+  server.get("/api/v1/expenses", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expenses = await atomicCommercialFinance.getExpenses(ctx);
+    return { success: true, data: expenses.map(normalizeExpenseResponse) };
+  });
+
+  server.post("/api/v1/expenses", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
     const validated = CreateExpenseRequestSchema.parse(req.body);
-    const expense = atomicCommercialFinance
-      ? await atomicCommercialFinance.recordExpense(req.tenantContext!, validated)
-      : await commercialRepository.recordExpense(req.tenantContext!, validated);
-    return reply.status(201).send({ success: true, data: expense });
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.recordExpense(ctx, {
+      ...validated,
+      deviceId: req.tenantContext?.userId ? String(req.headers["x-device-id"] || "web") : "web",
+    });
+    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  server.post("/api/v1/expenses/:id/pay", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const validated = PayExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.payExpense(ctx, String((req.params as any).id), {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(200).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  server.post("/api/v1/expenses/:id/void", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "void");
+    const validated = VoidExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.voidExpense(ctx, String((req.params as any).id), validated.reason, {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(200).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  // Legacy cash-session expense endpoint retained as a compatibility alias.
+  server.post("/api/v1/cash-sessions/expense", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const validated = CreateExpenseRequestSchema.parse(req.body);
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const expense = await atomicCommercialFinance.recordExpense(ctx, {
+      ...validated,
+      deviceId: String(req.headers["x-device-id"] || "web"),
+    });
+    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
   });
 
 
@@ -2306,33 +2390,45 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: position });
   });
 
-  // Employees & Employment Records
+  // Employees & Employment Records — PostgreSQL-authoritative HR service.
   server.get("/api/v1/workforce/employees", async (req) => {
-    const employees = await workforceRepository.getEmployees(req.tenantContext!);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const employees = await workforceRepository.getEmployees(ctx);
     return { success: true, data: employees };
   });
 
   server.post("/api/v1/workforce/employees", async (req, reply) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_CREATE");
     const validated = CreateEmployeeRequestSchema.parse(req.body);
-    const result = await workforceRepository.createEmployee(req.tenantContext!, validated);
+    const result = await workforceRepository.createEmployee(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/workforce/employees/:id", async (req, reply) => {
-    const employee = await workforceRepository.getEmployeeById(req.tenantContext!, (req.params as any).id);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const employee = await workforceRepository.getEmployeeById(ctx, (req.params as any).id);
     if (!employee) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Employee not found" } });
     return { success: true, data: employee };
   });
 
   server.put("/api/v1/workforce/employees/:id", async (req) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_EDIT");
     const validated = UpdateEmployeeRequestSchema.parse(req.body);
     const reason = (req.body as any)?.reason;
-    const updated = await workforceRepository.updateEmployee(req.tenantContext!, (req.params as any).id, validated, reason);
+    const updated = await workforceRepository.updateEmployee(ctx, (req.params as any).id, validated, reason);
     return { success: true, data: updated };
   });
 
+  server.post("/api/v1/workforce/employees/:id/archive", async (req) => {
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_ARCHIVE");
+    const reason = String((req.body as any)?.reason || "").trim() || "Employee archived";
+    const archived = await workforceRepository.archiveEmployee(ctx, (req.params as any).id, reason);
+    return { success: true, data: archived };
+  });
+
   server.get("/api/v1/workforce/employees/:id/employment-history", async (req) => {
-    const history = await workforceRepository.getEmploymentHistory(req.tenantContext!, (req.params as any).id);
+    const ctx = requireEmployeePermission(req, "EMPLOYEE_VIEW");
+    const history = await workforceRepository.getEmploymentHistory(ctx, (req.params as any).id);
     return { success: true, data: history };
   });
 
@@ -3694,31 +3790,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     });
   });
 
-  server.get("/api/v1/retail/settings", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
+  server.get("/api/v1/settings", async (req, reply) => {
     const ctx = requireTenantContext(req);
-    return reply.status(200).send({
-      success: true,
-      data: globalRetailService.getSettings(ctx),
-    });
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.read") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_READ_REQUIRED", message: "settings.read permission is required." } });
+    return reply.send({ success: true, data: await globalSettingsService.getEffectiveSettings(ctx) });
+  });
+
+  server.put("/api/v1/settings", async (req, reply) => {
+    const ctx = requireTenantContext(req);
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
+    const body = (req.body as any) || {};
+    const records = Array.isArray(body.records) ? body.records : [body];
+    return reply.send({ success: true, data: await globalSettingsService.upsertBatch(ctx, records) });
+  });
+
+  server.get("/api/v1/retail/settings", async (req, reply) => {
+    const ctx = requireTenantContext(req);
+    const settings = await globalSettingsService.getSettings(ctx);
+    return reply.send({ success: true, data: settings["retail.config"] });
   });
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
     const ctx = requireTenantContext(req);
-    const body = (req.body as any) || {};
-    const updated = globalRetailService.updateSettings(ctx, body);
-    return reply.status(200).send({
-      success: true,
-      data: updated,
-    });
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
+    const result = await globalSettingsService.upsertBatch(ctx, [{ key: "retail.config", value: (req.body as any) || {}, scope: "BRANCH" }]);
+    return reply.send({ success: true, data: result[0] });
   });
 
   server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
     const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
-    const sale = globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
+    const sale = await globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
     return reply.status(201).send({
       success: true,
       data: sale,
@@ -5228,14 +5340,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalSupplyChainService.getDashboardMetrics(tenantId) });
   });
 
-  // ── Phase 37 — Workforce Operating Layer (KWOL v1.0.0) ──
+  // Phase 37 legacy Workforce-ops employee surface is quarantined in production.
   server.get("/api/v1/workforce-ops/employees", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative /api/v1/workforce/employees API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
     return reply.status(200).send({ success: true, data: globalWorkforceService.listEmployees(tenantId) });
   });
 
   server.post("/api/v1/workforce-ops/employees", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative /api/v1/workforce/employees API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const body = (req.body as any) || {};
     const result = globalWorkforceService.registerEmployee(body);
@@ -5243,6 +5357,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/transition", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -5251,6 +5366,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/onboard", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};
@@ -5259,6 +5375,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/workforce-ops/employees/:id/offboard", async (req, reply) => {
+    if (productionPersistence) return reply.status(410).send({ success: false, error: { code: "LEGACY_EMPLOYEE_API_DISABLED", message: "Use the PostgreSQL-authoritative Employee lifecycle API." } });
     const { globalWorkforceService } = await import("./services/workforceService.js");
     const { id } = req.params as { id: string };
     const body = (req.body as any) || {};

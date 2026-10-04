@@ -6,7 +6,7 @@
  *   2. 3-Level Security Scope Model (Platform Scope, Tenant Scope, Branch Scope)
  *   3. Multi-Branch Role Assignment Engine (Different roles per branch per employee)
  *   4. Custom Role Builder (Tenant-specific custom roles with granular permission toggles)
- *   5. Employee HR Profiles (National ID, Employee Code, Emergency Contact, Salary Type)
+ *   5. Employee HR Profiles (Employee Code, Emergency Contact, Salary Type, lifecycle status)
  *   6. POS Quick PIN Security & Session Controls (Failed attempt locks, 2FA status)
  *   7. Authoritative RBAC Permission Matrix (Derived from V2 RBAC model & system manifests)
  *   8. Active Sessions Inspector & Immediate Token Revocation
@@ -20,10 +20,10 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Users, Shield, Key, Lock, CheckCircle, AlertTriangle, Plus, Search,
   Filter, Eye, Edit2, Trash2, Clock, MapPin, UserCheck, Activity, ChevronRight, RefreshCw, X,
-  Building, Briefcase, FileText, UserPlus, Sliders, ShieldCheck, Terminal, Cpu, Zap
+  Building, Briefcase, FileText, UserPlus, Sliders, ShieldCheck, Terminal, Cpu, Zap, Archive
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 // User and Role mutations are privileged PostgreSQL operations; they never use the business sync outbox.
 
@@ -48,11 +48,11 @@ export interface EmployeeProfileRecord {
   id: string;
   userId: string;
   employeeNumber: string;
-  nationalId: string;
   address: string;
   emergencyContact: string;
   employmentDate: string;
   salaryType: "MONTHLY" | "HOURLY" | "COMMISSION" | "DAILY";
+  status: "ACTIVE" | "ON_LEAVE" | "SUSPENDED" | "TERMINATED" | "ARCHIVED";
   notes?: string;
 }
 
@@ -100,7 +100,7 @@ export interface AuditLogRecord {
 
 const SYSTEM_ROLES: CustomRoleRecord[] = [
   { id: "role-owner", name: "Tenant Owner", slug: "tenant-owner", description: "Full administrative control across all tenant branches", isSystemRole: true, isCustom: false, permissions: ["*"] },
-  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.manage", "reports.view"] },
+  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.read", "settings.manage", "reports.view"] },
   { id: "role-manager", name: "Branch Manager", slug: "branch-manager", description: "Branch operations, stock adjustments, purchase orders, and shift approvals", isSystemRole: true, isCustom: false, permissions: ["sales.*", "inventory.*", "purchase.*", "staff.view", "reports.branch"] },
   { id: "role-cashier", name: "Cashier / POS Operator", slug: "cashier", description: "Point of sale registers, receipts, customer creation, and cash collection", isSystemRole: true, isCustom: false, permissions: ["sales.create", "payment.receive", "customer.create", "receipt.print"] },
   { id: "role-inventory", name: "Inventory Officer", slug: "inventory-officer", description: "Stock intake, FEFO batching, supplier purchase orders, stock adjustments", isSystemRole: true, isCustom: false, permissions: ["product.manage", "stock.adjust", "purchase.manage", "supplier.manage"] },
@@ -196,6 +196,28 @@ export const UsersRolesPage: React.FC = () => {
           }))
         : [];
 
+      const employeesRes = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/workforce/employees");
+      const profiles: Record<string, EmployeeProfileRecord> = {};
+      if (employeesRes.success && Array.isArray(employeesRes.data)) {
+        for (const employee of employeesRes.data) {
+          if (!employee?.userId) continue;
+          const salaryType: EmployeeProfileRecord["salaryType"] =
+            Number(employee.baseSalary || 0) > 0 ? "MONTHLY"
+              : Number(employee.hourlyRate || 0) > 0 ? "HOURLY"
+                : Number(employee.commissionRate || 0) > 0 ? "COMMISSION" : "DAILY";
+          profiles[String(employee.userId)] = {
+            id: String(employee.id),
+            userId: String(employee.userId),
+            employeeNumber: String(employee.employeeNumber || ""),
+            address: String(employee.address || ""),
+            emergencyContact: String(employee.emergencyContact || ""),
+            employmentDate: employee.hireDate ? new Date(employee.hireDate).toLocaleDateString() : "",
+            salaryType,
+            status: String(employee.status || "ACTIVE") as EmployeeProfileRecord["status"],
+          };
+        }
+      }
+      setEmployeeProfiles(profiles);
       setUsersList(users);
       setCustomRoles(roles);
       setFormRole((previous) => roles.some((role) => role.name === previous) ? previous : (roles[0]?.name || ""));
@@ -284,27 +306,14 @@ export const UsersRolesPage: React.FC = () => {
           password: formPassword,
           role: formRole,
           branchId: availableBranches.find((branch) => branch.name === formBranch)?.id || currentBranchId,
+          createEmployeeProfile: true,
         }),
       });
       if (!response.success || !response.data) {
         toast.error("User not created", response.error?.message || "The authoritative PostgreSQL RBAC service rejected the request.");
         return;
       }
-      const persisted = response.data;
-      setUsersList((prev) => [{
-        id: persisted.id,
-        tenantId: persisted.tenantId,
-        firstName: persisted.firstName || formFirstName.trim(),
-        lastName: persisted.lastName || formLastName.trim(),
-        email: persisted.email || formEmail.trim(),
-        phone: formPhone.trim() || "−",
-        username: persisted.email?.split("@")[0] || formEmail.trim().split("@")[0],
-        role: persisted.role || formRole,
-        branch: persisted.branch || formBranch,
-        status: ["INACTIVE", "SUSPENDED"].includes(String(persisted.status).toUpperCase()) ? "Suspended" : "Active",
-        lastLogin: "—",
-        pinSet: false,
-      }, ...prev]);
+      await loadUsersAndSecurity();
       setIsAddUserOpen(false);
       setFormFirstName("");
       setFormLastName("");
@@ -314,6 +323,28 @@ export const UsersRolesPage: React.FC = () => {
       toast.success("User Created", "User and its audit event were committed to PostgreSQL.");
     } catch (error: any) {
       toast.error("User not created", error?.message || "The authoritative PostgreSQL RBAC service is unavailable.");
+    }
+  };
+
+  const handleArchiveEmployee = async (employee: EmployeeProfileRecord) => {
+    if (!(isSuperAdmin || hasPermission("EMPLOYEE_ARCHIVE") || hasPermission("users.manage"))) {
+      toast.warning("Action Denied", "Employee archive permission is required.");
+      return;
+    }
+    if (!confirm(`Archive employee ${employee.employeeNumber || employee.id}? This keeps the HR history and prevents active workforce use.`)) return;
+    try {
+      const response = await apiFetch<{ success?: boolean; data?: EmployeeProfileRecord; error?: { message?: string } }>(`/api/v1/workforce/employees/${employee.id}/archive`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Employee archived from HR command center" }),
+      });
+      if (!response.success) {
+        toast.warning("Employee not archived", response.error?.message || "The authoritative PostgreSQL HR service rejected the request.");
+        return;
+      }
+      await loadUsersAndSecurity();
+      toast.success("Employee Archived", "Employee status and lifecycle history were committed to PostgreSQL.");
+    } catch (error: any) {
+      toast.warning("Employee not archived", error?.message || "The authoritative PostgreSQL HR service is unavailable.");
     }
   };
 
@@ -499,11 +530,12 @@ export const UsersRolesPage: React.FC = () => {
               <tr>
                 <th>User Account</th>
                 <th>Employee Code</th>
-                <th>National ID (NIDA)</th>
                 <th>Address & Location</th>
                 <th>Emergency Contact</th>
                 <th>Salary Structure</th>
                 <th>Employment Date</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -514,11 +546,18 @@ export const UsersRolesPage: React.FC = () => {
                   <tr key={u.id}>
                     <td className="v2-font-bold">{u.firstName} {u.lastName}</td>
                     <td className="v2-mono v2-text-xs">{emp?.employeeNumber || "—"}</td>
-                    <td className="v2-mono v2-text-xs">{emp?.nationalId || "—"}</td>
                     <td className="v2-text-xs">{emp?.address || "No HR profile persisted"}</td>
                     <td className="v2-text-xs">{emp?.emergencyContact || "—"}</td>
                     <td>{emp ? <span className="badge v2-badge-accent">{emp.salaryType}</span> : <span className="badge v2-badge-warning">NO HR PROFILE</span>}</td>
                     <td className="v2-text-xs v2-text-muted">{emp?.employmentDate || "—"}</td>
+                    <td>{emp ? <span className="badge v2-badge-accent">{emp.status}</span> : <span className="badge v2-badge-warning">NO HR PROFILE</span>}</td>
+                    <td>
+                      {emp && emp.status !== "ARCHIVED" && (
+                        <button type="button" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => void handleArchiveEmployee(emp)} title="Archive employee">
+                          <Archive size={13} /> Archive
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

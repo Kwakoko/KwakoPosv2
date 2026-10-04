@@ -12,9 +12,9 @@ describe("journal recovery tenant/branch scoping", () => {
     const start = source.indexOf(marker);
     expect(start).toBeGreaterThanOrEqual(0);
 
-    const block = source.slice(start, source.indexOf("ORDER BY so.\"createdAt\"", start));
-    expect(block).toContain('cj.tenant_id = so."tenantId"');
-    expect(block).toContain('cj.branch_id = so."branchId"');
-    expect(block).toContain('cj.operation_id = so."operationId"');
+    const block = source.slice(start, source.indexOf("ORDER BY so.created_at", start));
+    expect(block).toContain('cj.tenant_id = so.tenant_id');
+    expect(block).toContain('cj.branch_id = so.branch_id');
+    expect(block).toContain('cj.operation_id = so.operation_id');
   });
 });

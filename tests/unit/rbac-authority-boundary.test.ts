@@ -41,7 +41,7 @@ describe("P0 privileged User/Role authority boundary", () => {
 
   it("keeps privileged entities outside the ordinary sync protocol", () => {
     const sync = read("packages/sync/src/worldStandardPrismaSyncEngine.ts");
-    expect(sync).toContain('"Role", "User", "PlatformSecurity", "SuperAdmin"');
+    expect(sync).toContain('"Role", "User", "Employee", "PlatformSecurity", "SuperAdmin"');
     expect(sync).toContain("PRIVILEGE_ESCALATION_ATTEMPT_DENIED");
   });
 });

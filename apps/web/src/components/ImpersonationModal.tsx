@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Shield, Eye, Building2, GitBranch, ArrowRight, X, AlertTriangle, Loader2 } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useAuth } from "../context/KwakoPosContexts.js";
 
 interface TenantBranch {

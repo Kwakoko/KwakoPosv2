@@ -18,7 +18,7 @@ import {
   startSuperAdminSetup,
   completeSuperAdminSetup,
   SuperAdminSetupDetails,
-} from "../services/apiClient.js";
+} from "../services/applicationApiService.js";
 
 interface SuperAdminSetupModalProps {
   isOpen: boolean;

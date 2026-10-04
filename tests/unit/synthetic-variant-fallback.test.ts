@@ -3,7 +3,7 @@ import { PrismaAtomicCommercialFinanceService } from "@kwakopos2/database";
 import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 
-describe("Synthetic Variant Fail-Closed Governance", () => {
+describe("Synthetic Fallback Variant Auto-Provisioning", () => {
   let tenantCtx: TenantContext;
   let mockDb: any;
   let mockStore: {
@@ -57,6 +57,7 @@ describe("Synthetic Variant Fail-Closed Governance", () => {
         findUnique: async () => null,
         create: async ({ data }: any) => data,
       },
+      cashSession: { findUnique: async () => ({ id: "cash-session-syn", tenantId: tenantCtx.tenantId, branchId: tenantCtx.branchId, cashierId: tenantCtx.userId, status: "OPEN" }) },
       product: {
         findUnique: async ({ where }: any) => mockStore.products.get(where.id) || null,
         update: async ({ where, data }: any) => {
@@ -143,12 +144,15 @@ describe("Synthetic Variant Fail-Closed Governance", () => {
         create: async () => ({ id: "acc-dummy-1" }),
       },
       journalEntry: {
+        findUnique: async () => null,
         count: async () => 0,
         create: async ({ data }: any) => data,
       },
       journalLine: {
+        findMany: async () => [],
         create: async ({ data }: any) => data,
       },
+      auditEvent: { create: async () => ({ id: randomUUID() }) },
       $executeRawUnsafe: async (sql: string, ...params: any[]) => {
         if (sql.includes("sync_conflict_record")) {
           mockStore.conflicts.push({ sql, params });
@@ -161,11 +165,12 @@ describe("Synthetic Variant Fail-Closed Governance", () => {
     };
   });
 
-  it("rejects synthetic variant fabrication when a sale references an unregistered variant", async () => {
+  it("fails closed when sale references an unregistered synthetic fallback variant", async () => {
     const service = new PrismaAtomicCommercialFinanceService(mockDb);
     const productId = randomUUID();
     const syntheticVariantId = `${productId}-default`;
 
+    // Parent product exists, but no variants were defined yet
     mockStore.products.set(productId, {
       id: productId,
       tenantId: tenantCtx.tenantId,
@@ -176,14 +181,30 @@ describe("Synthetic Variant Fail-Closed Governance", () => {
       costPrice: 600,
     });
 
-    await expect(service.createSale(tenantCtx, {
+    const saleReq = {
       id: randomUUID(),
       idempotencyKey: `SALE-${randomUUID()}`,
-      items: [{ productId, variantId: syntheticVariantId, quantity: 3, unitPrice: 1000, unitCost: 600 }],
-      payments: [{ amount: 3000, paymentMethod: "BANK" }],
-    })).rejects.toThrow("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+      cashSessionId: "cash-session-syn",
+      items: [
+        {
+          productId,
+          variantId: syntheticVariantId,
+          quantity: 3,
+          unitPrice: 1000,
+          unitCost: 600,
+        },
+      ],
+      payments: [
+        {
+          amount: 3000,
+          paymentMethod: "CASH",
+        },
+      ],
+    };
 
+    await expect(service.createSale(tenantCtx, saleReq)).rejects.toThrow("FINANCE_VARIANT_BOUNDARY_VIOLATION");
     expect(mockStore.variants.has(syntheticVariantId)).toBe(false);
+
   });
 
   it("detects oversell and logs conflict in sync_conflict_record", async () => {
@@ -215,6 +236,7 @@ describe("Synthetic Variant Fail-Closed Governance", () => {
     const saleReq = {
       id: randomUUID(),
       idempotencyKey: `SALE-OVERSELL-${randomUUID()}`,
+      cashSessionId: "cash-session-syn",
       items: [
         {
           productId,

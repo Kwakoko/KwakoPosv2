@@ -16,7 +16,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/KwakoPosContexts.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
-import { apiFetch } from '../services/apiClient.js';
+import { apiFetch } from '../services/applicationApiService.js';
 import { fetchDashboardKpiSnapshot, type DashboardKpiSnapshot } from '../services/dashboardKpiService.js';
 import { getDashboardCardDefinitions, formatDashboardKpiValue } from '../services/dashboardCardRegistry.js';
 import { DATA_CHANGED_EVENT } from '../services/dataChangeEvent.js';

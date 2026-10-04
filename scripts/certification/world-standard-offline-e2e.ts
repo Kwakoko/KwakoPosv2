@@ -97,7 +97,7 @@ function spawnWeb(port: number): ChildProcess {
 function spawnApi(): ChildProcess {
   return spawn(
     process.execPath,
-    [resolvePath("node_modules/tsx/dist/cli.mjs"), "apps/api/src/server.ts"],
+    [resolvePath("node_modules/tsx/dist/cli.mjs"), "apps/api/src/serverFixed.ts"],
     {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],

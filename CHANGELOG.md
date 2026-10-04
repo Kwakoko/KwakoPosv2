@@ -4,9 +4,11 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-10-03
+## [2.13.0] - 2026-10-04
 
 ### ✨ New Features
+- **sync**: bridge durable domain events to event bus
+- **sync**: add durable domain event journal
 - **reports**: expose authoritative tenant-scoped report data API
 - **core**: materialize authoritative variant stock balance
 - **core**: consolidate conflict resolution and durable rollback authority
@@ -56,8 +58,95 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #49 from Kwakoko/fix/dashboard-kpi-sync-health-20261004
+- **core**: reconcile PR #49 with current main
+- **release**: v2.13.0
+- **core**: Merge pull request #50 from Kwakoko/fix/internal-communication-fabric-closed-loop
+- **auth**: align session persistence contract with server refresh handle
+- **web**: enforce application API boundary for UI
+- **web**: route login API imports through application facade
+- **sync**: prove durable domain event transaction boundary
+- **core**: Merge remote-tracking branch 'origin/fix/dashboard-kpi-sync-health-20261004' into dash-security-temp
+- **web**: route UI API calls through application facade
+- **main**: reconcile canonical P0/P1 remediation branch
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **core**: Merge remote-tracking branch 'origin/main' into dash-security-temp
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: route UI API calls through application facade
+- **web**: add application API facade
+- **sync**: enforce communication fabric boundaries
+- **sync**: add durable domain event bridge coverage
+- **auth**: align session persistence coverage with server-side refresh sessions
+- **release**: v2.13.0
+- **sync**: align variant drill with explicit client variant authority
+- **settings**: prove direct API retry idempotency
+- **settings**: respect append-only audit lifecycle in isolated CI
+- **settings**: assert fail-closed result and preserve append-only audit
+- **dashboard**: assert PostgreSQL product KPI renders in card
+- **sync**: enforce fail-closed sync status labeling
+- **settings**: add dedicated P0/P1 closed-loop workflow
+- **settings**: restore production-certified parity after real closed-loop evidence
+- **settings**: certify update and delete lifecycle without resurrection
+- **settings**: remove obsolete in-memory Retail Settings authority
+- **settings**: require closed-loop Settings evidence
+- **settings**: certify persistence RBAC audit and tenant isolation
+- **settings**: preserve canonical service after bootstrap wiring
+- **settings**: bind Settings status to closed-loop evidence
+- **settings**: make browser Settings verification executable
+- **settings**: await canonical retail settings checkout
+- **release**: v2.13.0
+- **core**: align privileged sync authority contract
+- **release**: v2.13.0
+- **release**: v2.13.0
+- **core**: checkpoint local certification fixes
+- **core**: Merge pull request #42 from Kwakoko/release/auth-transport-lock
+- **core**: enforce auth transport lock before certification
+- **core**: enforce production auth transport lock
+- **core**: wire auth transport lock into release commands
+- **core**: lock web auth transport at build
+- **core**: add production auth transport lock
+- **release**: v2.13.0
+- **core**: checkpoint local production and certification updates
+- **core**: reconcile purchasing sync repair with current main
+- **release**: v2.13.0
+- **core**: Merge pull request #40 from Kwakoko/fix/expenses-p0-p1-20261003
+- **expenses**: add dedicated P0/P1 closed-loop certification gate
+- **core**: remove eslint governance bypass from sync boot effect
+- **core**: refresh vertical command center production lock hash
+- **core**: exempt UI button primitive and disabled informational control from action audit
+- **core**: restore required release manifest brand metadata
+- **core**: refresh navigation lock for current production page sources
+- **release**: v2.13.0
+- **expenses**: assert bank payment posts to bank GL account
 - **ci**: remove redundant scheduled maintenance workflow
 - **ci**: consolidate redundant GitHub Actions gates
+- **expenses**: certify API sync bootstrap and bank posting
+- **expenses**: align finance fixture with canonical Expense contract
+- **expenses**: update legacy Expense fixture to canonical contract
+- **expenses**: certify authoritative lifecycle and tenant isolation
 - **ci**: reduce workflow surface to core gates
 - **sync**: consolidate migration and conflict gates
 - **ci**: retire redundant governance and contract workflows
@@ -195,6 +284,140 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **cert**: normalize candidate workflow YAML line breaks
+- **cert**: make candidate API startup idempotent
+- **cert**: provide local API to synthetic and security gates
+- **cert**: keep local API alive for synthetic monitoring
+- **cert**: correct forensic certification import path
+- **test**: restore path resolver import for session restart proof
+- **cert**: make cleanliness forensic gate self-contained
+- **governance**: align marketplace gate with live certification suite
+- **sync**: synthesize deterministic standard variant in production push
+- **sync**: normalize legacy product prices before variant synthesis
+- **inventory**: make fallback product variant identity deterministic
+- **test**: keep RBAC restart JWT signing key stable
+- **test**: make session restart proof CI-portable and JWT-stable
+- **test**: assert catalog bootstrap with tenant and branch scope
+- **security**: patch Fastify and transitive URL/IP dependencies
+- **ci**: update navigation lock for approved fabric imports
+- **cert**: track current candidate certification workflow hash
+- **cert**: execute security gate against local candidate API
+- **security**: start local API for live acceptance gate
+- **ci**: provide PostgreSQL to security certification
+- **security**: provide database for security certification
+- **cert**: restore clean navigation lock encoding
+- **cert**: restore navigation production lock syntax
+- **web**: normalize fail-closed context errors
+- **web**: fail closed on missing operational context providers
+- **sync-test**: await atomic offline sale stock mutation
+- **governance**: refresh production workflow navigation lock hashes
+- **sync-test**: avoid duplicate sale and stock outbox mutations
+- **sync**: persist and deliver durable domain events
+- **release**: provision candidate test PostgreSQL before integration gates
+- **security**: decouple dependency scanning from release performance gate
+- **ci**: make candidate certification database-complete
+- **sync**: fail closed on missing context and scope cross-tab events
+- **sync**: route retry panel through scoped client sync engine
+- **sync**: minimize cross-tab outbox broadcast payload
+- **sync**: scope legacy outbox dispatcher and minimize cross-tab payload
+- **synthetic**: satisfy authoritative expense contract
+- **test**: make API restart persistence proof CI-portable
+- **sync-test**: seed authoritative opening inventory ledger
+- **ci**: provide PostgreSQL to canonical integration gates
+- **ci**: align synthetic expense fixtures with canonical contract
+- **cert**: launch fixed API server for offline E2E
+- **cert**: generate fresh forensic evidence inside cleanliness gate
+- **cert**: decode UTF-16 source artifacts before forensic control scan
+- **settings**: close all P0/P1 remediation loops
+- **settings**: initialize idempotency journal before Settings replay lookup
+- **security**: refresh vulnerable runtime dependencies
+- **governance**: align marketplace gate with canonical certification authority
+- **governance**: refresh navigation lock for current canonical files
+- **sync**: fail closed when outbox verification is not green
+- **release-lock**: track Settings scope indicator checksum
+- **settings**: expose effective configuration scope in Settings UI
+- **settings**: harden Settings service RBAC and concurrent upserts
+- **settings**: correct untyped Prisma transaction query
+- **sync**: apply Settings in legacy delta path without resurrection
+- **sync**: deliver Settings tombstones in legacy date deltas
+- **settings**: make direct Settings mutations idempotent
+- **settings**: keep database-free unit tests on canonical Settings defaults
+- **certification**: use canonical Settings parity status type
+- **release-lock**: track repaired SettingsPage checksum
+- **settings**: repair Settings JSX conditional closures
+- **settings**: wire VAT enablement and correct Settings tab contract
+- **certification**: remove stale Settings evidence release identity
+- **release-lock**: reconcile current Settings and release-control hashes
+- **settings**: persist locale currency and inventory threshold controls
+- **settings**: update navigation lock to certified SettingsPage
+- **settings**: record full Settings before/after audit state
+- **settings**: enforce settings.manage on sync mutation path
+- **settings**: eliminate final legacy config key and false integration readiness
+- **settings**: remove remaining unscoped POS tax reads
+- **sync**: prioritize Settings before dependent client mutations
+- **settings**: repair canonical Setting sync handler structure
+- **settings**: repair atomic Settings outbox method structure
+- **settings**: hydrate canonical Settings during bootstrap
+- **settings**: enforce Settings management permission in UI
+- **settings**: grant admins explicit Settings read access
+- **settings**: enforce Settings read permission boundary
+- **settings**: resolve existing Setting records for revision journal
+- **settings**: align in-memory Settings sync with canonical tombstones
+- **settings**: preserve stable Setting identity across updates
+- **settings**: make Settings UI tenant-scoped and durably synchronized
+- **settings**: await canonical retail settings during checkout
+- **settings**: make retail runtime consume canonical Settings
+- **settings**: correct retail Settings compatibility endpoint
+- **settings**: scope POS tax configuration by tenant and branch
+- **settings**: apply authoritative Settings delta into scoped IndexedDB
+- **settings**: enforce scoped local config and atomic Settings outbox
+- **settings**: persist Settings in PostgreSQL sync authority
+- **settings**: route Settings through canonical service and RBAC
+- **settings**: add canonical settings service
+- **settings**: add canonical settings migration
+- **settings**: add canonical PostgreSQL Setting model
+- **core**: repair Employee outbox guard syntax
+- **core**: align Employee HR table with canonical fields
+- **core**: close Employee P0/P1 production gaps
+- **sync**: resolve purchasing merge conflict
+- **core**: reconcile local persistence and sync fixes
+- **sync**: align remaining raw SyncOperation recovery queries with PostgreSQL columns
+- **sync**: align Expense change-journal recovery queries with snake_case schema
+- **sync**: map SyncOperation Prisma fields to authoritative snake_case columns
+- **sync**: conditionally use IndexedDB configuration store for Expense delta compatibility
+- **expenses**: align production sync Expense control flow with TypeScript narrowing
+- **expenses**: remove invalid generic argument from untyped Prisma query
+- **ui**: label vertical command center navigation controls
+- **ui**: label sync conflict close control
+- **expenses**: close Prisma Expense model definition
+- **expenses**: reject conflicting direct-create idempotency reuse
+- **expenses**: atomically persist offline replica and Expense outbox mutation
+- **expenses**: reject destructive Expense sync deletes in favor of reversal
+- **sync**: normalize Expense monetary and temporal fields in replication payloads
+- **sync**: preserve complete price history delta payload
+- **expenses**: use full status enum for reads and constrained status for creates
+- **expenses**: restrict create status to pending or paid
+- **expenses**: align in-memory Expense repository with canonical lifecycle
+- **expenses**: exclude voided vouchers from active KPIs and lock empty-state actions
+- **expenses**: reconcile authoritative Expense replica counts and ids
+- **expenses**: expose expense ids in reconciliation contract
+- **expenses**: include expenses in local reconciliation manifest
+- **expenses**: bind paid cash mutations to authoritative local cash session
+- **expenses**: persist authoritative active cash session for offline expense capture
+- **expenses**: align idempotency database default with Prisma schema
+- **expenses**: serialize expense mutations and publish durable sync changes
+- **expenses**: scope revisioned expense replica by tenant and branch
+- **expenses**: apply revisioned Expense changes to tenant-scoped browser replica
+- **expenses**: include authoritative voided state in UI model
+- **expenses**: add expense lifecycle migration
+- **expenses**: make expense idempotency mandatory
+- **expenses**: support Expense production sync lifecycle and replication
+- **expenses**: converge IndexedDB bootstrap and delta replication
+- **expenses**: bind UI to authoritative API and atomic offline mutations
+- **expenses**: add governed authoritative expense API lifecycle
+- **expenses**: enforce authoritative lifecycle and double-entry settlement
+- **expenses**: persist complete expense lifecycle fields
+- **expenses**: establish canonical expense contracts and sync payload
 - **ci**: refresh production workflow lock hash
 - **purchasing**: close authoritative procurement loop
 - **sync**: resolve purchasing merge conflict markers
@@ -442,7 +665,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, Hilda99-D, Kwakoko1, Jack91186, github-actions[bot]
+Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes

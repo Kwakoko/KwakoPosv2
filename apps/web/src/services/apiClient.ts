@@ -83,6 +83,7 @@ export function getStoredSession(): StoredSession | null {
 
 export function setStoredSession(session: StoredSession | null): void {
   if (typeof window === "undefined") return;
+  accessToken = session?.accessToken || null;
   if (!session) {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
@@ -143,7 +144,7 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...((getAccessToken()) ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
         ...(init.headers || {}),
       },
       credentials: "include",
@@ -182,6 +183,7 @@ async function refreshAccessToken(): Promise<string | null> {
           method: "POST",
           body: JSON.stringify({
             sessionId: stored.sessionId,
+            deviceId: getDeviceId(),
             email: stored.user.email,
             tenantId: stored.user.tenantId,
             branchId: stored.user.branchId,
@@ -331,7 +333,6 @@ export async function switchContext(
   }, true);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Failed to switch context");
   accessToken = result.data.accessToken;
-  const existing = getStoredSession();
   setStoredSession({
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,

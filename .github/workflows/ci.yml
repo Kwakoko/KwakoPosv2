@@ -21,6 +21,25 @@ jobs:
     name: Quality Gates — Build, Test, Integration, Version
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_ci?schema=public
+      CI: true
+      NODE_ENV: test
+      KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,6 +54,10 @@ jobs:
         run: npm ci
       - name: Database Generation
         run: npm run db:generate
+      - name: Apply database migrations
+        run: npm run db:migrate
+      - name: Production Auth Transport Lock
+        run: npm run release:auth-lock
       - name: Lint
         run: npm run lint
       - name: Build

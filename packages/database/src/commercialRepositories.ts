@@ -357,10 +357,7 @@ export class ScopedCommercialRepository {
     for (const item of req.items) {
       const variant = this.store.variants.get(item.variantId);
       if (!variant) throw new Error(`POS_VARIANT_NOT_FOUND:${item.variantId}`);
-      if (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId || variant.isActive === false) {
-        throw new Error(`POS_VARIANT_BOUNDARY_VIOLATION:${item.variantId}`);
-      }
-      if (item.productId && variant.productId !== item.productId) {
+      if (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId || (item.productId !== undefined && variant.productId !== item.productId) || variant.isActive === false) {
         throw new Error(`POS_VARIANT_BOUNDARY_VIOLATION:${item.variantId}`);
       }
       item.productId = variant.productId;
@@ -674,27 +671,37 @@ export class ScopedCommercialRepository {
   }
 
   recordExpense(ctx: TenantContext, req: CreateExpenseRequest): Expense {
-    const id = randomUUID();
+    const id = req.id || randomUUID();
     const now = new Date().toISOString();
+    const paymentMethod = String(req.paymentMethod || "CASH").toUpperCase() as any;
+    const status = String(req.status || "PAID").toUpperCase() as any;
     const expense: Expense = {
       id,
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
-      cashSessionId: req.cashSessionId || null,
+      cashSessionId: status === "PAID" && paymentMethod === "CASH" ? (req.cashSessionId || null) : null,
       category: req.category,
       amount: req.amount,
       reason: req.reason,
+      description: req.description || req.reason,
+      payee: req.payee || "Unspecified Payee",
+      paymentMethod,
+      paymentRef: req.paymentRef || null,
+      status,
+      taxDeductible: Boolean(req.taxDeductible),
       authorizedById: ctx.userId,
-      incurredAt: now,
+      paidById: status === "PAID" ? ctx.userId : null,
+      paidAt: status === "PAID" ? now : null,
+      idempotencyKey: req.idempotencyKey || id,
+      incurredAt: req.incurredAt || now,
       createdAt: now,
+      updatedAt: now,
     };
     this.expenses.set(id, expense);
 
-    if (req.cashSessionId) {
-      const session = this.cashSessions.get(req.cashSessionId);
-      if (session) {
-        session.cashExpensesTotal = (session.cashExpensesTotal || 0) + req.amount;
-      }
+    if (expense.cashSessionId && status === "PAID") {
+      const session = this.cashSessions.get(expense.cashSessionId);
+      if (session) session.cashExpensesTotal = (session.cashExpensesTotal || 0) + req.amount;
     }
     return expense;
   }

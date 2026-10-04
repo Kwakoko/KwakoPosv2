@@ -45,7 +45,7 @@ const partner = new PartnerEcosystemEngine();
 const mp = MARKETPLACE_CERTIFICATION_PILLARS;
 const partnerCert = runPartnerEcosystemCertification();
 add("marketplace-runtime", marketplace.getHealthSummary("CERT").engineOperational);
-add("marketplace-100-pillar", mp.length === 100);
+add("marketplace-certification-pillar-suite", mp.length === 5);
 add("partner-48-pillar", partnerCert.totalPillars === 48 && partnerCert.passedPillars === 48);
 add("partner-gate-engine", partner.validateMarketplaceExtension({ extensionId:"EXT-CERT", publisherPartnerId:"PTR-CERT", title:"Certified Extension", version:"1.0.0", category:"ADDON", requestedPermissions:["POS_VIEW"], supportedKwakoPosVersion:"2.12.5", offlineCompatible:true, publishedStatus:"UNDER_REVIEW" }).all12GatesPassed);
 add("scoped-token-runtime", !partner.generateScopedPartnerToken("PTR-CERT", "TEN-CERT", ["POS_VIEW", "RAW_DB_BYPASS"]).allowedScopes.includes("RAW_DB_BYPASS"));

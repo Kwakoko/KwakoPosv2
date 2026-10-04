@@ -114,15 +114,43 @@ describe("Privileged RBAC PostgreSQL API", () => {
         password: "P0-RBAC-user-password",
         roleId: customRole.id,
         branchId,
+        createEmployeeProfile: true,
       },
     });
     expect(created.statusCode).toBe(201);
     const userId = created.json().data.id;
 
     const userRow = await prisma.user.findUnique({ where: { id: userId } });
+    const employeeRow = await prisma.employee.findFirst({ where: { tenantId, userId } });
+    expect(employeeRow).not.toBeNull();
+    expect(employeeRow?.branchId).toBe(branchId);
+    expect(employeeRow?.userId).toBe(userId);
+    const employeeAudit = await prisma.auditEvent.findFirst({
+      where: { tenantId, entityType: "Employee", entityId: employeeRow!.id, action: "EMPLOYEE_CREATED" },
+    });
+    expect(employeeAudit).not.toBeNull();
     expect(userRow?.tenantId).toBe(tenantId);
     expect(userRow?.roleId).toBe(customRole.id);
     expect(userRow?.phone).toBe("+255700123456");
+
+    const secondBranchId = randomUUID();
+    await prisma.branch.create({
+      data: { id: secondBranchId, tenantId, name: "Branch 2", code: `B2-${secondBranchId.slice(0, 6)}` },
+    });
+    const moved = await app.inject({
+      method: "PUT",
+      url: `/api/v1/users/${userId}`,
+      headers: tenantHeaders,
+      payload: { branchId: secondBranchId },
+    });
+    expect(moved.statusCode).toBe(200);
+    const movedEmployee = await prisma.employee.findFirst({ where: { tenantId, userId } });
+    expect(movedEmployee?.branchId).toBe(secondBranchId);
+    const transfer = await prisma.employmentRecord.findFirst({
+      where: { tenantId, employeeId: employeeRow!.id, changeType: "TRANSFER", branchId: secondBranchId },
+    });
+    expect(transfer).not.toBeNull();
+
     await prisma.deviceSession.create({
       data: {
         id: randomUUID(),

@@ -88,11 +88,8 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
       sequenceNumber: this.receipts.size + 1,
       date: new Date(now),
     });
-    const digitalSignature = req.digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, Number(req.paidAmount || 0), now);
-    const qrCodePayload = req.qrCodePayload || ReceiptEngine.generateQrCodePayload(
-      `local-${receiptNumber}`, receiptNumber, req.transactionId,
-      "https://pos.kwako.app/verify-receipt", digitalSignature
-    );
+    let digitalSignature = req.digitalSignature;
+    let qrCodePayload = req.qrCodePayload;
     const barcodePayload = req.barcodePayload || ReceiptEngine.generateBarcodePayload(receiptNumber);
     let subtotal = 0;
     let taxTotal = 0;
@@ -125,6 +122,8 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     });
 
     const grandTotal = subtotal - discountTotal + taxTotal;
+    digitalSignature = digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, grandTotal, now);
+    qrCodePayload = qrCodePayload || ReceiptEngine.generateQrCodePayload("local-" + receiptNumber, receiptNumber, req.transactionId, "https://pos.kwako.app/verify-receipt", digitalSignature);
     const changeAmount = Math.max(0, req.paidAmount - grandTotal);
 
     const receipt: ReceiptDTO = {

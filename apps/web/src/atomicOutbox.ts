@@ -218,7 +218,15 @@ function patchInstance(db: PatchedStore): void {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: outboxItem.tenantId,
+            branchId: outboxItem.branchId,
+            operationId: outboxItem.id,
+            entityType: outboxItem.entityType,
+            entityId: outboxItem.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
@@ -272,7 +280,15 @@ export async function enqueueOutbox(tx: any, targetDb: LocalIndexedDbStore = def
           window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
           if ("BroadcastChannel" in window) {
             const bc = new BroadcastChannel("kwakopos_sync_channel");
-            bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+            bc.postMessage({
+              type: "OUTBOX_MUTATION",
+              tenantId: outboxItem.tenantId,
+              branchId: outboxItem.branchId,
+              operationId: outboxItem.id,
+              entityType: outboxItem.entityType,
+              entityId: outboxItem.entityId,
+              timestamp: Date.now(),
+            });
             bc.close();
           }
         }
@@ -354,6 +370,8 @@ export async function processOutbox(opts?: {
   retries?: number;
   baseDelay?: number;
   factor?: number;
+  tenantId?: string;
+  branchId?: string;
 }): Promise<{ processed: number; succeeded: number; failed: number }> {
   const targetDb = opts?.db || defaultDb;
   const pushFn = opts?.apiPush || defaultApiPush;
@@ -361,7 +379,30 @@ export async function processOutbox(opts?: {
   const baseDelay = opts?.baseDelay ?? 500;
   const factor = opts?.factor ?? 2;
 
-  const items = await targetDb.outbox.where("status").equals("PENDING").toArray();
+  const allPending = await targetDb.outbox.where("status").equals("PENDING").toArray();
+  const scopes = new Set(
+    allPending
+      .filter((item) => Boolean(item.tenantId))
+      .map((item) => `${item.tenantId}:${item.branchId || ""}`),
+  );
+
+  const inferredTenantId = opts?.tenantId || (scopes.size === 1 ? String(allPending.find((item) => item.tenantId)?.tenantId) : undefined);
+  const inferredBranchId = opts?.branchId || (scopes.size === 1 ? allPending.find((item) => item.tenantId)?.branchId : undefined);
+
+  if (scopes.size > 1 && (!opts?.tenantId || !opts?.branchId)) {
+    throw new Error("SYNC_CONTEXT_REQUIRED: tenantId and branchId are required when multiple outbox scopes are pending");
+  }
+
+  const items = allPending.filter((item) => {
+    if (!inferredTenantId || !inferredBranchId) return !item.tenantId && !item.branchId;
+    return item.tenantId === inferredTenantId && item.branchId === inferredBranchId;
+  });
+
+  for (const item of items) {
+    if (!item.tenantId || !item.branchId) {
+      throw new Error("SYNC_CONTEXT_REQUIRED: every production outbox mutation must carry tenantId and branchId");
+    }
+  }
   let succeeded = 0;
   let failed = 0;
 

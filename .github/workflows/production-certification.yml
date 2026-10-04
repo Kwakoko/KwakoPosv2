@@ -17,6 +17,25 @@ jobs:
     name: Candidate → Build → Tests → Certification — No Production Mutation
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_candidate_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_candidate_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_candidate_ci?schema=public
+      CI: true
+      NODE_ENV: test
+      KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true"
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -45,6 +64,8 @@ jobs:
         run: npx tsx scripts/release/version-consistency-gate.ts
       - name: Generate Prisma client
         run: npm run db:generate
+      - name: Apply database migrations
+        run: npm run db:migrate
       - name: Build all workspaces
         run: npm run build
       - name: Run unit and invariant tests
@@ -53,14 +74,70 @@ jobs:
         run: npm run test:integration
       - name: Run multi-device sync convergence tests
         run: npm run test:sync
+      - name: Start local API for synthetic and security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+            exit 0
+          fi
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-candidate-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-candidate-security-api.log
+          exit 1
       - name: Run synthetic monitoring
         run: npx tsx scripts/ops/synthetic-monitor.ts
       - name: Run foundation certification
         run: npm run certify
       - name: Run full-system certification campaign
         run: npm run certify:campaign
+      - name: Start local API for executable security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+            exit 0
+          fi
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-candidate-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-candidate-security-api.log
+          exit 1
       - name: Run security certification
+        env:
+          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
         run: npm run certify:security
+      - name: Stop local API
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/kwakopos-candidate-security-api.pid ]]; then
+            kill "$(cat /tmp/kwakopos-candidate-security-api.pid)" 2>/dev/null || true
+          fi
+          pkill -P "$(cat /tmp/kwakopos-candidate-security-api.pid 2>/dev/null)" 2>/dev/null || true
       - name: Assert production mutation boundary
         shell: bash
         run: |

@@ -263,6 +263,7 @@ export const VerticalCommandCenterPage: React.FC<VerticalCommandCenterPageProps>
                   aria-label={tab}
                   className={`v2-btn v2-btn-sm ${isActive ? "v2-btn-primary" : "v2-btn-ghost"}`}
                   aria-current={isActive ? "page" : undefined}
+                  aria-label={`Open ${tab} command center`}
                   onClick={() => setActiveTab(tab)}
                   style={{ whiteSpace: "nowrap" }}
                 >

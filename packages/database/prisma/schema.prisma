@@ -864,14 +864,29 @@ model Expense {
   category       String
   amount         Decimal      @db.Decimal(12, 2)
   reason         String
+  description    String       @default("")
+  payee          String       @default("")
+  paymentMethod  String       @default("CASH")
+  paymentRef     String?
+  status         String       @default("PAID") // PENDING, PAID, VOIDED
+  taxDeductible  Boolean      @default(false)
   authorizedById String?
+  paidById       String?
+  paidAt         DateTime?
+  voidedById     String?
+  voidedAt       DateTime?
+  voidReason     String?
+  idempotencyKey String
   incurredAt     DateTime     @default(now())
   createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
 
+  @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, incurredAt])
+  @@index([tenantId, branchId, status, incurredAt])
   @@map("expenses")
 }
 
@@ -916,7 +931,7 @@ model SyncOperation {
   branchId        String    @map("branch_id")
   deviceId        String    @map("device_id")
   operationId     String    @map("operation_id")
-  entityType      String    @map("entity_type") // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession
+  entityType      String    @map("entity_type") // Product, ProductVariant, StockAdjustment, StockLedger, Customer, Supplier, Sale, PurchaseOrder, Payment, CashSession, Expense
   entityId        String    @map("entity_id")
   operationType   String    @map("operation_type") // CREATE, UPDATE, DELETE
   payload         Json
@@ -1093,6 +1108,25 @@ model ProductVariantBalance {
   @@unique([tenantId, branchId, variantId])
   @@index([tenantId, branchId, productId])
   @@map("product_variant_balances")
+}
+
+model Setting {
+  id         String   @id @default(uuid())
+  tenantId   String
+  branchId   String?
+  userId     String?
+  scope      String   @default("TENANT")
+  key        String
+  value      Json
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId, branchId, scope, key, isActive])
+  @@index([tenantId, userId, scope, key, isActive])
+  @@index([tenantId, key, updatedAt])
+  @@map("settings")
 }
 
 model AuditEvent {

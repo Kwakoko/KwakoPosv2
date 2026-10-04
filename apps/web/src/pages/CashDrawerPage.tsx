@@ -28,7 +28,7 @@ import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { CashCalculatorModal } from "../components/UI/CashCalculatorModal.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type DrawerTab = "active" | "denominations" | "blind" | "reconciliation" | "reports" | "safe" | "nosale" | "ledger" | "history" | "hardware";
 
@@ -240,6 +240,12 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setBlindDeclaredCash(Number(activeShift.actualCash ?? 0));
         setBlindCountDone(Boolean(activeShift.countSealedAt));
         setBlindCountSealedAt(activeShift.countSealedAt ? String(activeShift.countSealedAt) : null);
+        db.saveConfigurationLocal("active_cash_session", {
+          id: String(activeShift.id),
+          sessionNumber: String(activeShift.sessionNumber || activeShift.id),
+          status: String(activeShift.status || "OPEN"),
+          openedAt: activeShift.openedAt ? String(activeShift.openedAt) : null,
+        }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
 
         const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
         let cSales = 0;

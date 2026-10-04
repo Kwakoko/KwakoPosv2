@@ -96,12 +96,23 @@ describe("KwakoPos v2 — Convergence Chaos & Failure Injection Suite", () => {
           clientCreatedAt: new Date().toISOString(),
           idempotencyKey: "ESCALATION-001",
         },
+        {
+          operationId: randomUUID(),
+          entityType: "Employee",
+          entityId: randomUUID(),
+          operationType: "CREATE" as const,
+          payload: { firstName: "Sensitive", baseSalary: 1000000 },
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: "EMPLOYEE-SYNC-001",
+        },
       ],
     };
 
     const res = syncEngine.processPush(ctx, maliciousReq);
     expect(res.results[0].status).toBe("FAILED");
     expect(res.results[0].error).toMatch(/PRIVILEGE_ESCALATION_ATTEMPT_DENIED/);
+    expect(res.results[1].status).toBe("FAILED");
+    expect(res.results[1].error).toMatch(/PRIVILEGE_ESCALATION_ATTEMPT_DENIED/);
   });
 
   it("Chaos 4: Stale write conflict detected when client updates product based on outdated timestamp", () => {

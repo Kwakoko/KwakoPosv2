@@ -30,8 +30,14 @@ excluded.forEach((file) => console.log("  - " + file));
 console.log("These suites remain in the general unit suite and dedicated acceptance/browser coverage.");
 
 const vitestBin = path.resolve(root, "node_modules/vitest/vitest.mjs");
-execFileSync(process.execPath, [vitestBin, "run", ...inGate], {
-  cwd: root,
-  stdio: "inherit",
-});
+try {
+  execFileSync(process.execPath, [vitestBin, "run", ...inGate], {
+    cwd: root,
+    stdio: "inherit",
+  });
+} catch (error: any) {
+  const status = Number(error?.status || 1);
+  console.error("\n❌ NODE PERSISTENCE TEST GATE FAILED");
+  process.exit(status);
+}
 console.log("\n✅ NODE PERSISTENCE TEST GATE PASSED");
