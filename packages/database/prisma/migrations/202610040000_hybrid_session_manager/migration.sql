@@ -41,6 +41,7 @@ ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "platform" TEXT;
 ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "rememberMe" BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "offlineStartedAt" TIMESTAMP(3);
 ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "offlineExpiresAt" TIMESTAMP(3);
+ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "idleTimeoutMs" INTEGER NOT NULL DEFAULT 1800000;
 
 UPDATE "device_sessions" ds
 SET "branchId" = u."branchId"
