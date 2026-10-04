@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-export const AiRiskLevelEnum=z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]);
-export type AiRiskLevel=z.infer<typeof AiRiskLevelEnum>;
 export const AiEvidenceClassEnum=z.enum(["MEASURED","CALCULATED","ESTIMATED","PREDICTED","RECOMMENDED"]);
 export type AiEvidenceClass=z.infer<typeof AiEvidenceClassEnum>;
 export const AiEvidenceItemSchema=z.object({
@@ -23,7 +21,7 @@ export type AiInsightRecord=z.infer<typeof AiInsightRecordSchema>;
 export const AiRecommendationSchema=z.object({
   recommendationId:z.string(),tenantId:z.string(),branchId:z.string(),insightId:z.string().optional(),
   title:z.string(),summary:z.string(),evidence:z.array(AiEvidenceItemSchema),expectedImpact:z.string(),
-  riskLevel:AiRiskLevelEnum,policyStatus:z.enum(["VALIDATED","REJECTED"]),
+  riskLevel:z.enum(["LOW","MEDIUM","HIGH","CRITICAL"]),policyStatus:z.enum(["VALIDATED","REJECTED"]),
   approvalStatus:z.enum(["PENDING","APPROVED","REJECTED","EXPIRED"]),
   approvedByUserId:z.string().optional(),approvedAt:z.string().optional(),expiresAt:z.string().optional(),
   createdAt:z.string(),updatedAt:z.string(),
