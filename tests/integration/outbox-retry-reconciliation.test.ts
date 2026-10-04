@@ -126,7 +126,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(failResult.failed).toBe(5);
+    expect(failResult.failed).toBe(10);
     expect(failResult.succeeded).toBe(0);
     // 10 outbox operations * 3 retries each = 30 attempts.
     expect(attemptsCount).toBe(30);
