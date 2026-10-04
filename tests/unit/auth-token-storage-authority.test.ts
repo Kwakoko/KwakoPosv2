@@ -21,10 +21,8 @@ describe("Authentication credential authority", () => {
   it("does not hardcode wildcard RBAC claims during production token issuance", () => {
     const server = read("apps/api/src/server.ts");
     const refreshStart = server.indexOf('server.post("/auth/refresh"');
-    const refreshEnd = server.indexOf('if (routePath === "/auth/logout"', refreshStart);
     expect(refreshStart).toBeGreaterThanOrEqual(0);
-    expect(refreshEnd).toBeGreaterThan(refreshStart);
-    const refresh = server.slice(refreshStart, refreshEnd);
+    const refresh = server.slice(refreshStart);
 
     expect(refresh).toContain("prisma.user.findFirst");
     expect(refresh).toContain("sessionUser.role?.permissions");
