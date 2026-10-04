@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, X, ShieldAlert, Layers } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 export interface SyncConflictItem {
   id: string;
