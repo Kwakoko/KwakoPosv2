@@ -43,7 +43,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const session: StoredSession = {
       sessionId: "sess-12345",
       accessToken: "token-abc",
-      refreshToken: "refresh-xyz",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
@@ -64,7 +63,12 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     expect(retrieved).not.toBeNull();
     expect(retrieved?.sessionId).toBe("sess-12345");
     expect(retrieved?.accessToken).toBe("token-abc");
-    expect(retrieved?.refreshToken).toBe("refresh-xyz");
+    // Refresh-token credentials are intentionally not persisted in browser storage.
+    // The sessionId is the durable refresh handle for the HTTP-only server session.
+    expect((retrieved as any)?.refreshToken).toBeUndefined();
+    const raw = mockLocalStorage.getItem("kwakopos:v2:session");
+    expect(raw).toBeTruthy();
+    expect(raw).not.toContain("refresh-xyz");
     expect(retrieved?.user.name).toBe("Amina Cashier");
   });
 
