@@ -4,7 +4,7 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-10-03
+## [2.13.0] - 2026-10-04
 
 ### ✨ New Features
 - **reports**: expose authoritative tenant-scoped report data API
@@ -56,8 +56,21 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #40 from Kwakoko/fix/expenses-p0-p1-20261003
+- **expenses**: add dedicated P0/P1 closed-loop certification gate
+- **core**: remove eslint governance bypass from sync boot effect
+- **core**: refresh vertical command center production lock hash
+- **core**: exempt UI button primitive and disabled informational control from action audit
+- **core**: restore required release manifest brand metadata
+- **core**: refresh navigation lock for current production page sources
+- **release**: v2.13.0
+- **expenses**: assert bank payment posts to bank GL account
 - **ci**: remove redundant scheduled maintenance workflow
 - **ci**: consolidate redundant GitHub Actions gates
+- **expenses**: certify API sync bootstrap and bank posting
+- **expenses**: align finance fixture with canonical Expense contract
+- **expenses**: update legacy Expense fixture to canonical contract
+- **expenses**: certify authoritative lifecycle and tenant isolation
 - **ci**: reduce workflow surface to core gates
 - **sync**: consolidate migration and conflict gates
 - **ci**: retire redundant governance and contract workflows
@@ -195,6 +208,43 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **sync**: align remaining raw SyncOperation recovery queries with PostgreSQL columns
+- **sync**: align Expense change-journal recovery queries with snake_case schema
+- **sync**: map SyncOperation Prisma fields to authoritative snake_case columns
+- **sync**: conditionally use IndexedDB configuration store for Expense delta compatibility
+- **expenses**: align production sync Expense control flow with TypeScript narrowing
+- **expenses**: remove invalid generic argument from untyped Prisma query
+- **ui**: label vertical command center navigation controls
+- **ui**: label sync conflict close control
+- **expenses**: close Prisma Expense model definition
+- **expenses**: reject conflicting direct-create idempotency reuse
+- **expenses**: atomically persist offline replica and Expense outbox mutation
+- **expenses**: reject destructive Expense sync deletes in favor of reversal
+- **sync**: normalize Expense monetary and temporal fields in replication payloads
+- **sync**: preserve complete price history delta payload
+- **expenses**: use full status enum for reads and constrained status for creates
+- **expenses**: restrict create status to pending or paid
+- **expenses**: align in-memory Expense repository with canonical lifecycle
+- **expenses**: exclude voided vouchers from active KPIs and lock empty-state actions
+- **expenses**: reconcile authoritative Expense replica counts and ids
+- **expenses**: expose expense ids in reconciliation contract
+- **expenses**: include expenses in local reconciliation manifest
+- **expenses**: bind paid cash mutations to authoritative local cash session
+- **expenses**: persist authoritative active cash session for offline expense capture
+- **expenses**: align idempotency database default with Prisma schema
+- **expenses**: serialize expense mutations and publish durable sync changes
+- **expenses**: scope revisioned expense replica by tenant and branch
+- **expenses**: apply revisioned Expense changes to tenant-scoped browser replica
+- **expenses**: include authoritative voided state in UI model
+- **expenses**: add expense lifecycle migration
+- **expenses**: make expense idempotency mandatory
+- **expenses**: support Expense production sync lifecycle and replication
+- **expenses**: converge IndexedDB bootstrap and delta replication
+- **expenses**: bind UI to authoritative API and atomic offline mutations
+- **expenses**: add governed authoritative expense API lifecycle
+- **expenses**: enforce authoritative lifecycle and double-entry settlement
+- **expenses**: persist complete expense lifecycle fields
+- **expenses**: establish canonical expense contracts and sync payload
 - **ci**: refresh production workflow lock hash
 - **purchasing**: close authoritative procurement loop
 - **sync**: resolve purchasing merge conflict markers
@@ -442,7 +492,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, Hilda99-D, Kwakoko1, Jack91186, github-actions[bot]
+Credit to: Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1, Jack91186
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes

@@ -1,12 +1,12 @@
 {
   "version": "2.13.0",
   "tag": "v2.13.0",
-  "gitSha": "9c249ea76f46abcacb3e75a1b432bccfd62dfe3d",
+  "gitSha": "439a3f8c17b6ddb643949ffa0d71517912f11a74",
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
   "releaseChannel": "production",
-  "releasedAt": "2026-10-03T19:42:30.766Z",
+  "releasedAt": "2026-10-04T06:33:10.927Z",
   "certification": "FAIL",
   "compatibility": {
     "databaseSchemaVersion": 4,
@@ -14,9 +14,5 @@
     "pwaSchemaVersion": 4,
     "minSupportedClientVersion": "2.0.0",
     "recommendedClientVersion": "2.13.0"
-  },
-  "brand": {
-    "parentBrand": "Kwakoko",
-    "platform": "Kwakoko Business Operating System"
   }
 }
