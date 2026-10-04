@@ -1110,6 +1110,25 @@ model ProductVariantBalance {
   @@map("product_variant_balances")
 }
 
+model Setting {
+  id         String   @id @default(uuid())
+  tenantId   String
+  branchId   String?
+  userId     String?
+  scope      String   @default("TENANT")
+  key        String
+  value      Json
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId, branchId, scope, key, isActive])
+  @@index([tenantId, userId, scope, key, isActive])
+  @@index([tenantId, key, updatedAt])
+  @@map("settings")
+}
+
 model AuditEvent {
   id         String   @id @default(uuid())
   tenantId   String
