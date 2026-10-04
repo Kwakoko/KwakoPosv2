@@ -661,9 +661,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             timestamp: new Date(s.createdAt || s.soldAt || s.timestamp || Date.now()).getTime(),
             total: Number(s.totalAmount || s.grandTotal || s.total || 0),
             status: s.status || 'Completed',
-            paymentMethod: s.paymentMethod || s.method || 'Cash',
+            paymentMethod: s.payments?.length > 1 ? 'Split' : (s.paymentMethod || s.method || s.payments?.[0]?.paymentMethod || 'Cash'),
             syncStatus: 'Synced',
-            cashierName: s.cashierName || s.cashier || s.user || 'Cashier',
+            customer: s.customer?.name || s.customerName || s.customer?.displayName || 'Walk-In Customer',
+            cashierName: s.cashierName || s.cashier || s.user || s.soldByName || s.soldById || 'Cashier',
             module: s.module,
             branch_id: s.branchId || s.branch_id,
             items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : Array.isArray(s.lines) ? s.lines : []).map((it: any) => ({
@@ -680,7 +681,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       }
 
       // Merge local sales from db.sales (IndexedDB local store)
-      if (db.sales) {
+      if (!isOnline && db.sales) {
         for (const s of db.sales.values()) {
           const sAny = s as any;
           if (!hasStrictScope(sAny)) continue;
@@ -720,7 +721,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
       // Pending sales are operational-only and must remain exact-scope.
       // They are never included in authoritative online KPI calculations.
-      if (db.syncOutbox) {
+      if (!isOnline && db.syncOutbox) {
         for (const item of db.syncOutbox.values()) {
           if (item.entityType === 'Sale' && outboxMatchesScope(item, tenantId, branchId)) {
             const p = (item.payload || {}) as any;
@@ -763,11 +764,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       setProductVariants(localVariants);
       setCustomers(localCusts);
       setSuppliers(localSupps);
-      setOrders(parsedOrders.sort((a, b) => a.timestamp - b.timestamp));
+      setOrders(parsedOrders.sort((a, b) => b.timestamp - a.timestamp));
     } catch {
       // Graceful fallback
     }
-  }, [db, activeModule, branchId, tenantId, hasStrictScope]);
+  }, [db, activeModule, branchId, tenantId, hasStrictScope, isOnline]);
 
   useEffect(() => {
     void loadData();
@@ -1001,6 +1002,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         : (item.countShare || (item.count > 0 ? 1 : 0));
       return {
         ...item,
+        paymentCount: item.paymentCount ?? item.count,
+        orderCount: item.orderCount ?? item.count,
         value: Math.max(pieValue, 1),
         rawMetric: paymentMetricMode === "volume" ? item.volume : item.count,
         color: cfg.color, icon: cfg.icon, badgeBg: cfg.badgeBg, textColor: cfg.textColor,
@@ -1012,6 +1015,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       items,
       totalVolume: analytics?.paymentTotalVolume ?? 0,
       totalCount: analytics?.paymentTotalCount ?? 0,
+      totalOrderCount: analytics?.paymentTotalOrderCount ?? 0,
       overallAov: analytics?.paymentOverallAov ?? 0,
     };
   }, [authoritativeKpis, paymentMetricMode]);
@@ -1214,7 +1218,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
       // Tab 4: "4. TOP PRODUCTS LEADERBOARD"
       const ws4Data: any[][] = [
-        ['Rank', 'Product Name', 'Category', 'Stock On Hand', 'Units Sold Today', 'Total Revenue (Tsh)', 'Stock Alert Status'],
+        ['Rank', 'Product Name', 'Category', 'Stock On Hand', 'Units Sold (Selected Period)', 'Net Revenue (Tsh)', 'Stock Alert Status'],
         ...topProductsAnalytics.items.map(p => [
           Number(p.rank || 0),
           p.name,
@@ -1233,7 +1237,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       // Tab 5: "5. AUDITED RECENT ORDERS"
       const ws5Data: any[][] = [
         ['Order Ref / Receipt', 'Date & Time', 'Customer Name', 'Serving Cashier', 'Items Count', 'Grand Total (Tsh)', 'Payment Channel', 'Sync Status', 'Audit Status'],
-        ...orders.slice(-50).reverse().map(o => [
+        ...orders.slice(0, 50).map(o => [
           o.saleNumber || o.id,
           new Date(o.timestamp).toLocaleString(),
           o.customer || 'Walk-In Customer',
@@ -2419,7 +2423,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                                 <span>Volume:</span> <span>{fmtCcy(d.volume)} ({d.volumeShare}%)</span>
                               </div>
                               <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex justify-between">
-                                <span>Sales:</span> <span>{d.count} ({d.countShare}%)</span>
+                                <span>Payments:</span> <span>{d.paymentCount ?? d.count} ({d.countShare}%)</span>
                               </div>
                               <div className="text-[10px] text-slate-400 dark:text-slate-500 flex justify-between pt-1 border-t border-slate-100 dark:border-darkbg-border/60">
                                 <span>Avg Ticket:</span> <span className="font-semibold">{fmtCcy(d.aov)}</span>
@@ -2443,7 +2447,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           {activePaymentChannel.name}
                         </span>
                         <span className="text-sm font-black font-mono tracking-tight text-slate-800 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.count} Sales`}
+                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.paymentCount ?? activePaymentChannel.count} Payments`}
                         </span>
                         <span className="text-[9px] font-bold" style={{ color: activePaymentChannel.color }}>
                           {paymentMetricMode === 'volume' ? `${activePaymentChannel.volumeShare}% Share` : `${activePaymentChannel.countShare}% Share`}
@@ -2452,15 +2456,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                     ) : (
                       <>
                         <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Transactions'}
+                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Payment Records'}
                         </span>
                         <span className="text-sm font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Orders`}
+                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Payments`}
                         </span>
                         <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-medium">
                           {paymentMetricMode === 'volume'
-                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'sale' : 'sales'}`
-                            : `Avg ${fmtCcy(paymentChannelSummary.overallAov)}`}
+                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'payments' : 'payments'} · ${paymentChannelSummary.totalOrderCount} ${paymentChannelSummary.totalOrderCount === 1 ? 'order' : 'orders'}`
+                            : `Distinct orders ${paymentChannelSummary.totalOrderCount} · Avg order ${fmtCcy(paymentChannelSummary.overallAov)}`}
                         </span>
                       </>
                     )}
@@ -2500,7 +2504,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                               )}
                             </div>
                             <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium truncate">
-                              {item.count} {item.count === 1 ? 'sale' : 'sales'} · AOV {fmtCcy(item.aov)}
+                              {item.orderCount} {item.orderCount === 1 ? 'order' : 'orders'} · {item.paymentCount} {item.paymentCount === 1 ? 'payment' : 'payments'} · AOV {fmtCcy(item.aov)}
                             </div>
                           </div>
                         </div>
@@ -2509,7 +2513,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                             {fmtCcy(item.volume)}
                           </div>
                           <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% count`}
+                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% payments`}
                           </div>
                         </div>
                       </div>
@@ -2809,7 +2813,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                       </td>
                     </tr>
                   ) : (
-                    orders.slice(-6).reverse().map(order => {
+                    orders.slice(0, 6).map(order => {
                       const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
                       const tender = getTenderBadge(order.paymentMethod);
                       const TenderIcon = tender.Icon;

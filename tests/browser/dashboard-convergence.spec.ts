@@ -34,9 +34,10 @@ type DashboardSnapshot = {
     profitDeltaPct: string | null;
     priorTotalRevenue: number;
     peakHour: { hour: string; revenue: number; ordersCount: number } | null;
-    paymentChannels: Array<{ name: string; volume: number; count: number; volumeShare: number; countShare: number; aov: number }>;
+    paymentChannels: Array<{ name: string; volume: number; count: number; paymentCount: number; orderCount: number; volumeShare: number; countShare: number; aov: number }>;
     paymentTotalVolume: number;
     paymentTotalCount: number;
+    paymentTotalOrderCount: number;
     paymentOverallAov: number;
     topProducts: Array<{ productId: string; name: string; revenue: number; units: number; stock: number; category: string; rank: number }>;
     topProductsTotalTracked: number;
@@ -132,39 +133,39 @@ async function readPostgresKpis(tenantId: string, branchId: string) {
     supplier_count: bigint | number | string;
   }>>(
     `SELECT
-       COALESCE((SELECT SUM(grand_total) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS sales_today,
-       COALESCE((SELECT SUM(gross_profit) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS gross_profit,
+       COALESCE((SELECT SUM("grandTotal" - "taxTotal") FROM sales
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'), 0) AS sales_today,
+       COALESCE((SELECT SUM(("grandTotal" - "taxTotal") - "totalCost") FROM sales
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'), 0) AS gross_profit,
        (SELECT COUNT(*) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS order_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day') AS order_count,
        (SELECT COUNT(*) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS completed_orders,
-       (SELECT COALESCE(SUM(stock_value), 0) FROM product_branch_stock
-          WHERE tenant_id = $1 AND branch_id = $2) AS inventory_value,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day') AS completed_orders,
+       (SELECT COALESCE(SUM("stockValue"), 0) FROM product_branch_stock
+          WHERE "tenantId" = $1 AND "branchId" = $2) AS inventory_value,
        (SELECT COUNT(*) FROM product_branch_stock pbs
-          JOIN product_variants pv ON pv.id = pbs.variant_id
-          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
-          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
-            AND pv.is_active = TRUE AND pbs.current_quantity > 0
-            AND pbs.current_quantity <= pv.reorder_level) AS low_stock,
+          JOIN product_variants pv ON pv."id" = pbs."variantId"
+          AND pv."tenantId" = pbs."tenantId" AND pv."branchId" = pbs."branchId"
+          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+            AND pv."isActive" = TRUE AND pbs."currentQuantity" > 0
+            AND pbs."currentQuantity" <= pv."reorderLevel") AS low_stock,
        (SELECT COUNT(*) FROM product_branch_stock pbs
-          JOIN product_variants pv ON pv.id = pbs.variant_id
-          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
-          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
-            AND pv.is_active = TRUE AND pbs.current_quantity <= 0) AS out_of_stock,
-       (SELECT COALESCE(SUM(current_balance), 0) FROM customers
-          WHERE tenant_id = $1 AND branch_id = $2) AS customer_debts,
+          JOIN product_variants pv ON pv."id" = pbs."variantId"
+          AND pv."tenantId" = pbs."tenantId" AND pv."branchId" = pbs."branchId"
+          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+            AND pv."isActive" = TRUE AND pbs."currentQuantity" <= 0) AS out_of_stock,
+       (SELECT COALESCE(SUM("currentBalance"), 0) FROM customers
+          WHERE "tenantId" = $1 AND "branchId" = $2) AS customer_debts,
        (SELECT COUNT(*) FROM customers
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS customer_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'ACTIVE') AS customer_count,
        (SELECT COUNT(*) FROM products
-          WHERE tenant_id = $1 AND branch_id = $2 AND is_active = TRUE) AS product_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "isActive" = TRUE) AS product_count,
        (SELECT COUNT(*) FROM suppliers
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS supplier_count`,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'ACTIVE') AS supplier_count`,
     tenantId,
     branchId,
   );
@@ -522,6 +523,102 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(finalB.asOfRevision).toBe(finalC.asOfRevision);
     expect(BigInt(finalA.asOfRevision)).toBeGreaterThan(BigInt(initial[0].asOfRevision));
 
+    // Financial closure coverage: authoritative tax calculation, split tender and partial return.
+    await prisma.setting.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        scope: 'BRANCH',
+        key: 'tax.config',
+        value: { vatEnabled: true, vatRatePercent: 18, taxInclusivePricing: true, currencyCode: 'TZS' },
+      },
+    });
+    const taxSaleResponse = await pageA.evaluate(async ({ tenantId, branchId, productId, variantId }) => {
+      const raw = localStorage.getItem('kwakopos:v2:session');
+      const session = raw ? JSON.parse(raw) : null;
+      const response = await fetch('/api/v1/pos/sales', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + String(session?.accessToken || ''),
+          'x-tenant-id': tenantId,
+          'x-branch-id': branchId,
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          items: [{ productId, variantId, quantity: 1, unitPrice: 1180, unitCost: 600 }],
+          payments: [
+            { amount: 590, paymentMethod: 'CARD' },
+            { amount: 590, paymentMethod: 'MOBILE_MONEY' },
+          ],
+          deviceId: 'DEVICE-A',
+          operationId: 'dashboard-financial-closure-' + crypto.randomUUID(),
+          idempotencyKey: 'dashboard-financial-closure-' + crypto.randomUUID(),
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    }, { tenantId, branchId, productId, variantId });
+    expect(taxSaleResponse.status).toBe(201);
+    const taxSaleId = taxSaleResponse.body?.data?.sale?.id || taxSaleResponse.body?.data?.id;
+    expect(taxSaleId).toBeTruthy();
+    const taxSale = await prisma.sale.findUnique({ where: { id: taxSaleId }, select: { grandTotal: true, subtotal: true, taxTotal: true, totalCost: true, grossProfit: true } });
+    expect(Number(taxSale?.grandTotal)).toBe(1180);
+    expect(Number(taxSale?.subtotal)).toBe(1000);
+    expect(Number(taxSale?.taxTotal)).toBe(180);
+    expect(Number(taxSale?.totalCost)).toBe(600);
+    expect(Number(taxSale?.grossProfit)).toBe(400);
+
+    await prisma.return.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        returnNumber: 'RET-DASH-' + randomUUID().slice(0, 8),
+        originalSaleId: taxSaleId,
+        reason: 'Financial closure certification partial return',
+        refundType: 'CASH',
+        totalRefundAmount: 590,
+        status: 'COMPLETED',
+        lines: {
+          create: [{
+            id: randomUUID(),
+            variantId,
+            quantityReturned: 0.5,
+            refundUnitPrice: 1180,
+            refundLineTotal: 590,
+            condition: 'GOOD',
+          }],
+        },
+      },
+    });
+    const financialSnapshot = await readDashboardSnapshot(pageA, tenantId, branchId);
+    expect(financialSnapshot.grossSalesToday).toBe(2500);
+    expect(financialSnapshot.discountsToday).toBe(0);
+    expect(financialSnapshot.refundsToday).toBe(590);
+    expect(financialSnapshot.salesToday).toBe(2000);
+    expect(financialSnapshot.grossProfit).toBe(700);
+    expect(financialSnapshot.netSalesToday).toBe(2000);
+    expect(financialSnapshot.cogsToday).toBe(1300);
+    expect(financialSnapshot.analytics.paymentTotalVolume).toBe(2680);
+    expect(financialSnapshot.analytics.paymentTotalCount).toBe(3);
+    expect(financialSnapshot.analytics.paymentTotalOrderCount).toBe(2);
+    expect(financialSnapshot.analytics.paymentOverallAov).toBe(1340);
+    const cashChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'CASH');
+    const cardChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'CARD');
+    const mobileChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'MOBILE_MONEY');
+    expect(cashChannel?.orderCount).toBe(1);
+    expect(cashChannel?.paymentCount).toBe(1);
+    expect(cardChannel?.orderCount).toBe(1);
+    expect(cardChannel?.paymentCount).toBe(1);
+    expect(mobileChannel?.orderCount).toBe(1);
+    expect(mobileChannel?.paymentCount).toBe(1);
+    expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1.5);
+    expect(financialSnapshot.analytics.topProducts[0]?.revenue).toBe(2000);
+    expect(financialSnapshot.analytics.totalRevenue).toBe(2000);
+    expect(financialSnapshot.analytics.totalCOGS).toBe(1300);
+    expect(financialSnapshot.analytics.totalProfit).toBe(700);
+    expect(financialSnapshot.analytics.marginPct).toBe('35.0');
     // Browser C: real logout -> login -> dashboard recovery.
     await pageC.locator("#topbar-user-btn").click();
     const signOutResponse = pageC.waitForResponse((response) =>
@@ -538,11 +635,11 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await expect.poll(
       async () => (await readDashboardSnapshot(pageC, tenantId, branchId)).salesToday,
       { timeout: 30000, intervals: [500, 1000, 2000] },
-    ).toBe(1500);
+    ).toBe(2000);
 
     const afterReloginC = await readDashboardSnapshot(pageC, tenantId, branchId);
-    expect(afterReloginC.kpis).toEqual(finalA.kpis);
-    expect(afterReloginC.asOfRevision).toBe(finalA.asOfRevision);
+    expect(afterReloginC.kpis).toEqual(financialSnapshot.kpis);
+    expect(afterReloginC.asOfRevision).toBe(financialSnapshot.asOfRevision);
 
     const evidence = {
       status: "PASS",
@@ -579,6 +676,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await Promise.all(contexts.map((context) => context.close()));
     await prisma.$executeRawUnsafe("DELETE FROM sync_change_journal WHERE tenant_id = $1", tenantId);
     await prisma.$executeRawUnsafe("DELETE FROM sync_conflict_record WHERE tenant_id = $1", tenantId);
+    await prisma.returnLine.deleteMany({ where: { returnRel: { tenantId } } });
+    await prisma.return.deleteMany({ where: { tenantId } });
+    await prisma.setting.deleteMany({ where: { tenantId } });
     await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.saleLine.deleteMany({ where: { sale: { tenantId } } });
     await prisma.sale.deleteMany({ where: { tenantId } });

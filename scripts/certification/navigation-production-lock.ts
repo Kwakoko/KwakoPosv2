@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
 
 const LOCK_ID = "NAVIGATION-PRODUCTION-LOCK-2026-10-03";
@@ -13,7 +14,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/App.tsx": "000a361bbaab925456e36cec3ee5c26d14026931",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
-  "apps/web/src/pages/DashboardPage.tsx": "8821c3ec11803bebfacdb0e4c5b9e597bcab5ec1",
+  "apps/web/src/pages/DashboardPage.tsx": "538532f765e1fd7e29c696044b320326b56cd32f",
   "apps/web/src/pages/InventoryPage.tsx": "a0d3c963e73dca1ccf63ce23c73ac30112be5b16",
   "apps/web/src/pages/PurchasingPage.tsx": "07e34d92a282c0172a7a9b3cf8e7f20b2a321d39",
   "apps/web/src/pages/ReportsPage.tsx": "4c66a81a465479ddd35cad56005002d73b99772b",
@@ -21,7 +22,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/CashDrawerPage.tsx": "71439a29b8c2ae894f3fe6a7ca97c44f2c1795a2",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
   ".github/workflows/production-certification.yml": "cd6aa88d31253df2c8bdae56f7f944ebaa70fd10",
-  ".github/workflows/production-release-exact-main.yml": "d49cdb11f9cd97b66fd36da205da56b2a71ce7ee"
+  ".github/workflows/production-release-exact-main.yml": "d49cdb11f9cd97b66fd36da205da56b2a71ce7ee",
 };
 
 const MARKERS: Array<[string, string, string]> = [
@@ -41,10 +42,20 @@ const MARKERS: Array<[string, string, string]> = [
   ["exact-main-production-release-hook", ".github/workflows/production-release-exact-main.yml", "npm run certify:navigation-lock"]
 ];
 
-function gitBlobSha(content: string): string {
-  const bytes = Buffer.from(content, "utf8");
-  const header = Buffer.from(`blob ${bytes.length}\0`, "utf8");
-  return createHash("sha1").update(Buffer.concat([header, bytes])).digest("hex");
+function gitBlobSha(content: string, relativePath: string): string {
+  // Hash the canonical Git-cleaned representation so Windows CRLF checkouts
+  // produce the same blob SHA as GitHub/Linux CI.
+  try {
+    return execFileSync(
+      "git",
+      ["hash-object", "--path=" + relativePath, "--stdin"],
+      { input: Buffer.from(content, "utf8"), encoding: "utf8" },
+    ).trim();
+  } catch {
+    const bytes = Buffer.from(content, "utf8");
+    const header = Buffer.from(`blob ${bytes.length}\0`, "utf8");
+    return createHash("sha1").update(Buffer.concat([header, bytes])).digest("hex");
+  }
 }
 
 function read(relativePath: string): string {
@@ -58,7 +69,7 @@ const checked: Record<string, { expected: string; actual: string; pass: boolean 
 
 for (const [relativePath, expected] of Object.entries(LOCKED_BLOBS)) {
   try {
-    const actual = gitBlobSha(read(relativePath));
+    const actual = gitBlobSha(read(relativePath), relativePath);
     const pass = actual === expected;
     checked[relativePath] = { expected, actual, pass };
     if (!pass) failures.push(`LOCK_DRIFT: ${relativePath} expected ${expected} got ${actual}`);

@@ -127,6 +127,11 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
           return data;
         },
       },
+      setting: {
+        // These unit fixtures use a minimal Prisma transaction mock. An empty
+        // branch tax-config result preserves the production default of no VAT.
+        findMany: async () => [],
+      },
       account: {
         findFirst: async () => ({ id: "acc-dummy" }),
         create: async () => ({ id: "acc-dummy" }),

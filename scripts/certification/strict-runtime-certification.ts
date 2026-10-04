@@ -29,9 +29,10 @@ sourceContains("apps/api/src/serverFixed.ts", "requireSecuritySecrets");
 sourceContains("apps/api/src/serverFixed.ts", "ensureSuperAdminSecurity");
 sourceContains("apps/api/src/serverFixed.ts", "verifySuperAdminMfa");
 sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"Sale\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
-sourceContains("packages/sync/src/prismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
+// PrismaSyncEngine is the public compatibility alias; verify the concrete world-standard PostgreSQL engine.
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "op.entityType === \"Sale\" && op.operationType === \"CREATE\"");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "op.entityType === \"PurchaseReceipt\" && op.operationType === \"CREATE\"");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
 

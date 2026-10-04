@@ -176,9 +176,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST D: Browser A -> Server -> Browser B Multi-Device Sync
   // -------------------------------------------------------------------------
   const startD = Date.now();
-  const bADb = new LocalIndexedDbStore();
+  const bADb = new LocalIndexedDbStore(6, `kwakopos-synthetic-D-A-${randomUUID()}`);
   const bAEngine = new ClientSyncEngine("device-synth-A", bADb);
-  const bBDb = new LocalIndexedDbStore();
+  const bBDb = new LocalIndexedDbStore(6, `kwakopos-synthetic-D-B-${randomUUID()}`);
   const bBEngine = new ClientSyncEngine("device-synth-B", bBDb);
 
   const synthVarId = randomUUID();
@@ -193,7 +193,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D1",
     status: "PENDING",
-  });
+  }, ctx);
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D2",
     entityType: "ProductVariant",
@@ -203,7 +203,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D2",
     status: "PENDING",
-  });
+  }, ctx);
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D3",
     entityType: "StockAdjustment",
@@ -221,16 +221,20 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D3",
     status: "PENDING",
-  });
+  }, ctx);
 
   await bAEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   await bBEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const bBStock = calculateAvailableStock(
@@ -251,7 +255,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST E: Offline Mutation Outbox Queuing & Reconnect Sync
   // -------------------------------------------------------------------------
   const startE = Date.now();
-  const offlineDb = new LocalIndexedDbStore();
+  const offlineDb = new LocalIndexedDbStore(6, `kwakopos-synthetic-E-${randomUUID()}`);
   const offlineEngine = new ClientSyncEngine("device-synth-offline", offlineDb);
 
   offlineDb.recordOutboxMutation({
@@ -271,12 +275,14 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "OFFLINE-KEY-01",
     status: "PENDING",
-  });
+  }, ctx);
 
   const pendingBefore = offlineDb.getPendingOutbox().length;
   await offlineEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
   const pendingAfter = offlineDb.getPendingOutbox().length;
   const passE = pendingBefore === 1 && pendingAfter === 0;
@@ -294,7 +300,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F: PWA Schema Migration Preservation
   // -------------------------------------------------------------------------
   const startF = Date.now();
-  const pwaDb = new LocalIndexedDbStore();
+  const pwaDb = new LocalIndexedDbStore(2, `kwakopos-synthetic-migration-${randomUUID()}`);
+  await pwaDb.ready;
   pwaDb.recordOutboxMutation({
     id: "OP-PWA-01",
     entityType: "StockAdjustment",
@@ -304,9 +311,11 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "PWA-1",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
-  const migration = await pwaDb.migrateToVersion(3);
-  const passF = migration.newVersion === 3 && migration.preservedOutboxCount === 1;
+  const migration = await pwaDb.migrateToVersion(6);
+  const passF = migration.previousVersion === 2 && migration.newVersion === 6 && migration.preservedOutboxCount === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
@@ -432,32 +441,36 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST K: Multi-Device Outbox Convergence (Device A -> Server -> Device B)
   // -------------------------------------------------------------------------
   const startK = Date.now();
-  const dbA = new LocalIndexedDbStore();
-  const dbB = new LocalIndexedDbStore();
+  const dbA = new LocalIndexedDbStore(6, `kwakopos-synthetic-K-A-${randomUUID()}`);
+  const dbB = new LocalIndexedDbStore(6, `kwakopos-synthetic-K-B-${randomUUID()}`);
   const engineA = new ClientSyncEngine("device-k-a", dbA);
   const engineB = new ClientSyncEngine("device-k-b", dbB);
 
   dbA.recordOutboxMutation({
     id: "OP-DEV-A-01",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CONV-A-01",
     status: "PENDING",
-  });
+  }, ctx);
 
   // Device A syncs up to Server
   await engineA.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   // Device B syncs down from Server
   await engineB.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const serverCustomers = commercialRepo.getCustomers(ctx);
@@ -635,29 +648,33 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F06: Multi-Device Financial Mutation Sync Convergence
   // -------------------------------------------------------------------------
   const startF06 = Date.now();
-  const dbStoreF06A = new LocalIndexedDbStore();
-  const dbStoreF06B = new LocalIndexedDbStore();
+  const dbStoreF06A = new LocalIndexedDbStore(6, `kwakopos-synthetic-F06-A-${randomUUID()}`);
+  const dbStoreF06B = new LocalIndexedDbStore(6, `kwakopos-synthetic-F06-B-${randomUUID()}`);
   const engineF06A = new ClientSyncEngine("device-fin-a", dbStoreF06A);
   const engineF06B = new ClientSyncEngine("device-fin-b", dbStoreF06B);
 
   dbStoreF06A.recordOutboxMutation({
     id: "op-fin-sync-1",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Financial Customer", creditLimit: 250000 },
     idempotencyKey: `idem-fin-sync-${randomUUID()}`,
     clientCreatedAt: new Date().toISOString(),
     status: "PENDING",
-  });
+  }, ctx);
 
   await engineF06A.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
   await engineF06B.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const passF06 = commercialRepo.getCustomers(ctx).some((c) => c.name === "Converged Financial Customer");
@@ -1882,6 +1899,13 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   const allPassed = results.every((r) => r.status === "PASS");
 
+  // Synthetic LocalIndexedDbStore instances open native IndexedDB connections in
+  // the Node certification process. Close every test database before returning
+  // so the monitor terminates cleanly after printing its GREEN result.
+  for (const store of [bADb, bBDb, offlineDb, pwaDb, dbA, dbB, dbStoreF06A, dbStoreF06B]) {
+    try { store.close(); } catch { /* best-effort test cleanup */ }
+  }
+
   return { allPassed, results };
 }
 
@@ -1893,7 +1917,7 @@ if (process.argv[1] && process.argv[1].endsWith("synthetic-monitor.ts")) {
       console.log("\n========================================================================");
       console.log(` SYNTHETIC SUITE RESULT: ${allPassed ? "ALL TESTS PASSED (GREEN)" : "FAILURES DETECTED (RED)"}`);
       console.log("========================================================================");
-      if (!allPassed) process.exit(1);
+      process.exit(allPassed ? 0 : 1);
     })
     .catch((err) => {
       console.error("SYNTHETIC MONITORING ERROR:", err);

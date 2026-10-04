@@ -3,14 +3,14 @@ import { apiFetch } from "./apiClient.js";
 export interface DashboardRevenuePoint {
   name: string; fullLabel: string; Revenue: number; Profit: number; COGS: number; PriorRevenue: number; ordersCount: number; marginPct: string;
 }
-export interface DashboardPaymentChannel { name: string; volume: number; count: number; volumeShare: number; countShare: number; aov: number; }
+export interface DashboardPaymentChannel { name: string; volume: number; count: number; paymentCount: number; orderCount: number; volumeShare: number; countShare: number; aov: number; }
 export interface DashboardTopProduct { productId: string; name: string; revenue: number; units: number; stock: number; category: string; rank: number; }
 export interface DashboardAnalyticsSnapshot {
   timeframe: "today" | "7d" | "30d" | "month";
   chartPoints: DashboardRevenuePoint[]; totalRevenue: number; totalCOGS: number; totalProfit: number; marginPct: string;
   revenueDeltaPct: string | null; profitDeltaPct: string | null; priorTotalRevenue: number;
   peakHour: { hour: string; revenue: number; ordersCount: number } | null;
-  paymentChannels: DashboardPaymentChannel[]; paymentTotalVolume: number; paymentTotalCount: number; paymentOverallAov: number;
+  paymentChannels: DashboardPaymentChannel[]; paymentTotalVolume: number; paymentTotalCount: number; paymentTotalOrderCount: number; paymentOverallAov: number;
   topProducts: DashboardTopProduct[]; topProductsTotalTracked: number;
 }
 export interface DashboardKpiSnapshot {
