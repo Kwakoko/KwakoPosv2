@@ -160,6 +160,9 @@ describe("Dashboard financial closures", () => {
 
       const snapshot = await getDashboardKpiSnapshot(ctx, "7d");
 
+      expect(snapshot.grossSalesToday).toBe(1000);
+      expect(snapshot.discountsToday).toBe(0);
+      expect(snapshot.refundsToday).toBe(590);
       expect(snapshot.salesToday).toBe(500);
       expect(snapshot.netSalesToday).toBe(500);
       expect(snapshot.cogsToday).toBe(300);
