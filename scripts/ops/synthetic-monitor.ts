@@ -193,6 +193,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D1",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D2",
@@ -203,6 +205,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D2",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
   bADb.recordOutboxMutation({
     id: "OP-SYNTH-D3",
@@ -221,16 +225,22 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D3",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
 
   await bAEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
 
   await bBEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
 
   const bBStock = calculateAvailableStock(
@@ -271,14 +281,18 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "OFFLINE-KEY-01",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
 
-  const pendingBefore = offlineDb.getPendingOutbox().length;
+  const pendingBefore = offlineDb.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
   await offlineEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
-  const pendingAfter = offlineDb.getPendingOutbox().length;
+  const pendingAfter = offlineDb.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
   const passE = pendingBefore === 1 && pendingAfter === 0;
   results.push({
     testSuite: "SYNTHETIC_TEST_E_OFFLINE_DURABILITY",
@@ -294,7 +308,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F: PWA Schema Migration Preservation
   // -------------------------------------------------------------------------
   const startF = Date.now();
-  const pwaDb = new LocalIndexedDbStore();
+  const pwaDb = new LocalIndexedDbStore(3, `kwakopos-synthetic-pwa-${randomUUID()}`);
   pwaDb.recordOutboxMutation({
     id: "OP-PWA-01",
     entityType: "StockAdjustment",
@@ -304,9 +318,11 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "PWA-1",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
-  const migration = await pwaDb.migrateToVersion(3);
-  const passF = migration.newVersion === 3 && migration.preservedOutboxCount === 1;
+  const migration = await pwaDb.migrateToVersion(6);
+  const passF = migration.previousVersion === 3 && migration.newVersion === 6 && migration.preservedOutboxCount === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
@@ -439,25 +455,31 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbA.recordOutboxMutation({
     id: "OP-DEV-A-01",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
-    payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
+    payload: { name: "Converged Customer Alpha", creditLimit: 50000, phone: "+255700000001" },
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CONV-A-01",
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
 
   // Device A syncs up to Server
   await engineA.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
 
   // Device B syncs down from Server
   await engineB.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
 
   const serverCustomers = commercialRepo.getCustomers(ctx);
@@ -640,33 +662,51 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   const engineF06A = new ClientSyncEngine("device-fin-a", dbStoreF06A);
   const engineF06B = new ClientSyncEngine("device-fin-b", dbStoreF06B);
 
+  const financialExpenseId = randomUUID();
   dbStoreF06A.recordOutboxMutation({
     id: "op-fin-sync-1",
-    entityType: "StockAdjustment",
-    entityId: randomUUID(),
+    entityType: "Expense",
+    entityId: financialExpenseId,
     operationType: "CREATE",
-    payload: { name: "Converged Financial Customer", creditLimit: 250000 },
+    payload: {
+      category: "OPERATING",
+      amount: 250000,
+      reason: "Converged Financial Expense",
+      description: "Multi-device financial sync certification",
+      payee: "Synthetic Supplier",
+      paymentMethod: "BANK",
+      status: "PAID",
+      taxDeductible: false,
+    },
     idempotencyKey: `idem-fin-sync-${randomUUID()}`,
     clientCreatedAt: new Date().toISOString(),
     status: "PENDING",
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
   });
 
   await engineF06A.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
   await engineF06B.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    syntheticTenantId,
+    syntheticBranchId,
   );
 
-  const passF06 = commercialRepo.getCustomers(ctx).some((c) => c.name === "Converged Financial Customer");
+  const financialExpenses = (globalInMemoryStore as any).expenses as Map<string, any> | undefined;
+  const passF06 = financialExpenses?.get(financialExpenseId)?.amount === 250000
+    && financialExpenses?.get(financialExpenseId)?.tenantId === syntheticTenantId;
   results.push({
     testSuite: "SYNTHETIC_TEST_F06_FINANCIAL_SYNC_CONVERGENCE",
     syntheticTenantId,
     durationMs: Date.now() - startF06,
     status: passF06 ? "PASS" : "FAIL",
-    evidence: { syncStatus: "CONVERGED", customerFound: passF06 },
+    evidence: { syncStatus: "CONVERGED", financialExpenseFound: passF06, financialExpenseId },
     timestamp: new Date().toISOString(),
   });
   console.log(` [F06/F08] ${passF06 ? "✓" : "✗"} Synthetic Test F06 (Multi-Device Financial Mutation Sync Convergence): ${passF06 ? "PASS" : "FAIL"}`);
