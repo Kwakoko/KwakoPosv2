@@ -118,10 +118,10 @@ export async function getDashboardKpiSnapshot(
     const [salesRows, inventoryRows, stockRows, customerRows, productRows, supplierRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_sales_today: unknown; discounts_today: unknown; gross_profit: unknown; cogs_today: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
         `SELECT
-           COALESCE(SUM(grand_total) FILTER (WHERE status = 'COMPLETED'), 0) AS sales_today,
-           COALESCE(SUM(subtotal) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_sales_today,
+           COALESCE(SUM(grand_total - tax_total) FILTER (WHERE status = 'COMPLETED'), 0) AS sales_today,
+           COALESCE(SUM(grand_total) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_sales_today,
            COALESCE(SUM(discount_total) FILTER (WHERE status = 'COMPLETED'), 0) AS discounts_today,
-           COALESCE(SUM(gross_profit) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_profit,
+           COALESCE(SUM((grand_total - tax_total) - total_cost) FILTER (WHERE status = 'COMPLETED'), 0) AS gross_profit,
            COALESCE(SUM(total_cost) FILTER (WHERE status = 'COMPLETED'), 0) AS cogs_today,
            COUNT(*) FILTER (WHERE status = 'COMPLETED') AS order_count,
            COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed_orders
@@ -323,21 +323,31 @@ export async function getDashboardKpiSnapshot(
       topProducts, topProductsTotalTracked,
     };
 
-    const refundRows = await tx.$queryRawUnsafe<Array<{ refunds_today: unknown }>>(
-      `SELECT COALESCE(SUM(total_refund_amount),0) AS refunds_today
-         FROM returns
-        WHERE tenant_id = $1 AND branch_id = $2
-          AND status = 'COMPLETED'
-          AND created_at >= CURRENT_DATE
-          AND created_at < CURRENT_DATE + INTERVAL '1 day'`,
+    const refundRows = await tx.$queryRawUnsafe<Array<{ refunds_today: unknown; net_refunds_today: unknown; returned_cogs_today: unknown }>>(
+      `SELECT COALESCE(SUM(r.total_refund_amount),0) AS refunds_today,
+              COALESCE(SUM(r.total_refund_amount * CASE
+                WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+                ELSE 1 END),0) AS net_refunds_today,
+              COALESCE(SUM(rl.quantity_returned * pv.cost_price),0) AS returned_cogs_today
+         FROM returns r
+         LEFT JOIN sales s ON s.id = r.original_sale_id
+         LEFT JOIN return_lines rl ON rl.return_id = r.id
+         LEFT JOIN product_variants pv ON pv.id = rl.variant_id
+        WHERE r.tenant_id = $1 AND r.branch_id = $2
+          AND r.status = 'COMPLETED'
+          AND r.created_at >= CURRENT_DATE
+          AND r.created_at < CURRENT_DATE + INTERVAL '1 day'`,
       ctx.tenantId, ctx.branchId,
     );
     const refundsToday = numberValue(refundRows[0]?.refunds_today);
-    const salesToday = numberValue(sales.sales_today);
+    const netRefundsToday = numberValue(refundRows[0]?.net_refunds_today);
+    const returnedCogsToday = numberValue(refundRows[0]?.returned_cogs_today);
     const grossSalesToday = numberValue(sales.gross_sales_today);
     const discountsToday = numberValue(sales.discounts_today);
     const cogsToday = numberValue(sales.cogs_today);
-    const grossProfitToday = numberValue(sales.gross_profit);
+    const grossRevenueToday = numberValue(sales.sales_today);
+    const salesToday = grossRevenueToday - netRefundsToday;
+    const grossProfitToday = salesToday - cogsToday + returnedCogsToday;
     const orderCount = numberValue(sales.order_count);
     const lowStockCount = numberValue(stock.low_stock);
     const outOfStockCount = numberValue(stock.out_of_stock);
