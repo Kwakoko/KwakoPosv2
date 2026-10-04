@@ -12,16 +12,16 @@ const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "9ea5125220428ea41006e9dbd3201060056fd3d5",
   "apps/web/src/App.tsx": "000a361bbaab925456e36cec3ee5c26d14026931",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
-  "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
+  "apps/web/src/pages/VerticalCommandCenterPage.tsx": "b9ca5366b01f03ff0b7bf44bf81c716519836b96",
   "apps/web/src/pages/DashboardPage.tsx": "8821c3ec11803bebfacdb0e4c5b9e597bcab5ec1",
   "apps/web/src/pages/InventoryPage.tsx": "b692a288e7b3842ea32eff1709bedf9113394519",
   "apps/web/src/pages/PurchasingPage.tsx": "07e34d92a282c0172a7a9b3cf8e7f20b2a321d39",
   "apps/web/src/pages/ReportsPage.tsx": "4c66a81a465479ddd35cad56005002d73b99772b",
   "apps/web/src/pages/SettingsPage.tsx": "aef9d5de51d62f8f7de0d772f7f426152951b949",
-  "apps/web/src/pages/CashDrawerPage.tsx": "13f30ca82037198e2704bfe25688783d689a40dd",
+  "apps/web/src/pages/CashDrawerPage.tsx": "71439a29b8c2ae894f3fe6a7ca97c44f2c1795a2",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/production-certification.yml": "b1fa5502685b56d52334f32ab33e46d6c215ad11",
-  ".github/workflows/production-release-exact-main.yml": "8db0002f34fbc36cb65635fc07ae8e14feab1120"
+  ".github/workflows/production-certification.yml": "cd6aa88d31253df2c8bdae56f7f944ebaa70fd10",
+  ".github/workflows/production-release-exact-main.yml": "d49cdb11f9cd97b66fd36da205da56b2a71ce7ee"
 };
 
 const MARKERS: Array<[string, string, string]> = [
