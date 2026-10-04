@@ -59,6 +59,7 @@ import { SyncConflictResolutionModal } from "../components/SyncConflictResolutio
 import { useWindowManager } from "../context/WindowManagerContext.js";
 import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
+import { useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -2460,6 +2461,10 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const { theme, toggleTheme } = useTheme();
   const { permissions, isSuperAdmin } = useRbac();
   const { isMobileSidebarOpen, setIsMobileSidebarOpen } = useModule();
+  const authoritativeSyncStatus = useAuthoritativeSyncStatus({
+    tenantId: currentTenantId || null,
+    branchId: currentBranchId || null,
+  });
 
   const isSuperAdminUser = Boolean(
     isSuperAdmin || user?.role === "SUPER_ADMIN" || user?.email === "admin@kwakoko.co.tz"
@@ -2502,6 +2507,10 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
       window.removeEventListener("kwakopos:open-conflict-center", onOpenConflictCenter);
     };
   }, [refreshSyncConflicts]);
+
+  const displayedSyncConflictCount = authoritativeSyncStatus.openConflictCount ?? syncConflictCount;
+  const hasAuthoritativeDivergence = authoritativeSyncStatus.reconciliationStatus === "DIVERGENT";
+  const showSyncConflictBanner = displayedSyncConflictCount > 0 || hasAuthoritativeDivergence;
 
   const canAdminister = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 
@@ -2654,7 +2663,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         </div>
 
         <main id="app-root" className="main-content" role="main">
-          {syncConflictCount > 0 && (
+          {showSyncConflictBanner && (
             <div
               className="sync-conflict-sticky-banner"
               style={{
@@ -2675,10 +2684,14 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
                 <AlertTriangle size={20} style={{ color: "#ef4444", flexShrink: 0 }} />
                 <div>
                   <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "#f87171" }}>
-                    Replication Paused: {syncConflictCount} Unresolved Sync Conflict{syncConflictCount > 1 ? "s" : ""}
+                    {hasAuthoritativeDivergence
+                      ? "Replication Divergence Detected"
+                      : `Replication Paused: ${displayedSyncConflictCount} Unresolved Sync Conflict${displayedSyncConflictCount > 1 ? "s" : ""}`}
                   </div>
                   <div style={{ fontSize: "0.78rem", color: "var(--muted, #94a3b8)" }}>
-                    Cloud sync is paused at the conflicting revision to safeguard transaction consistency. Resolve to resume real-time replication.
+                    {hasAuthoritativeDivergence
+                      ? "The last authoritative reconciliation found replica divergence. Inspect the Conflict Center before treating this device as converged."
+                      : "Cloud sync is paused at the conflicting revision to safeguard transaction consistency. Resolve to resume real-time replication."}
                   </div>
                 </div>
               </div>
