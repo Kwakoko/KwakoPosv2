@@ -115,7 +115,6 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     const session: StoredSession = {
       sessionId: "sess-expired-offline",
       accessToken: expiredJwt,
-      refreshToken: "refresh-xyz",
       user: {
         id: "usr-01",
         email: "cashier@kwakopos.com",
