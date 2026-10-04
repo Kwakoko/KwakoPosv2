@@ -53,7 +53,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       saleIds.push(saleId);
 
       // Record stock deductions locally (deducts variant, writes ledger, records pending StockAdjustment)
-      recordPosSaleDeductions(db, {
+      await recordPosSaleDeductions(db, {
         saleId,
         items: [{ productId, variantId, qty: 2, unitCost: 28000 }],
         tenantId: "tenant-integ-1",
