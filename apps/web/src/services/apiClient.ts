@@ -307,8 +307,9 @@ export async function restoreSession(): Promise<LoginResponseUser | null> {
     return getStoredSession()?.user || stored.user;
   }
 
-  // Preserve stored user so offline POS sessions do not get logged out on page refresh
-  return stored.user;
+  // Only retain the durable identity when the browser is actually offline.
+  if (typeof navigator !== "undefined" && !navigator.onLine) return stored.user;
+  return null;
 }
 
 export async function logout(reason = "USER_LOGOUT"): Promise<void> {
