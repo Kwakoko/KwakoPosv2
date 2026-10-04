@@ -54,6 +54,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   const { formatCurrency, formatMoneyCompact, formatDate, formatTime, formatNumber } = useFormatters();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+  const [effectiveSettingsScope, setEffectiveSettingsScope] = useState<string>("DEFAULT");
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const selectSettingsTab = useCallback((tab: SettingsTab) => {
@@ -211,7 +212,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       .then((res) => {
         const data = res?.data || res;
         const read = (key: string) => data?.[key]?.value;
+        const scopeOf = (key: string) => String(data?.[key]?.scope || "DEFAULT");
         const profileRemote = read("business.profile");
+        const profileScope = scopeOf("business.profile");
         const localeRemote = read("localization.config");
         const posRemote = read("pos.config");
         const taxRemote = read("tax.config");
@@ -219,7 +222,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         const securityRemote = read("security.config");
         const notificationsRemote = read("notifications.config");
         const syncRemote = read("sync.config");
-        if (profileRemote) { setProfile((v) => ({ ...v, ...profileRemote })); db.saveConfigurationLocal?.("business.profile", profileRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (profileRemote) {
+          setProfile((v) => ({ ...v, ...profileRemote }));
+          setEffectiveSettingsScope(profileScope);
+          db.saveConfigurationLocal?.("business.profile", profileRemote, { tenantId: currentTenantId, branchId: currentBranchId });
+        }
         if (localeRemote?.locale) { setLocale(localeRemote.locale as SupportedLocale); db.saveConfigurationLocal?.("localization.config", localeRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
         if (posRemote) { setPosConfig((v) => ({ ...v, ...posRemote })); db.saveConfigurationLocal?.("pos.config", posRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
         if (taxRemote) { setTaxConfig((v) => ({ ...v, ...taxRemote })); db.saveConfigurationLocal?.("tax.config", taxRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
@@ -425,6 +432,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
           <p className="v2-text-xs v2-text-muted">
             {t("settings.enterpriseConfig")}
           </p>
+          <div className="v2-text-xs v2-text-muted" style={{ marginTop: ".25rem" }}>
+            Effective configuration scope: <strong>{effectiveSettingsScope}</strong>
+            <span style={{ marginLeft: ".4rem" }}>• this workspace edits branch overrides</span>
+          </div>
         </div>
         <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void handleSave()} type="button" disabled={!canManageSettings} title={!canManageSettings ? "settings.manage permission is required" : undefined}>
           <Save size={13} /> {t("settings.saveChanges")}
