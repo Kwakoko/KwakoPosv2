@@ -56,6 +56,8 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: align privileged sync authority contract
+- **release**: v2.13.0
 - **release**: v2.13.0
 - **core**: checkpoint local certification fixes
 - **core**: Merge pull request #42 from Kwakoko/release/auth-transport-lock
