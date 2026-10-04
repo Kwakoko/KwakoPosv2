@@ -293,16 +293,9 @@ export function comparePrerelease(p1?: string, p2?: string): number {
   return parts1.length - parts2.length;
 }
 
-export function compareSemVer(v1: string, v2: string): number {
-  const s1 = parseSemVer(v1);
-  const s2 = parseSemVer(v2);
+import { compareSemVer as compareAuthoritativeSemVer } from "../../packages/config/src/semverEngine.js";
 
-  if (s1.major !== s2.major) return s1.major - s2.major;
-  if (s1.minor !== s2.minor) return s1.minor - s2.minor;
-  if (s1.patch !== s2.patch) return s1.patch - s2.patch;
-
-  return comparePrerelease(s1.prerelease, s2.prerelease);
-}
+export const compareSemVer = compareAuthoritativeSemVer;
 
 export function getCanonicalFolderName(
   projectName: string,
