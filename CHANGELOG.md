@@ -58,6 +58,11 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #59 from Kwakoko/fix/remove-persistent-access-token-20261004
+- **auth**: enforce bearer and RBAC authority boundaries
+- **core**: Merge pull request #58 from Kwakoko/fix/typed-scoped-app-event-bus-20261004
+- **ui-events**: enforce typed data-change boundary
+- **release**: v2.13.0
 - **core**: Merge pull request #57 from Kwakoko/fix/communication-conflict-current-main-v2
 - **sync**: carry authoritative conflict checks onto current main
 - **sync**: add authoritative conflict presentation coverage
@@ -360,6 +365,17 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **sync**: close current-main P0/P1 validation blockers
+- **auth**: derive refresh claims from authoritative RBAC
+- **auth**: make browser access tokens memory-only
+- **ui-events**: preserve extensible typed event metadata
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: route data-change publishes through typed bus
+- **ui-events**: add typed scoped data-change boundary
 - **sync**: carry closed-loop remediation onto current main
 - **sync**: carry closed-loop remediation onto current main
 - **sync**: carry closed-loop remediation onto current main
