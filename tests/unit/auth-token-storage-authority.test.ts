@@ -69,8 +69,12 @@ describe("Authentication credential authority", () => {
     const server = read("apps/api/src/server.ts");
     const buildStart = server.indexOf("export function buildServer");
     const hookStart = server.indexOf('server.addHook("onRequest"', buildStart);
-    const firstRouteStart = server.search(/server\.(?:get|post|put|patch|delete)\(\s*"/, buildStart);
-    const canonicalRegistration = server.indexOf("registerCanonicalProductionAuthentication(server, config, productionPersistence)", buildStart);
+    const buildSection = server.slice(buildStart);
+    const hookRelative = buildSection.indexOf('server.addHook("onRequest"');
+    const firstRouteRelative = buildSection.search(/server\.(?:get|post|put|patch|delete)\(\s*"/);
+    const hookStart = buildStart + hookRelative;
+    const firstRouteStart = buildStart + firstRouteRelative;
+    const canonicalRegistration = buildStart + buildSection.indexOf("registerCanonicalProductionAuthentication(server, config, productionPersistence)");
 
     expect(buildStart).toBeGreaterThanOrEqual(0);
     expect(hookStart).toBeGreaterThan(buildStart);
