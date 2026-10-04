@@ -56,6 +56,9 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: checkpoint local production and certification updates
+- **core**: reconcile purchasing sync repair with current main
+- **release**: v2.13.0
 - **core**: Merge pull request #40 from Kwakoko/fix/expenses-p0-p1-20261003
 - **expenses**: add dedicated P0/P1 closed-loop certification gate
 - **core**: remove eslint governance bypass from sync boot effect
@@ -208,6 +211,8 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **sync**: resolve purchasing merge conflict
+- **core**: reconcile local persistence and sync fixes
 - **sync**: align remaining raw SyncOperation recovery queries with PostgreSQL columns
 - **sync**: align Expense change-journal recovery queries with snake_case schema
 - **sync**: map SyncOperation Prisma fields to authoritative snake_case columns
