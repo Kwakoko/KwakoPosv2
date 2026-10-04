@@ -107,7 +107,8 @@ const DEFAULT_AUTH_CONTEXT: AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 export const useAuth = (): AuthContextType => {
   const ctx = useContext(AuthContext);
-  return ctx || DEFAULT_AUTH_CONTEXT;
+  if (!ctx) throw new Error("USEAUTH_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface TenantContextType {
@@ -131,7 +132,8 @@ const DEFAULT_TENANT_CONTEXT: TenantContextType = {
 const TenantContext = createContext<TenantContextType | null>(null);
 export const useTenant = (): TenantContextType => {
   const ctx = useContext(TenantContext);
-  return ctx || DEFAULT_TENANT_CONTEXT;
+  if (!ctx) throw new Error("USETENANT_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface BranchContextType {
@@ -153,7 +155,8 @@ const DEFAULT_BRANCH_CONTEXT: BranchContextType = {
 const BranchContext = createContext<BranchContextType | null>(null);
 export const useBranch = (): BranchContextType => {
   const ctx = useContext(BranchContext);
-  return ctx || DEFAULT_BRANCH_CONTEXT;
+  if (!ctx) throw new Error("USEBRANCH_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface RbacContextType {
@@ -173,7 +176,8 @@ const DEFAULT_RBAC_CONTEXT: RbacContextType = {
 const RbacContext = createContext<RbacContextType | null>(null);
 export const useRbac = (): RbacContextType => {
   const ctx = useContext(RbacContext);
-  return ctx || DEFAULT_RBAC_CONTEXT;
+  if (!ctx) throw new Error("USERBAC_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 export interface ModuleContextType {
@@ -221,7 +225,8 @@ const DEFAULT_MODULE_CONTEXT: ModuleContextType = {
 const ModuleContext = createContext<ModuleContextType | null>(null);
 export const useModule = (): ModuleContextType => {
   const ctx = useContext(ModuleContext);
-  return ctx || DEFAULT_MODULE_CONTEXT;
+  if (!ctx) throw new Error("USEMODULE_CONTEXT_PROVIDER_REQUIRED");
+  return ctx;
 };
 
 interface SyncContextType {
