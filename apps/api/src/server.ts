@@ -656,9 +656,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     try {
       const payload = verifyAccessToken(token);
       if (payload.sessionId) {
-        const isRevoked = await globalSessionManager.isSessionRevoked(payload.sessionId);
-        if (isRevoked) {
-          return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session revoked or expired" } });
+        const validation = await globalSessionManager.validateSession(payload.sessionId, {
+          tenantId: payload.tenantId,
+          branchId: payload.branchId,
+          userId: payload.sub,
+          deviceId: payload.deviceId,
+          activity: false,
+        });
+        if (!validation.valid) {
+          const code = validation.code === "SESSION_REVOKED"
+            ? "SESSION_REVOKED"
+            : validation.code === "SESSION_EXPIRED"
+              ? "SESSION_EXPIRED"
+              : validation.code === "DEVICE_MISMATCH"
+                ? "DEVICE_REVOKED"
+                : validation.code === "TENANT_MISMATCH" || validation.code === "BRANCH_MISMATCH"
+                  ? "TENANT_ACCESS_REVOKED"
+                  : "AUTH_REQUIRED";
+          return reply.status(401).send({ success: false, error: { code, message: "Server session validation failed." } });
         }
       }
       req.tenantContext = extractTenantContext(payload);
