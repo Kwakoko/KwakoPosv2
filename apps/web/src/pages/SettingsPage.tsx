@@ -318,7 +318,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       routingKey: taxConfig.traVfdRoutingKey || "vfdrct",
     };
     db.saveConfigurationLocal?.("tra_vfd_config", vfdObj, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
-    db.saveConfigurationLocal?.("tax_config", { ...taxConfig, traVfdEnabled: newVal });
+    db.saveConfigurationLocal?.("tax.config", { ...taxConfig, traVfdEnabled: newVal }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
 
     if (currentTenantId && currentBranchId && typeof navigator !== "undefined" && navigator.onLine) {
       try {
@@ -1112,7 +1112,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
                   <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
                     <strong className="v2-text-xs">Airtel Money</strong>
-                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                    <span className="v2-badge v2-badge-sm">CONFIGURE</span>
                   </div>
                   <div className="v2-text-xs v2-text-muted">Provider integration availability; configure credentials and settlement mapping before activation.</div>
                 </div>
@@ -1120,7 +1120,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 <div className="v2-p-3" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", border: "1px solid var(--surface-border)" }}>
                   <div className="v2-flex v2-items-center v2-justify-between v2-mb-1">
                     <strong className="v2-text-xs">CRDB / NMB Bank</strong>
-                    <span className="v2-badge v2-badge-sm" style={{ color: "#10b981" }}>READY</span>
+                    <span className="v2-badge v2-badge-sm">CONFIGURE</span>
                   </div>
                   <div className="v2-text-xs v2-text-muted">Provider integration availability; configure bank integration credentials before activation.</div>
                 </div>
