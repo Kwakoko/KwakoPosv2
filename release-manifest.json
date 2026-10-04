@@ -1,12 +1,12 @@
 {
   "version": "2.13.0",
   "tag": "v2.13.0",
-  "gitSha": "fd54531305c2b739eaed759a0c147dc6ca839b07",
+  "gitSha": "2df1def0b61220d89526176ed58c950ab069ec46",
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
   "releaseChannel": "production",
-  "releasedAt": "2026-10-04T10:25:53.412Z",
+  "releasedAt": "2026-10-04T10:33:49.245Z",
   "certification": "FAIL",
   "brand": {
     "parentBrand": "Kwakoko",
