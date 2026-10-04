@@ -213,7 +213,22 @@ export class WorldStandardPrismaSyncEngine {
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
-        case "Setting": return await db.setting.findUnique({ where: { id: op.entityId } });
+        case "Setting": {
+          const byId = await db.setting.findUnique({ where: { id: op.entityId } });
+          if (byId) return byId;
+          const p: any = op.payload || {};
+          const scope = String(p.scope || "BRANCH").toUpperCase();
+          return await db.setting.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              key: String(p.key || ""),
+              scope,
+              branchId: scope === "BRANCH" ? ctx.branchId : null,
+              userId: scope === "USER" ? ctx.userId : null,
+            },
+            orderBy: { updatedAt: "desc" },
+          });
+        }
         default: return op.payload;
       }
     } catch {
