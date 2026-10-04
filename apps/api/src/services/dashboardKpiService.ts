@@ -156,7 +156,7 @@ export async function getDashboardKpiSnapshot(
         ctx.tenantId,
         ctx.branchId,
       ),
-      tx.$queryRawUnsafe<Array<{ customerDebts: unknown; customer_count: bigint | number | string }>>(
+      tx.$queryRawUnsafe<Array<{ customer_debts: unknown; customer_count: bigint | number | string }>>(
         `SELECT
            COALESCE(SUM("currentBalance"), 0) AS customer_debts,
            COUNT(*) FILTER (WHERE "status" = 'ACTIVE') AS customer_count
