@@ -1,29 +1,18 @@
-import { globalAiOperatingLayerEngine } from "@kwakopos2/domain";
+import type { AiRecommendation,TenantContext } from "@kwakopos2/contracts";
+import { globalPrismaAiInsightsRepository,type PrismaAiInsightsRepository } from "@kwakopos2/database";
+import { AiOperatingLayerEngine } from "@kwakopos2/domain";
 
-export class AiOperatingLayerService {
-  public getInsightsAndRecommendations(tenantId: string) {
-    return globalAiOperatingLayerEngine.generateInsightsAndRecommendations(tenantId);
-  }
+function allowed(ctx:TenantContext,required:string[]){const permissions=new Set((ctx.permissions||[]).map(p=>String(p).toLowerCase()));const roles=new Set((ctx.roles||[]).map(r=>String(r).toUpperCase()));return permissions.has("*")||roles.has("SUPER_ADMIN")||roles.has("SUPERADMIN")||roles.has("OWNER")||roles.has("ADMIN")||required.some(p=>permissions.has(p));}
 
-  public askAi(queryText: string, userPermissions: string[]) {
-    return globalAiOperatingLayerEngine.askAi(queryText, userPermissions);
-  }
-
-  public explainRecommendation(recommendationId: string) {
-    return globalAiOperatingLayerEngine.explainRecommendation(recommendationId);
-  }
-
-  public executeAction(recommendationId: string, approverId: string) {
-    return globalAiOperatingLayerEngine.executeApprovedAction(recommendationId, approverId);
-  }
-
-  public toggleKillSwitch(scope: "GLOBAL" | "AGENT" | "TOOL" | "TENANT", idOrDisabled: string | boolean) {
-    return globalAiOperatingLayerEngine.toggleKillSwitch(scope, idOrDisabled);
-  }
-
-  public getDashboardMetrics() {
-    return globalAiOperatingLayerEngine.getHealthSummary();
-  }
+export class AiOperatingLayerService{
+  constructor(private readonly repository:PrismaAiInsightsRepository=globalPrismaAiInsightsRepository,private readonly engine=new AiOperatingLayerEngine()){}
+  async getInsightsAndRecommendations(ctx:TenantContext){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Insights permission required.");if(await this.repository.getKillSwitchActive(ctx))return {insights:[],recommendations:[]};const snapshot=await this.repository.loadBusinessSnapshot(ctx);const result=this.engine.generateInsightsAndRecommendations(ctx,snapshot,false);await this.repository.persistInsightsAndRecommendations(ctx,result);return {insights:await this.repository.listInsights(ctx,50),recommendations:await this.repository.listRecommendations(ctx,50)};}
+  async listInsights(ctx:TenantContext,limit=50){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Insights permission required.");return this.repository.listInsights(ctx,limit);}
+  async listRecommendations(ctx:TenantContext,limit=50){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Recommendations permission required.");return this.repository.listRecommendations(ctx,limit);}
+  async askAi(ctx:TenantContext,q:string){if(!allowed(ctx,["finance_view","financial_report_view"]))throw new Error("FORBIDDEN: Finance analytical permission required.");if(await this.repository.getKillSwitchActive(ctx))throw new Error("AI_KILL_SWITCH_ACTIVE: AI query disabled.");return this.engine.askAi(ctx,q,ctx.permissions,await this.repository.getGrossMarginMetric(ctx));}
+  async explainRecommendation(ctx:TenantContext,id:string){return this.engine.explainRecommendation(await this.repository.findRecommendation(ctx,id));}
+  async approveRecommendation(ctx:TenantContext,id:string,comments?:string):Promise<AiRecommendation>{if(!allowed(ctx,["purchase_approve","finance_create","journal_post"]))throw new Error("FORBIDDEN: AI recommendation approval permission required.");if(await this.repository.getKillSwitchActive(ctx))throw new Error("AI_KILL_SWITCH_ACTIVE: AI approval disabled.");return this.repository.approveRecommendation(ctx,id,comments);}
+  async toggleKillSwitch(ctx:TenantContext,scope:"GLOBAL"|"TENANT",targetId:string,enabled:boolean){const roles=new Set((ctx.roles||[]).map(r=>String(r).toUpperCase()));if(scope==="GLOBAL"&&!roles.has("SUPER_ADMIN")&&!roles.has("SUPERADMIN"))throw new Error("FORBIDDEN: Super Admin privileges required for global AI kill switch.");if(scope==="TENANT"&&!allowed(ctx,["admin:*"]))throw new Error("FORBIDDEN: Tenant administrator privileges required.");return this.repository.setKillSwitch(ctx,scope,targetId,enabled);}
+  async getDashboardMetrics(ctx:TenantContext){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI dashboard permission required.");return this.repository.getHealth(ctx);}
 }
-
-export const globalAiOperatingLayerService = new AiOperatingLayerService();
+export const globalAiOperatingLayerService=new AiOperatingLayerService();
