@@ -997,15 +997,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         color: ["#14b8a6", "#f43f5e", "#a855f7", "#06b6d4"][idx % 4],
         icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",
       };
-      const pieValue = paymentMetricMode === "volume"
-        ? (item.volumeShare || (item.volume > 0 ? 1 : 0))
-        : (item.countShare || (item.count > 0 ? 1 : 0));
+      const rawMetric = paymentMetricMode === "volume" ? item.volume : item.count;
       return {
         ...item,
         paymentCount: item.paymentCount ?? item.count,
         orderCount: item.orderCount ?? item.count,
-        value: Math.max(pieValue, 1),
-        rawMetric: paymentMetricMode === "volume" ? item.volume : item.count,
+        value: Math.max(rawMetric, 0),
+        rawMetric,
         color: cfg.color, icon: cfg.icon, badgeBg: cfg.badgeBg, textColor: cfg.textColor,
       };
     });
