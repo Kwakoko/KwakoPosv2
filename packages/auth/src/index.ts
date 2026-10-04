@@ -196,6 +196,7 @@ export interface SessionRecord {
   rememberMe?: boolean;
   offlineStartedAt?: Date | null;
   offlineExpiresAt?: Date | null;
+  idleTimeoutMs: number;
 }
 
 export interface SessionCreateInput {
@@ -209,6 +210,7 @@ export interface SessionCreateInput {
   userAgent?: string | null;
   platform?: string | null;
   rememberMe?: boolean;
+  idleTimeoutMs?: number;
   absoluteLifetimeMs?: number;
   refreshTokenLifetimeMs?: number;
 }
@@ -324,6 +326,7 @@ export class SessionManager {
       rememberMe: Boolean(input.rememberMe),
       offlineStartedAt: null,
       offlineExpiresAt: null,
+      idleTimeoutMs: input.idleTimeoutMs ?? 30 * 60_000,
     };
     if (this.storeProvider) await this.storeProvider.create(record);
     else this.inMemorySessions.set(sessionId, record);
@@ -349,6 +352,13 @@ export class SessionManager {
     if (context?.userId && session.userId !== context.userId) return { valid: false, code: "USER_MISMATCH", session };
     if (context?.deviceId && session.deviceId !== context.deviceId) return { valid: false, code: "DEVICE_MISMATCH", session };
     if (session.refreshTokenExpiresAt <= now) return { valid: false, code: "REFRESH_EXPIRED", session };
+    if (session.lastActivityAt.getTime() + session.idleTimeoutMs <= now.getTime()) {
+      session.status = "EXPIRED";
+      session.revokedAt = now;
+      session.revokeReason = "SESSION_TIMEOUT";
+      await this.persist(session);
+      return { valid: false, code: "SESSION_EXPIRED", session };
+    }
     return { valid: true, code: "OK", session };
   }
 
