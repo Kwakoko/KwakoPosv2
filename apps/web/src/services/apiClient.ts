@@ -384,7 +384,7 @@ export function safeUUID(): string {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function getDeviceId(): string {
+export function getDeviceId(): string {
   if (typeof window === "undefined") return "server-rendered-client";
   const key = "kwakopos:v2:device-id";
   try {
