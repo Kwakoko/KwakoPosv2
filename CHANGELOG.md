@@ -58,6 +58,19 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #67 from Kwakoko/fix/dashboard-final-closure
+- **core**: refresh dashboard lock after return ownership fix
+- **core**: refresh dashboard lock after return hardening
+- **core**: refresh navigation lock workflow hashes
+- **core**: refresh dashboard lock workflow hashes
+- **core**: refresh navigation lock for dashboard closures
+- **core**: add dashboard analytics production lock
+- **core**: enforce dashboard production lock
+- **core**: enforce dashboard production lock
+- **core**: enforce dashboard production lock
+- **core**: add dashboard production lock command
+- **core**: close final dashboard audit gaps
+- **release**: v2.13.0
 - **release**: v2.13.0
 - **core**: commit local release and cleanup changes
 - **core**: Merge PR #63: Dashboard financial reporting closures
@@ -395,6 +408,20 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **core**: exclude cross-tenant original-sale returns
+- **core**: preserve valid orphan return analytics under tenant isolation
+- **core**: add dashboard lock as separate release step
+- **core**: add dashboard lock as separate candidate step
+- **core**: add dashboard lock as separate CI step
+- **core**: render payment donut from raw metrics
+- **core**: remove cashier ID fallback and correct order copy
+- **core**: publish governed product ranking fields
+- **core**: scope dashboard return cost lookups
+- **core**: align top product ranking and recent order labels
+- **core**: expose top product ranking dimensions
+- **core**: resolve authoritative cashier names for recent orders
+- **core**: enforce tenant branch on payment summary
+- **core**: harden dashboard analytics isolation and rankings
 - **core**: close Conflict Center P0/P1 convergence loop
 - **core**: terminate synthetic certification CLI deterministically
 - **core**: close synthetic IndexedDB stores before monitor exit
@@ -854,7 +881,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
+Credit to: Jack91186, Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
