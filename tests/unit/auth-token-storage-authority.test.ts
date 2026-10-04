@@ -39,4 +39,26 @@ describe("Authentication credential authority", () => {
     expect(server).toContain("userPermissions = Array.isArray(existingUser.role?.permissions)");
     expect(server).toContain("permissions: userPermissions");
   });
+
+  it("uses the HttpOnly refresh cookie contract", () => {
+    const server = read("apps/api/src/server.ts");
+    const client = read("apps/web/src/services/apiClient.ts");
+    const refreshStart = server.indexOf('if (routePath === "/auth/refresh"');
+    const refreshEnd = server.indexOf('if (routePath === "/auth/logout"', refreshStart);
+    const refresh = server.slice(refreshStart, refreshEnd);
+    const clientStart = client.indexOf('async function refreshAccessToken()');
+    const clientEnd = client.indexOf('export async function login', clientStart);
+    const clientRefresh = client.slice(clientStart, clientEnd);
+
+    expect(refresh).toContain('parseCookies(req.headers?.cookie)[REFRESH_COOKIE]');
+    expect(refresh).toContain('setRefreshCookie(reply, rotated.refreshToken');
+    expect(refresh).not.toContain('body.refreshToken');
+    expect(refresh).not.toContain('refreshToken?: unknown');
+    expect(clientRefresh).toContain('body: JSON.stringify({');
+    expect(clientRefresh).toContain('sessionId: stored.sessionId');
+    expect(clientRefresh).not.toContain('refreshToken');
+    expect(clientRefresh).not.toContain('deviceId: getDeviceId()');
+    expect(clientRefresh).not.toContain('tenantId: stored.user.tenantId');
+  });
+
 });
