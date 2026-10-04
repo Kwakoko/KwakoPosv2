@@ -1155,7 +1155,15 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: outboxItem.tenantId,
+            branchId: outboxItem.branchId,
+            operationId: outboxItem.id,
+            entityType: outboxItem.entityType,
+            entityId: outboxItem.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
@@ -1840,7 +1848,15 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: outboxItem.tenantId,
+            branchId: outboxItem.branchId,
+            operationId: outboxItem.id,
+            entityType: outboxItem.entityType,
+            entityId: outboxItem.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
