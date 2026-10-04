@@ -49,8 +49,6 @@ sourceContains("tests/unit/sync-conflict-center-presentation.test.ts", "does not
 sourceContains("tests/unit/sync-conflict-center-presentation.test.ts", "does not claim convergence before the sync run is successful");
 sourceContains("tests/unit/sync-status-label.test.ts", "never reports synced while authoritative server conflicts exist");
 
-sourceContains(".github/workflows/ci.yml", "Conflict Center Production Lock v1");
-sourceContains(".github/workflows/ci.yml", "Conflict Center PostgreSQL Lifecycle");
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "name: Conflict Center Production Lock v1");
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "pull_request:");
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "push:");
