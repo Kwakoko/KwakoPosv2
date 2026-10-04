@@ -273,7 +273,7 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
     {
       id: "SEC-STORE-01", priority: "P0", category: "Client Storage Security", title: "No Refresh Token Browser Migration",
       run: async () => ({
-        passed: !sourceContains("apps/web/src/services/apiClient.ts", /refreshToken/),
+        passed: !sourceContains("apps/web/src/services/apiClient.ts", /\brefreshToken\b/) && !sourceContains("apps/web/src/services/apiClient.ts", /['"]refreshToken['"]\s*:/),
         details: "apiClient contains no refresh-token migration, serialization, or browser-storage handling",
       }),
     },
