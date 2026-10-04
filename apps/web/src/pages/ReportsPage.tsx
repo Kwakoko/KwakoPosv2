@@ -32,7 +32,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 import { useModule, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 
