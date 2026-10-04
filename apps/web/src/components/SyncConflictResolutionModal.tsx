@@ -32,20 +32,25 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
   const [conflicts, setConflicts] = useState<SyncConflictItem[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [serverConflictState, setServerConflictState] = useState<"UNKNOWN" | "VERIFIED" | "UNAVAILABLE">("UNKNOWN");
   const { currentTenantId } = useTenant();
   const { currentBranchId } = useBranch();
   const syncStatus = useAuthoritativeSyncStatus({
     tenantId: currentTenantId || null,
     branchId: currentBranchId || null,
   });
-  const replicaState = getConflictCenterReplicaState(syncStatus);
+  const replicaState = serverConflictState === "VERIFIED"
+    ? getConflictCenterReplicaState(syncStatus)
+    : "NOT_VERIFIED";
 
   const loadConflicts = async () => {
     if (!localDb) return;
     const byId = new Map<string, SyncConflictItem>();
+    setServerConflictState("UNKNOWN");
     try {
       const response = await apiFetch<any>("/sync/conflicts?status=OPEN");
       const serverItems = Array.isArray(response?.data) ? response.data : [];
+      setServerConflictState("VERIFIED");
       for (const item of serverItems) {
         const id = String(item?.id || "").trim();
         if (!id) continue;
@@ -63,7 +68,9 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
         });
       }
     } catch {
-      // Offline fallback: retain durable local conflict metadata.
+      // Offline fallback: retain durable local conflict metadata, but never
+      // present that fallback as authoritative server confirmation.
+      setServerConflictState("UNAVAILABLE");
     }
     for (const [key, value] of localDb.syncMetadata.entries()) {
       if (!key.startsWith("sync_conflict_")) continue;
@@ -280,18 +287,26 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
                 />
               )}
               <p style={{ margin: 0, fontWeight: 600, fontSize: "0.95rem" }}>
-                {replicaState === "VERIFIED"
-                  ? "Replica verified — no open sync conflicts."
-                  : replicaState === "DIVERGENT"
-                    ? "No open conflicts — replica is divergent."
-                    : "No open conflicts — replica verification pending."}
+                {serverConflictState !== "VERIFIED"
+                  ? (serverConflictState === "UNAVAILABLE"
+                    ? "Open conflict verification unavailable."
+                    : "Checking authoritative open conflicts…")
+                  : replicaState === "VERIFIED"
+                    ? "Replica verified — no open sync conflicts."
+                    : replicaState === "DIVERGENT"
+                      ? "No open conflicts — replica is divergent."
+                      : "No open conflicts — replica verification pending."}
               </p>
               <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem" }}>
-                {replicaState === "VERIFIED"
-                  ? "Authoritative reconciliation is in sync, with no pending, failed, or abandoned mutations."
-                  : replicaState === "DIVERGENT"
-                    ? "The last authoritative reconciliation reported divergence. Do not treat this as zero divergence."
-                    : "No open server conflict is recorded, but zero-divergence has not been established yet."}
+                {serverConflictState !== "VERIFIED"
+                  ? (serverConflictState === "UNAVAILABLE"
+                    ? "The server could not confirm the current conflict set. Local metadata is shown only as a recovery aid."
+                    : "The server conflict list has not finished loading; zero divergence is not established.")
+                  : replicaState === "VERIFIED"
+                    ? "Authoritative reconciliation is in sync, with no pending, failed, or abandoned mutations."
+                    : replicaState === "DIVERGENT"
+                      ? "The last authoritative reconciliation reported divergence. Do not treat this as zero divergence."
+                      : "No open server conflict is recorded, but zero-divergence has not been established yet."}
               </p>
               {(syncStatus.pendingOutboxCount > 0 || syncStatus.failedOutboxCount > 0 || syncStatus.abandonedOutboxCount > 0) && (
                 <p style={{ margin: "0.65rem 0 0", fontSize: "0.78rem", fontWeight: 700 }}>
