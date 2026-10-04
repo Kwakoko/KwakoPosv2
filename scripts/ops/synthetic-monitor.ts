@@ -434,7 +434,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbA.recordOutboxMutation({
     id: "OP-DEV-A-01",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
@@ -636,7 +636,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbStoreF06A.recordOutboxMutation({
     id: "op-fin-sync-1",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Financial Customer", creditLimit: 250000 },
