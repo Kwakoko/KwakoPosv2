@@ -74,14 +74,70 @@ jobs:
         run: npm run test:integration
       - name: Run multi-device sync convergence tests
         run: npm run test:sync
+      - name: Start local API for synthetic and security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+            exit 0
+          fi
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-candidate-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-candidate-security-api.log
+          exit 1
       - name: Run synthetic monitoring
         run: npx tsx scripts/ops/synthetic-monitor.ts
       - name: Run foundation certification
         run: npm run certify
       - name: Run full-system certification campaign
         run: npm run certify:campaign
+      - name: Start local API for executable security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+            exit 0
+          fi
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-candidate-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-candidate-security-api.log
+          exit 1
       - name: Run security certification
+        env:
+          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
         run: npm run certify:security
+      - name: Stop local API
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/kwakopos-candidate-security-api.pid ]]; then
+            kill "$(cat /tmp/kwakopos-candidate-security-api.pid)" 2>/dev/null || true
+          fi
+          pkill -P "$(cat /tmp/kwakopos-candidate-security-api.pid 2>/dev/null)" 2>/dev/null || true
       - name: Assert production mutation boundary
         shell: bash
         run: |

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth, useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { syncTelemetryService, type SyncTelemetryMetrics } from "../services/syncTelemetryService.js";
+import { useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
 import { SyncConflictResolutionModal } from "./SyncConflictResolutionModal.js";
 import { globalStoragePressureMonitor } from "../persistence/storagePressure.js";
 import { HumanIdBadge } from "./UI/HumanIdBadge.js";
@@ -35,6 +36,10 @@ export const SyncTelemetryHUD: React.FC = () => {
   const { currentTenantName, currentTenantId, currentTenantSlug } = useTenant();
   const { currentBranchName, currentBranchId, currentBranchCode } = useBranch();
   const { isOnline, pendingOutboxCount, syncOutbox, isSyncing, isSimulatedOffline, toggleOfflineSimulation, db } = useSync();
+  const syncStatus = useAuthoritativeSyncStatus({
+    tenantId: currentTenantId || null,
+    branchId: currentBranchId || null,
+  });
 
   const [metrics, setMetrics] = useState<SyncTelemetryMetrics>(syncTelemetryService.getMetrics());
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -76,8 +81,21 @@ export const SyncTelemetryHUD: React.FC = () => {
     syncTelemetryService.setNetworkStatus(isOnline, Boolean(isSimulatedOffline));
   }, [isOnline, isSimulatedOffline]);
 
-  const effectiveIsSyncing = isSyncing || isProbing || metrics.syncStatus === "SYNCING";
-  const effectiveOutboxCount = Math.max(pendingOutboxCount || 0, metrics.pendingOutboxCount || 0);
+  const effectiveIsSyncing = isSyncing || isProbing || metrics.syncStatus === "SYNCING" || syncStatus.state === "SYNCING";
+  const effectiveOutboxCount = Math.max(
+    pendingOutboxCount || 0,
+    metrics.pendingOutboxCount || 0,
+    syncStatus.pendingOutboxCount || 0,
+  );
+  const effectiveFailedCount = Math.max(metrics.failedOutboxCount || 0, syncStatus.failedOutboxCount || 0);
+  const effectiveConflictCount = Math.max(conflictCount, syncStatus.abandonedOutboxCount || 0);
+  const syncVerified =
+    !isSimulatedOffline &&
+    isOnline &&
+    syncStatus.state === "SUCCESS" &&
+    effectiveOutboxCount === 0 &&
+    effectiveFailedCount === 0 &&
+    effectiveConflictCount === 0;
 
   const handleForceProbe = async () => {
     setIsProbing(true);

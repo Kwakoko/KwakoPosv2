@@ -114,9 +114,9 @@ jobs:
           RELEASE_SHA: ${{ steps.commit_release.outputs.release_sha }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
-            -f event_type=certify-release \
-            -f client_payload="{\"release_sha\":\"$RELEASE_SHA\"}"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - <<EOF
+          {"event_type":"certify-release","client_payload":{"release_sha":"$RELEASE_SHA"}}
+          EOF
           echo "Production certification dispatched for $RELEASE_SHA"
 
       - name: Verify authoritative SemVer state

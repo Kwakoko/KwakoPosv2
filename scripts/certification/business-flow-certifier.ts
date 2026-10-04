@@ -131,7 +131,9 @@ export async function runBusinessFlowJourneys(): Promise<{
       operationId: randomUUID(),
       idempotencyKey: `PHARM-BATCH-${randomUUID()}`,
     });
+    const session = commRepo.openCashSession(ctx, { openingCash: 50000 });
     const posRes = commRepo.createPosSale(ctx, {
+      cashSessionId: session.id,
       items: [{ productId: prod.id, variantId: varId, quantity: 1, unitPrice: 15000, unitCost: 8000 }],
       payments: [{ amount: 15000, paymentMethod: "CASH" }],
       deviceId: "dev-pharm-1",

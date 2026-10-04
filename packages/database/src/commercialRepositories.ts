@@ -360,6 +360,7 @@ export class ScopedCommercialRepository {
       if (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId || (item.productId !== undefined && variant.productId !== item.productId) || variant.isActive === false) {
         throw new Error(`POS_VARIANT_BOUNDARY_VIOLATION:${item.variantId}`);
       }
+      item.productId = variant.productId;
     }
 
     // Validate Variants exist

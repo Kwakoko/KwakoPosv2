@@ -58,17 +58,23 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #49 from Kwakoko/fix/dashboard-kpi-sync-health-20261004
+- **core**: reconcile PR #49 with current main
+- **release**: v2.13.0
 - **core**: Merge pull request #50 from Kwakoko/fix/internal-communication-fabric-closed-loop
 - **auth**: align session persistence contract with server refresh handle
 - **web**: enforce application API boundary for UI
 - **web**: route login API imports through application facade
 - **sync**: prove durable domain event transaction boundary
+- **core**: Merge remote-tracking branch 'origin/fix/dashboard-kpi-sync-health-20261004' into dash-security-temp
+- **web**: route UI API calls through application facade
+- **main**: reconcile canonical P0/P1 remediation branch
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
-- **web**: route UI API calls through application facade
+- **core**: Merge remote-tracking branch 'origin/main' into dash-security-temp
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
 - **web**: route UI API calls through application facade
@@ -93,10 +99,14 @@ All notable changes to KwakoPos will be documented in this file.
 - **web**: add application API facade
 - **sync**: enforce communication fabric boundaries
 - **sync**: add durable domain event bridge coverage
+- **auth**: align session persistence coverage with server-side refresh sessions
 - **release**: v2.13.0
+- **sync**: align variant drill with explicit client variant authority
 - **settings**: prove direct API retry idempotency
 - **settings**: respect append-only audit lifecycle in isolated CI
 - **settings**: assert fail-closed result and preserve append-only audit
+- **dashboard**: assert PostgreSQL product KPI renders in card
+- **sync**: enforce fail-closed sync status labeling
 - **settings**: add dedicated P0/P1 closed-loop workflow
 - **settings**: restore production-certified parity after real closed-loop evidence
 - **settings**: certify update and delete lifecycle without resurrection
@@ -274,23 +284,56 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **cert**: normalize candidate workflow YAML line breaks
+- **cert**: make candidate API startup idempotent
+- **cert**: provide local API to synthetic and security gates
+- **cert**: keep local API alive for synthetic monitoring
 - **cert**: correct forensic certification import path
+- **test**: restore path resolver import for session restart proof
 - **cert**: make cleanliness forensic gate self-contained
 - **governance**: align marketplace gate with live certification suite
 - **sync**: synthesize deterministic standard variant in production push
 - **sync**: normalize legacy product prices before variant synthesis
 - **inventory**: make fallback product variant identity deterministic
+- **test**: keep RBAC restart JWT signing key stable
+- **test**: make session restart proof CI-portable and JWT-stable
+- **test**: assert catalog bootstrap with tenant and branch scope
 - **security**: patch Fastify and transitive URL/IP dependencies
 - **ci**: update navigation lock for approved fabric imports
+- **cert**: track current candidate certification workflow hash
+- **cert**: execute security gate against local candidate API
+- **security**: start local API for live acceptance gate
+- **ci**: provide PostgreSQL to security certification
+- **security**: provide database for security certification
+- **cert**: restore clean navigation lock encoding
+- **cert**: restore navigation production lock syntax
 - **web**: normalize fail-closed context errors
 - **web**: fail closed on missing operational context providers
+- **sync-test**: await atomic offline sale stock mutation
+- **governance**: refresh production workflow navigation lock hashes
+- **sync-test**: avoid duplicate sale and stock outbox mutations
 - **sync**: persist and deliver durable domain events
+- **release**: provision candidate test PostgreSQL before integration gates
+- **security**: decouple dependency scanning from release performance gate
+- **ci**: make candidate certification database-complete
 - **sync**: fail closed on missing context and scope cross-tab events
 - **sync**: route retry panel through scoped client sync engine
 - **sync**: minimize cross-tab outbox broadcast payload
 - **sync**: scope legacy outbox dispatcher and minimize cross-tab payload
+- **synthetic**: satisfy authoritative expense contract
+- **test**: make API restart persistence proof CI-portable
+- **sync-test**: seed authoritative opening inventory ledger
+- **ci**: provide PostgreSQL to canonical integration gates
+- **ci**: align synthetic expense fixtures with canonical contract
+- **cert**: launch fixed API server for offline E2E
+- **cert**: generate fresh forensic evidence inside cleanliness gate
+- **cert**: decode UTF-16 source artifacts before forensic control scan
 - **settings**: close all P0/P1 remediation loops
 - **settings**: initialize idempotency journal before Settings replay lookup
+- **security**: refresh vulnerable runtime dependencies
+- **governance**: align marketplace gate with canonical certification authority
+- **governance**: refresh navigation lock for current canonical files
+- **sync**: fail closed when outbox verification is not green
 - **release-lock**: track Settings scope indicator checksum
 - **settings**: expose effective configuration scope in Settings UI
 - **settings**: harden Settings service RBAC and concurrent upserts
@@ -622,7 +665,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Jack91186, Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1
+Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes

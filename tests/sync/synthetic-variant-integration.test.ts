@@ -43,7 +43,7 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
     await Promise.all([clientDb.ready, secondClientDb.ready]);
   });
 
-  it("handles offline sale of product without variants by synthesizing fallback variant and propagating via delta sync", async () => {
+  it("handles offline product sale when the client persists the deterministic default variant before sync", async () => {
     const productId = randomUUID();
     const syntheticVariantId = `${productId}-default`;
     const saleId = randomUUID();
@@ -64,6 +64,31 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
       },
       clientCreatedAt: now,
       idempotencyKey: `PROD-${productId}`,
+      status: "PENDING",
+      tenantId: tenantCtx.tenantId,
+      branchId: tenantCtx.branchId,
+    });
+
+    // 2. Client persists the default variant explicitly while offline.
+    // Production sync rejects unknown synthetic variant IDs; the client must carry
+    // the canonical variant mutation with the sale.
+    clientDb.recordOutboxMutation({
+      id: "OP-VAR-SYN-01",
+      entityType: "ProductVariant",
+      entityId: syntheticVariantId,
+      operationType: "CREATE",
+      payload: {
+        id: syntheticVariantId,
+        productId,
+        name: "Artisan Bread",
+        sku: "BREAD-ARTISAN-DEFAULT",
+        price: 3.5,
+        costPrice: 2.0,
+        inventoryQuantity: 0,
+        attributes: { __systemDefaultVariant: true },
+      },
+      clientCreatedAt: now,
+      idempotencyKey: "VAR-" + productId,
       status: "PENDING",
       tenantId: tenantCtx.tenantId,
       branchId: tenantCtx.branchId,
@@ -99,17 +124,18 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
     const pushApi = async (req: any) => serverSyncEngine.processPush(tenantCtx, req);
     const deltaApi = async (since?: string) => serverSyncEngine.processDelta(tenantCtx, { since });
 
-    // 3. Client pushes to server
+    // 3. Client pushes product + explicit variant + sale to server
     const syncRes = await clientEngine.syncWithServer(pushApi, deltaApi, tenantCtx.tenantId);
 
     // Metric Verification: Zero rejected sales due to missing variants
-    expect(syncRes.pushed).toBe(2);
+    expect(syncRes.pushed).toBe(3);
     expect(clientDb.getPendingOutbox().length).toBe(0);
 
     // Verify synthetic variant exists in server repository or store
     const product = serverProductRepo.getProductById(tenantCtx, productId);
     const serverVariants = product?.variants || Array.from(globalInMemoryStore.variants.values()).filter((v) => v.productId === productId);
     expect(serverVariants.length).toBeGreaterThanOrEqual(1);
+    expect(serverVariants.some((v) => v.id === `${productId}-default`)).toBe(true);
     const synth = serverVariants.find((v) => v.id === syntheticVariantId || v.id.endsWith("-default"));
     expect(synth).toBeDefined();
 

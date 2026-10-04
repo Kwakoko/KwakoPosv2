@@ -1056,7 +1056,7 @@ Manager Sign-off:  _____________________
                     {discrepancy === 0 ? "BALANCED" : money(discrepancy)}
                   </span>
                 </div>
-                <button className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} disabled type="button" title="A sealed physical cash count is immutable.">
+                <button data-governance="display" className="v2-btn v2-btn-secondary v2-btn-sm" style={{ width: "100%", justifyContent: "center" }} disabled type="button" title="A sealed physical cash count is immutable.">
                   Count Sealed — Cannot Re-enter
                 </button>
               </div>

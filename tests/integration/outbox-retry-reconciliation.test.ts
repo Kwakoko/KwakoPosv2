@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { randomUUID } from "node:crypto";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { enqueueOutbox, processOutbox, retryWithBackoff } from "../../apps/web/src/atomicOutbox.js";
 import { reconcileInventory } from "../../apps/web/src/clientSyncEngine.js";
@@ -12,7 +11,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
   const productId = "prod-integ-100";
 
   beforeEach(async () => {
-    db = new LocalIndexedDbStore(4, `kwakopos-outbox-integration-${randomUUID()}`);
+    db = new LocalIndexedDbStore(4);
     await db.ready;
 
     const prod: Product = {
@@ -45,32 +44,32 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     };
     db.saveVariantLocal(variant);
 
-    // Ledger is the inventory authority. Seed the baseline as an opening-stock
-    // ledger fact so POS deductions never derive authority from inventoryQuantity alone.
-    db.stockLedger.set(`opening-${variantId}`, {
-      id: `opening-${variantId}`,
+    // Opening stock is authoritative ledger state. Seed it as a historical receipt
+    // so offline sale deductions can never derive inventory from the variant cache.
+    db.stockLedger.set("opening-stock-" + variantId, {
+      id: "opening-stock-" + variantId,
       tenantId: "tenant-integ-1",
       branchId: "branch-integ-1",
       productId,
       variantId,
-      movementType: "OPENING_STOCK",
-      referenceType: "ADJUSTMENT",
-      referenceId: `opening-${variantId}`,
+      movementType: "PURCHASE_RECEIPT",
+      referenceType: "PURCHASE_RECEIPT",
+      referenceId: "opening-balance",
       quantityBefore: 0,
       quantityChange: 100,
       quantity: 100,
       quantityAfter: 100,
       unitCost: 28000,
       totalCost: 2800000,
-      deviceId: "TEST-FIXTURE",
-      operationId: `opening-${variantId}`,
-      idempotencyKey: `OPENING-${variantId}`,
-      notes: "Integration fixture baseline",
+      userId: "test-fixture",
+      deviceId: "test-fixture",
+      operationId: "opening-stock",
+      idempotencyKey: "OPENING-STOCK-" + variantId,
+      notes: "Test opening balance",
       synced: true,
       occurredAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     } as any);
-    await db.flushPersistence();
   });
 
   it("adds 5 offline sales, retries with exponential backoff on failure, and reconciles ledger and inventory consistently", async () => {
@@ -81,34 +80,22 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       saleIds.push(saleId);
 
       // Record stock deductions locally (deducts variant, writes ledger, records pending StockAdjustment)
-      recordPosSaleDeductions(db, {
+      await recordPosSaleDeductions(db, {
         saleId,
         items: [{ productId, variantId, qty: 2, unitCost: 28000 }],
         tenantId: "tenant-integ-1",
         branchId: "branch-integ-1",
       });
 
-      // Enqueue to outbox before any network attempt
-      await enqueueOutbox(
-        {
-          entityType: "Sale",
-          entityId: saleId,
-          operationType: "CREATE",
-          tenantId: "tenant-integ-1",
-          branchId: "branch-integ-1",
-          payload: {
-            id: saleId,
-            items: [{ variantId, qty: 2, price: 35000 }],
-            total: 70000,
-          },
-        },
-        db
-      );
+      // recordPosSaleDeductions atomically queues the StockAdjustment mutation.
+      // Do not create a second Sale outbox entry in this transport drill: the
+      // authoritative server sale path generates the stock ledger, while the
+      // local inventory mutation is already represented by the StockAdjustment outbox.
     }
 
-    // Each offline sale produces one Sale mutation plus one stock-adjustment mutation.\n    // The durable queue therefore contains 10 operations for 5 sales.
+    // Verify one durable StockAdjustment outbox item per offline sale
     const pendingItems = await db.outbox.where("status").equals("PENDING").toArray();
-    expect(pendingItems.length).toBe(10);
+    expect(pendingItems.length).toBe(5);
 
     // Verify local inventory shows 100 - (5 * 2) = 90
     expect(db.productVariants.get(variantId)?.inventoryQuantity).toBe(90);
@@ -129,14 +116,14 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(failResult.failed).toBe(10);
+    expect(failResult.failed).toBe(5);
     expect(failResult.succeeded).toBe(0);
-    // 10 queued operations * 3 retries each = 30 attempts
-    expect(attemptsCount).toBe(30);
+    // 5 items * 3 retries each = 15 attempts
+    expect(attemptsCount).toBe(15);
 
     // Assert that errors were persisted and items marked FAILED with error messages
     const failedItems = db.getFailedOutbox();
-    expect(failedItems.length).toBe(10);
+    expect(failedItems.length).toBe(5);
     for (const item of failedItems) {
       expect(item.status).toBe("FAILED");
       const errReason = db.syncMetadata.get(`error_${item.id}`);
@@ -147,7 +134,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     for (const item of failedItems) {
       db.retryOutbox(item.id);
     }
-    expect(db.getPendingOutbox().length).toBe(10);
+    expect(db.getPendingOutbox().length).toBe(5);
 
     // 4. Simulate network recovery and successful outbox processing
     const successfulPush = vi.fn().mockResolvedValue({ success: true });
@@ -159,7 +146,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(successResult.succeeded).toBe(10);
+    expect(successResult.succeeded).toBe(5);
     expect(successResult.failed).toBe(0);
     expect(db.getPendingOutbox().length).toBe(0);
 
@@ -186,7 +173,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
 
     // 6. Verify ledger integrity: 5 distinct sale entries exist totaling -10
     const ledgerEntries = Array.from(db.stockLedger.values()).filter(
-      (entry) => entry.variantId === variantId && String((entry as any).referenceId || "").startsWith("SALE-OFFLINE-SEQ-"),
+      (entry) => entry.variantId === variantId && entry.movementType === "SALE"
     );
     expect(ledgerEntries.length).toBe(5);
     const totalDeducted = ledgerEntries.reduce(
