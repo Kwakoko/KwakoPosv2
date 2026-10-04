@@ -1088,7 +1088,17 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { items: outboxItems } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", items: outboxItems, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            items: outboxItems.map((item) => ({
+              tenantId: item.tenantId,
+              branchId: item.branchId,
+              operationId: item.id,
+              entityType: item.entityType,
+              entityId: item.entityId,
+            })),
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
@@ -1145,7 +1155,15 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: outboxItem.tenantId,
+            branchId: outboxItem.branchId,
+            operationId: outboxItem.id,
+            entityType: outboxItem.entityType,
+            entityId: outboxItem.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }
@@ -1430,13 +1448,13 @@ export class LocalIndexedDbStore {
       for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
       if (categories.length) {
         const tenantId = String((categories[0] as any).tenantId || "");
-        const branchId = String((categories[0] as any).branchId || "");
-        this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
+        const branchId = String((categories[0] as any).branchId || (delta as any).branchId || "");
+        if (tenantId) this.saveCatalogCategoriesLocal(categories, { tenantId, branchId });
       }
       if (brands.length) {
         const tenantId = String((brands[0] as any).tenantId || "");
-        const branchId = String((brands[0] as any).branchId || "");
-        this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
+        const branchId = String((brands[0] as any).branchId || (delta as any).branchId || "");
+        if (tenantId) this.saveCatalogBrandsLocal(brands, { tenantId, branchId });
       }
       await this.flushPersistence();
       this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
@@ -1549,11 +1567,13 @@ export class LocalIndexedDbStore {
     this.syncMetadata.set("lastSyncTime", delta.serverTimestamp);
     if (categories.length) {
       const tenantId = String((categories[0] as any).tenantId || "");
-      this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : undefined);
+      const branchId = String((categories[0] as any).branchId || (delta as any).branchId || "");
+      if (tenantId) this.saveCatalogCategoriesLocal(categories, { tenantId, branchId });
     }
     if (brands.length) {
       const tenantId = String((brands[0] as any).tenantId || "");
-      this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : undefined);
+      const branchId = String((brands[0] as any).branchId || (delta as any).branchId || "");
+      if (tenantId) this.saveCatalogBrandsLocal(brands, { tenantId, branchId });
     }
     await this.flushPersistence();
     return appliedCount;
@@ -1830,7 +1850,15 @@ export class LocalIndexedDbStore {
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item: outboxItem } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item: outboxItem, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: outboxItem.tenantId,
+            branchId: outboxItem.branchId,
+            operationId: outboxItem.id,
+            entityType: outboxItem.entityType,
+            entityId: outboxItem.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }

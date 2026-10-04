@@ -33,7 +33,7 @@ sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"Sale\"
 sourceContains("packages/sync/src/prismaSyncEngine.ts", "entityType === \"PurchaseReceipt\"");
 sourceContains("packages/sync/src/prismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("apps/api/package.json", "serverFixed.js");
-sourceContains("index.js", "apps/api/dist/serverFixed.js");
+sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
 
 const readJson = (relative: string): any => { try { return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); } catch { return null; } };
 const rootPkg = readJson("package.json");

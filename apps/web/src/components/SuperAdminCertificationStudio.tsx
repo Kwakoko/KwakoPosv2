@@ -32,6 +32,7 @@ import { renderPlatformGovernanceCommandCenter } from "../platformGovernanceComm
 import { renderEnterpriseOnboardingCommandCenter } from "../enterpriseOnboardingCommandCenter.js";
 import { renderPartnerEcosystemCommandCenter } from "../partnerEcosystemCommandCenter.js";
 import { useToast } from "../context/ToastContext.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type CertTab =
   | "master-kpcp"
@@ -56,13 +57,11 @@ export const SuperAdminCertificationStudio: React.FC = () => {
   const handleRunRevalidation = async () => {
     setIsRevalidating(true);
     try {
-      const res = await fetch("/api/v1/certification/revalidate", {
+      const data = await apiFetch<any>("/api/v1/certification/revalidate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "full" }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      if (data?.success !== false) {
         toast.success(
           "KPCP Revalidation Passed",
           `Score: ${data.data?.evidencePackage?.certificationScore ?? 100}% • 22/22 Domains certified.`

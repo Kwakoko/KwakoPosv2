@@ -32,7 +32,7 @@ describe("Internal communication fabric boundary", () => {
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name)) {
           const source = fs.readFileSync(full, "utf8");
-          if (source.includes('apiClient.js')) {
+          if (source.includes('apiClient.js') || /\bfetch\s*\(/.test(source)) {
             violations.push(path.relative(process.cwd(), full));
           }
         }
