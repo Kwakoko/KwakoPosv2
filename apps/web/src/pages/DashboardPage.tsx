@@ -767,7 +767,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     } catch {
       // Graceful fallback
     }
-  }, [db, activeModule, branchId, tenantId, hasStrictScope]);
+  }, [db, activeModule, branchId, tenantId, hasStrictScope, isOnline]);
 
   useEffect(() => {
     void loadData();
