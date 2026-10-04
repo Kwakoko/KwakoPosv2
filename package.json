@@ -131,6 +131,7 @@
     "dev:web": "npm run dev --workspace=apps/web",
     "experience:verify": "tsx scripts/release/verify-experience-integrity.ts",
     "certify:navigation-lock": "tsx scripts/certification/navigation-production-lock.ts",
+    "certify:dashboard-lock": "tsx scripts/certification/dashboard-analytics-production-lock.ts",
     "design:verify": "tsx scripts/release/verify-design-system.ts",
     "certify:ui-action-parity": "tsx scripts/certification/ui-action-parity-gate.ts",
     "workflow:verify": "tsx scripts/release/verify-workflow-integrity.ts",
