@@ -16,7 +16,7 @@ While the platform features extensive domain modeling, granular role contracts, 
 
 ### Vulnerability & Finding Breakdown
 
-The dashboard below counts active findings. SEC-08 (browser token storage) and SEC-09 (legacy SHA-256 password verification) are retained in the report for audit history but are marked resolved in the current implementation.
+The dashboard below counts active findings. SEC-08 (browser token storage) and SEC-09 (legacy SHA-256 password verification) are resolved in the current implementation. The server split-brain portion of ARCH-01 is also resolved; the remaining ARCH-01 risk is the build-time regex source mutation described below.
 
 | Severity | Architecture & Deps | OWASP Top 10 Security | Performance & Scalability | Code Quality & AI Drift | Total |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -79,6 +79,17 @@ graph TD
     end
 ```
 
+### 1.1A Current-State Authentication & Server Topology Reconciliation
+
+As of October 4, 2026, the authentication/server topology has been consolidated since the September 14 audit:
+
+- `apps/api/src/server.ts` is the single API server/authentication implementation. The superseded `serverFixed.ts` and `testServerFixed.ts` files are removed.
+- The current `server.ts` is approximately 6,330 lines; the earlier 4,810-line figure is historical and should not be used as the current architecture measure.
+- `buildServer()` registers one shared `onRequest` authentication boundary before the first route declaration. The hook verifies the Bearer access token, validates the bound server-side session, populates `req.tenantContext`, and applies the admin/Super Admin gates used by protected routes.
+- Route modules and the canonical production authentication registration are attached after this shared hook, so protected production routes inherit the same authentication boundary rather than depending on route-by-route copies of JWT verification.
+- Explicit exceptions are intentional authentication/public endpoints: health/readiness/version discovery, `/auth/login`, `/auth/refresh`, `/auth/logout`, Super Admin setup endpoints authenticated by setup tokens, approved legal/telemetry endpoints, and static/PWA assets. These are not bearer-protected business routes.
+- Browser credential transport is now split-token: access tokens are memory-only; refresh tokens are delivered and rotated through the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, plus `Secure` in production. The client sends only `sessionId` in the refresh body and uses `credentials: "include"`.
+- The legacy secret-dependent SHA-256 password verifier has been removed. New and migrated passwords use Argon2id; existing scrypt hashes are the only legacy compatibility format still accepted and are rehashed after successful authentication.
 The system is structured as an npm workspaces monorepo:
 - `apps/web`: React 18 SPA / PWA utilizing IndexedDB for offline queueing.
 - `apps/api`: Fastify 5 REST API handling enterprise commerce, auth, sync, and vertical industry routes.
@@ -92,26 +103,12 @@ The system is structured as an npm workspaces monorepo:
 
 ### 1.2 Core Architectural Defects
 
-#### Defect ARCH-01: Split-Brain Server Duality & Build-Time Regex Patching
-- **Locations:**  
-  - `apps/api/package.json:6`  
-  - `scripts/ci/harden-production-finance.ts:16-34`  
-  - `apps/api/src/server.ts` (canonical API server and authentication/security path)
-- **Finding:**  
-  The codebase has two competing API server implementations:
-  1. `server.ts`: A massive 4,810-line monolithic server containing legacy in-memory fallback routes and developmental auth bypasses.
-  2. `server.ts`: The single API entrypoint now owns `/auth/login`, `/auth/refresh`, session/setup routes, hardened cookie transport, and production security hooks.
-  
-  To make `server.ts` use persistent PostgreSQL repositories instead of in-memory maps, the project's build pipeline (`apps/api/package.json`) executes a script (`harden-production-finance.ts`) that **modifies `server.ts` via regex string manipulation prior to compilation**:
-  ```typescript
-  // scripts/ci/harden-production-finance.ts:25-34
-  let financeBlock = source.slice(financeStart, financeEnd).replaceAll("globalFinanceRepository.", "financeRepository.");
-  financeBlock = financeBlock.replace(/(?<!await )financeRepository\.(\w+\([^;\n]+\))/g, "await financeRepository.$1");
-  fs.writeFileSync(file, source);
-  ```
-- **Architectural Risk:**  
-  This demonstrates severe technical debt and unmanaged build mutations. If formatting in `server.ts` changes, the build script fails with `FINANCE_PATCH_TARGET_NOT_FOUND` or silently corrupts the API server source code.
+#### Defect ARCH-01: Build-Time Regex Patching Remains; Server Split-Brain Resolved
 
+- **Current status:** The split-brain API/server implementation described in the original audit is **resolved**. `apps/api/src/server.ts` is now the sole API entrypoint and owns the authentication/security flow; the superseded `serverFixed.ts` wrapper is removed.
+- **Current remaining risk:** `scripts/ci/harden-production-finance.ts` still mutates `server.ts` through regex-based source rewriting before compilation. That build-time mutation remains a maintenance and release-integrity risk even though there is no longer a second authentication server implementation.
+- **Authentication consequence:** The production route surface now has a single shared `onRequest` authentication boundary registered before route declarations. The current implementation was explicitly changed to avoid ordering-based auth gaps: the hook is installed before `buildServer()` begins registering business routes, and the canonical production auth registration occurs after that boundary is established.
+- **Maintenance control:** Keep the server-entrypoint consolidation as resolved, but retain the build-time source-rewrite issue as an independent remediation item until the finance hardening script is eliminated.
 #### Defect ARCH-02: Volatile In-Memory Repository Duality in Critical Modules
 - **Locations:**  
   - `packages/database/src/rollbackRepositories.ts:16-50`  
