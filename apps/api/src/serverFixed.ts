@@ -373,7 +373,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   });
   const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId, sessionId: session.sessionId, permissionsVersion, tenantVersion };
   const accessToken = generateAccessToken(payload);
-  setRefreshCookie(reply, session.refreshToken, true, (session.refreshTokenExpiresAt.getTime() - now.getTime()) / 1000);
+  setRefreshCookie(reply, session.refreshToken, isProduction(config), (session.refreshTokenExpiresAt.getTime() - now.getTime()) / 1000);
   await recordSessionAudit({
     tenantId: user.tenantId,
     branchId: user.branchId,
@@ -538,7 +538,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/session/event" && req.method === "POST") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const event = String((req.body as any)?.event || "").toUpperCase();
@@ -567,7 +567,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/session" || routePath === "/auth/session/validate" || routePath === "/auth/session/heartbeat") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const sessionId = String(ctx.sessionId || "");
@@ -578,7 +578,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
         });
         if (!validation.valid || !validation.session) {
           const code = validation.code === "SESSION_EXPIRED" ? "SESSION_EXPIRED" : validation.code === "SESSION_REVOKED" ? "SESSION_REVOKED" : "AUTH_REQUIRED";
-          clearRefreshCookie(reply, true);
+          clearRefreshCookie(reply, isProduction(loadConfig()));
           return reply.status(401).send({ success: false, error: { code, message: code === "SESSION_EXPIRED" ? "Session expired." : "Authentication required." } });
         }
         const user = await prisma.user.findFirst({ where: { id: ctx.sub, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" }, include: { role: true, tenant: true } });
@@ -589,7 +589,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
         if (idleRemainingMs <= 0) {
           await globalSessionManager.revokeSession(sessionId, "SESSION_TIMEOUT");
           await recordSessionAudit({ tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, deviceId: ctx.deviceId, sessionId, action: "SESSION_TIMEOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
-          clearRefreshCookie(reply, true);
+          clearRefreshCookie(reply, isProduction(loadConfig()));
           return reply.status(401).send({ success: false, error: { code: "SESSION_EXPIRED", message: "Session expired due to inactivity." } });
         }
         await prisma.device.updateMany({ where: { deviceId: ctx.deviceId, tenantId: ctx.tenantId, userId: ctx.sub }, data: { lastSeenAt: new Date(), status: "ACTIVE" } });
@@ -612,7 +612,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/sessions" && req.method === "GET") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const rows = await prisma.deviceSession.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastActivityAt: "desc" }, select: { id: true, deviceId: true, branchId: true, createdAt: true, lastActivityAt: true, lastValidatedAt: true, expiresAt: true, refreshTokenExpiresAt: true, revokedAt: true, revokeReason: true, status: true, rememberMe: true, ipAddress: true, userAgent: true, platform: true } });
@@ -621,7 +621,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath.startsWith("/auth/sessions/") && routePath.endsWith("/revoke") && req.method === "POST") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       const sessionId = routePath.split("/")[3];
       try {
         const ctx = verifyAccessToken(token);
@@ -634,7 +634,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/sessions/revoke-all" && req.method === "POST") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const count = await globalSessionManager.revokeAllUserSessions(ctx.tenantId, ctx.sub, "REVOKE_ALL");
@@ -643,7 +643,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/device/register" && req.method === "POST") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const now = new Date();
@@ -659,7 +659,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath === "/auth/devices" && req.method === "GET") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       try {
         const ctx = verifyAccessToken(token);
         const devices = await prisma.device.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastSeenAt: "desc" } });
@@ -668,7 +668,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
     }
 
     if (routePath.startsWith("/auth/devices/") && routePath.endsWith("/revoke") && req.method === "POST") {
-      const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       const deviceId = routePath.split("/")[3];
       try {
         const ctx = verifyAccessToken(token);
@@ -689,12 +689,12 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
 
       const session = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
       if (!session || session.revokedAt || session.status !== "ACTIVE" || session.expiresAt <= new Date() || session.refreshTokenExpiresAt <= new Date()) {
-        clearRefreshCookie(reply, true);
+        clearRefreshCookie(reply, isProduction(loadConfig()));
         return reply.status(401).send({ success: false, error: { code: session?.revokedAt ? "SESSION_REVOKED" : "SESSION_EXPIRED", message: "Invalid or expired session." } });
       }
       const user = await prisma.user.findFirst({ where: { id: session.userId, tenantId: session.tenantId, branchId: session.branchId, status: "ACTIVE" }, include: { role: true } });
       if (!user) {
-        clearRefreshCookie(reply, true);
+        clearRefreshCookie(reply, isProduction(loadConfig()));
         return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } });
       }
       const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
@@ -703,12 +703,12 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
         permissions: Array.isArray(user.role?.permissions) ? user.role.permissions.map((v) => String(v)) : [],
       });
       if (!rotated) {
-        clearRefreshCookie(reply, true);
+        clearRefreshCookie(reply, isProduction(loadConfig()));
         return reply.status(401).send({ success: false, error: { code: "TOKEN_INVALID", message: "Invalid or reused refresh token." } });
       }
       const updated = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
       const maxAge = updated ? (updated.refreshTokenExpiresAt.getTime() - Date.now()) / 1000 : DEFAULT_COOKIE_MAX_AGE_SECONDS;
-      setRefreshCookie(reply, rotated.refreshToken, true, maxAge);
+      setRefreshCookie(reply, rotated.refreshToken, isProduction(loadConfig()), maxAge);
       await recordSessionAudit({ tenantId: user.tenantId, branchId: user.branchId, userId: user.id, deviceId: session.deviceId, sessionId, action: "SESSION_REFRESHED", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
       return reply.send({ success: true, data: { accessToken: rotated.accessToken, sessionId } });
     }
@@ -725,7 +725,7 @@ export function buildFixedServer(opts: { config?: ReturnType<typeof loadConfig>;
           await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "SESSION_LOGOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req), metadata: { reason } });
         }
       }
-      clearRefreshCookie(reply, true);
+      clearRefreshCookie(reply, isProduction(loadConfig()));
       reply.send({ success: true, data: { loggedOut: true, reason } });
     }
   });

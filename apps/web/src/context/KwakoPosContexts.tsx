@@ -785,49 +785,68 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
 
     let alive = true;
-    void apiValidateSession()
-      .then((result) => {
-        if (!alive) return;
-        const data = result?.data || result;
-        const expiry = Date.parse(String(data?.expiresAt || ""));
-        const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
-        const idleMinutes = Number(data?.policy?.idleTimeoutMinutes);
-        const warningSeconds = Number(data?.policy?.warningDurationSeconds);
-        if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
-        if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
-        setSessionPolicy((current) => ({
-          ...current,
-          idleTimeoutMs: Number.isFinite(idleMinutes) ? idleMinutes * 60_000 : current.idleTimeoutMs,
-          warningDurationMs: Number.isFinite(warningSeconds) ? warningSeconds * 1000 : current.warningDurationMs,
-        }));
-        const serverActivity = Date.parse(String(data?.lastActivityAt || ""));
-        if (Number.isFinite(serverActivity)) {
-          setSessionLastActivityAt(serverActivity);
-          sessionLastActivityRef.current = serverActivity;
-        }
-        setSessionStatus("AUTHENTICATED_ONLINE");
-        setOfflineExpiresAt(null);
-        void saveDurableSessionState({
-          sessionId: String(getStoredSession()?.sessionId || ""),
-          tenantId: user.tenantId,
-          branchId: user.branchId,
-          userId: user.id,
-          deviceId: getDeviceId(),
-          status: "AUTHENTICATED_ONLINE",
-          authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
-          lastOnlineAt: Date.now(),
-          lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
-          serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
-          lastValidatedAt: Date.now(),
-          localLogoutPending: false,
+    // Small stabilization delay: lets the access token settle in memory after
+    // login before firing the first validation request. Without this the effect
+    // can fire synchronously before the token is stored, causing a spurious 401.
+    const delay = setTimeout(() => {
+      if (!alive) return;
+      void apiValidateSession()
+        .then((result) => {
+          if (!alive) return;
+          const data = result?.data || result;
+          const expiry = Date.parse(String(data?.expiresAt || ""));
+          const refreshExpiry = Date.parse(String(data?.refreshTokenExpiresAt || ""));
+          const idleMinutes = Number(data?.policy?.idleTimeoutMinutes);
+          const warningSeconds = Number(data?.policy?.warningDurationSeconds);
+          if (Number.isFinite(expiry)) setSessionExpiresAt(expiry);
+          if (Number.isFinite(refreshExpiry)) setSessionRefreshTokenExpiresAt(refreshExpiry);
+          setSessionPolicy((current) => ({
+            ...current,
+            idleTimeoutMs: Number.isFinite(idleMinutes) ? idleMinutes * 60_000 : current.idleTimeoutMs,
+            warningDurationMs: Number.isFinite(warningSeconds) ? warningSeconds * 1000 : current.warningDurationMs,
+          }));
+          const serverActivity = Date.parse(String(data?.lastActivityAt || ""));
+          if (Number.isFinite(serverActivity)) {
+            setSessionLastActivityAt(serverActivity);
+            sessionLastActivityRef.current = serverActivity;
+          }
+          setSessionStatus("AUTHENTICATED_ONLINE");
+          setOfflineExpiresAt(null);
+          void saveDurableSessionState({
+            sessionId: String(getStoredSession()?.sessionId || ""),
+            tenantId: user.tenantId,
+            branchId: user.branchId,
+            userId: user.id,
+            deviceId: getDeviceId(),
+            status: "AUTHENTICATED_ONLINE",
+            authenticatedAt: Number.isFinite(expiry) ? expiry - sessionPolicy.absoluteTimeoutMs : Date.now(),
+            lastOnlineAt: Date.now(),
+            lastActivityAt: Number.isFinite(serverActivity) ? serverActivity : Date.now(),
+            serverExpiresAt: Number.isFinite(expiry) ? expiry : null,
+            lastValidatedAt: Date.now(),
+            localLogoutPending: false,
+          });
+          void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
+        })
+        .catch(async (err: unknown) => {
+          if (!alive) return;
+          // Only terminate the session on genuine authentication failures (401).
+          // Network errors, timeouts, and other transient failures must NOT log
+          // the user out — that is the source of the post-login flash.
+          const status = (err as any)?.status ?? (err as any)?.response?.status;
+          const isAuthError = status === 401 || status === 403;
+          if (isAuthError && navigator.onLine) {
+            await terminateSession("SESSION_TIMEOUT", true, true);
+          }
+          // Non-auth errors (network down, 5xx, timeout) are silently ignored;
+          // the heartbeat and idle-timer logic will handle real session expiry.
         });
-        void apiRecordSessionEvent("SESSION_RESTORED", { source: "session-validate" });
-      })
-      .catch(async () => {
-        if (alive && navigator.onLine) await terminateSession("SESSION_TIMEOUT", true, true);
-      });
-    return () => { alive = false; };
-  }, [user, isOnline, sessionExpiresAt, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
+    }, 200);
+    return () => { alive = false; clearTimeout(delay); };
+  // Intentionally exclude sessionExpiresAt: including it causes the effect to
+  // re-run every time validation updates the expiry, creating an infinite loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isOnline, sessionPolicy.absoluteTimeoutMs, sessionPolicy.offlineGracePeriodMs, terminateSession]);
 
   useEffect(() => {
     if (!user) return;

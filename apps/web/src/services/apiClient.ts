@@ -180,7 +180,12 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
     if (response.status === 401 && body?.error?.code === "MFA_REQUIRED") {
       throw new MfaRequiredError(body.error.message || "Valid Super Admin MFA code is required");
     }
-    if (!response.ok) throw new Error(body?.error?.message || `Request failed with HTTP ${response.status}`);
+    if (!response.ok) {
+      const err = new Error(body?.error?.message || `Request failed with HTTP ${response.status}`) as Error & { status: number; code?: string };
+      err.status = response.status;
+      err.code = body?.error?.code;
+      throw err;
+    }
     return body;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
