@@ -135,6 +135,7 @@ describe("Pillar 2 — Server-Side Variant Synthesis: Integration Drill", () => 
     const product = serverProductRepo.getProductById(tenantCtx, productId);
     const serverVariants = product?.variants || Array.from(globalInMemoryStore.variants.values()).filter((v) => v.productId === productId);
     expect(serverVariants.length).toBeGreaterThanOrEqual(1);
+    expect(serverVariants.some((v) => v.id === `${productId}-default`)).toBe(true);
     const synth = serverVariants.find((v) => v.id === syntheticVariantId || v.id.endsWith("-default"));
     expect(synth).toBeDefined();
 

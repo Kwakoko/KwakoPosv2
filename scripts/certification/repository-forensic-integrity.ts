@@ -16,7 +16,7 @@ const suspicious = [
   /kwakopos-production-rev-00001/i,
   /admin123|password123|changeme/i,
 ];
-const intentionalFixturePath = /(^|\\)(tests|scripts[\\/]certification)[\\/]/i;
+const intentionalFixturePath = /(^|\\)(tests|scripts[\\/]certification|scripts[\\/]retired-certification)[\\/]/i;
 const provenanceEnforcementPath = /scripts[\\/]release[\\/]releaseIdentity\.ts$/i;
 const retiredArtifactPath = /scripts[\\/]retired-certification[\\/].*\.disabled$/i;
 
