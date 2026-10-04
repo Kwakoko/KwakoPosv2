@@ -797,7 +797,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             </div>
           </div>
         </div>
-      )}}
+      )}
 
       {/* Production-safe developer diagnostics: sample/demo data injection is deliberately unavailable. */}
       <div className="v2-card">
@@ -1175,7 +1175,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
             <div className="v2-text-xs v2-text-muted">Retry: {syncConfig.retryBackoff} · Conflict policy: {syncConfig.conflictPolicy}</div>
           </div>
         </div>
-      )}}
+      )}
     </div>
   );
 };
