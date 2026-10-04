@@ -8,6 +8,7 @@ on:
       - 'fix/world-standard-offline-sync-*'
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   offline-sync-gate:
