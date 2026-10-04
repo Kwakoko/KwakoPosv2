@@ -1028,11 +1028,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   // Top products ranked leaderboard data with real-time stock & category awareness
   const topProductsAnalytics = useMemo(() => {
     const rows = authoritativeKpis?.analytics?.topProducts ?? [];
-    const maxRevenue = Math.max(...rows.map(p => p.revenue), 1);
-    const maxUnits = Math.max(...rows.map(p => p.units), 1);
+    const sortedRows = [...rows].sort((a, b) => topProductsMetric === "revenue"
+      ? (b.revenue - a.revenue) || (b.units - a.units)
+      : (b.units - a.units) || (b.revenue - a.revenue));
+    const maxRevenue = Math.max(...sortedRows.map(p => p.revenue), 1);
+    const maxUnits = Math.max(...sortedRows.map(p => p.units), 1);
     return {
-      items: rows.map(p => ({
+      items: sortedRows.slice(0, 5).map((p, index) => ({
         ...p,
+        rank: index + 1,
         progressPct: topProductsMetric === "revenue"
           ? Math.round((p.revenue / maxRevenue) * 100)
           : Math.round((p.units / maxUnits) * 100),
@@ -2776,7 +2780,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-sm font-black">Recent Orders</CardTitle>
-              <CardDescription className="text-[11px]">Audit log for latest {Math.min(orders.length, 6)} transactions</CardDescription>
+              <CardDescription className="text-[11px]">Latest ${Math.min(orders.length, 6)} transactions</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black bg-primary/10 text-primary dark:bg-primary/20 px-2.5 py-1 rounded-full">
@@ -2801,7 +2805,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                     <th className="p-3">Items</th>
                     <th className="p-3">Total</th>
                     <th className="p-3">Channel</th>
-                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-center">Sync</th>
                     <th className="p-3 text-center">Action</th>
                   </tr>
                 </thead>
