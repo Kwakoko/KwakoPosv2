@@ -573,6 +573,26 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     typeof localStorage !== "undefined" && localStorage.getItem("kwakopos:v2:theme") === "light" ? "light" : "dark",
   );
   const [rawOnline, setRawOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  const [sessionStatus, setSessionStatus] = useState<ClientSessionStatus>("UNKNOWN");
+  const [sessionPolicy, setSessionPolicy] = useState<ClientSessionPolicy>(DEFAULT_SESSION_POLICY);
+  const [sessionLastActivityAt, setSessionLastActivityAt] = useState<number>(() => Date.now());
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(() => {
+    const raw = getStoredSession()?.session?.expiresAt;
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [sessionRefreshTokenExpiresAt, setSessionRefreshTokenExpiresAt] = useState<number | null>(() => {
+    const raw = getStoredSession()?.session?.refreshTokenExpiresAt;
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [offlineExpiresAt, setOfflineExpiresAt] = useState<number | null>(null);
+  const [sessionWarningOpen, setSessionWarningOpen] = useState(false);
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const [sessionRedirectPath, setSessionRedirectPath] = useState<string | null>(null);
+  const [restoredDrafts, setRestoredDrafts] = useState<SessionDraft[]>([]);
+  const sessionTerminationRef = useRef(false);
+  const sessionLastActivityRef = useRef(sessionLastActivityAt);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState(false);
   const isOnline = isSimulatedOffline ? false : rawOnline;
   const [isSyncing, setIsSyncing] = useState(false);
