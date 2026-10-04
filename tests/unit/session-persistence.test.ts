@@ -6,7 +6,7 @@ import {
   getAccessToken,
   setAccessToken,
   type StoredSession,
-} from "../../apps/web/src/services/apiClient.js";
+} from "../../apps/web/src/services/apiClient.ts";
 
 // Mock localStorage and sessionStorage
 class MemoryStorage implements Storage {
