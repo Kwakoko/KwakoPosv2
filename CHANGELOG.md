@@ -58,6 +58,35 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: commit local release and cleanup changes
+- **core**: Merge PR #63: Dashboard financial reporting closures
+- **core**: isolate synthetic devices with independent IndexedDB stores
+- **core**: scope synthetic catalog sync mutations
+- **core**: correct synthetic customer convergence fixtures
+- **core**: align synthetic sync and migration fixtures with current contract
+- **core**: provide settings seam in Prisma sale mocks
+- **core**: provide settings seam in Prisma sale mocks
+- **core**: assert post-closure dashboard after relogin
+- **core**: verify dashboard gross-to-net revenue reconciliation
+- **core**: assert tax-free gross sales reconciliation
+- **core**: lock return COGS to original sale cost
+- **core**: correct dashboard return COGS reconciliation
+- **core**: record dashboard financial P0/P1 closure evidence
+- **core**: refresh complete navigation lock baseline
+- **core**: refresh production navigation lock for dashboard closure
+- **core**: align dashboard PostgreSQL fixture with actual schema
+- **core**: correct partial return COGS and profit assertions
+- **core**: correct browser partial return fixture
+- **core**: correct dashboard partial return fixture
+- **core**: finalize dashboard return closure assertions
+- **core**: make financial closure return truly partial
+- **core**: instrument dashboard financial closure assertion
+- **core**: fix dashboard closure certification cleanup
+- **core**: add dashboard financial closure certification
+- **core**: exercise split tender without bypassing cash session controls
+- **core**: assert full financial reconciliation including net COGS
+- **core**: certify dashboard VAT split tender and return closures
+- **release**: v2.13.0
 - **core**: Merge pull request #59 from Kwakoko/fix/remove-persistent-access-token-20261004
 - **auth**: enforce bearer and RBAC authority boundaries
 - **core**: Merge pull request #58 from Kwakoko/fix/typed-scoped-app-event-bus-20261004
@@ -365,6 +394,40 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **core**: terminate synthetic certification CLI deterministically
+- **core**: close synthetic IndexedDB stores before monitor exit
+- **core**: validate concrete world-standard sync engine in runtime gate
+- **core**: refresh dashboard navigation lock hash
+- **core**: reconcile gross sales definition with net revenue
+- **core**: label payment metrics and show authoritative customers
+- **core**: derive return economics from original sale costs
+- **core**: make navigation lock hashing Windows and CI consistent
+- **core**: refresh recent orders across online offline transitions
+- **core**: preserve paymentMethod alias in dashboard SQL
+- **core**: align dashboard analytics date window with PostgreSQL dates
+- **core**: use dashboard customer debt aggregate alias consistently
+- **core**: preserve snake_case sync journal schema in dashboard revision query
+- **core**: restore dashboard customer debt result key
+- **core**: restore dashboard customer debt result typing
+- **core**: complete dashboard raw SQL identifier mapping
+- **core**: reconcile dashboard SQL with Prisma PostgreSQL column mappings
+- **core**: align dashboard SQL with persisted camelCase columns
+- **core**: close nested payment persistence contract
+- **core**: update client payment channel contract fields
+- **core**: preserve payment order fields in dashboard chart rows
+- **core**: keep dashboard net COGS consistent with returned inventory
+- **core**: clarify dashboard payment and product metric labels
+- **core**: prevent split tenders from inflating dashboard order count
+- **core**: label payment channels by orders and payment records
+- **core**: enrich authoritative recent orders from PostgreSQL
+- **core**: make online recent orders PostgreSQL authoritative
+- **core**: sync authoritative payment analytics contract
+- **core**: apply return adjustments to dashboard revenue charts
+- **core**: make top product analytics net of tax and returns
+- **core**: correct dashboard payment order counts and net revenue semantics
+- **core**: make dashboard revenue and profit net of tax and refunds
+- **core**: expose payment row and distinct order counts
+- **core**: derive production sale tax and gross profit from tenant settings
 - **sync**: close current-main P0/P1 validation blockers
 - **auth**: derive refresh claims from authoritative RBAC
 - **auth**: make browser access tokens memory-only
