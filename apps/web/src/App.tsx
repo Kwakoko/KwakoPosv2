@@ -562,6 +562,20 @@ const AuthenticatedApp: React.FC = () => {
         provisioningRequested={currentPath === "/tenant-onboarding"}
         onAuthenticated={() => {
           setHasEnteredWorkspace(true);
+          const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+          const requested = params.get("redirect");
+          const safeRedirect = requested && requested.startsWith("/") && !requested.startsWith("//") ? requested : null;
+          if (safeRedirect && params.get("reason") === "session_expired") {
+            const normalized = new URL(safeRedirect, window.location.origin);
+            if (normalized.origin === window.location.origin) {
+              setCurrentPath(normalized.pathname);
+              if (typeof window !== "undefined") {
+                window.history.replaceState({}, "", normalized.pathname + normalized.search + normalized.hash);
+                window.dispatchEvent(new PopStateEvent("popstate"));
+              }
+              return;
+            }
+          }
           if (currentPath === "/tenant-onboarding") {
             setCurrentPath("/tenant-onboarding");
             if (typeof window !== "undefined" && window.location.pathname !== "/tenant-onboarding") {
