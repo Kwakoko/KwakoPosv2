@@ -23,6 +23,7 @@ import {
   InMemoryStore,
 } from "@kwakopos2/database";
 import { globalProductService, ProductService } from "./productService.js";
+import { globalSettingsService } from "./settingsService.js";
 
 export class RetailService {
   private engine?: RetailEngine;
@@ -32,7 +33,6 @@ export class RetailService {
   private stockRepo: ScopedStockRepository;
   private commercialRepo: ScopedCommercialRepository;
 
-  private settingsMap: Map<string, RetailSettings> = new Map();
   private promotionsMap: Map<string, RetailPromotion> = new Map();
   private auditEventsMap: Map<string, RetailAuditEvent[]> = new Map();
 
@@ -60,21 +60,32 @@ export class RetailService {
     return this.getEngine().getModuleManifest();
   }
 
-  getSettings(ctx: TenantContext): RetailSettings {
-    const key = `${ctx.tenantId}:${ctx.branchId}`;
-    if (!this.settingsMap.has(key)) {
-      this.settingsMap.set(key, this.getEngine().getDefaultSettings(ctx.tenantId, ctx.branchId));
-    }
-    return this.settingsMap.get(key)!;
+  async getSettings(ctx: TenantContext): Promise<RetailSettings> {
+    const settings = await globalSettingsService.getSettings(ctx);
+    const tax: any = settings["tax.config"] || {};
+    const pos: any = settings["pos.config"] || {};
+    const inventory: any = settings["inventory.config"] || {};
+    return {
+      ...this.getEngine().getDefaultSettings(ctx.tenantId, ctx.branchId),
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      currency: String(tax.currencyCode || "TZS"),
+      taxRatePct: Number(tax.vatRatePercent ?? 0),
+      taxInclusivePricing: tax.taxInclusivePricing !== false,
+      allowNegativeStock: Boolean(inventory.allowNegativeStock),
+      maxDiscountPctWithoutApproval: Number(pos.maxDiscountPercent ?? 15),
+    };
   }
 
-  updateSettings(ctx: TenantContext, updates: Partial<RetailSettings>): RetailSettings {
-    const current = this.getSettings(ctx);
+  async updateSettings(ctx: TenantContext, updates: Partial<RetailSettings>): Promise<RetailSettings> {
+    const current = await this.getSettings(ctx);
     const updated: RetailSettings = { ...current, ...updates, tenantId: ctx.tenantId, branchId: ctx.branchId };
-    const key = `${ctx.tenantId}:${ctx.branchId}`;
-    this.settingsMap.set(key, updated);
-
-    this.recordAuditEvent(ctx, "RETAIL_SETTINGS_UPDATE", "RetailSettings", key, current, updated, "Settings updated by user");
+    const existingTax: any = (await globalSettingsService.getSettings(ctx))["tax.config"] || {};
+    const existingPos: any = (await globalSettingsService.getSettings(ctx))["pos.config"] || {};
+    await globalSettingsService.upsertBatch(ctx, [
+      { key: "tax.config", scope: "BRANCH", value: { ...existingTax, currencyCode: updated.currency, vatRatePercent: updated.taxRatePct, taxInclusivePricing: updated.taxInclusivePricing } },
+      { key: "pos.config", scope: "BRANCH", value: { ...existingPos, maxDiscountPercent: updated.maxDiscountPctWithoutApproval } },
+    ]);
     return updated;
   }
 
@@ -97,7 +108,7 @@ export class RetailService {
     );
   }
 
-  processPOSCheckout(
+  async processPOSCheckout(
     ctx: TenantContext,
     items: Array<{
       productId: string;
@@ -110,8 +121,8 @@ export class RetailService {
     payments: Array<{ amount: number; paymentMethod: "CASH" | "CARD" | "MOBILE_MONEY" | "CREDIT" }>,
     cartDiscountPct: number = 0,
     customerId?: string
-  ): Sale {
-    const settings = this.getSettings(ctx);
+  ): Promise<Sale> {
+    const settings = await this.getSettings(ctx);
     const totals = this.getEngine().calculatePOSCartTotals(
       items,
       cartDiscountPct,

@@ -130,7 +130,7 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     expect(html).toContain("EXPLAINABLE RETAIL AI INSIGHTS");
   });
 
-  it("should execute POS checkout through globalRetailService", () => {
+  it("should execute POS checkout through globalRetailService", async () => {
     const prod = globalProductService.createProduct(dummyCtx, {
       name: "Retail Shirt",
       sku: "RET-SHIRT-001",
@@ -139,7 +139,7 @@ describe("Retail Industry Module Operating System Test Suite", () => {
     });
     const variantId = prod.variants![0].id;
 
-    const sale = globalRetailService.processPOSCheckout(
+    const sale = await globalRetailService.processPOSCheckout(
       dummyCtx,
       [{ productId: prod.id, variantId, quantity: 2, unitPrice: 25000, unitCost: 15000 }],
       [{ amount: 50000, paymentMethod: "CASH" }]

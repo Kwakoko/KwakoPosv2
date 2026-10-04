@@ -220,7 +220,7 @@ export const KWAKOPOS_UI_PARITY_MATRIX: UiControlObjective[] = [
     syncBehavior: "Tenant settings delta sync",
     auditBehavior: "AuditEvent: SETTING_UPDATED",
     status: "PRODUCTION_CERTIFIED",
-    evidenceRef: "apps/web/src/App.tsx & apps/web/src/layouts/SystemAppShellLayout.tsx"
+    evidenceRef: "tests/integration/settings-closed-loop.test.ts & apps/web/src/clientSyncEngine.ts"
   },
   {
     controlId: "UI-R14",
