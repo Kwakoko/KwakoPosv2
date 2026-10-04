@@ -16,6 +16,8 @@ While the platform features extensive domain modeling, granular role contracts, 
 
 ### Vulnerability & Finding Breakdown
 
+The dashboard below counts active findings. SEC-08 (browser token storage) and SEC-09 (legacy SHA-256 password verification) are retained in the report for audit history but are marked resolved in the current implementation.
+
 | Severity | Architecture & Deps | OWASP Top 10 Security | Performance & Scalability | Code Quality & AI Drift | Total |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **CRITICAL** | 1 | 3 | 2 | 1 | **7** |
@@ -41,7 +43,7 @@ While the platform features extensive domain modeling, granular role contracts, 
 | **SEC-05** | **HIGH** | Security (A07) | **Super-Admin 2FA Setup Leaks Valid TOTP Code (`currentOtp`) in Response** | `apps/api/src/services/superAdminSecurityService.ts:260-268` |
 | **SEC-06** | **HIGH** | Security (A07) | **Overly Permissive 4.5-Minute TOTP Replay Window (±4 Clock Steps)** | `apps/api/src/services/superAdminSecurityService.ts:77` |
 | **SEC-07** | **HIGH** | Security (A07) | **Unenforced / Decorative Step-Up Authentication (Dead Security Logic)** | `apps/api/src/services/superAdminSecurityService.ts:251` |
-| **SEC-08** | **HIGH** | Security (A02) | **Unencrypted Token Persistence in Client `localStorage` (XSS Attack Vector)** | `apps/web/src/services/apiClient.ts:55-89` |
+| **SEC-08** | **RESOLVED** | Security (A02) | **Browser credential storage migrated to memory-only access tokens + HttpOnly refresh cookie** | `apps/web/src/services/apiClient.ts`; `apps/api/src/server.ts` |
 | **PERF-03** | **HIGH** | Performance | **Sequential N+1 Unbatched Operations Loop in Sync Engine `processPush`** | `packages/sync/src/prismaSyncEngine.ts:49-158` |
 | **PERF-04** | **HIGH** | Performance | **Full Table Scan & Concurrency Collision on Transaction Sequence Numbering** | `packages/database/src/atomicCommercialFinance.ts:42-50` |
 | **PERF-05** | **HIGH** | Performance | **Event-Loop Blocking Synchronous I/O (`execSync` & `fs.readFileSync`)** | `packages/config/src/index.ts:78`, `apps/api/src/server.ts:481` |
@@ -544,7 +546,7 @@ gantt
 2. **Decommission Raw SQL Backdoor (SEC-03):** Delete `/api/v1/super-admin/db/query` from `apps/api/src/routes/superAdminDatabaseRoutes.ts`.
 3. **Parameterize SQL Injections (SEC-02):** In `packages/database/src/rlsContext.ts` and `apps/api/src/services/supportOperationsService.ts`, replace string templates with tagged template literals `$executeRaw` and parameterized `$queryRaw`.
 4. **Sanitize 2FA Setup (SEC-05 & SEC-06):** In `apps/api/src/services/superAdminSecurityService.ts`, remove `currentOtp` from `beginSuperAdminSetup` and narrow the TOTP verification window from $[-4..4]$ to $[-1..1]$.
-5. **Secure Token Storage (SEC-08):** Remove `refreshToken` from `window.localStorage` in `apps/web/src/services/apiClient.ts`.
+5. **Secure Token Storage (SEC-08) — completed:** The client persists only non-secret session metadata. Access tokens are memory-only, while refresh credentials use the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict; Secure` in production. The refresh request body contains only `sessionId`.
 
 ### Phase 2: Architectural Unification & Persistence (Days 4–8)
 1. **Prisma Schema Re-synchronization (QUAL-03):** Add `PlatformSuperAdminSecurity`, `AuthLoginThrottle`, `SupportTicket`, `SupportEvent`, `SupportIncident`, and `SupportRemediation` models to `schema.prisma`. Run `prisma generate` to establish authentic type safety.
