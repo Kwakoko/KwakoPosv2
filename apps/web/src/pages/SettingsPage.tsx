@@ -212,6 +212,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         const data = res?.data || res;
         const read = (key: string) => data?.[key]?.value;
         const profileRemote = read("business.profile");
+        const localeRemote = read("localization.config");
         const posRemote = read("pos.config");
         const taxRemote = read("tax.config");
         const inventoryRemote = read("inventory.config");
@@ -219,6 +220,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         const notificationsRemote = read("notifications.config");
         const syncRemote = read("sync.config");
         if (profileRemote) { setProfile((v) => ({ ...v, ...profileRemote })); db.saveConfigurationLocal?.("business.profile", profileRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
+        if (localeRemote?.locale) { setLocale(localeRemote.locale as SupportedLocale); db.saveConfigurationLocal?.("localization.config", localeRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
         if (posRemote) { setPosConfig((v) => ({ ...v, ...posRemote })); db.saveConfigurationLocal?.("pos.config", posRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
         if (taxRemote) { setTaxConfig((v) => ({ ...v, ...taxRemote })); db.saveConfigurationLocal?.("tax.config", taxRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
         if (inventoryRemote) { setInvConfig((v) => ({ ...v, ...inventoryRemote })); db.saveConfigurationLocal?.("inventory.config", inventoryRemote, { tenantId: currentTenantId, branchId: currentBranchId }); }
@@ -375,6 +377,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
       await db.enqueueSettingsMutations(
         [
           { key: "business.profile", value: profile, scope: "BRANCH" },
+          { key: "localization.config", value: { locale }, scope: "BRANCH" },
           { key: "pos.config", value: posConfig, scope: "BRANCH" },
           { key: "tax.config", value: taxConfig, scope: "BRANCH" },
           { key: "inventory.config", value: invConfig, scope: "BRANCH" },
@@ -641,10 +644,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabTax")}</div></div>
           <div className="v2-space-y-4">
-            <div className="v2-grid v2-grid-2 v2-gap-4">
+            <div className="v2-grid v2-grid-3 v2-gap-4">
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.vatRate")}</label>
-                <input className="v2-input" type="number" value={taxConfig.vatRatePercent} onChange={(e) => setTaxConfig({ ...taxConfig, vatRatePercent: Number(e.target.value) })} />
+                <input className="v2-input" type="number" min={0} max={100} value={taxConfig.vatRatePercent} onChange={(e) => setTaxConfig({ ...taxConfig, vatRatePercent: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.currencyCode")}</label>
+                <input className="v2-input" value={taxConfig.currencyCode} onChange={(e) => setTaxConfig({ ...taxConfig, currencyCode: e.target.value.toUpperCase() })} maxLength={3} />
               </div>
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.currencySymbol")}</label>
@@ -747,6 +754,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
                 <div className="v2-text-xs v2-text-muted">Permit checkout when stock level drops below zero</div>
               </div>
               <input type="checkbox" checked={invConfig.allowNegativeStock} onChange={(e) => setInvConfig({ ...invConfig, allowNegativeStock: e.target.checked })} />
+            </div>
+            <div className="v2-grid v2-grid-2 v2-gap-4 v2-mt-3">
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">Default Low Stock Threshold</label>
+                <input className="v2-input" type="number" min={0} value={invConfig.defaultLowStockThreshold} onChange={(e) => setInvConfig({ ...invConfig, defaultLowStockThreshold: Number(e.target.value) })} />
+              </div>
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">Barcode Prefix</label>
+                <input className="v2-input" value={invConfig.barcodePrefix} onChange={(e) => setInvConfig({ ...invConfig, barcodePrefix: e.target.value })} maxLength={12} />
+              </div>
             </div>
           </div>
         </div>
