@@ -34,7 +34,7 @@ import { ProductRegistrationWizardModal } from "../components/UI/ProductRegistra
 import { NumberStepper } from "../components/UI/NumberStepper.js";
 import { safeUUID } from "../services/applicationApiService.js";
 import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
-import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
@@ -979,7 +979,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setAddProductModal(false);
     toast.success("Product Created", isVariantProduct ? `Product "${newProductRecord.name}" created with ${inflowVariants.length} variants.` : `Product "${newProductRecord.name}" added to inventory.`);
     playSuccessChime();
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    publishDataChanged({ action: "INVENTORY_CHANGED" });
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1087,7 +1087,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setEditingItem(null);
     playSuccessChime();
     toast.success("SKU Updated", `Product "${updatedRecord.name}" successfully updated.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    publishDataChanged({ action: "INVENTORY_CHANGED" });
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1159,7 +1159,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setItemToDelete(null);
     playSuccessChime();
     toast.success("Product Archived", `"${target.name}" (${target.sku}) archived. Hidden from POS counter.`);
-    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+    publishDataChanged({ action: "INVENTORY_CHANGED" });
     void syncOutbox?.().catch(() => {});
   };
 
@@ -1394,7 +1394,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           db.saveConfigurationLocal("procurement_purchase_orders", updatedOrders, currentTenantId ? { tenantId: currentTenantId } : undefined);
                           playSuccessChime();
                           toast.success("Draft PO Created", `Generated PO #${poId} with ${lowItems.length} replenishment SKUs. Available in Purchasing.`);
-                          window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "PURCHASE_ORDER_CREATED", po: draftPO } }));
+                          publishDataChanged({ action: "PURCHASE_ORDER_CREATED", po: draftPO });
                         }}
                       >
                         <Truck size={13} /> Draft Low-Stock PO ({items.filter((i) => i.stock <= i.reorderLevel).length})
@@ -3009,7 +3009,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                               setPriceAuditOpen(false);
                               playSuccessChime();
                               toast.success("Price Version Recorded", `New Margin: ${money(margin)} (${marginPct}%) · Reason: ${priceAuditReason}`);
-                              window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                              publishDataChanged({ action: "INVENTORY_CHANGED" });
                             }}
                           >
                             <Check size={12} /> Commit Price Version
@@ -3320,7 +3320,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             setVariantStudioPanel("none");
                             playSuccessChime();
                             toast.success("Variant Created", `Variant "${newVar.name}" added and synced.`);
-                            window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            publishDataChanged({ action: "INVENTORY_CHANGED" });
                             void syncOutbox?.().catch(() => {});
                           }}
                         >
@@ -3504,7 +3504,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                             setVariantStudioPanel("none");
                             playSuccessChime();
                             toast.success("Variants Matrix Generated", `Generated and synced ${generated.length} variant combinations.`);
-                            window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                            publishDataChanged({ action: "INVENTORY_CHANGED" });
                             void syncOutbox?.().catch(() => {});
                           }}
                         >
@@ -3595,7 +3595,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
                                 toast.success("Bulk Prices Adjusted", `Shifted selling price by ${pct > 0 ? `+${pct}` : pct}% across all variants.`);
-                                window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                publishDataChanged({ action: "INVENTORY_CHANGED" });
                                 void syncOutbox?.().catch(() => {});
                               }}
                             >
@@ -3685,7 +3685,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 setVariantModalProduct(updatedProduct);
                                 playSuccessChime();
                                 toast.success("Bulk Stock Updated", `Added ${addStock} units to all variants.`);
-                                window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                publishDataChanged({ action: "INVENTORY_CHANGED" });
                                 void syncOutbox?.().catch(() => {});
                               }}
                             >
@@ -3870,7 +3870,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
                                       toast.success("Variant Updated", `Variant "${inlineVariantEdit.name}" saved.`);
-                                      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      publishDataChanged({ action: "INVENTORY_CHANGED" });
                                       void syncOutbox?.().catch(() => {});
                                     }}
                                   >
@@ -3946,7 +3946,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                       setVariantModalProduct(updatedProduct);
                                       playSuccessChime();
                                       toast.success("Variant Deleted", `Removed "${v.name}". Parent SKU stock recalculated.`);
-                                      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                                      publishDataChanged({ action: "INVENTORY_CHANGED" });
                                       void syncOutbox?.().catch(() => {});
                                     }}
                                   >
@@ -4164,7 +4164,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     const actionLabel = isBackdated ? "Backdated Adjustment" : "Stock Movement";
                     const deltaLabel = delta >= 0 ? `+${delta}` : `${delta}`;
                     toast.success(actionLabel, `${targetVariantName}: ${deltaLabel} applied. Local balance: ${result.quantityAfter}.`);
-                    window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+                    publishDataChanged({ action: "INVENTORY_CHANGED" });
                     void syncOutbox().catch(() => {});
                     setStockAdjModal(false);
                     setAdjNotes("");
