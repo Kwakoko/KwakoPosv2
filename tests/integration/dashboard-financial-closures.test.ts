@@ -174,8 +174,8 @@ describe("Dashboard financial closures", () => {
       expect(card?.orderCount).toBe(1);
       expect(mobile?.paymentCount).toBe(1);
       expect(mobile?.orderCount).toBe(1);
-      expect(snapshot.analytics.topProducts[0]?.units).toBe(0);
-      expect(snapshot.analytics.topProducts[0]?.revenue).toBe(undefined);
+      expect(snapshot.analytics.topProducts[0]?.units).toBe(0.5);
+      expect(snapshot.analytics.topProducts[0]?.revenue).toBe(500);
 
       const repository = new PrismaCommercialRepository();
       const recent = await repository.getSales(ctx);
