@@ -80,6 +80,7 @@ jobs:
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Navigation Production Lock
         run: npm run certify:navigation-lock
+      - name: Dashboard Analytics Production Lock
         run: npm run certify:dashboard-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
