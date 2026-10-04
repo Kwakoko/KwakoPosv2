@@ -65,6 +65,43 @@ describe("Settings P0/P1 closed-loop certification", () => {
 
     const deltaA: any = await engine.processDelta(ctxA, { since: "rev:0" } as any);
     expect(deltaA.changes?.some((change: any) => change.entityId === settingId && change.entityType === "Setting")).toBe(true);
+
+    const updateOpId = randomUUID();
+    const updated = await engine.processPush(ctxA, {
+      deviceId: "settings-device-a",
+      operations: [{
+        operationId: updateOpId,
+        idempotencyKey: "SETTINGS:" + updateOpId,
+        entityType: "Setting",
+        entityId: settingId,
+        operationType: "UPDATE",
+        payload: { key: "tax.config", scope: "BRANCH", branchId: branchA, value: { vatEnabled: true, vatRatePercent: 20, currencyCode: "TZS" } },
+        clientCreatedAt: new Date().toISOString(),
+      }],
+    } as any);
+    expect(updated.results[0]?.status).toBe("SUCCESS");
+
+    const current = await prisma.setting.findUnique({ where: { id: settingId } });
+    expect((current?.value as any)?.vatRatePercent).toBe(20);
+    expect(current?.version).toBeGreaterThan(1);
+
+    const deleteOpId = randomUUID();
+    const deleted = await engine.processPush(ctxA, {
+      deviceId: "settings-device-a",
+      operations: [{
+        operationId: deleteOpId,
+        idempotencyKey: "SETTINGS:" + deleteOpId,
+        entityType: "Setting",
+        entityId: settingId,
+        operationType: "DELETE",
+        payload: { key: "tax.config", scope: "BRANCH", branchId: branchA },
+        clientCreatedAt: new Date().toISOString(),
+      }],
+    } as any);
+    expect(deleted.results[0]?.status).toBe("SUCCESS");
+
+    const tombstoned = await prisma.setting.findUnique({ where: { id: settingId } });
+    expect(tombstoned?.isActive).toBe(false);
   });
 
   it("fails closed for a cashier without settings.manage", async () => {
