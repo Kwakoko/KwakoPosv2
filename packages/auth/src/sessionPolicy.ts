@@ -87,6 +87,18 @@ export const sessionPolicyToMinutes = (policy: SessionPolicy) => ({
   idleTimeoutMinutes: Math.round(policy.idleTimeoutMs / 60_000),
   absoluteTimeoutMinutes: Math.round(policy.absoluteTimeoutMs / 60_000),
   warningDurationSeconds: Math.round(policy.warningDurationMs / 1_000),
+  refreshTokenDurationDays: Math.round(policy.refreshTokenDurationMs / (24 * 60 * 60_000)),
+  rememberMeDurationDays: Math.round(policy.rememberMeDurationMs / (24 * 60 * 60_000)),
+  forceLogoutOnBrowserClose: policy.forceLogoutOnBrowserClose,
+  allowMultipleDevices: policy.allowMultipleDevices,
+  maxConcurrentSessions: policy.maxConcurrentSessions,
+  forceLogoutOnPasswordChange: policy.forceLogoutOnPasswordChange,
+  singleDeviceLogin: policy.singleDeviceLogin,
+  trustedDevices: policy.trustedDevices,
+  autoRedirect: policy.autoRedirect,
+  restoreLastPage: policy.restoreLastPage,
+  offlineGracePeriodHours: Math.round(policy.offlineGracePeriodMs / (60 * 60_000)),
+  heartbeatIntervalMinutes: Math.round(policy.heartbeatIntervalMs / 60_000),
 });
 
 export function sessionPolicyFromSettings(securityConfig: Record<string, unknown> | null | undefined): SessionPolicy {
