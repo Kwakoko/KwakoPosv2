@@ -6,6 +6,7 @@ import {
 
 const baseStatus = () => ({
   reconciliationStatus: "IN_SYNC" as const,
+  openConflictCount: 0,
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
@@ -44,5 +45,13 @@ describe("Conflict Center presentation invariants", () => {
 
   it("does not claim convergence before reconciliation has been established", () => {
     expect(getConflictCenterReplicaState({ ...baseStatus(), reconciliationStatus: "UNKNOWN" })).toBe("NOT_VERIFIED");
+  });
+
+  it("does not claim zero conflicts when the authoritative conflict count is unknown", () => {
+    expect(getConflictCenterReplicaState({ ...baseStatus(), openConflictCount: null })).toBe("NOT_VERIFIED");
+  });
+
+  it("does not claim zero conflicts when the authoritative server reports open conflicts", () => {
+    expect(getConflictCenterReplicaState({ ...baseStatus(), openConflictCount: 2 })).toBe("NOT_VERIFIED");
   });
 });
