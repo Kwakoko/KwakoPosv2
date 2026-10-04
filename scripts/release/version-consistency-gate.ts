@@ -56,6 +56,8 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     if (manifest.version === targetVersion && manifest.tag === targetTag) {
       manifestSync = true;
+    } else {
+      errors.push(`release-manifest.json drift: expected version ${targetVersion}, got ${manifest.version}`);
     }
     const headSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
     if (manifest.gitSha === headSha) {
@@ -76,7 +78,7 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
     errors.push(`Runtime config drift: expected ${targetVersion}, got ${identity.appVersion}`);
   }
 
-  // 4. Live endpoint check if URL provided
+  // 5. Live endpoint check if URL provided
   let liveSync: "PASS" | "FAIL" | undefined = undefined;
   if (targetUrl) {
     try {
@@ -113,8 +115,8 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
 
   const passed = errors.length === 0;
 
-  console.log(` [1/3] package.json valid SemVer: ${checks.packageJsonVersionValid}`);
-  console.log(` [2/3] release-manifest.json synchronized: ${checks.releaseManifestSynchronized}`);
+  console.log(` [1/5] package.json valid SemVer: ${checks.packageJsonVersionValid}`);
+  console.log(` [2/5] release-manifest.json synchronized: ${checks.releaseManifestSynchronized}`);
   console.log(` [3/5] Runtime config synchronized: ${checks.runtimeConfigSynchronized}`);
   console.log(` [4/5] package-lock.json synchronized: ${checks.packageLockSynchronized}`);
   console.log(` [5/5] Release manifest Git SHA synchronized: ${checks.manifestGitShaSynchronized}`);
