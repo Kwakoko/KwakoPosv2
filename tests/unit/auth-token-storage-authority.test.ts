@@ -51,6 +51,9 @@ describe("Authentication credential authority", () => {
     const clientRefresh = client.slice(clientStart, clientEnd);
 
     expect(refresh).toContain('parseCookies(req.headers?.cookie)[REFRESH_COOKIE]');
+    expect(server).toContain('HttpOnly; SameSite=Strict; Max-Age=');
+    expect(server).toContain('(secure ? "; Secure" : "")');
+    expect(server).toContain('const secureCookies = isProductionEnv(config);');
     expect(refresh).toContain('setRefreshCookie(reply, rotated.refreshToken');
     expect(refresh).not.toContain('body.refreshToken');
     expect(refresh).not.toContain('refreshToken?: unknown');
