@@ -448,25 +448,29 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbA.recordOutboxMutation({
     id: "OP-DEV-A-01",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Customer Alpha", creditLimit: 50000 },
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CONV-A-01",
     status: "PENDING",
-  });
+  }, ctx);
 
   // Device A syncs up to Server
   await engineA.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   // Device B syncs down from Server
   await engineB.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const serverCustomers = commercialRepo.getCustomers(ctx);
@@ -651,7 +655,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
 
   dbStoreF06A.recordOutboxMutation({
     id: "op-fin-sync-1",
-    entityType: "StockAdjustment",
+    entityType: "Customer",
     entityId: randomUUID(),
     operationType: "CREATE",
     payload: { name: "Converged Financial Customer", creditLimit: 250000 },
