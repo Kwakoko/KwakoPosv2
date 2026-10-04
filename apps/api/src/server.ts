@@ -650,7 +650,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
   });
   const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId, sessionId: session.sessionId, permissionsVersion, tenantVersion };
   const accessToken = generateAccessToken(payload);
-  setRefreshCookie(reply, session.refreshToken, true, (session.refreshTokenExpiresAt.getTime() - now.getTime()) / 1000);
+  setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - now.getTime()) / 1000);
   await recordSessionAudit({
     tenantId: user.tenantId,
     branchId: user.branchId,
