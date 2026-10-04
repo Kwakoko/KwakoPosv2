@@ -201,7 +201,7 @@ export async function getDashboardKpiSnapshot(
     const priorStart = new Date(windowStart);
     priorStart.setDate(priorStart.getDate() - windowDays);
 
-    const [dailyRows, paymentRows, topProductRows, hourlyRows] = await Promise.all([
+    const [dailyRows, returnDailyRows, paymentRows, topProductRows, hourlyRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
         `SELECT DATE(sold_at) AS day,
                 COALESCE(SUM(grand_total - tax_total),0) AS revenue,
@@ -215,6 +215,22 @@ export async function getDashboardKpiSnapshot(
             AND sold_at < $4
           GROUP BY DATE(sold_at)
           ORDER BY DATE(sold_at)`,
+        ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
+      ),
+      tx.$queryRawUnsafe<Array<{ day: Date; refund_net: unknown; returned_cogs: unknown }>>(
+        `SELECT DATE(r.created_at) AS day,
+                COALESCE(SUM(r.total_refund_amount * CASE
+                  WHEN s.grand_total > 0 THEN 1 - (s.tax_total / s.grand_total)
+                  ELSE 1 END),0) AS refund_net,
+                COALESCE(SUM(rl.quantity_returned * pv.cost_price),0) AS returned_cogs
+           FROM returns r
+           LEFT JOIN sales s ON s.id = r.original_sale_id
+           LEFT JOIN return_lines rl ON rl.return_id = r.id
+           LEFT JOIN product_variants pv ON pv.id = rl.variant_id
+          WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r.status = 'COMPLETED'
+            AND r.created_at >= $3 AND r.created_at < $4
+          GROUP BY DATE(r.created_at)
+          ORDER BY DATE(r.created_at)` ,
         ctx.tenantId, ctx.branchId, priorStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ payment_method: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
@@ -287,7 +303,9 @@ export async function getDashboardKpiSnapshot(
     ]);
 
     const dayMap = new Map(dailyRows.map(r => [new Date(r.day).toISOString().slice(0,10), r]));
+    const returnDayMap = new Map(returnDailyRows.map(r => [new Date(r.day).toISOString().slice(0,10), r]));
     const priorDayMap = new Map(dailyRows.filter(r => new Date(r.day) < windowStart).map(r => [new Date(r.day).toISOString().slice(0,10), r]));
+    const priorReturnDayMap = new Map(returnDailyRows.filter(r => new Date(r.day) < windowStart).map(r => [new Date(r.day).toISOString().slice(0,10), r]));
     const chartPoints: DashboardRevenuePoint[] = [];
     let totalRevenue = 0, totalCOGS = 0, totalProfit = 0, priorTotalRevenue = 0, priorTotalProfit = 0;
     for (let i = 0; i < windowDays; i++) {
@@ -296,11 +314,13 @@ export async function getDashboardKpiSnapshot(
       const row = dayMap.get(key);
       const prior = new Date(d); prior.setDate(prior.getDate() - windowDays);
       const priorRow = priorDayMap.get(prior.toISOString().slice(0,10));
-      const revenue = numberValue(row?.revenue);
-      const profit = numberValue(row?.profit);
+      const returned = returnDayMap.get(key);
+      const priorReturned = priorReturnDayMap.get(prior.toISOString().slice(0,10));
+      const revenue = numberValue(row?.revenue) - numberValue(returned?.refund_net);
       const cogs = numberValue(row?.cogs);
-      const priorRevenue = numberValue(priorRow?.revenue);
-      const priorProfit = numberValue(priorRow?.profit);
+      const profit = revenue - cogs + numberValue(returned?.returned_cogs);
+      const priorRevenue = numberValue(priorRow?.revenue) - numberValue(priorReturned?.refund_net);
+      const priorProfit = priorRevenue - numberValue(priorRow?.cogs) + numberValue(priorReturned?.returned_cogs);
       totalRevenue += revenue; totalCOGS += cogs; totalProfit += profit;
       priorTotalRevenue += priorRevenue; priorTotalProfit += priorProfit;
       chartPoints.push({
