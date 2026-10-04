@@ -59,6 +59,7 @@ import { SyncConflictResolutionModal } from "../components/SyncConflictResolutio
 import { useWindowManager } from "../context/WindowManagerContext.js";
 import { HumanIdBadge } from "../components/UI/HumanIdBadge.js";
 import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
+import { useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
 
 function translateNavTab(tab: string, t: (k: string) => string): string {
   const map: Record<string, string> = {
@@ -2457,6 +2458,10 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const { currentTenantId, currentTenantName, currentTenantSlug, availableTenants, switchTenant } = useTenant();
   const { currentBranchId, currentBranchName, currentBranchCode, availableBranches, switchBranch } = useBranch();
   const { isOnline, pendingOutboxCount, syncOutbox, db } = useSync();
+  const syncStatus = useAuthoritativeSyncStatus({
+    tenantId: currentTenantId || null,
+    branchId: currentBranchId || null,
+  });
   const { theme, toggleTheme } = useTheme();
   const { permissions, isSuperAdmin } = useRbac();
   const { isMobileSidebarOpen, setIsMobileSidebarOpen } = useModule();
@@ -2502,6 +2507,9 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
       window.removeEventListener("kwakopos:open-conflict-center", onOpenConflictCenter);
     };
   }, [refreshSyncConflicts]);
+
+  const authoritativeConflictCount = syncStatus.openConflictCount > 0 ? syncStatus.openConflictCount : 0;
+  const effectiveConflictCount = Math.max(syncConflictCount, authoritativeConflictCount);
 
   const canAdminister = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
 
@@ -2654,7 +2662,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
         </div>
 
         <main id="app-root" className="main-content" role="main">
-          {syncConflictCount > 0 && (
+          {effectiveConflictCount > 0 && (
             <div
               className="sync-conflict-sticky-banner"
               style={{
@@ -2675,7 +2683,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
                 <AlertTriangle size={20} style={{ color: "#ef4444", flexShrink: 0 }} />
                 <div>
                   <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "#f87171" }}>
-                    Replication Paused: {syncConflictCount} Unresolved Sync Conflict{syncConflictCount > 1 ? "s" : ""}
+                    Replication Paused: {effectiveConflictCount} Unresolved Sync Conflict{effectiveConflictCount > 1 ? "s" : ""}
                   </div>
                   <div style={{ fontSize: "0.78rem", color: "var(--muted, #94a3b8)" }}>
                     Cloud sync is paused at the conflicting revision to safeguard transaction consistency. Resolve to resume real-time replication.
