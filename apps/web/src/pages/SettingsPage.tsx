@@ -362,6 +362,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
   const [securityConfig, setSecurityConfig] = useState({
     inactivityLockMinutes: 15,
     managerPinPolicy: "6-digit numeric PIN",
+    sessionIdleTimeoutMinutes: 30,
+    absoluteSessionLifetimeHours: 8,
+    sessionWarningMinutes: 2,
+    refreshTokenLifetimeDays: 14,
+    rememberMeDurationDays: 30,
+    forceLogoutOnBrowserClose: false,
+    allowMultipleDevices: true,
+    maxConcurrentSessions: 5,
+    forceLogoutOnPasswordChange: true,
+    singleDeviceLogin: false,
+    trustedDevices: true,
+    autoRedirect: true,
+    restoreLastPage: true,
+    offlineGracePeriodHours: 24,
+    heartbeatIntervalMinutes: 5,
+    sessionRefreshThresholdMinutes: 5,
   });
   const [notificationsConfig, setNotificationsConfig] = useState({
     lowStockAlerts: true,
@@ -789,11 +805,70 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
 
       {/* Security Settings */}
       {activeTab === "security" && (
-        <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabSecurity")}</div></div>
-          <div className="v2-space-y-3">
-            <div className="v2-text-xs v2-text-muted">Security policy changes are tenant/branch settings and use the canonical durable Settings pipeline.</div>
-            <div className="v2-grid v2-grid-2 v2-gap-4">
+        <div className="v2-space-y-4">
+          <div className="v2-card">
+            <div className="v2-card-header"><div className="v2-card-title">{t("settings.tabSecurity")}</div></div>
+            <div className="v2-card-body v2-space-y-4">
+              <div className="v2-text-xs v2-text-muted">Tenant-aware Session Manager policy. These values are durable Settings records and remain separate from business data and the offline Sync Queue.</div>
+              <div className="v2-grid v2-grid-2 v2-gap-4">
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Idle Timeout (Minutes)</label>
+                  <input className="v2-input" type="number" min={5} max={1440} value={securityConfig.sessionIdleTimeoutMinutes} onChange={(e) => setSecurityConfig({ ...securityConfig, sessionIdleTimeoutMinutes: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Absolute Session Lifetime (Hours)</label>
+                  <input className="v2-input" type="number" min={0.25} max={168} step={0.25} value={securityConfig.absoluteSessionLifetimeHours} onChange={(e) => setSecurityConfig({ ...securityConfig, absoluteSessionLifetimeHours: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Warning Countdown (Minutes)</label>
+                  <input className="v2-input" type="number" min={0.5} max={10} step={0.5} value={securityConfig.sessionWarningMinutes} onChange={(e) => setSecurityConfig({ ...securityConfig, sessionWarningMinutes: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Refresh Token Lifetime (Days)</label>
+                  <input className="v2-input" type="number" min={1} max={30} value={securityConfig.refreshTokenLifetimeDays} onChange={(e) => setSecurityConfig({ ...securityConfig, refreshTokenLifetimeDays: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Remember Me Duration (Days)</label>
+                  <input className="v2-input" type="number" min={1} max={30} value={securityConfig.rememberMeDurationDays} onChange={(e) => setSecurityConfig({ ...securityConfig, rememberMeDurationDays: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Offline Grace Period (Hours)</label>
+                  <input className="v2-input" type="number" min={1} max={72} value={securityConfig.offlineGracePeriodHours} onChange={(e) => setSecurityConfig({ ...securityConfig, offlineGracePeriodHours: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Concurrent Sessions</label>
+                  <input className="v2-input" type="number" min={1} max={50} value={securityConfig.maxConcurrentSessions} onChange={(e) => setSecurityConfig({ ...securityConfig, maxConcurrentSessions: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className="v2-text-xs v2-font-bold v2-text-muted">Heartbeat (Minutes)</label>
+                  <input className="v2-input" type="number" min={1} max={15} value={securityConfig.heartbeatIntervalMinutes} onChange={(e) => setSecurityConfig({ ...securityConfig, heartbeatIntervalMinutes: Number(e.target.value) })} />
+                </div>
+              </div>
+
+              <div className="v2-space-y-2">
+                {[
+                  ["allowMultipleDevices", "Allow Multiple Devices"],
+                  ["singleDeviceLogin", "Single Device Login"],
+                  ["forceLogoutOnPasswordChange", "Force Logout After Password Change"],
+                  ["forceLogoutOnBrowserClose", "Force Logout On Browser Close (best effort)"],
+                  ["trustedDevices", "Allow Trusted Devices"],
+                  ["autoRedirect", "Automatic Timeout Redirect"],
+                  ["restoreLastPage", "Restore Last Authorized Page"],
+                ].map(([key, label]) => (
+                  <label key={key} className="v2-flex v2-items-center v2-gap-2 v2-text-xs" style={{ cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean((securityConfig as any)[key])}
+                      onChange={(e) => setSecurityConfig({ ...securityConfig, [key]: e.target.checked })}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="v2-card">
+            <div className="v2-card-body v2-space-y-3">
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">Cashier Inactivity Lock (Minutes)</label>
                 <input className="v2-input" type="number" min={1} value={securityConfig.inactivityLockMinutes} onChange={(e) => setSecurityConfig({ ...securityConfig, inactivityLockMinutes: Number(e.target.value) })} />
