@@ -81,6 +81,10 @@ model Tenant {
   traVfdConfigs          TraVfdConfig[]
   traVfdFiscalizations   TraVfdFiscalization[]
   traVfdOutbox           TraVfdOutbox[]
+  aiInsights              AiInsight[]
+  aiRecommendations       AiRecommendation[]
+  aiActionLedgers         AiActionLedger[]
+  aiKillSwitches          AiKillSwitch[]
 
   @@map("tenants")
 }
@@ -149,6 +153,9 @@ model Branch {
   traVfdConfigs        TraVfdConfig[]
   traVfdFiscalizations TraVfdFiscalization[]
   traVfdOutbox         TraVfdOutbox[]
+  aiInsights            AiInsight[]
+  aiRecommendations     AiRecommendation[]
+  aiActionLedgers       AiActionLedger[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3167,4 +3174,91 @@ model SyncControlState {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("sync_control_state")
+}
+
+
+model AiInsight {
+  id                  String    @id @default(uuid())
+  tenantId            String
+  branchId            String
+  dedupeKey           String
+  title               String
+  observation         String
+  evidence            Json
+  interpretation      String
+  impact              String
+  recommendedNextStep String
+  confidenceScore     Float
+  evidenceClass       String
+  sourceKind          String
+  sourceMetricId      String?
+  status              String    @default("ACTIVE")
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch              Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  recommendations     AiRecommendation[]
+  @@unique([tenantId, branchId, dedupeKey])
+  @@index([tenantId, branchId, createdAt])
+  @@map("ai_insights")
+}
+
+model AiRecommendation {
+  id               String          @id @default(uuid())
+  tenantId         String
+  branchId         String
+  insightId        String?
+  title            String
+  summary          String
+  evidence         Json
+  expectedImpact   String
+  riskLevel        String
+  policyStatus     String
+  approvalStatus   String          @default("PENDING")
+  approvedByUserId String?
+  approvedAt       DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  insight          AiInsight?      @relation(fields: [insightId], references: [id], onDelete: SetNull)
+  actionLedgers    AiActionLedger[]
+  @@index([tenantId, branchId, approvalStatus])
+  @@index([tenantId, branchId, createdAt])
+  @@map("ai_recommendations")
+}
+
+model AiActionLedger {
+  id                 String           @id @default(uuid())
+  tenantId           String
+  branchId           String
+  recommendationId   String
+  eventType          String
+  actionExecuted     String
+  executedByIdentity String
+  executionVerified  Boolean
+  verificationDetails String
+  timestamp          DateTime
+  createdAt          DateTime         @default(now())
+  tenant             Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch             Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  recommendation     AiRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  @@index([tenantId, branchId, recommendationId, timestamp])
+  @@map("ai_action_ledgers")
+}
+
+model AiKillSwitch {
+  id          String    @id
+  scope       String
+  targetId    String
+  tenantId    String?
+  isActive    Boolean   @default(false)
+  triggeredBy String
+  triggeredAt DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  @@index([tenantId, scope, isActive])
+  @@map("ai_kill_switches")
 }
