@@ -285,7 +285,10 @@ export async function getDashboardKpiSnapshot(
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
            JOIN sales s ON s."id" = p."saleId"
+            AND s."tenantId" = p."tenantId"
+            AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
+            AND s."tenantId" = $1 AND s."branchId" = $2
             AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
