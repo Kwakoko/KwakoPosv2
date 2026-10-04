@@ -635,11 +635,11 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await expect.poll(
       async () => (await readDashboardSnapshot(pageC, tenantId, branchId)).salesToday,
       { timeout: 30000, intervals: [500, 1000, 2000] },
-    ).toBe(1500);
+    ).toBe(2000);
 
     const afterReloginC = await readDashboardSnapshot(pageC, tenantId, branchId);
-    expect(afterReloginC.kpis).toEqual(finalA.kpis);
-    expect(afterReloginC.asOfRevision).toBe(finalA.asOfRevision);
+    expect(afterReloginC.kpis).toEqual(financialSnapshot.kpis);
+    expect(afterReloginC.asOfRevision).toBe(financialSnapshot.asOfRevision);
 
     const evidence = {
       status: "PASS",
