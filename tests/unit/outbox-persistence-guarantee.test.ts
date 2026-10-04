@@ -330,6 +330,16 @@ describe("Pillar 1 — Outbox Guarantees: Unit Tests", () => {
       branchId: "branch-security",
     })).toThrow("PRIVILEGED_ENTITY_OUTBOX_FORBIDDEN");
     expect(localDb.syncOutbox.has("role-forbidden")).toBe(false);
+
+    expect(() => localDb.enqueueOutbox({
+      entityType: "Employee" as any,
+      entityId: "employee-forbidden",
+      operationType: "CREATE",
+      payload: { firstName: "Sensitive", baseSalary: 1000000 },
+      tenantId: "tenant-security",
+      branchId: "branch-security",
+    })).toThrow("PRIVILEGED_ENTITY_OUTBOX_FORBIDDEN");
+    expect(localDb.syncOutbox.has("employee-forbidden")).toBe(false);
   });
 
   it("commitLocalOutboxes commits multiple outboxes and explicit deletes in one durable transaction", async () => {
