@@ -190,9 +190,11 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST D: Browser A -> Server -> Browser B Multi-Device Sync
   // -------------------------------------------------------------------------
   const startD = Date.now();
-  const bADb = new LocalIndexedDbStore();
+  const bADb = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-device-a-" + randomUUID());
+  await bADb.ready;
   const bAEngine = new ClientSyncEngine("device-synth-A", bADb);
-  const bBDb = new LocalIndexedDbStore();
+  const bBDb = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-device-b-" + randomUUID());
+  await bBDb.ready;
   const bBEngine = new ClientSyncEngine("device-synth-B", bBDb);
 
   const synthVarId = randomUUID();
@@ -275,8 +277,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST E: Offline Mutation Outbox Queuing & Reconnect Sync
   // -------------------------------------------------------------------------
   const startE = Date.now();
-  const offlineDb = new LocalIndexedDbStore();
-  const offlineEngine = new ClientSyncEngine("device-synth-offline", offlineDb);
+  const offlineDb = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-offline-" + randomUUID());
+    await offlineDb.ready;
+    const offlineEngine = new ClientSyncEngine("device-synth-offline", offlineDb);
 
   offlineDb.recordOutboxMutation({
     id: "OP-OFFLINE-01",
@@ -512,8 +515,10 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST K: Multi-Device Outbox Convergence (Device A -> Server -> Device B)
   // -------------------------------------------------------------------------
   const startK = Date.now();
-  const dbA = new LocalIndexedDbStore();
-  const dbB = new LocalIndexedDbStore();
+  const dbA = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-k-a-" + randomUUID());
+  await dbA.ready;
+  const dbB = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-k-b-" + randomUUID());
+  await dbB.ready;
   const engineA = new ClientSyncEngine("device-k-a", dbA);
   const engineB = new ClientSyncEngine("device-k-b", dbB);
 
@@ -721,8 +726,10 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F06: Multi-Device Financial Mutation Sync Convergence
   // -------------------------------------------------------------------------
   const startF06 = Date.now();
-  const dbStoreF06A = new LocalIndexedDbStore();
-  const dbStoreF06B = new LocalIndexedDbStore();
+  const dbStoreF06A = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-f06-a-" + randomUUID());
+  await dbStoreF06A.ready;
+  const dbStoreF06B = new LocalIndexedDbStore(undefined, "kwakopos-synthetic-f06-b-" + randomUUID());
+  await dbStoreF06B.ready;
   const engineF06A = new ClientSyncEngine("device-fin-a", dbStoreF06A);
   const engineF06B = new ClientSyncEngine("device-fin-b", dbStoreF06B);
 
