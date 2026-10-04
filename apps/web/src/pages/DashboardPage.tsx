@@ -1012,6 +1012,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       items,
       totalVolume: analytics?.paymentTotalVolume ?? 0,
       totalCount: analytics?.paymentTotalCount ?? 0,
+      totalOrderCount: analytics?.paymentTotalOrderCount ?? 0,
       overallAov: analytics?.paymentOverallAov ?? 0,
     };
   }, [authoritativeKpis, paymentMetricMode]);
@@ -2452,15 +2453,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                     ) : (
                       <>
                         <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Transactions'}
+                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Orders'}
                         </span>
                         <span className="text-sm font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight">
                           {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Orders`}
                         </span>
                         <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-medium">
                           {paymentMetricMode === 'volume'
-                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'sale' : 'sales'}`
-                            : `Avg ${fmtCcy(paymentChannelSummary.overallAov)}`}
+                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'payments' : 'payments'} · ${paymentChannelSummary.totalOrderCount} ${paymentChannelSummary.totalOrderCount === 1 ? 'order' : 'orders'}`
+                            : `Avg order ${fmtCcy(paymentChannelSummary.overallAov)}`}
                         </span>
                       </>
                     )}
@@ -2500,7 +2501,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                               )}
                             </div>
                             <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium truncate">
-                              {item.count} {item.count === 1 ? 'sale' : 'sales'} · AOV {fmtCcy(item.aov)}
+                              {item.orderCount} {item.orderCount === 1 ? 'order' : 'orders'} · {item.paymentCount} {item.paymentCount === 1 ? 'payment' : 'payments'} · AOV {fmtCcy(item.aov)}
                             </div>
                           </div>
                         </div>
@@ -2509,7 +2510,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                             {fmtCcy(item.volume)}
                           </div>
                           <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% count`}
+                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% orders`}
                           </div>
                         </div>
                       </div>
