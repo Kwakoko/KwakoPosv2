@@ -4,7 +4,7 @@ import {
   ScopedStockRepository,
   ScopedCommercialRepository,
   ScopedFinanceRepository,
-  globalInMemoryStore,
+  InMemoryStore,
 } from "@kwakopos2/database";
 import { TenantContext } from "@kwakopos2/contracts";
 
@@ -29,10 +29,15 @@ export async function runBusinessFlowJourneys(): Promise<{
     permissions: ["*"],
   };
 
-  const prodRepo = new ScopedProductRepository(globalInMemoryStore);
-  const stockRepo = new ScopedStockRepository(globalInMemoryStore);
-  const commRepo = new ScopedCommercialRepository(globalInMemoryStore);
-  const finRepo = new ScopedFinanceRepository(globalInMemoryStore);
+  // Each certification invocation gets an isolated in-memory fixture store.
+  // The suite runs multiple certification tests concurrently; sharing the
+  // process-global store would create false cross-journey collisions such as
+  // CASH_SESSION_ALREADY_OPEN.
+  const certificationStore = new InMemoryStore();
+  const prodRepo = new ScopedProductRepository(certificationStore);
+  const stockRepo = new ScopedStockRepository(certificationStore);
+  const commRepo = new ScopedCommercialRepository(certificationStore);
+  const finRepo = new ScopedFinanceRepository(certificationStore);
 
   // ==================== TIER 1 INDUSTRY JOURNEYS ====================
 
