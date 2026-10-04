@@ -30,7 +30,7 @@ import {
   useAuth, useSync, useTenant, useBranch, useRbac, useModule,
   useTranslation, useFormatters,
 } from "../context/KwakoPosContexts.js";
-import { apiFetch, safeUUID } from "../services/apiClient.js";
+import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 import { Button } from "../components/UI/Button.js";
 import { SyncErrorsPanel } from "../components/SyncErrorsPanel.js";
 import type { PersistenceState } from "../persistence/persistenceStatus.js";
