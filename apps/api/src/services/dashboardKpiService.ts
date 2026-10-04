@@ -31,6 +31,8 @@ export interface DashboardTopProduct {
   stock: number;
   category: string;
   rank: number;
+  revenueRank: number;
+  unitsRank: number;
 }
 
 export interface DashboardAnalyticsSnapshot {
