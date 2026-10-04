@@ -58,6 +58,11 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #57 from Kwakoko/fix/communication-conflict-current-main-v2
+- **sync**: carry authoritative conflict checks onto current main
+- **sync**: add authoritative conflict presentation coverage
+- **sync**: carry authoritative conflict checks onto current main
+- **release**: v2.13.0
 - **core**: Merge pull request #54 from Kwakoko/fix/communication-fabric-p0-p2-final
 - **core**: enforce application facade against raw UI fetch transport
 - **test**: remove temporary certification diagnostic
@@ -355,6 +360,12 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **sync**: carry closed-loop remediation onto current main
+- **sync**: carry closed-loop remediation onto current main
+- **sync**: carry closed-loop remediation onto current main
+- **sync**: carry closed-loop remediation onto current main
+- **sync**: carry closed-loop remediation onto current main
+- **sync**: carry closed-loop remediation onto current main
 - **ui**: route support control tower through application API facade
 - **ui**: route remaining page transport through application API facade
 - **ui**: route remaining page transport through application API facade
@@ -762,7 +773,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, Jack91186, github-actions[bot], Hilda99-D, Kwakoko1
+Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
