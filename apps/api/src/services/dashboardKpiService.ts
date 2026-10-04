@@ -346,7 +346,9 @@ export async function getDashboardKpiSnapshot(
                  ROW_NUMBER() OVER (ORDER BY units DESC, "productId") AS units_rank
             FROM aggregated
          )
-        SELECT * FROM ranked
+        SELECT ranked."productId" AS product_id, ranked.name, ranked.revenue, ranked.units, ranked.stock, ranked.category,
+               ranked.revenue_rank, ranked.units_rank
+          FROM ranked
          WHERE revenue_rank <= 20 OR units_rank <= 20
          ORDER BY revenue_rank, units_rank`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
