@@ -446,7 +446,7 @@ export async function getDashboardKpiSnapshot(
         AovToday: orderCount > 0 ? salesToday / orderCount : 0,
         ProductCount: numberValue(productRows[0]?.product_count),
         StockAlerts: lowStockCount + outOfStockCount,
-        CustomerDebts: numberValue(customers.customerDebts),
+        CustomerDebts: numberValue(customers.customer_debts),
         InventoryValue: numberValue(inventory.inventory_value),
         CompletedOrders: numberValue(sales.completed_orders),
         LowStock: lowStockCount,
