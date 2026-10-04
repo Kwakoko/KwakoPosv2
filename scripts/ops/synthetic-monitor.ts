@@ -221,16 +221,20 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D3",
     status: "PENDING",
-  });
+  }, ctx);
 
   await bAEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   await bBEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const bBStock = calculateAvailableStock(
@@ -271,12 +275,14 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "OFFLINE-KEY-01",
     status: "PENDING",
-  });
+  }, ctx);
 
   const pendingBefore = offlineDb.getPendingOutbox().length;
   await offlineEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
   const pendingAfter = offlineDb.getPendingOutbox().length;
   const passE = pendingBefore === 1 && pendingAfter === 0;
@@ -294,7 +300,8 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   // SYNTHETIC TEST F: PWA Schema Migration Preservation
   // -------------------------------------------------------------------------
   const startF = Date.now();
-  const pwaDb = new LocalIndexedDbStore();
+  const pwaDb = new LocalIndexedDbStore(2, `kwakopos-synthetic-migration-${randomUUID()}`);
+  await pwaDb.ready;
   pwaDb.recordOutboxMutation({
     id: "OP-PWA-01",
     entityType: "StockAdjustment",
@@ -304,9 +311,11 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "PWA-1",
     status: "PENDING",
+    tenantId: ctx.tenantId,
+    branchId: ctx.branchId,
   });
-  const migration = await pwaDb.migrateToVersion(3);
-  const passF = migration.newVersion === 3 && migration.preservedOutboxCount === 1;
+  const migration = await pwaDb.migrateToVersion(6);
+  const passF = migration.previousVersion === 2 && migration.newVersion === 6 && migration.preservedOutboxCount === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
     syntheticTenantId,
@@ -649,15 +658,19 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     idempotencyKey: `idem-fin-sync-${randomUUID()}`,
     clientCreatedAt: new Date().toISOString(),
     status: "PENDING",
-  });
+  }, ctx);
 
   await engineF06A.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
   await engineF06B.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
-    async (since) => syncEngine.processDelta(ctx, { since })
+    async (since) => syncEngine.processDelta(ctx, { since }),
+    ctx.tenantId,
+    ctx.branchId,
   );
 
   const passF06 = commercialRepo.getCustomers(ctx).some((c) => c.name === "Converged Financial Customer");
