@@ -51,7 +51,6 @@ interface ApiErrorPayload {
 }
 
 const SESSION_KEY = "kwakopos:v2:session";
-const LEGACY_TOKEN_KEY = "kwakopos_access_token";
 
 export function getStoredSession(): StoredSession | null {
   if (typeof window === "undefined") return null;
@@ -67,9 +66,18 @@ export function getStoredSession(): StoredSession | null {
       window.sessionStorage.removeItem(SESSION_KEY);
       return null;
     }
+    // Access tokens are bearer credentials and must never be persisted in browser storage.
+    // Strip any legacy persisted accessToken from old sessions during migration.
+    if (parsed.accessToken) {
+      const sanitized = JSON.stringify({
+        sessionId: parsed.sessionId,
+        user: parsed.user,
+      });
+      try { window.localStorage.setItem(SESSION_KEY, sanitized); } catch { /* ignore */ }
+      try { window.sessionStorage.setItem(SESSION_KEY, sanitized); } catch { /* ignore */ }
+    }
     return {
       sessionId: parsed.sessionId,
-      accessToken: parsed.accessToken,
       user: parsed.user as LoginResponseUser,
     };
   } catch {
@@ -87,48 +95,33 @@ export function setStoredSession(session: StoredSession | null): void {
   if (!session) {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
-    try { window.localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* ignore */ }
   } else {
-    const serialized = JSON.stringify(session);
+    // Persist only the durable session identity. Never persist the bearer access token.
+    const serialized = JSON.stringify({
+      sessionId: session.sessionId,
+      user: session.user,
+    });
     try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
     try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
-    if (session.accessToken) {
-      try { window.localStorage.setItem(LEGACY_TOKEN_KEY, session.accessToken); } catch { /* ignore */ }
-    }
   }
 }
 
-let accessToken: string | null = typeof window !== "undefined" ? getStoredSession()?.accessToken || window.localStorage.getItem(LEGACY_TOKEN_KEY) || null : null;
+let accessToken: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
 
 export function getAccessToken(): string | null {
   if (accessToken) return accessToken;
+  // Access tokens intentionally remain memory-only. A page restart re-establishes
+  // the session through the durable sessionId and /auth/refresh.
   if (typeof window !== "undefined") {
-    const stored = getStoredSession();
-    if (stored?.accessToken) {
-      accessToken = stored.accessToken;
-      return accessToken;
-    }
-    const legacy = window.localStorage.getItem(LEGACY_TOKEN_KEY);
-    if (legacy) {
-      accessToken = legacy;
-      return accessToken;
-    }
+    return accessToken;
   }
   return null;
 }
 
 export function setAccessToken(token: string | null): void {
+  // Deliberately memory-only; never write bearer credentials to browser storage.
   accessToken = token;
-  if (typeof window !== "undefined") {
-    try {
-      if (token) {
-        window.localStorage.setItem(LEGACY_TOKEN_KEY, token);
-      } else {
-        window.localStorage.removeItem(LEGACY_TOKEN_KEY);
-      }
-    } catch { /* ignore */ }
-  }
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, allowRefresh = true): Promise<T> {
@@ -268,25 +261,8 @@ export async function restoreSession(): Promise<LoginResponseUser | null> {
   const stored = getStoredSession();
   if (!stored || !stored.user) return null;
 
-  // If stored accessToken is present and not expired, restore immediately
-  if (stored.accessToken) {
-    try {
-      const parts = stored.accessToken.split(".");
-      if (parts.length === 3) {
-        const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-        if (payload && typeof payload.exp === "number") {
-          const expiresAtMs = payload.exp * 1000;
-          if (expiresAtMs > Date.now() + 30000) {
-            accessToken = stored.accessToken;
-            return stored.user;
-          }
-        }
-      }
-    } catch {
-      // Decode fallback
-    }
-  }
-
+  // Access tokens are memory-only, so browser restart always re-establishes
+  // the bearer credential from the durable server-side session.
   const refreshed = await refreshAccessToken();
   if (refreshed) {
     return getStoredSession()?.user || stored.user;
