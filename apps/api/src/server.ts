@@ -4991,43 +4991,67 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(200).send({ success: true, data: globalBiAnalyticsService.getDashboardMetrics() });
   });
 
-  // Phase 33 — AI Operating Layer OS Endpoints
+  // Phase 33 — AI Operating Layer Endpoints
+  server.get("/api/v1/ai-operating-layer/insights", async (req, reply) => {
+    const ctx = requireAiViewerContext(req);
+    const result = await globalAiOperatingLayerService.getInsightsAndRecommendations(ctx);
+    const limit = Number((req.query as any)?.limit || 50);
+    return reply.status(200).send({ success: true, data: result.insights.slice(0, Math.min(Math.max(limit, 1), 100)) });
+  });
+
+  server.get("/api/v1/ai-operating-layer/recommendations", async (req, reply) => {
+    const ctx = requireAiViewerContext(req);
+    const limit = Number((req.query as any)?.limit || 50);
+    return reply.status(200).send({ success: true, data: await globalAiOperatingLayerService.listRecommendations(ctx, limit) });
+  });
+
   server.get("/api/v1/ai-operating-layer/overview", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+    const ctx = requireAiViewerContext(req);
+    return reply.status(200).send({ success: true, data: await globalAiOperatingLayerService.getDashboardMetrics(ctx) });
   });
 
   server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const ctx = requireTenantContext(req);
     const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    return reply.status(200).send({ success: true, data: await globalAiOperatingLayerService.askAi(ctx, String(body.queryText || "")) });
   });
 
   server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
+    const ctx = requireAiApprovalContext(req);
     const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    const recommendationId = String(body.recommendationId || "").trim();
+    if (!recommendationId) {
+      return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "recommendationId is required." } });
+    }
+    return reply.status(200).send({
+      success: true,
+      data: await globalAiOperatingLayerService.approveRecommendation(ctx, recommendationId, body.comments == null ? undefined : String(body.comments)),
+    });
   });
 
   server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const params = req.params as any;
-    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
-    return reply.status(200).send({ success: true, data: res });
+    const ctx = requireAiViewerContext(req);
+    return reply.status(200).send({ success: true, data: await globalAiOperatingLayerService.explainRecommendation(ctx, String((req.params as any).id)) });
   });
 
   server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
     const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
-    return reply.status(200).send({ success: true, data: res });
+    const scope = String(body.scope || "TENANT").toUpperCase();
+    if (scope !== "GLOBAL" && scope !== "TENANT") {
+      return reply.status(400).send({ success: false, error: { code: "AI_KILL_SCOPE_UNSUPPORTED", message: "Only GLOBAL and TENANT kill-switch scopes are supported." } });
+    }
+    const ctx = requireAiKillSwitchContext(req, scope as "GLOBAL" | "TENANT");
+    const enabled = Boolean(body.enabled ?? body.active ?? true);
+    const targetId = String(body.targetId || (scope === "GLOBAL" ? "GLOBAL" : ctx.tenantId));
+    return reply.status(200).send({
+      success: true,
+      data: { scope, targetId, active: await globalAiOperatingLayerService.toggleKillSwitch(ctx, scope as "GLOBAL" | "TENANT", targetId, enabled) },
+    });
   });
 
   server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
-    const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    return reply.status(200).send({ success: true, data: globalAiOperatingLayerService.getDashboardMetrics() });
+    const ctx = requireAiViewerContext(req);
+    return reply.status(200).send({ success: true, data: await globalAiOperatingLayerService.getDashboardMetrics(ctx) });
   });
 
 
