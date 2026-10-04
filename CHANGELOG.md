@@ -56,6 +56,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **release**: v2.13.0
 - **core**: checkpoint local certification fixes
 - **core**: Merge pull request #42 from Kwakoko/release/auth-transport-lock
 - **core**: enforce auth transport lock before certification
@@ -219,6 +220,9 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **core**: repair Employee outbox guard syntax
+- **core**: align Employee HR table with canonical fields
+- **core**: close Employee P0/P1 production gaps
 - **sync**: resolve purchasing merge conflict
 - **core**: reconcile local persistence and sync fixes
 - **sync**: align remaining raw SyncOperation recovery queries with PostgreSQL columns
