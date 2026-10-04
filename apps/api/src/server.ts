@@ -3786,7 +3786,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/retail/settings", async (req, reply) => {
     const ctx = requireTenantContext(req);
-    return reply.send({ success: true, data: await globalSettingsService.getSettings(ctx)["retail.config"] });
+    const settings = await globalSettingsService.getSettings(ctx);
+    return reply.send({ success: true, data: settings["retail.config"] });
   });
 
   server.post("/api/v1/retail/settings", async (req, reply) => {
