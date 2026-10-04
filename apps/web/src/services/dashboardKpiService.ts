@@ -10,7 +10,7 @@ export interface DashboardAnalyticsSnapshot {
   chartPoints: DashboardRevenuePoint[]; totalRevenue: number; totalCOGS: number; totalProfit: number; marginPct: string;
   revenueDeltaPct: string | null; profitDeltaPct: string | null; priorTotalRevenue: number;
   peakHour: { hour: string; revenue: number; ordersCount: number } | null;
-  paymentChannels: DashboardPaymentChannel[]; paymentTotalVolume: number; paymentTotalCount: number; paymentOverallAov: number;
+  paymentChannels: DashboardPaymentChannel[]; paymentTotalVolume: number; paymentTotalCount: number; paymentTotalOrderCount: number; paymentOverallAov: number;
   topProducts: DashboardTopProduct[]; topProductsTotalTracked: number;
 }
 export interface DashboardKpiSnapshot {
