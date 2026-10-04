@@ -93,8 +93,7 @@ The system is structured as an npm workspaces monorepo:
 - **Locations:**  
   - `apps/api/package.json:6`  
   - `scripts/ci/harden-production-finance.ts:16-34`  
-  - `apps/api/src/serverFixed.ts:1-334`  
-  - `apps/api/src/server.ts:1-4810`
+  - `apps/api/src/server.ts` (canonical API server and authentication/security path)
 - **Finding:**  
   The codebase has two competing API server implementations:
   1. `server.ts`: A massive 4,810-line monolithic server containing legacy in-memory fallback routes and developmental auth bypasses.
