@@ -1,4 +1,4 @@
-﻿-- DropForeignKey
+-- DropForeignKey
 ALTER TABLE "platform_super_admin_security" DROP CONSTRAINT "platform_super_admin_security_user_id_fkey";
 
 -- DropIndex
