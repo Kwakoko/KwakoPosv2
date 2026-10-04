@@ -8,7 +8,7 @@ const sourceContains = (relative: string, needle: string, forbidden = false) => 
 
 for (const file of [
   "apps/web/src/main.tsx","apps/web/src/App.tsx","apps/web/src/context/KwakoPosContexts.tsx","apps/web/src/services/apiClient.ts","apps/web/src/indexedDb.ts","apps/web/src/versionManager.ts",
-  "apps/api/src/server.ts","apps/api/src/serverFixed.ts","packages/sync/src/prismaSyncEngine.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
+  "apps/api/src/server.ts","apps/api/src/serverFixed.ts","packages/sync/src/worldStandardPrismaSyncEngine.ts","packages/database/src/atomicCommercialFinance.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
   "apps/web/dist/index.html","apps/web/dist/manifest.json","apps/web/dist/sw.js","apps/api/dist/serverFixed.js",
 ]) requireFile(file);
 
@@ -29,10 +29,10 @@ sourceContains("apps/api/src/serverFixed.ts", "requireSecuritySecrets");
 sourceContains("apps/api/src/serverFixed.ts", "ensureSuperAdminSecurity");
 sourceContains("apps/api/src/serverFixed.ts", "verifySuperAdminMfa");
 sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
-// PrismaSyncEngine is the public compatibility alias; verify the concrete world-standard PostgreSQL engine.
-sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "op.entityType === \"Sale\" && op.operationType === \"CREATE\"");
-sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "op.entityType === \"PurchaseReceipt\" && op.operationType === \"CREATE\"");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PurchaseReceipt");
+sourceContains("packages/database/src/atomicCommercialFinance.ts", "createSale");
+sourceContains("packages/database/src/atomicCommercialFinance.ts", "stockLedger");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
 
