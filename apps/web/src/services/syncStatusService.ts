@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LocalIndexedDbStore } from "../indexedDb.js";
+import { apiFetch } from "./applicationApiService.js";
 
 export const SYNC_STATUS_STATES = [
   "IDLE",
@@ -29,6 +30,8 @@ export interface SyncStatusSnapshot extends SyncStatusScope {
   failedOutboxCount: number;
   /** Items permanently abandoned after exceeding the server-rejection retry cap. */
   abandonedOutboxCount: number;
+  /** Authoritative server-side OPEN conflicts for the active tenant/branch. */
+  openConflictCount: number;
   lastSyncedAt: number | null;
   lastSyncDurationMs: number;
   lastError: string | null;
@@ -49,6 +52,7 @@ const emptySnapshot = (): SyncStatusSnapshot => ({
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
+  openConflictCount: 0,
   lastSyncedAt: null,
   lastSyncDurationMs: 0,
   lastError: null,
@@ -150,6 +154,17 @@ export class SyncStatusService {
       const tenantId = scope?.tenantId ?? this.snapshot.tenantId ?? undefined;
       const branchId = scope?.branchId ?? this.snapshot.branchId ?? undefined;
       const pending = this.db.getPendingOutbox(tenantId, branchId).length;
+      // Server conflicts are authoritative. A failed read is represented as
+      // UNKNOWN (-1), never as zero, so the UI cannot claim convergence.
+      let openConflictCount = 0;
+      if (tenantId && branchId) {
+        try {
+          const conflictResponse = await apiFetch<any>("/sync/conflicts?status=OPEN");
+          openConflictCount = Array.isArray(conflictResponse?.data) ? conflictResponse.data.length : 0;
+        } catch {
+          openConflictCount = -1;
+        }
+      }
       const localRevision = tenantId && branchId
         ? String(this.db.syncMetadata.get(`syncScope:${tenantId}:${branchId}:lastSyncRevision`) ?? "0")
         : "0";
@@ -196,6 +211,7 @@ export class SyncStatusService {
         pendingOutboxCount: pending,
         failedOutboxCount: failed,
         abandonedOutboxCount: abandoned,
+        openConflictCount,
         reconciliationStatus,
         localRevision,
         syncEpoch,
