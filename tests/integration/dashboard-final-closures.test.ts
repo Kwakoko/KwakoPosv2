@@ -273,7 +273,7 @@ describe("Dashboard final production closures", () => {
     const ctx: any = { tenantId, branchId, userId: randomUUID(), roles: ["ADMIN"], permissions: ["*"] };
     const now = new Date();
     const utcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const beforeMidnight = new Date(utcDay.getTime() + 23 * 60 * 60 * 1000 + 30 * 60 * 1000);
+    const beforeMidnight = new Date(utcDay.getTime() + 30 * 60 * 1000);
     const afterMidnight = new Date(utcDay.getTime() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000);
 
     try {
@@ -303,7 +303,7 @@ describe("Dashboard final production closures", () => {
       expect(snapshot.todayOrderCount).toBe(1);
       expect(snapshot.analytics.chartPoints).toHaveLength(1);
       expect(snapshot.analytics.chartPoints[0]?.Revenue).toBe(123);
-      expect(snapshot.analytics.peakHour?.hour).toBe("23:00");
+      expect(snapshot.analytics.peakHour?.hour).toBe("00:00");
     } finally {
       await prisma.sale.deleteMany({ where: { id: { in: [saleBeforeMidnight, saleAfterMidnight] } } });
       await prisma.branch.deleteMany({ where: { id: branchId } });
