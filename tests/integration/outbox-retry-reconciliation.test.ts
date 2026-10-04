@@ -43,6 +43,29 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       updatedAt: new Date().toISOString(),
     };
     db.saveVariantLocal(variant);
+
+    // Stock Ledger is authoritative: seed the opening balance explicitly.
+    db.stockLedger.set("led-opening-var-integ-100", {
+      id: "led-opening-var-integ-100",
+      tenantId: "tenant-integ-1",
+      branchId: "branch-integ-1",
+      productId,
+      variantId,
+      movementType: "OPENING_STOCK",
+      referenceType: "OPENING_STOCK",
+      referenceId: "OPENING-var-integ-100",
+      quantityBefore: 0,
+      quantityChange: 100,
+      quantity: 100,
+      quantityAfter: 100,
+      unitCost: 28000,
+      totalCost: 2800000,
+      idempotencyKey: "OPENING-STOCK-var-integ-100",
+      operationId: "OPENING-STOCK-var-integ-100",
+      synced: true,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    } as any);
   });
 
   it("adds 5 offline sales, retries with exponential backoff on failure, and reconciles ledger and inventory consistently", async () => {
@@ -158,7 +181,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
 
     // 6. Verify ledger integrity: 5 distinct sale entries exist totaling -10
     const ledgerEntries = Array.from(db.stockLedger.values()).filter(
-      (entry) => entry.variantId === variantId
+      (entry) => entry.variantId === variantId && (entry as any).movementType === "SALE"
     );
     expect(ledgerEntries.length).toBe(5);
     const totalDeducted = ledgerEntries.reduce(
