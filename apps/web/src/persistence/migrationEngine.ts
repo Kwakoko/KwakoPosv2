@@ -123,7 +123,10 @@ export class MigrationEngine {
       }
     }
 
-    // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices
+    // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices.
+    // Existing business/outbox rows are immutable across schema upgrades: never replace
+    // or recreate the syncOutbox store. Re-assert every queued row in the upgrade
+    // transaction so a client restart can prove the same durable payload still exists.
     if (toVersion === 4) {
       const v4Stores = ["migrationJournal", "recoverySnapshots", "updateState"];
       for (const name of v4Stores) {
@@ -132,7 +135,22 @@ export class MigrationEngine {
         }
       }
 
-      // Add indices on stores if transaction is active
+      if (db.objectStoreNames.contains("syncOutbox")) {
+        const outbox = transaction.objectStore("syncOutbox");
+        const cursorRequest = outbox.openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) return;
+          const value: any = cursor.value;
+          // Preserve the record under its original primary key without changing status,
+          // scope, idempotency key, or payload. This is deliberately a put-on-same-key.
+          cursor.update(value);
+          cursor.continue();
+        };
+      }
+
+      // Add indices on stores if transaction is active. Tenant scope is stored on the
+      // outbox record itself, not inside payload; index the authoritative field.
       this.ensureStoreIndices(transaction);
     }
 
@@ -193,8 +211,19 @@ export class MigrationEngine {
 
       if (transaction.db.objectStoreNames.contains("syncOutbox")) {
         const store = transaction.objectStore("syncOutbox");
+        if (store.indexNames.contains("by_tenant")) {
+          try {
+            const index = store.index("by_tenant");
+            if (index.keyPath !== "tenantId") store.deleteIndex("by_tenant");
+          } catch {
+            try { store.deleteIndex("by_tenant"); } catch {}
+          }
+        }
         if (!store.indexNames.contains("by_tenant")) {
-          store.createIndex("by_tenant", "payload.tenantId", { unique: false });
+          store.createIndex("by_tenant", "tenantId", { unique: false });
+        }
+        if (!store.indexNames.contains("by_branch")) {
+          store.createIndex("by_branch", "branchId", { unique: false });
         }
       }
     } catch {
