@@ -6,7 +6,7 @@
  *   2. 3-Level Security Scope Model (Platform Scope, Tenant Scope, Branch Scope)
  *   3. Multi-Branch Role Assignment Engine (Different roles per branch per employee)
  *   4. Custom Role Builder (Tenant-specific custom roles with granular permission toggles)
- *   5. Employee HR Profiles (National ID, Employee Code, Emergency Contact, Salary Type)
+ *   5. Employee HR Profiles (Employee Code, Emergency Contact, Salary Type, lifecycle status)
  *   6. POS Quick PIN Security & Session Controls (Failed attempt locks, 2FA status)
  *   7. Authoritative RBAC Permission Matrix (Derived from V2 RBAC model & system manifests)
  *   8. Active Sessions Inspector & Immediate Token Revocation
@@ -530,7 +530,6 @@ export const UsersRolesPage: React.FC = () => {
               <tr>
                 <th>User Account</th>
                 <th>Employee Code</th>
-                <th>National ID (NIDA)</th>
                 <th>Address & Location</th>
                 <th>Emergency Contact</th>
                 <th>Salary Structure</th>
