@@ -13,7 +13,17 @@ export interface LoginResponseUser {
 
 export interface LoginResponse {
   success: boolean;
-  data?: { accessToken: string; sessionId: string; user: LoginResponseUser };
+  data?: {
+    accessToken: string;
+    sessionId: string;
+    user: LoginResponseUser;
+    session?: {
+      status?: string;
+      expiresAt?: string;
+      refreshTokenExpiresAt?: string;
+      policy?: Record<string, number>;
+    };
+  };
   error?: { code?: string; message?: string };
 }
 
@@ -44,6 +54,12 @@ export interface StoredSession {
   sessionId: string;
   accessToken?: string;
   user: LoginResponseUser;
+  session?: {
+    status?: string;
+    expiresAt?: string;
+    refreshTokenExpiresAt?: string;
+    policy?: Record<string, number>;
+  };
 }
 
 interface ApiErrorPayload {
@@ -79,6 +95,7 @@ export function getStoredSession(): StoredSession | null {
     return {
       sessionId: parsed.sessionId,
       user: parsed.user as LoginResponseUser,
+      session: parsed.session,
     };
   } catch {
     try {
@@ -100,6 +117,7 @@ export function setStoredSession(session: StoredSession | null): void {
     const serialized = JSON.stringify({
       sessionId: session.sessionId,
       user: session.user,
+      session: session.session,
     });
     try { window.localStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
     try { window.sessionStorage.setItem(SESSION_KEY, serialized); } catch { /* ignore */ }
@@ -202,10 +220,10 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-export async function login(email: string, password: string, mfaCode?: string): Promise<LoginResponseUser> {
+export async function login(email: string, password: string, mfaCode?: string, rememberMe = false): Promise<LoginResponseUser> {
   const result = await requestJson<LoginResponse>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password, deviceId: getDeviceId(), mfaCode }),
+    body: JSON.stringify({ email, password, deviceId: getDeviceId(), mfaCode, rememberMe }),
   }, false);
   if (!result.success || !result.data) throw new Error(result.error?.message || "Authentication failed");
   accessToken = result.data.accessToken;
@@ -213,8 +231,29 @@ export async function login(email: string, password: string, mfaCode?: string): 
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
     user: result.data.user,
+    session: result.data.session,
   });
   return result.data.user;
+}
+
+export async function refreshSession(): Promise<boolean> {
+  const stored = getStoredSession();
+  if (!stored?.sessionId) return false;
+  const result = await requestJson<{ success: boolean; data?: { accessToken: string; sessionId?: string } }>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ sessionId: stored.sessionId }),
+  }, false);
+  if (!result.success || !result.data?.accessToken) return false;
+  accessToken = result.data.accessToken;
+  return true;
+}
+
+export async function validateSession(): Promise<any> {
+  return requestJson<any>("/auth/session/validate", { method: "GET" }, false);
+}
+
+export async function heartbeatSession(): Promise<any> {
+  return requestJson<any>("/auth/session/heartbeat", { method: "POST" }, false);
 }
 
 export interface SuperAdminSetupDetails {
@@ -272,11 +311,11 @@ export async function restoreSession(): Promise<LoginResponseUser | null> {
   return stored.user;
 }
 
-export async function logout(): Promise<void> {
+export async function logout(reason = "USER_LOGOUT"): Promise<void> {
   const stored = getStoredSession();
   try {
     if (stored?.sessionId) {
-      await requestJson("/auth/logout", { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId }) }, false);
+      await requestJson("/auth/logout", { method: "POST", body: JSON.stringify({ sessionId: stored.sessionId, reason }) }, false);
     }
   } catch (err) {
     console.warn("apiLogout error:", err);
