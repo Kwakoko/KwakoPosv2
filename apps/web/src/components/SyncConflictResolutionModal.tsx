@@ -196,7 +196,7 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
           </div>
           <button
             type="button"
-            aria-label="Close sync conflict dialog"
+            aria-label="Close sync conflict resolution dialog"
             title="Close"
             onClick={onClose}
             style={{

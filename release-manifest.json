@@ -19,5 +19,10 @@
     "pwaSchemaVersion": 4,
     "minSupportedClientVersion": "2.0.0",
     "recommendedClientVersion": "2.13.0"
+  },
+  "brand": {
+    "parentBrand": "Kwakoko",
+    "platform": "Kwakoko Business Operating System",
+    "pos": "KwakoPos"
   }
 }
