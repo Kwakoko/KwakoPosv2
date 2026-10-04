@@ -326,7 +326,7 @@ const REFRESH_COOKIE = "kwakopos_refresh";
 const DEFAULT_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
 
 type LoginRequestBody = { email?: unknown; password?: unknown; deviceId?: unknown; mfaCode?: unknown; rememberMe?: unknown };
-type RefreshRequestBody = { sessionId?: unknown; refreshToken?: unknown };
+type RefreshRequestBody = { sessionId?: unknown };
 type LogoutRequestBody = { sessionId?: unknown; reason?: unknown };
 type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
 type SuperAdminSetupStartBody = { setupToken?: unknown };
