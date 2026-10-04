@@ -43,6 +43,7 @@ export class MfaRequiredError extends Error {
 export interface StoredSession {
   sessionId: string;
   accessToken?: string;
+  refreshToken?: string;
   user: LoginResponseUser;
 }
 
@@ -70,6 +71,7 @@ export function getStoredSession(): StoredSession | null {
     return {
       sessionId: parsed.sessionId,
       accessToken: parsed.accessToken,
+      refreshToken: (parsed as any).refreshToken,
       user: parsed.user as LoginResponseUser,
     };
   } catch {
@@ -83,6 +85,7 @@ export function getStoredSession(): StoredSession | null {
 
 export function setStoredSession(session: StoredSession | null): void {
   if (typeof window === "undefined") return;
+  accessToken = session?.accessToken || null;
   if (!session) {
     try { window.localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
@@ -143,7 +146,7 @@ async function requestJson<T>(input: RequestInfo | URL, init: RequestInit = {}, 
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...((getAccessToken()) ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
         ...(init.headers || {}),
       },
       credentials: "include",
@@ -175,13 +178,15 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       const result = await requestJson<{
         success: boolean;
-        data?: { accessToken: string };
+        data?: { accessToken: string; refreshToken?: string };
       }>(
         "/auth/refresh",
         {
           method: "POST",
           body: JSON.stringify({
             sessionId: stored.sessionId,
+              refreshToken: stored.refreshToken,
+              deviceId: getDeviceId(),
             email: stored.user.email,
             tenantId: stored.user.tenantId,
             branchId: stored.user.branchId,
@@ -217,6 +222,7 @@ export async function login(email: string, password: string, mfaCode?: string): 
   setStoredSession({
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
+    refreshToken: result.data.refreshToken,
     user: result.data.user,
   });
   return result.data.user;
@@ -316,6 +322,7 @@ export interface SwitchContextResponse {
     user: LoginResponseUser;
     tenantName?: string;
     branchName?: string;
+    refreshToken?: string;
     isImpersonating?: boolean;
   };
   error?: { code?: string; message?: string };
@@ -335,6 +342,7 @@ export async function switchContext(
   setStoredSession({
     sessionId: result.data.sessionId,
     accessToken: result.data.accessToken,
+    refreshToken: result.data.refreshToken,
     user: result.data.user,
   });
   return {

@@ -4,9 +4,9 @@ export interface CashSessionState {
   cashSalesTotal: number;
   cashRefundsTotal: number;
   cashExpensesTotal: number;
-  cashInTotal: number;
-  cashOutTotal: number;
-  safeDropTotal: number;
+  cashInTotal?: number;
+  cashOutTotal?: number;
+  safeDropTotal?: number;
   actualCash?: number;
 }
 
@@ -17,7 +17,13 @@ export class CashSessionEngine {
    */
   static calculateExpectedCash(state: CashSessionState): number {
     const expected =
-      state.openingCash + state.cashSalesTotal + state.cashInTotal - state.cashRefundsTotal - state.cashExpensesTotal - state.cashOutTotal - state.safeDropTotal;
+      Number(state.openingCash ?? 0) +
+      Number(state.cashSalesTotal ?? 0) +
+      Number(state.cashInTotal ?? 0) -
+      Number(state.cashRefundsTotal ?? 0) -
+      Number(state.cashExpensesTotal ?? 0) -
+      Number(state.cashOutTotal ?? 0) -
+      Number(state.safeDropTotal ?? 0);
     return Math.round(expected * 100) / 100;
   }
 

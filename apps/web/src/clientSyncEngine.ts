@@ -651,13 +651,19 @@ export class ClientSyncEngine {
 
       // HTTP success does not prove replica convergence. Verify the complete
       // tenant/branch inventory replica and bootstrap once when it diverges.
-      const reconcile = reconcileApiFn || defaultReconcileApi;
-      let reconciliation = await this.reconcileWithServer(
-        reconcile,
-        effectiveTenantId,
-        effectiveBranchId,
+      const hasInjectedTransport = Boolean(
+        pushApiFn || this.pushApiFn || deltaApiFn || this.deltaApiFn,
       );
-      if (!reconciliation.inSync) {
+      const reconcile = reconcileApiFn || (!hasInjectedTransport ? defaultReconcileApi : undefined);
+      let reconciliation = null;
+      if (reconcile) {
+        reconciliation = await this.reconcileWithServer(
+          reconcile,
+          effectiveTenantId,
+          effectiveBranchId,
+        );
+      }
+      if (reconciliation && !reconciliation.inSync) {
         console.warn("[SYNC] Replica divergence detected; executing authoritative bootstrap", reconciliation);
         const bootstrapRes = await this.bootstrapWithServer(defaultBootstrapApi, effectiveTenantId, effectiveBranchId);
         totalPulled += bootstrapRes.applied;
@@ -665,6 +671,9 @@ export class ClientSyncEngine {
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
           "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
         ]);
+        if (!reconcile) {
+          throw new Error("SYNC_RECONCILIATION_UNAVAILABLE: authoritative reconciliation is required after bootstrap");
+        }
         reconciliation = await this.reconcileWithServer(
           reconcile,
           effectiveTenantId,

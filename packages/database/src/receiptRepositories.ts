@@ -80,18 +80,16 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     req: CreateReceiptRequest & { receiptNumber: string; digitalSignature: string; qrCodePayload: string; barcodePayload: string; signatureTimestamp?: string }
   ): Promise<ReceiptDTO> {
     const now = req.signatureTimestamp || new Date().toISOString();
-    const receiptNumber = ReceiptNumberGenerator.generate({
+    // Test double only: production sequencing is performed by PrismaReceiptRepository in PostgreSQL.
+    const receiptNumber = req.receiptNumber || ReceiptNumberGenerator.generate({
       tenantPrefix: ctx.tenantId.slice(0, 3),
       branchPrefix: ctx.branchId.slice(0, 3),
       sequenceType: "DAILY",
       sequenceNumber: this.receipts.size + 1,
       date: new Date(now),
     });
-    const digitalSignature = req.digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, Number(req.paidAmount || 0), now);
-    const qrCodePayload = req.qrCodePayload || ReceiptEngine.generateQrCodePayload(
-      `local-${receiptNumber}`, receiptNumber, req.transactionId,
-      "https://pos.kwako.app/verify-receipt", digitalSignature
-    );
+    let digitalSignature = req.digitalSignature;
+    let qrCodePayload = req.qrCodePayload;
     const barcodePayload = req.barcodePayload || ReceiptEngine.generateBarcodePayload(receiptNumber);
     let subtotal = 0;
     let taxTotal = 0;
@@ -124,6 +122,8 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     });
 
     const grandTotal = subtotal - discountTotal + taxTotal;
+    digitalSignature = digitalSignature || ReceiptEngine.calculateDigitalSignature(receiptNumber, req.transactionId, grandTotal, now);
+    qrCodePayload = qrCodePayload || ReceiptEngine.generateQrCodePayload("local-" + receiptNumber, receiptNumber, req.transactionId, "https://pos.kwako.app/verify-receipt", digitalSignature);
     const changeAmount = Math.max(0, req.paidAmount - grandTotal);
 
     const receipt: ReceiptDTO = {

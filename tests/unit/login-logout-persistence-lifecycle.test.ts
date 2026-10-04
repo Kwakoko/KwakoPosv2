@@ -217,7 +217,7 @@ describe("Login-Logout-Login Data Persistence Lifecycle Suite", () => {
     expect(restoredSales).toHaveLength(1);
     expect(restoredSales[0].grandTotal).toBe(9000);
 
-    const restoredLedger = freshDb.getStockLedgerLocal(reUser.tenantId, variant.id);
+    const restoredLedger = freshDb.getStockLedgerLocal(reUser.tenantId, branchId);
     expect(restoredLedger).toHaveLength(1);
     expect(restoredLedger[0].quantityDelta).toBe(100);
 
