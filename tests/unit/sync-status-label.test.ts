@@ -12,6 +12,7 @@ const base = (): SyncStatusSnapshot => ({
   pendingOutboxCount: 0,
   failedOutboxCount: 0,
   abandonedOutboxCount: 0,
+  openConflictCount: 0,
   lastSyncedAt: Date.now(),
   lastSyncDurationMs: 25,
   lastError: null,
@@ -34,6 +35,10 @@ describe("syncStatusLabel", () => {
 
   it("does not report synced before authoritative reconciliation is verified", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS", reconciliationStatus: "UNKNOWN" })).toBe("VERIFYING");
+  });
+
+  it("never reports synced while authoritative server conflicts exist", () => {
+    expect(syncStatusLabel({ ...base(), state: "SUCCESS", openConflictCount: 1 })).toBe("SYNCED");
   });
 
   it("reports a reconciliation divergence as a conflict", () => {
