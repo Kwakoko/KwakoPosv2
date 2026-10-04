@@ -119,7 +119,7 @@ export async function getDashboardKpiSnapshot(
       tx.$queryRawUnsafe<Array<{ sales_today: unknown; gross_sales_today: unknown; discounts_today: unknown; gross_profit: unknown; cogs_today: unknown; order_count: bigint | number | string; completed_orders: bigint | number | string }>>(
         `SELECT
            COALESCE(SUM("grandTotal" - "taxTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS sales_today,
-           COALESCE(SUM("grandTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS gross_sales_today,
+           COALESCE(SUM(("grandTotal" - "taxTotal") + "discountTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS gross_sales_today,
            COALESCE(SUM("discountTotal") FILTER (WHERE "status" = 'COMPLETED'), 0) AS discounts_today,
            COALESCE(SUM(("grandTotal" - "taxTotal") - "totalCost") FILTER (WHERE "status" = 'COMPLETED'), 0) AS gross_profit,
            COALESCE(SUM("totalCost") FILTER (WHERE "status" = 'COMPLETED'), 0) AS cogs_today,
