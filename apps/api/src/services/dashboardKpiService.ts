@@ -16,6 +16,8 @@ export interface DashboardPaymentChannel {
   name: string;
   volume: number;
   count: number;
+  paymentCount: number;
+  orderCount: number;
   volumeShare: number;
   countShare: number;
   aov: number;
@@ -45,6 +47,7 @@ export interface DashboardAnalyticsSnapshot {
   paymentChannels: DashboardPaymentChannel[];
   paymentTotalVolume: number;
   paymentTotalCount: number;
+  paymentTotalOrderCount: number;
   paymentOverallAov: number;
   topProducts: DashboardTopProduct[];
   topProductsTotalTracked: number;
