@@ -3770,6 +3770,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   server.get("/api/v1/settings", async (req, reply) => {
     const ctx = requireTenantContext(req);
+    const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+    const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+    const allowed = permissions.includes("*") || permissions.includes("settings.read") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_READ_REQUIRED", message: "settings.read permission is required." } });
     return reply.send({ success: true, data: await globalSettingsService.getEffectiveSettings(ctx) });
   });
 
