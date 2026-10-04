@@ -55,5 +55,35 @@ jobs:
       - run: npm run build
       - name: Production dependency vulnerability audit
         run: npm audit --omit=dev --audit-level=high
+      - name: Start local API for executable security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-security-api.log
+          exit 1
       - name: Security certification
+        env:
+          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
         run: npm run certify:security
+      - name: Stop local API
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/kwakopos-security-api.pid ]]; then
+            kill "$(cat /tmp/kwakopos-security-api.pid)" 2>/dev/null || true
+          fi
+          pkill -P "$(cat /tmp/kwakopos-security-api.pid 2>/dev/null)" 2>/dev/null || true
