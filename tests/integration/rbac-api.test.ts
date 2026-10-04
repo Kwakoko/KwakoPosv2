@@ -47,6 +47,16 @@ describe("Privileged RBAC PostgreSQL API", () => {
         status: "ACTIVE",
       },
     });
+    await prisma.device.create({
+      data: {
+        deviceId: "p0-rbac-device",
+        tenantId,
+        userId: ownerUserId,
+        name: "P0 RBAC Test Device",
+        platform: "test",
+        status: "ACTIVE",
+      },
+    });
 
     const pendingLegal = globalLegalGovernanceService.checkUserAcceptanceStatus(ownerUserId, tenantId);
     for (const document of pendingLegal.requiredDocuments) {
