@@ -7,6 +7,9 @@ export function validateCommitMessage(message: string): { isValid: boolean; erro
   }
 
   const firstLine = message.trim().split("\n")[0];
+  if (firstLine.startsWith("Merge pull request ") || firstLine.startsWith("Merge branch ")) {
+    return { isValid: true, commit: { type: "chore", scope: "merge", isBreaking: false, subject: firstLine, rawMessage: message.trim() } };
+  }
   const parsed = parseConventionalCommit(message);
 
   const allowedTypes = [
@@ -87,7 +90,8 @@ if (process.argv.includes("--test")) {
     const latestCommit = execSync("git log -1 --pretty=%B", { encoding: "utf8" });
     const res = validateCommitMessage(latestCommit);
     if (!res.isValid) {
-      console.warn(`[WARN] Commit does not follow standard conventional format: ${res.error}`);
+      console.error(`[ERROR] Commit does not follow required Conventional Commits format: ${res.error}`);
+      process.exit(1);
     } else {
       console.log(`✓ Conventional Commit Validated: [${res.commit.type}${res.commit.scope ? `(${res.commit.scope})` : ""}${res.commit.isBreaking ? "!" : ""}] ${res.commit.subject}`);
     }
