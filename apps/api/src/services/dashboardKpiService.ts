@@ -126,15 +126,15 @@ export async function getDashboardKpiSnapshot(
            COUNT(*) FILTER (WHERE "status" = 'COMPLETED') AS order_count,
            COUNT(*) FILTER (WHERE "status" = 'COMPLETED') AS completed_orders
          FROM sales
-        WHERE tenant_id = $1
-          AND branch_id = $2
+        WHERE "tenantId" = $1
+          AND "branchId" = $2
           AND "soldAt" >= CURRENT_DATE
           AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'`,
         ctx.tenantId,
         ctx.branchId,
       ),
       tx.$queryRawUnsafe<Array<{ inventory_value: unknown }>>(
-        `SELECT COALESCE(SUM(stock_value), 0) AS inventory_value
+        `SELECT COALESCE(SUM("stockValue"), 0) AS inventory_value
            FROM product_branch_stock
           WHERE "tenantId" = $1
             AND "branchId" = $2`,
@@ -158,7 +158,7 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ customerDebts: unknown; customer_count: bigint | number | string }>>(
         `SELECT
-           COALESCE(SUM("currentBalance"), 0) AS customerDebts,
+           COALESCE(SUM("currentBalance"), 0) AS customer_debts,
            COUNT(*) FILTER (WHERE "status" = 'ACTIVE') AS customer_count
          FROM customers
         WHERE "tenantId" = $1
@@ -278,12 +278,12 @@ export async function getDashboardKpiSnapshot(
                   COALESCE(SUM(rl."quantityReturned"),0) AS refund_units
              FROM return_lines rl
              JOIN returns r ON r."id" = rl."returnId"
-             LEFT JOIN sales s ON s.id = r."originalSaleId"
-            WHERE r.tenant_id = $1 AND r.branch_id = $2 AND r."status" = 'COMPLETED'
+             LEFT JOIN sales s ON s."id" = r."originalSaleId"
+            WHERE r."tenantId" = $1 AND r."branchId" = $2 AND r."status" = 'COMPLETED'
               AND r."createdAt" >= $3 AND r."createdAt" < $4
             GROUP BY rl."variantId"
          )
-        SELECT sold."productId", p.name,
+        SELECT sold."productId", p."name",
                COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0) AS revenue,
                GREATEST(0, COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) AS units,
                COALESCE((SELECT SUM(pbs."currentQuantity") FROM product_branch_stock pbs
@@ -291,9 +291,9 @@ export async function getDashboardKpiSnapshot(
                             AND pbs."productId" = sold."productId"),0) AS stock,
                COALESCE(p.category,'General') AS category
           FROM sold
-          JOIN products p ON p.id = sold.product_id
+          JOIN products p ON p."id" = sold."productId"
           LEFT JOIN returns_by_variant rbv ON rbv."variantId" = sold."variantId"
-         GROUP BY sold."productId", p.name, p.category
+         GROUP BY sold."productId", p."name", p.category
         HAVING (COALESCE(SUM(sold.revenue),0) - COALESCE(SUM(rbv.refund_revenue),0)) > 0
             OR (COALESCE(SUM(sold.units),0) - COALESCE(SUM(rbv.refund_units),0)) > 0
          ORDER BY revenue DESC
@@ -386,10 +386,10 @@ export async function getDashboardKpiSnapshot(
                 ELSE 1 END),0) AS net_refunds_today,
               COALESCE(SUM(rl."quantityReturned" * pv."costPrice"),0) AS returned_cogs_today
          FROM returns r
-         LEFT JOIN sales s ON s.id = r."originalSaleId"
+         LEFT JOIN sales s ON s."id" = r."originalSaleId"
          LEFT JOIN return_lines rl ON rl."returnId" = r.id
          LEFT JOIN product_variants pv ON pv."id" = rl."variantId"
-        WHERE r.tenant_id = $1 AND r.branch_id = $2
+        WHERE r."tenantId" = $1 AND r."branchId" = $2
           AND r."status" = 'COMPLETED'
           AND r."createdAt" >= CURRENT_DATE
           AND r."createdAt" < CURRENT_DATE + INTERVAL '1 day'`,
