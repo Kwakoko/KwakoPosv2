@@ -82,6 +82,7 @@ model Tenant {
   traVfdFiscalizations   TraVfdFiscalization[]
   traVfdOutbox           TraVfdOutbox[]
 
+  devices                Device[]
   @@map("tenants")
 }
 
