@@ -193,8 +193,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D1",
     status: "PENDING",
-  });
-  bADb.recordOutboxMutation({
+  }, ctx);  bADb.recordOutboxMutation({
     id: "OP-SYNTH-D2",
     entityType: "ProductVariant",
     entityId: synthVarId,
@@ -203,8 +202,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D2",
     status: "PENDING",
-  });
-  bADb.recordOutboxMutation({
+  }, ctx);  bADb.recordOutboxMutation({
     id: "OP-SYNTH-D3",
     entityType: "StockAdjustment",
     entityId: randomUUID(),
@@ -221,8 +219,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "SYNTH-KEY-D3",
     status: "PENDING",
-  });
-
+  }, ctx);
   await bAEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
     async (since) => syncEngine.processDelta(ctx, { since })
@@ -271,8 +268,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "OFFLINE-KEY-01",
     status: "PENDING",
-  });
-
+  }, ctx);
   const pendingBefore = offlineDb.getPendingOutbox().length;
   await offlineEngine.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
@@ -304,8 +300,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "PWA-1",
     status: "PENDING",
-  });
-  const migration = await pwaDb.migrateToVersion(3);
+  }, ctx);  const migration = await pwaDb.migrateToVersion(3);
   const passF = migration.newVersion === 3 && migration.preservedOutboxCount === 1;
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
@@ -446,8 +441,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     clientCreatedAt: new Date().toISOString(),
     idempotencyKey: "CONV-A-01",
     status: "PENDING",
-  });
-
+  }, ctx);
   // Device A syncs up to Server
   await engineA.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
@@ -649,8 +643,7 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
     idempotencyKey: `idem-fin-sync-${randomUUID()}`,
     clientCreatedAt: new Date().toISOString(),
     status: "PENDING",
-  });
-
+  }, ctx);
   await engineF06A.syncWithServer(
     async (req) => syncEngine.processPush(ctx, req),
     async (since) => syncEngine.processDelta(ctx, { since })
