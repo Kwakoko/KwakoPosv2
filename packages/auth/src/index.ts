@@ -493,3 +493,5 @@ export class SessionManager {
 }
 
 export const globalSessionManager = new SessionManager();
+
+export * from "./sessionPolicy.js";
