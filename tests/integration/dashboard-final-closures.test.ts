@@ -264,4 +264,51 @@ describe("Dashboard final production closures", () => {
       await prisma.tenant.deleteMany({ where: { id: { in: [tenantA, tenantB] } } });
     }
   });
+
+  it("keeps dashboard day/hour boundaries deterministic at UTC midnight", async () => {
+    const tenantId = randomUUID();
+    const branchId = randomUUID();
+    const saleBeforeMidnight = randomUUID();
+    const saleAfterMidnight = randomUUID();
+    const ctx: any = { tenantId, branchId, userId: randomUUID(), roles: ["ADMIN"], permissions: ["*"] };
+    const now = new Date();
+    const utcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const beforeMidnight = new Date(utcDay.getTime() + 23 * 60 * 60 * 1000 + 30 * 60 * 1000);
+    const afterMidnight = new Date(utcDay.getTime() + 24 * 60 * 60 * 1000 + 30 * 60 * 1000);
+
+    try {
+      await prisma.tenant.create({
+        data: { id: tenantId, name: "Dashboard UTC Boundary", slug: "dash-utc-" + tenantId.slice(0, 8) },
+      });
+      await prisma.branch.create({
+        data: { id: branchId, tenantId, name: "UTC Boundary", code: "UTC-" + branchId.slice(0, 8) },
+      });
+
+      for (const [id, soldAt, amount] of [
+        [saleBeforeMidnight, beforeMidnight, 123],
+        [saleAfterMidnight, afterMidnight, 456],
+      ] as const) {
+        await prisma.sale.create({
+          data: {
+            id, tenantId, branchId, saleNumber: "UTC-" + id.slice(0, 8),
+            subtotal: amount, discountTotal: 0, taxTotal: 0, grandTotal: amount,
+            totalCost: 0, grossProfit: amount, status: "COMPLETED", paymentStatus: "PAID",
+            deviceId: "UTC-TEST", operationId: id, idempotencyKey: "UTC-IDEM-" + id, soldAt,
+          },
+        });
+      }
+
+      const snapshot = await getDashboardKpiSnapshot(ctx, "today");
+      expect(snapshot.salesToday).toBe(123);
+      expect(snapshot.todayOrderCount).toBe(1);
+      expect(snapshot.analytics.chartPoints).toHaveLength(1);
+      expect(snapshot.analytics.chartPoints[0]?.Revenue).toBe(123);
+      expect(snapshot.analytics.peakHour?.hour).toBe("23:00");
+    } finally {
+      await prisma.sale.deleteMany({ where: { id: { in: [saleBeforeMidnight, saleAfterMidnight] } } });
+      await prisma.branch.deleteMany({ where: { id: branchId } });
+      await prisma.tenant.deleteMany({ where: { id: tenantId } });
+    }
+  });
+
 });
