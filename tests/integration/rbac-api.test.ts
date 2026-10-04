@@ -64,7 +64,8 @@ describe("Privileged RBAC PostgreSQL API", () => {
 
   afterAll(async () => {
     if (app) await app.close();
-    await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
+    // audit_events is append-only by design; CI uses an isolated PostgreSQL database per run,
+    // so teardown intentionally leaves immutable audit evidence intact rather than violating the invariant.
   });
   it("lists PostgreSQL roles and creates a custom role with an audit event", async () => {
     const list = await app.inject({
