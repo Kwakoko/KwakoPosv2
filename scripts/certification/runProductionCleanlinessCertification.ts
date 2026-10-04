@@ -23,6 +23,7 @@ import { createHash } from "crypto";
 import { execFileSync } from "child_process";
 import { tenantStoreCleanupService } from "../../apps/web/src/services/tenantStoreCleanupService.js";
 import { productionCleanupService } from "../../apps/web/src/services/productionCleanupService.js";
+import { runRepositoryForensicIntegrityCertification } from "./repository-forensic-integrity.js";
 
 export interface CleanlinessPillar {
   pillarId: string;
@@ -213,6 +214,13 @@ export async function runProductionCleanlinessCertification(): Promise<{
   );
 
   // 10. CLN-10: Forensic Source Cleanliness & Control Character Elimination
+  // Generate the evidence from the same working tree immediately before evaluating
+  // the pillar. This prevents stale/unrelated evidence artifacts from deciding the gate.
+  try {
+    runRepositoryForensicIntegrityCertification();
+  } catch {
+    // The evidence file records the exact forensic failure; the pillar remains failed.
+  }
   const forensicEvidencePath = path.resolve(process.cwd(), "artifacts/release-evidence/kwakopos-repository-forensic-integrity.json");
   let forensicPassed = false;
   if (fs.existsSync(forensicEvidencePath)) {
