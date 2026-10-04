@@ -109,7 +109,7 @@ export async function getDashboardKpiSnapshot(
     const revisionRows = await tx.$queryRawUnsafe<Array<{ revision: bigint | number | string | null }>>(
       `SELECT COALESCE(MAX(revision), 0) AS revision
          FROM sync_change_journal
-        WHERE "tenantId" = $1 AND "branchId" = $2`,
+        WHERE tenant_id = $1 AND branch_id = $2`,
       ctx.tenantId,
       ctx.branchId,
     );
