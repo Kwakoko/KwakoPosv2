@@ -101,6 +101,18 @@ export class SettingsService {
         const userId = scope === "USER" ? ctx.userId : null;
         const operationId = String(record.operationId || randomUUID());
         const operationType = String(record.operationType || "UPDATE").toUpperCase();
+        const replay = await tx.$queryRawUnsafe<Array<{ entity_id: string; operation_type: string; record: any }>>(
+          "SELECT entity_id, operation_type, record FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND operation_id = $3 LIMIT 1",
+          ctx.tenantId, ctx.branchId, operationId,
+        );
+        if (replay[0]) {
+          const replayRow = await tx.setting.findUnique({ where: { id: replay[0].entity_id } });
+          if (replayRow) {
+            results.push({ ...replayRow, operationId, operationType: "ALREADY_PROCESSED" });
+            continue;
+          }
+          throw new Error("SETTINGS_IDEMPOTENCY_REPLAY");
+        }
         const existing = await tx.setting.findFirst({
           where: { tenantId: ctx.tenantId, key, scope, branchId, userId, isActive: true },
           orderBy: { updatedAt: "desc" },
