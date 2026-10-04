@@ -2,6 +2,7 @@
 export const DATA_CHANGED_EVENT = "kwakopos:data-changed" as const;
 
 export interface DataChangeDetail {
+  [key: string]: unknown;
   action: string;
   tenantId?: string | null;
   branchId?: string | null;
