@@ -97,6 +97,7 @@ export async function rbacRoutes(server: FastifyInstance, opts: { service: Privi
         roleId: body.roleId ? String(body.roleId) : undefined,
         roleName: body.role ? String(body.role) : undefined,
         branchId,
+        createEmployeeProfile: body.createEmployeeProfile === true,
       });
       return reply.status(201).send({ success: true, data: mapUser(user) });
     } catch (error) {
