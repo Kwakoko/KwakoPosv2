@@ -1,11 +1,12 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { hashPassword } from "@kwakopos2/auth";
 import { prisma } from "@kwakopos2/database";
 
-const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
+const ROOT = process.cwd();
 const API_PORT = 3011;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -22,8 +23,9 @@ describe("session revoke survives API restart", () => {
   let apiPidBeforeRestart: number | null = null;
 
   const startApi = async (): Promise<void> => {
-    const tsxCli = `${ROOT}\\node_modules\\tsx\\dist\\cli.mjs`;
-    api = spawn(process.execPath, [tsxCli, "apps/api/src/testServerFixed.ts"], {
+    const tsxCli = resolvePath(ROOT, "node_modules/tsx/dist/cli.mjs");
+    const serverEntry = resolvePath(ROOT, "apps/api/src/testServerFixed.ts");
+    api = spawn(process.execPath, [tsxCli, serverEntry], {
       cwd: ROOT,
       env: {
         ...process.env,
