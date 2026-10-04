@@ -24,7 +24,7 @@ import {
 import type { LocalIndexedDbStore } from "../../indexedDb.js";
 import { useToast } from "../../context/ToastContext.js";
 import { useAudioFeedback } from "../../utils/useAudioFeedback.js";
-import { DATA_CHANGED_EVENT } from "../../services/dataChangeEvent.js";
+import { DATA_CHANGED_EVENT, publishDataChanged } from "../../services/dataChangeEvent.js";
 import { STOCK_CHANGED_EVENT } from "../../services/inventoryStockService.js";
 import { NumberStepper } from "./NumberStepper.js";
 
@@ -614,7 +614,7 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
           : `Product "${name}" registered with initial stock movement.`
       );
 
-      window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { action: "INVENTORY_CHANGED" } }));
+      publishDataChanged({ action: "INVENTORY_CHANGED" });
       window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail: { productId: prodId, reason: "PRODUCT_CREATED" } }));
       void syncOutbox?.().catch(() => {});
 
