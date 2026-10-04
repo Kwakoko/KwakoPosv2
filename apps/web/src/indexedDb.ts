@@ -1448,13 +1448,13 @@ export class LocalIndexedDbStore {
       for (const history of priceHistories) { this.saveProductPriceHistoryLocal(history as any); appliedCount += 1; }
       if (categories.length) {
         const tenantId = String((categories[0] as any).tenantId || "");
-        const branchId = String((categories[0] as any).branchId || "");
-        this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
+        const branchId = String((categories[0] as any).branchId || (delta as any).branchId || "");
+        if (tenantId) this.saveCatalogCategoriesLocal(categories, { tenantId, branchId });
       }
       if (brands.length) {
         const tenantId = String((brands[0] as any).tenantId || "");
-        const branchId = String((brands[0] as any).branchId || "");
-        this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId, branchId } : undefined);
+        const branchId = String((brands[0] as any).branchId || (delta as any).branchId || "");
+        if (tenantId) this.saveCatalogBrandsLocal(brands, { tenantId, branchId });
       }
       await this.flushPersistence();
       this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
@@ -1567,11 +1567,13 @@ export class LocalIndexedDbStore {
     this.syncMetadata.set("lastSyncTime", delta.serverTimestamp);
     if (categories.length) {
       const tenantId = String((categories[0] as any).tenantId || "");
-      this.saveConfigurationLocal("inventory_categories_meta", categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", isDefault: false })), tenantId ? { tenantId } : undefined);
+      const branchId = String((categories[0] as any).branchId || (delta as any).branchId || "");
+      if (tenantId) this.saveCatalogCategoriesLocal(categories, { tenantId, branchId });
     }
     if (brands.length) {
       const tenantId = String((brands[0] as any).tenantId || "");
-      this.saveConfigurationLocal("inventory_brands_meta", brands.filter((b: any) => b.isActive !== false).map((b: any) => ({ id: b.id, name: b.name, origin: b.origin ?? undefined, notes: b.notes ?? undefined, isDefault: false })), tenantId ? { tenantId } : undefined);
+      const branchId = String((brands[0] as any).branchId || (delta as any).branchId || "");
+      if (tenantId) this.saveCatalogBrandsLocal(brands, { tenantId, branchId });
     }
     await this.flushPersistence();
     return appliedCount;
