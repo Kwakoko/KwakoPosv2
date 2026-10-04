@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { prisma, PrismaProductRepository, PrismaStockRepository } from "@kwakopos2/database";
 import { WorldStandardPrismaSyncEngine } from "../../packages/sync/src/worldStandardPrismaSyncEngine.js";
+import { globalSettingsService } from "../../apps/api/src/services/settingsService.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
 
@@ -97,6 +98,28 @@ describe("Settings P0/P1 closed-loop certification", () => {
 
     const tombstoned = await prisma.setting.findUnique({ where: { id: settingId } });
     expect(tombstoned?.isActive).toBe(false);
+  });
+
+  it("is idempotent for direct Settings service retries", async () => {
+    if (!enabled) return;
+    const ctx: any = { tenantId: tenantA, branchId: branchA, userId: userA, roles: ["ADMIN"], permissions: ["settings.manage"] };
+    const operationId = randomUUID();
+    const first = await globalSettingsService.upsertBatch(ctx, [{
+      key: "security.config",
+      scope: "BRANCH",
+      value: { inactivityLockMinutes: 20 },
+      operationId,
+    }]);
+    const second = await globalSettingsService.upsertBatch(ctx, [{
+      key: "security.config",
+      scope: "BRANCH",
+      value: { inactivityLockMinutes: 20 },
+      operationId,
+    }]);
+    expect(first[0]?.operationId).toBe(operationId);
+    expect(second[0]?.operationType).toBe("ALREADY_PROCESSED");
+    const row = await prisma.setting.findFirst({ where: { tenantId: tenantA, branchId: branchA, key: "security.config", scope: "BRANCH", isActive: true } });
+    expect((row?.value as any)?.inactivityLockMinutes).toBe(20);
   });
 
   it("fails closed for a cashier without settings.manage", async () => {
