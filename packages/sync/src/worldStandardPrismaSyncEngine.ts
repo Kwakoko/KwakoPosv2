@@ -213,6 +213,7 @@ export class WorldStandardPrismaSyncEngine {
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
+        case "Setting": return await db.setting.findUnique({ where: { id: op.entityId } });
         default: return op.payload;
       }
     } catch {
@@ -334,6 +335,42 @@ export class WorldStandardPrismaSyncEngine {
       } as any, "recovery", prisma);
     }
   }
+
+  private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
+    if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const key = String(payload.key || "").trim();
+      const scope = String(payload.scope || "BRANCH").toUpperCase();
+      if (!key) throw new Error("SETTING_KEY_REQUIRED");
+      if (!["TENANT", "BRANCH", "USER"].includes(scope)) throw new Error("SETTING_SCOPE_INVALID");
+      const branchId = scope === "BRANCH" ? ctx.branchId : null;
+      const userId = scope === "USER" ? ctx.userId : null;
+      if (scope === "BRANCH" && payload.branchId && payload.branchId !== ctx.branchId) throw new Error("SETTING_BRANCH_SCOPE_FORBIDDEN");
+      const existingById = await tx.setting.findUnique({ where: { id: op.entityId } });
+      if (existingById && existingById.tenantId !== ctx.tenantId) throw new Error("TENANT_BOUNDARY_VIOLATION");
+      const existing = existingById || await tx.setting.findFirst({
+        where: { tenantId: ctx.tenantId, key, scope, branchId, userId, isActive: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      if (op.operationType === "DELETE") {
+        if (!existing) return;
+        if (existing.branchId && existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        await tx.setting.update({ where: { id: existing.id }, data: { isActive: false, version: { increment: 1 } } });
+      } else if (existing) {
+        if (existing.branchId && existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        await tx.setting.update({ where: { id: existing.id }, data: { value: payload.value ?? {}, version: { increment: 1 }, isActive: true } });
+      } else {
+        await tx.setting.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId, userId, scope, key, value: payload.value ?? {}, version: 1, isActive: true } });
+      }
+      const row = await tx.setting.findUnique({ where: { id: existing?.id || op.entityId } });
+      if (!row) throw new Error("SETTING_PERSISTENCE_FAILED");
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SETTING_UPDATED", entityType: "Setting", entityId: row.id,
+        metadata: { key, scope, operationType: op.operationType, settingVersion: row.version },
+      } });
+      return;
+    }
 
   private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
     if (op.entityType === "Category" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
@@ -1191,8 +1228,9 @@ const now = new Date();
       const payments = await tx.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { paidAt: "asc" } });
       const purchaseReceipts = await tx.purchaseReceipt.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { receivedAt: "asc" } });
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
+      const settings = await tx.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } });
       const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, expenses };
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1249,6 +1287,7 @@ const now = new Date();
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      settings: await prisma.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, updatedAt: { gte: since, lte: anchor }, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } }),
       expenses: (await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } })).map(expenseShape),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
