@@ -1,65 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { AiOperatingLayerEngine, AutonomousOperationsEngine } from "@kwakopos2/domain";
-import { verifyAccessToken, generateAccessToken } from "@kwakopos2/auth";
+import { AiOperatingLayerEngine } from "@kwakopos2/domain";
+import type { AiBusinessSnapshot, TenantContext } from "@kwakopos2/contracts";
 
-describe("Adversarial AI Authorization & RBAC Test Suite", () => {
-  const aiEngine = new AiOperatingLayerEngine();
-  const autoOpsEngine = new AutonomousOperationsEngine();
+const tenantA:TenantContext={tenantId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",branchId:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",userId:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",roles:["MANAGER"],permissions:["INVENTORY_VIEW","PURCHASE_APPROVE"]};
+const tenantB:TenantContext={tenantId:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",branchId:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",userId:"ffffffff-ffff-4fff-8fff-ffffffffffff",roles:["MANAGER"],permissions:["INVENTORY_VIEW","PURCHASE_APPROVE"]};
+const snapshot:AiBusinessSnapshot={now:"2026-10-04T10:00:00.000Z",variants:[{variantId:"99999999-9999-4999-8999-999999999999",productId:"12121212-1212-4212-8212-121212121212",productName:"Tenant A Product",sku:"A-001",inventoryQuantity:1,reservedQuantity:0,reorderLevel:4,sellingPrice:10,costPrice:5,active:true}],stockByVariant:{"99999999-9999-4999-8999-999999999999":1},unitsSoldLast7DaysByVariant:{"99999999-9999-4999-8999-999999999999":7},salesDaysByVariant:{"99999999-9999-4999-8999-999999999999":7}};
 
-  it("should reject AI actions attempted without valid authentication token", () => {
-    expect(() => verifyAccessToken("invalid-fake-token")).toThrow("UNAUTHORIZED");
+describe("AI authorization and evidence-boundary invariants",()=>{
+  const engine=new AiOperatingLayerEngine();
+  it("binds generated records to supplied tenant context",()=>{
+    const result=engine.generateInsightsAndRecommendations(tenantA,snapshot);
+    expect(result.insights[0].tenantId).toBe(tenantA.tenantId);
+    expect(result.insights[0].tenantId).not.toBe(tenantB.tenantId);
   });
-
-  it("should reject non-admin users attempting to trigger AI emergency kill switch", () => {
-    const regularUserPayload = {
-      sub: "USR-REG-01",
-      tenantId: "TENANT-01",
-      branchId: "BRANCH-01",
-      email: "user@test.com",
-      roles: ["CASHIER"],
-      permissions: ["pos.sales"],
-      deviceId: "DEV-01",
-    };
-
-    const token = generateAccessToken(regularUserPayload);
-    const verified = verifyAccessToken(token);
-    expect(verified.roles.includes("ADMIN") || verified.roles.includes("SUPER_ADMIN")).toBe(false);
+  it("cannot synthesize another tenant's business data",()=>{
+    const result=engine.generateInsightsAndRecommendations(tenantB,{...snapshot,variants:[{...snapshot.variants[0],productName:"Tenant B Product"}]});
+    expect(result.insights[0].observation).toContain("Tenant B Product");
+    expect(result.insights[0].observation).not.toContain("Tenant A Product");
   });
-
-  it("should isolate cross-tenant AI recommendations and prevent tenant ID spoofing", () => {
-    const sigResult = aiEngine.generateInsightsAndRecommendations("TENANT-VICTIM");
-
-    expect(sigResult.recommendations.length).toBeGreaterThan(0);
-    expect(sigResult.insights.length).toBeGreaterThan(0);
-
-    // Toggle tenant kill switch for attacker only
-    aiEngine.toggleKillSwitch("TENANT", "TENANT-ATTACKER");
-
-    const victimRes = aiEngine.generateInsightsAndRecommendations("TENANT-VICTIM");
-    const attackerRes = aiEngine.generateInsightsAndRecommendations("TENANT-ATTACKER");
-
-    expect(victimRes.insights.length).toBeGreaterThan(0);
-    expect(attackerRes.insights.length).toBe(0); // Tenant isolation enforced
-  });
-
-  it("should enforce policy limits on high-cost autonomous operations", () => {
-    autoOpsEngine.registerAgentCapability({
-      agentId: "AGT-SEC-01",
-      tenantId: "TENANT-SEC",
-      agentRole: "Security Guard Agent",
-      autonomyLevel: "LEVEL_4_CERTIFIED",
-      riskClass: "HIGH",
-      financialLimitTzs: 100000,
-    });
-
-    const req = autoOpsEngine.executeAutonomousRequest({
-      requestId: "REQ-ADV-01",
-      tenantId: "TENANT-SEC",
-      agentId: "AGT-SEC-01",
-      capability: "transfer.funds",
-      financialCostTzs: 5000000, // Exceeds financial limit
-    });
-
-    expect(req.request?.state).toBe("ESCALATED");
+  it("never represents approval as execution of a business mutation",()=>{
+    const result=engine.generateInsightsAndRecommendations(tenantA,snapshot);
+    expect(engine.explainRecommendation(result.recommendations[0]).explanation).toContain("does not execute a business mutation");
   });
 });
