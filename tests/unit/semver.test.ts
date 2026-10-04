@@ -41,6 +41,9 @@ describe("Semantic Versioning (SemVer 2.0.0) Engine", () => {
       expect(compareSemVer("3.0.0", "2.9.9")).toBeGreaterThan(0);
       expect(compareSemVer("2.0.0", "2.0.0")).toBe(0);
       expect(compareSemVer("2.0.0", "2.0.0-rc.1")).toBeGreaterThan(0);
+      expect(compareSemVer("2.0.0-rc.2", "2.0.0-rc.10")).toBeLessThan(0);
+      expect(compareSemVer("2.0.0-alpha.1", "2.0.0-alpha.beta")).toBeLessThan(0);
+      expect(compareSemVer("2.0.0+build.1", "2.0.0+build.2")).toBe(0);
     });
   });
 
