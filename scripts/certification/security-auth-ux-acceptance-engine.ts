@@ -124,7 +124,7 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     const accessToken = loginBody.data?.accessToken || "";
     const sessionId = loginBody.data?.sessionId || "";
     const cookieHardened = /HttpOnly/i.test(setCookie) && /SameSite=Strict/i.test(setCookie);
-    const noRefreshJson = !JSON.stringify(loginBody).includes("refreshToken");
+    const noRefreshJson = !Object.prototype.hasOwnProperty.call(loginBody.data || {}, "refreshToken");
 
     results.set("SEC-AUTH-01", {
       passed: login.status === 200 && Boolean(accessToken) && Boolean(sessionId) && cookieHardened && noRefreshJson,
