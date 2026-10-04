@@ -64,6 +64,9 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Production Auth Transport Lock
+        run: npm run release:auth-lock
+
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
 

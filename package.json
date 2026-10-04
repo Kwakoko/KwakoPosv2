@@ -16,7 +16,8 @@
     "apps/web"
   ],
   "scripts": {
-    "production-release:verify": "tsx scripts/release/verify-production-release-authority.ts",
+    "production-release:verify": "node scripts/release/auth-transport-lock.mjs && tsx scripts/release/verify-production-release-authority.ts",
+    "release:auth-lock": "node scripts/release/auth-transport-lock.mjs",
     "start": "node index.js",
     "dev": "tsx scripts/dev.ts",
     "build": "npm run build --workspaces --if-present",
@@ -43,7 +44,7 @@
     "release:validate-commits": "tsx scripts/release/validate-semver.ts",
     "release:certify-sync": "tsx scripts/release/certify-version-sync.ts",
     "release:generate-notes": "tsx scripts/release/generate-release-notes.ts",
-    "release:prepare": "npm run build && npm run test:unit && npm run release:sync-versions",
+    "release:prepare": "npm run release:auth-lock && npm run build && npm run test:unit && npm run release:sync-versions",
     "validate:commits": "tsx scripts/release/validate-semver.ts",
     "certify:versions": "tsx scripts/release/certify-version-sync.ts",
     "sync:versions": "tsx scripts/release/sync-workspace-versions.ts",
@@ -54,7 +55,7 @@
     "certify:pwa-durability": "tsx scripts/certification/runPwaZeroDataLossCertification.ts",
     "test:browser": "playwright test --config=playwright.production.config.mjs",
     "certify": "tsx scripts/certification/runCertification.ts",
-    "certify:security": "tsx scripts/certification/strict-security-runtime-gate.ts",
+    "certify:security": "npm run release:auth-lock && tsx scripts/certification/strict-security-runtime-gate.ts",
     "certify:resilience": "tsx scripts/certification/runResilienceCertification.ts",
     "certify:performance": "tsx scripts/certification/runPerformanceCertification.ts",
     "certify:reliability": "tsx scripts/certification/runReliabilityCertification.ts",
