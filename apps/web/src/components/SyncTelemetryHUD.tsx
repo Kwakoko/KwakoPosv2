@@ -10,7 +10,7 @@
  * - Edge sync probe and offline simulation controls
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Wifi, WifiOff, RefreshCw, ShieldCheck, Clock, Activity, HardDrive,
   CheckCircle2, X, AlertTriangle, Database, Lock, Layers, ShieldAlert
@@ -18,9 +18,9 @@ import {
 import { useAuth, useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { syncTelemetryService, type SyncTelemetryMetrics } from "../services/syncTelemetryService.js";
 import { useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
-import { SyncConflictResolutionModal } from "./SyncConflictResolutionModal.js";
 import { globalStoragePressureMonitor } from "../persistence/storagePressure.js";
 import { HumanIdBadge } from "./UI/HumanIdBadge.js";
+import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return "0 MB";
@@ -31,7 +31,7 @@ function formatBytes(bytes?: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-export const SyncTelemetryHUD: React.FC = () => {
+export const SyncTelemetryHUD: React.FC<{ onOpenConflictCenter?: () => void }> = ({ onOpenConflictCenter }) => {
   const { user } = useAuth();
   const { currentTenantName, currentTenantId, currentTenantSlug } = useTenant();
   const { currentBranchName, currentBranchId, currentBranchCode } = useBranch();
@@ -43,22 +43,14 @@ export const SyncTelemetryHUD: React.FC = () => {
 
   const [metrics, setMetrics] = useState<SyncTelemetryMetrics>(syncTelemetryService.getMetrics());
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [showConflictModal, setShowConflictModal] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError?: boolean } | null>(null);
   const [isStoragePersisted, setIsStoragePersisted] = useState(false);
   const [isRequestingPersistence, setIsRequestingPersistence] = useState(false);
 
-  const conflictCount = useMemo(() => {
-    if (!db?.syncMetadata) return 0;
-    let count = 0;
-    for (const key of db.syncMetadata.keys()) {
-      if (key.startsWith("sync_conflict_")) {
-        count++;
-      }
-    }
-    return count;
-  }, [db, showDiagnostics, showConflictModal]);
+  const conflictCount = db?.syncMetadata
+    ? countUniqueLocalConflictIds(db.syncMetadata.entries())
+    : 0;
 
   // Register DB store with telemetry service
   useEffect(() => {
@@ -624,11 +616,17 @@ export const SyncTelemetryHUD: React.FC = () => {
                 <button
                   type="button"
                   className="v2-btn v2-btn-outline v2-btn-sm"
-                  onClick={() => setShowConflictModal(true)}
-                  style={{ color: conflictCount > 0 ? "#f87171" : undefined, borderColor: conflictCount > 0 ? "#ef4444" : undefined }}
+                  onClick={() => {
+                    if (onOpenConflictCenter) {
+                      onOpenConflictCenter();
+                    } else if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("kwakopos:open-conflict-center"));
+                    }
+                  }}
+                  style={{ color: effectiveConflictCount > 0 ? "#f87171" : undefined, borderColor: effectiveConflictCount > 0 ? "#ef4444" : undefined }}
                 >
-                  <ShieldAlert size={13} style={{ marginRight: "0.35rem", color: conflictCount > 0 ? "#ef4444" : "#f59e0b" }} />
-                  <span>{conflictCount > 0 ? `${conflictCount} Conflicts` : "Conflict Center"}</span>
+                  <ShieldAlert size={13} style={{ marginRight: "0.35rem", color: effectiveConflictCount > 0 ? "#ef4444" : "#f59e0b" }} />
+                  <span>{effectiveConflictCount > 0 ? `${effectiveConflictCount} Conflicts` : "Conflict Center"}</span>
                 </button>
                 <button
                   type="button"
@@ -652,12 +650,6 @@ export const SyncTelemetryHUD: React.FC = () => {
         </div>
       )}
 
-      {/* Sync Conflict & Oversell Resolution Modal */}
-      <SyncConflictResolutionModal
-        isOpen={showConflictModal}
-        onClose={() => setShowConflictModal(false)}
-        localDb={db}
-      />
     </>
   );
 };
