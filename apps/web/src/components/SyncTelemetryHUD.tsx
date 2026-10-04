@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth, useBranch, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { syncTelemetryService, type SyncTelemetryMetrics } from "../services/syncTelemetryService.js";
-import { useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
+import { isReplicaConverged, useAuthoritativeSyncStatus } from "../services/syncStatusService.js";
 import { globalStoragePressureMonitor } from "../persistence/storagePressure.js";
 import { HumanIdBadge } from "./UI/HumanIdBadge.js";
 import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
@@ -80,14 +80,14 @@ export const SyncTelemetryHUD: React.FC<{ onOpenConflictCenter?: () => void }> =
     syncStatus.pendingOutboxCount || 0,
   );
   const effectiveFailedCount = Math.max(metrics.failedOutboxCount || 0, syncStatus.failedOutboxCount || 0);
-  const effectiveConflictCount = Math.max(conflictCount, syncStatus.abandonedOutboxCount || 0);
+  const effectiveConflictCount = syncStatus.openConflictCount !== null
+    ? syncStatus.openConflictCount
+    : Math.max(conflictCount, syncStatus.abandonedOutboxCount || 0);
   const syncVerified =
     !isSimulatedOffline &&
     isOnline &&
-    syncStatus.state === "SUCCESS" &&
-    effectiveOutboxCount === 0 &&
-    effectiveFailedCount === 0 &&
-    effectiveConflictCount === 0;
+    conflictCount === 0 &&
+    isReplicaConverged(syncStatus);
 
   const handleForceProbe = async () => {
     setIsProbing(true);
