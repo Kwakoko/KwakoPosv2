@@ -361,12 +361,14 @@ export class WorldStandardPrismaSyncEngine {
       const branchId = scope === "BRANCH" ? ctx.branchId : null;
       const userId = scope === "USER" ? ctx.userId : null;
       if (scope === "BRANCH" && payload.branchId && payload.branchId !== ctx.branchId) throw new Error("SETTING_BRANCH_SCOPE_FORBIDDEN");
+
       const existingById = await tx.setting.findUnique({ where: { id: op.entityId } });
       if (existingById && existingById.tenantId !== ctx.tenantId) throw new Error("TENANT_BOUNDARY_VIOLATION");
       const existing = existingById || await tx.setting.findFirst({
         where: { tenantId: ctx.tenantId, key, scope, branchId, userId, isActive: true },
         orderBy: { updatedAt: "desc" },
       });
+
       if (op.operationType === "DELETE") {
         if (!existing) return;
         if (existing.branchId && existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
@@ -375,19 +377,40 @@ export class WorldStandardPrismaSyncEngine {
         if (existing.branchId && existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
         await tx.setting.update({ where: { id: existing.id }, data: { value: payload.value ?? {}, version: { increment: 1 }, isActive: true } });
       } else {
-        await tx.setting.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId, userId, scope, key, value: payload.value ?? {}, version: 1, isActive: true } });
+        await tx.setting.create({
+          data: {
+            id: op.entityId,
+            tenantId: ctx.tenantId,
+            branchId,
+            userId,
+            scope,
+            key,
+            value: payload.value ?? {},
+            version: 1,
+            isActive: true,
+          },
+        });
       }
+
       const row = await tx.setting.findUnique({ where: { id: existing?.id || op.entityId } });
       if (!row) throw new Error("SETTING_PERSISTENCE_FAILED");
-      await tx.auditEvent.create({ data: {
-        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
-        deviceId: req.deviceId, action: "SETTING_UPDATED", entityType: "Setting", entityId: row.id,
-        metadata: { key, scope, operationType: op.operationType, settingVersion: row.version },
-      } });
+
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: req.deviceId,
+          action: "SETTING_UPDATED",
+          entityType: "Setting",
+          entityId: row.id,
+          metadata: { key, scope, operationType: op.operationType, settingVersion: row.version },
+        },
+      });
       return;
     }
 
-  private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
     if (op.entityType === "Category" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);
       const existing = await tx.category.findUnique({ where: { id: op.entityId } });
