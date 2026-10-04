@@ -389,7 +389,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
     accessToken,
     sessionId: session.sessionId,
     user: { id: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, name: user.name, role: roles[0] },
-    session: { status: "AUTHENTICATED_ONLINE", expiresAt: session.expiresAt.toISOString(), refreshTokenExpiresAt: session.refreshTokenExpiresAt.toISOString(), policy: sessionPolicyToMinutes(policy) },
+    session: { status: "AUTHENTICATED_ONLINE", expiresAt: session.expiresAt.toISOString(), refreshTokenExpiresAt: session.refreshTokenExpiresAt.toISOString(), policy: { ...sessionPolicyToMinutes(policy), rememberMe } },
   } });
 }
 
