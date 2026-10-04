@@ -160,7 +160,10 @@ export class SyncStatusService {
       if (tenantId && branchId) {
         try {
           const conflictResponse = await apiFetch<any>("/sync/conflicts?status=OPEN");
-          openConflictCount = Array.isArray(conflictResponse?.data) ? conflictResponse.data.length : 0;
+          if (!Array.isArray(conflictResponse?.data)) {
+            throw new Error("SYNC_CONFLICT_AUTHORITY_MALFORMED_RESPONSE");
+          }
+          openConflictCount = conflictResponse.data.length;
         } catch {
           openConflictCount = -1;
         }
