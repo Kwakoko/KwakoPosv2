@@ -34,9 +34,10 @@ type DashboardSnapshot = {
     profitDeltaPct: string | null;
     priorTotalRevenue: number;
     peakHour: { hour: string; revenue: number; ordersCount: number } | null;
-    paymentChannels: Array<{ name: string; volume: number; count: number; volumeShare: number; countShare: number; aov: number }>;
+    paymentChannels: Array<{ name: string; volume: number; count: number; paymentCount: number; orderCount: number; volumeShare: number; countShare: number; aov: number }>;
     paymentTotalVolume: number;
     paymentTotalCount: number;
+    paymentTotalOrderCount: number;
     paymentOverallAov: number;
     topProducts: Array<{ productId: string; name: string; revenue: number; units: number; stock: number; category: string; rank: number }>;
     topProductsTotalTracked: number;
@@ -608,6 +609,10 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(mobileChannel?.paymentCount).toBe(1);
     expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1);
     expect(financialSnapshot.analytics.topProducts[0]?.revenue).toBe(2000);
+    expect(financialSnapshot.analytics.totalRevenue).toBe(2000);
+    expect(financialSnapshot.analytics.totalCOGS).toBe(1000);
+    expect(financialSnapshot.analytics.totalProfit).toBe(1000);
+    expect(financialSnapshot.analytics.marginPct).toBe('50.0');
     // Browser C: real logout -> login -> dashboard recovery.
     await pageC.locator("#topbar-user-btn").click();
     const signOutResponse = pageC.waitForResponse((response) =>
