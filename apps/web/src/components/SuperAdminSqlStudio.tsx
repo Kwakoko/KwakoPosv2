@@ -27,7 +27,7 @@ import {
   CheckCircle2,
   Trash2,
 } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 
 type SubTab = "sql-studio" | "db-explorer" | "vitals" | "maintenance" | "logs";
 
