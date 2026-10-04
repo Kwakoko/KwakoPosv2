@@ -699,8 +699,19 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   );
 
   const financialExpenses = (globalInMemoryStore as any).expenses as Map<string, any> | undefined;
-  const passF06 = financialExpenses?.get(financialExpenseId)?.amount === 250000
-    && financialExpenses?.get(financialExpenseId)?.tenantId === syntheticTenantId;
+  const serverExpense = financialExpenses?.get(financialExpenseId);
+  const browserBExpenses = dbStoreF06B.getConfigurationLocal("expenses", {
+    tenantId: syntheticTenantId,
+    branchId: syntheticBranchId,
+  }) as any[];
+  const passF06 = serverExpense?.amount === 250000
+    && serverExpense?.tenantId === syntheticTenantId
+    && browserBExpenses.some((expense: any) =>
+      String(expense.id) === financialExpenseId &&
+      Number(expense.amount) === 250000 &&
+      expense.tenantId === syntheticTenantId &&
+      expense.branchId === syntheticBranchId
+    );
   results.push({
     testSuite: "SYNTHETIC_TEST_F06_FINANCIAL_SYNC_CONVERGENCE",
     syntheticTenantId,
