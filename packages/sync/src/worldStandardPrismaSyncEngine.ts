@@ -1338,7 +1338,10 @@ const now = new Date();
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
-      settings: await prisma.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, updatedAt: { gte: since, lte: anchor }, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } }),
+      settings: (await prisma.setting.findMany({
+        where: { tenantId: ctx.tenantId, updatedAt: { gte: since, lte: anchor }, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] },
+        orderBy: { updatedAt: "asc" },
+      })).map((row: any) => row.isActive === false ? { ...row, _deleted: true } : row),
       expenses: (await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { incurredAt: "asc" } })).map(expenseShape),
       ...( { serverRevision: String(afterRevision), syncEpoch } as any ),
     } as any;
