@@ -1917,7 +1917,7 @@ if (process.argv[1] && process.argv[1].endsWith("synthetic-monitor.ts")) {
       console.log("\n========================================================================");
       console.log(` SYNTHETIC SUITE RESULT: ${allPassed ? "ALL TESTS PASSED (GREEN)" : "FAILURES DETECTED (RED)"}`);
       console.log("========================================================================");
-      if (!allPassed) process.exit(1);
+      process.exit(allPassed ? 0 : 1);
     })
     .catch((err) => {
       console.error("SYNTHETIC MONITORING ERROR:", err);
