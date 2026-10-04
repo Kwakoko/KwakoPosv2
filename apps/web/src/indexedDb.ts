@@ -1361,6 +1361,7 @@ export class LocalIndexedDbStore {
     const brands = Array.isArray(delta.brands) ? delta.brands : [];
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
     const expenses = Array.isArray((delta as any).expenses) ? (delta as any).expenses : [];
+    const settings = Array.isArray((delta as any).settings) ? (delta as any).settings : [];
     let appliedCount = 0;
 
     if (!this.nativeDb) {
@@ -1398,6 +1399,18 @@ export class LocalIndexedDbStore {
         if (this.protectServerRecord("Supplier", supplier.id)) continue;
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
+      }
+      if (settings.length) {
+        for (const setting of settings as any[]) {
+          const tenantId = String(setting.tenantId || "");
+          const branchId = String(setting.branchId || (delta as any).branchId || "");
+          const keyName = String(setting.key || "");
+          if (!tenantId || !keyName) continue;
+          const key = tenantId + ":" + branchId + ":" + keyName;
+          if (setting.isActive === false || setting._deleted) this.configuration.delete(key);
+          else this.configuration.set(key, { key: keyName, value: setting.value, tenantId, branchId, scope: setting.scope || "BRANCH", settingId: setting.id, version: Number(setting.version || 1), updatedAt: setting.updatedAt || delta.serverTimestamp });
+          appliedCount += 1;
+        }
       }
       if (expenses.length) {
         const ctxTenant = String((expenses[0] as any).tenantId || "");
@@ -1488,6 +1501,25 @@ export class LocalIndexedDbStore {
       this.suppliers.set(supplier.id, supplier);
       appliedCount += 1;
     }
+    if (settings.length && configStore) {
+      for (const setting of settings as any[]) {
+        const tenantId = String(setting.tenantId || "");
+        const branchId = String(setting.branchId || (delta as any).branchId || "");
+        const keyName = String(setting.key || "");
+        if (!tenantId || !keyName) continue;
+        const key = tenantId + ":" + branchId + ":" + keyName;
+        if (setting.isActive === false || setting._deleted) {
+          configStore.delete(key);
+          this.configuration.delete(key);
+        } else {
+          const value = { key: keyName, value: setting.value, tenantId, branchId, scope: setting.scope || "BRANCH", settingId: setting.id, version: Number(setting.version || 1), updatedAt: setting.updatedAt || delta.serverTimestamp };
+          configStore.put(toIndexedDbCloneable(value), key);
+          this.configuration.set(key, value);
+        }
+        appliedCount += 1;
+      }
+    }
+
     if (expenses.length) {
       const ctxTenant = String((expenses[0] as any).tenantId || "");
       const ctxBranch = String((expenses[0] as any).branchId || "");
