@@ -8,7 +8,7 @@ const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-04";
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "490b7fd6ec428e77f1e2f48c8375856b1bac0eec",
   "apps/web/src/pages/DashboardPage.tsx": "ff7cb0795e1684016c8960245c0737c61e2271dd",
-  "apps/api/src/services/dashboardKpiService.ts": "e596541fe65ce8023ac8960d41ec98c4507510cb",
+  "apps/api/src/services/dashboardKpiService.ts": "e5313d7ab1cbcfc8c735668a366e82356fb2d09a",
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
   "packages/database/src/prismaProductionRepositories.ts": "d07fa6b890b5a96ff60c746cacb47375dac03aaa",
   "tests/integration/dashboard-final-closures.test.ts": "0bf976e22962182f797f8de7a823cf0177dd0807",
