@@ -17,6 +17,8 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     const prod: Product = {
       id: productId,
       name: "Sunflower Cooking Oil 5L",
+      tenantId: "tenant-integ-1",
+      branchId: "branch-integ-1",
       sku: "OIL-SUN-5L",
       category: "Edibles",
       sellingPrice: 35000,
@@ -29,6 +31,8 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     const variant: ProductVariant = {
       id: variantId,
       productId,
+      tenantId: "tenant-integ-1",
+      branchId: "branch-integ-1",
       name: "5L Jerrycan",
       sku: "OIL-5L",
       price: 35000,

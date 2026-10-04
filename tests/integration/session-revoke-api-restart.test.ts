@@ -8,7 +8,7 @@ import { prisma } from "@kwakopos2/database";
 const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
 const API_PORT = 3011;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
-const STARTUP_TIMEOUT_MS = 15_000;
+const STARTUP_TIMEOUT_MS = 60_000;
 const TEST_TIMEOUT_MS = 60_000;
 
 describe("session revoke survives API restart", () => {

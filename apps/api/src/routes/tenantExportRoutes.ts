@@ -84,6 +84,12 @@ export function tenantExportRoutes(server: FastifyInstance): void {
       return reply.status(200).send({ success: true, data: bundle });
     } catch (error: any) {
       req.log.error({ err: error }, "Authoritative tenant export failed");
+      if (String(error?.message || "").startsWith("FORBIDDEN:")) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: "FORBIDDEN", message: String(error.message) },
+        });
+      }
       return reply.status(500).send({
         success: false,
         error: { code: "TENANT_EXPORT_FAILED", message: "Authoritative PostgreSQL tenant export failed." },
