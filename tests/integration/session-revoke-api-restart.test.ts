@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { once } from "node:events";
 import { hashPassword } from "@kwakopos2/auth";
 import { prisma } from "@kwakopos2/database";
