@@ -12,6 +12,7 @@ concurrency:
 permissions:
   contents: write
   actions: read
+  pull-requests: write
 
 jobs:
   auto-semver:
@@ -125,37 +126,56 @@ jobs:
           else
             echo "needs_release=true" >> "$GITHUB_OUTPUT"
           fi
-      - name: Commit release candidate
+      - name: Create release candidate branch and pull request
         if: steps.candidate.outputs.needs_release == 'true'
-        id: commit_release
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
           LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          [[ -n "$LATEST_TAG" ]] || { echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag"; exit 1; }
-          [[ "$VERSION" != "${LATEST_TAG#v}" ]] || { echo "RELEASE_BLOCKED: candidate did not advance beyond $LATEST_TAG"; exit 1; }
+          [[ -n "$LATEST_TAG" ]] || { echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag" >&2; exit 1; }
+          [[ "$VERSION" != "${LATEST_TAG#v}" ]] || { echo "RELEASE_BLOCKED: candidate did not advance beyond $LATEST_TAG" >&2; exit 1; }
           if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
             echo "RELEASE_BLOCKED: tag v${VERSION} already exists; refusing duplicate release tag" >&2
             exit 1
           fi
+          RELEASE_BRANCH="automation/release-v${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(release): v${VERSION}"
-          git push origin HEAD:main
-          RELEASE_SHA="$(git rev-parse HEAD)"
-          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Dispatch exact production certification
-        if: steps.commit_release.outputs.release_sha != ''
+          LOCAL_SHA="$(git rev-parse HEAD)"
+          EXISTING_SHA="$(git ls-remote --heads origin "refs/heads/${RELEASE_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$EXISTING_SHA" && "$EXISTING_SHA" != "$LOCAL_SHA" ]]; then
+            echo "RELEASE_BLOCKED: existing release branch ${RELEASE_BRANCH} points to ${EXISTING_SHA}, expected ${LOCAL_SHA}." >&2
+            exit 1
+          fi
+          git push origin "HEAD:refs/heads/${RELEASE_BRANCH}"
+          PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$PR_NUMBER" ]]; then
+            PR_NUMBER="$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$RELEASE_BRANCH" --base main --title "chore(release): v${VERSION}" --body "Automated SemVer release candidate v${VERSION}. This PR must pass all required checks before merge; production certification runs against the exact merged main SHA." --json number --jq .number)"
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Release candidate v${VERSION} prepared from ${LOCAL_SHA}. Certification will be dispatched only after the merged main SHA is known." || true
+          echo "RELEASE_PR_CREATED: #${PR_NUMBER} ${RELEASE_BRANCH} @ ${LOCAL_SHA}"
+      - name: Certify existing merged release candidate
+        if: steps.pending.outputs.pending == 'true' && steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.commit_release.outputs.release_sha }}
+        shell: bash
         run: |
           set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          existing="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "KwakoPos Exact Main Production Certification" --branch main --limit 20 --json headSha,status --jq ".[] | select(.headSha == \"$GITHUB_SHA\") | .headSha" | head -n1)"
+          if [[ "$existing" == "$GITHUB_SHA" ]]; then
+            echo "RELEASE_CERTIFICATION_ALREADY_DISPATCHED: v${VERSION} @ ${GITHUB_SHA}"
+            exit 0
+          fi
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - <<EOF
-          {"event_type":"certify-release","client_payload":{"release_sha":"$RELEASE_SHA"}}
+          {"event_type":"certify-release","client_payload":{"release_sha":"$GITHUB_SHA"}}
           EOF
+          echo "RELEASE_CERTIFICATION_DISPATCHED: v${VERSION} @ ${GITHUB_SHA}"
       - name: Verify authoritative SemVer state
         shell: bash
         run: |
