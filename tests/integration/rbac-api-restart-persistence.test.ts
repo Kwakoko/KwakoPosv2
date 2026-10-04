@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 
-const ROOT = "D:\\Projects\\KwakoPos v2.0.0\\KwakoPosv2";
+const ROOT = process.cwd();
 const PORT = 3012;
 const BASE = "http://127.0.0.1:" + PORT;
 
@@ -26,8 +27,9 @@ describe("RBAC API mutations survive exact API restart", () => {
   };
 
   async function startApi() {
-    const tsx = ROOT + "\\node_modules\\tsx\\dist\\cli.mjs";
-    api = spawn(process.execPath, [tsx, "apps/api/src/serverFixed.ts"], {
+    const tsx = resolvePath(ROOT, "node_modules/tsx/dist/cli.mjs");
+    const serverEntry = resolvePath(ROOT, "apps/api/src/serverFixed.ts");
+    api = spawn(process.execPath, [tsx, serverEntry], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -56,11 +58,20 @@ describe("RBAC API mutations survive exact API restart", () => {
 
   async function stopApi() {
     if (!api || api.exitCode !== null || !api.pid) return;
-    const killer = spawn("taskkill.exe", ["/PID", String(api.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    await once(killer, "exit");
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill.exe", ["/PID", String(api.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      await once(killer, "exit");
+    } else {
+      api.kill("SIGTERM");
+      await Promise.race([
+        once(api, "exit").then(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+      ]);
+      if (api.exitCode === null) api.kill("SIGKILL");
+    }
     api = null;
   }
 
