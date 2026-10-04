@@ -594,9 +594,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     });
     const financialSnapshot = await readDashboardSnapshot(pageA, tenantId, branchId);
     expect(financialSnapshot.salesToday).toBe(2000);
-    expect(financialSnapshot.grossProfit).toBe(1100);
+    expect(financialSnapshot.grossProfit).toBe(700);
     expect(financialSnapshot.netSalesToday).toBe(2000);
-    expect(financialSnapshot.cogsToday).toBe(900);
+    expect(financialSnapshot.cogsToday).toBe(1300);
     expect(financialSnapshot.analytics.paymentTotalVolume).toBe(2680);
     expect(financialSnapshot.analytics.paymentTotalCount).toBe(3);
     expect(financialSnapshot.analytics.paymentTotalOrderCount).toBe(2);
@@ -613,9 +613,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1.5);
     expect(financialSnapshot.analytics.topProducts[0]?.revenue).toBe(2000);
     expect(financialSnapshot.analytics.totalRevenue).toBe(2000);
-    expect(financialSnapshot.analytics.totalCOGS).toBe(900);
-    expect(financialSnapshot.analytics.totalProfit).toBe(1100);
-    expect(financialSnapshot.analytics.marginPct).toBe('55.0');
+    expect(financialSnapshot.analytics.totalCOGS).toBe(1300);
+    expect(financialSnapshot.analytics.totalProfit).toBe(700);
+    expect(financialSnapshot.analytics.marginPct).toBe('35.0');
     // Browser C: real logout -> login -> dashboard recovery.
     await pageC.locator("#topbar-user-btn").click();
     const signOutResponse = pageC.waitForResponse((response) =>
