@@ -515,24 +515,26 @@ const AuthenticatedApp: React.FC = () => {
     }
   }, [isSuperAdmin, impersonatedTenant, currentPath, user]);
 
-  // Stay on WorkspaceLoadingScreen until user explicitly clicks Enter (only on first-time unauthenticated visit)
-  if (!hasEnteredWorkspace && !user) {
+  // Show a loading screen while the session is being restored from storage.
+  // This covers BOTH first-time visitors (hasEnteredWorkspace=false) AND returning
+  // users with a stored session (hasEnteredWorkspace=true but user=null until
+  // initSequence completes). Without this guard, returning users see a flash of
+  // the LoginPage while the restore is in flight.
+  if (isInitializing && !user) {
     if (currentPath === "/legal") {
       return <LegalCenterPage onNavigate={handleNavigate} />;
     }
     if (currentPath === "/privacy") {
       return <PrivacyCenterPage onNavigate={handleNavigate} />;
     }
-    if (isInitializing) {
-      return (
-        <WorkspaceLoadingScreen
-          onForceContinue={() => {
-            dismissLoading?.();
-            setHasEnteredWorkspace(true);
-          }}
-        />
-      );
-    }
+    return (
+      <WorkspaceLoadingScreen
+        onForceContinue={() => {
+          dismissLoading?.();
+          setHasEnteredWorkspace(true);
+        }}
+      />
+    );
   }
 
   // Fail-closed statutory consent gate: never render the authenticated workspace before server verification.
@@ -561,6 +563,20 @@ const AuthenticatedApp: React.FC = () => {
 
   // Public Legal / Privacy routes viewable even without authentication
   if (!isAuthenticated || !user) {
+    // Safety net: never flash LoginPage while session restoration is still in flight.
+    // isInitializing && !user was already handled above, but this guards against any
+    // edge-case where isInitializing flips to false before setUser fires.
+    if (isInitializing) {
+      return (
+        <WorkspaceLoadingScreen
+          onForceContinue={() => {
+            dismissLoading?.();
+            setHasEnteredWorkspace(true);
+          }}
+        />
+      );
+    }
+
     if (currentPath === "/legal") {
       return <LegalCenterPage onNavigate={handleNavigate} />;
     }
