@@ -25,8 +25,8 @@ describe("Authentication credential authority", () => {
     const refresh = server.slice(refreshStart);
 
     expect(refresh).toContain("prisma.user.findFirst");
-    expect(refresh).toContain("sessionUser.role?.permissions");
-    expect(refresh).toContain('roles: [String(sessionUser.role?.name || "ADMIN")]');
+    expect(refresh).toContain("Array.isArray(sessionUser.role?.permissions)");
+    expect(refresh).toContain('const roles = [String(sessionUser.role?.name || sessionUser.role || "ADMIN")]');
     expect(refresh).toContain("permissions,");
     expect(refresh).not.toContain('roles: ["ADMIN"]');
     expect(refresh).not.toContain('permissions: ["*"]');
