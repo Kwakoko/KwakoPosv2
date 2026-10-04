@@ -56,6 +56,14 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: checkpoint local certification fixes
+- **core**: Merge pull request #42 from Kwakoko/release/auth-transport-lock
+- **core**: enforce auth transport lock before certification
+- **core**: enforce production auth transport lock
+- **core**: wire auth transport lock into release commands
+- **core**: lock web auth transport at build
+- **core**: add production auth transport lock
+- **release**: v2.13.0
 - **core**: checkpoint local production and certification updates
 - **core**: reconcile purchasing sync repair with current main
 - **release**: v2.13.0
