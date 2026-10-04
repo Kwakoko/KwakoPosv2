@@ -1,6 +1,7 @@
 import { loadConfig, getReleaseIdentity, isValidSemVer } from "../../packages/config/src/index.js";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "node:child_process";
 
 export interface VersionConsistencyCheckResult {
   passed: boolean;
@@ -10,6 +11,8 @@ export interface VersionConsistencyCheckResult {
     packageJsonVersionValid: "PASS" | "FAIL";
     releaseManifestSynchronized: "PASS" | "FAIL";
     runtimeConfigSynchronized: "PASS" | "FAIL";
+    packageLockSynchronized: "PASS" | "FAIL";
+    manifestGitShaSynchronized: "PASS" | "FAIL";
     liveEndpointSynchronized?: "PASS" | "FAIL";
   };
   errors: string[];
@@ -34,24 +37,38 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
     errors.push(`package.json version "${targetVersion}" is not valid SemVer.`);
   }
 
-  // 2. Check release-manifest.json synchronization
+  // 2. Check package-lock.json synchronization
+  let packageLockSync = false;
+  const lockPath = path.resolve(process.cwd(), "package-lock.json");
+  if (fs.existsSync(lockPath)) {
+    const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+    packageLockSync = lock.version === targetVersion && lock.packages?.[""]?.version === targetVersion;
+    if (!packageLockSync) errors.push(`package-lock.json drift: expected version ${targetVersion}`);
+  } else {
+    errors.push("package-lock.json does not exist. Authoritative version lock is required.");
+  }
+
+  // 3. Check release-manifest.json synchronization and bind its Git identity to HEAD
   let manifestSync = false;
+  let manifestGitShaSync = false;
   const manifestPath = path.resolve(process.cwd(), "release-manifest.json");
   if (fs.existsSync(manifestPath)) {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     if (manifest.version === targetVersion && manifest.tag === targetTag) {
       manifestSync = true;
+    }
+    const headSha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    if (manifest.gitSha === headSha) {
+      manifestGitShaSync = true;
     } else {
-      errors.push(
-        `release-manifest.json drift: expected version ${targetVersion}, got ${manifest.version}`
-      );
+      errors.push(`release-manifest.json Git SHA drift: expected ${headSha}, got ${manifest.gitSha || "missing"}`);
     }
   } else {
     // If not existing yet, create or warn
     errors.push("release-manifest.json does not exist. Must be generated before promotion.");
   }
 
-  // 3. Check runtime config
+  // 4. Check runtime config
   const config = loadConfig();
   const identity = getReleaseIdentity(config);
   const runtimeSync = identity.appVersion === targetVersion;
@@ -89,6 +106,8 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
     packageJsonVersionValid: isSemVer ? "PASS" : "FAIL",
     releaseManifestSynchronized: manifestSync ? "PASS" : "FAIL",
     runtimeConfigSynchronized: runtimeSync ? "PASS" : "FAIL",
+    packageLockSynchronized: packageLockSync ? "PASS" : "FAIL",
+    manifestGitShaSynchronized: manifestGitShaSync ? "PASS" : "FAIL",
   };
   if (liveSync) checks.liveEndpointSynchronized = liveSync;
 
@@ -96,7 +115,9 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
 
   console.log(` [1/3] package.json valid SemVer: ${checks.packageJsonVersionValid}`);
   console.log(` [2/3] release-manifest.json synchronized: ${checks.releaseManifestSynchronized}`);
-  console.log(` [3/3] Runtime config synchronized: ${checks.runtimeConfigSynchronized}`);
+  console.log(` [3/5] Runtime config synchronized: ${checks.runtimeConfigSynchronized}`);
+  console.log(` [4/5] package-lock.json synchronized: ${checks.packageLockSynchronized}`);
+  console.log(` [5/5] Release manifest Git SHA synchronized: ${checks.manifestGitShaSynchronized}`);
 
   if (passed) {
     console.log("========================================================================");
