@@ -1921,11 +1921,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const accessToken = generateAccessToken(tokenPayload);
     const session = await globalSessionManager.createSession({ tenantId, userId, branchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
+    setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
     return reply.send({
       success: true,
       data: {
         accessToken,
-        refreshToken: session.refreshToken,
         sessionId: session.sessionId,
         user: {
           id: userId,
@@ -1948,9 +1948,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Refresh token rotation. The refresh token is mandatory; session identity alone
   // must never mint a new access token.
   server.post("/auth/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (req, reply) => {
-    const { sessionId, refreshToken } = (req.body as any) || {};
-    if (!sessionId || !refreshToken) {
-      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "sessionId and refreshToken are required" } });
+    const { sessionId } = (req.body as RefreshRequestBody) || {};
+    const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
+    if (!sessionId) {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "sessionId is required" } });
+    }
+    if (!refreshToken) {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Refresh cookie required" } });
     }
     try {
       const validation = await globalSessionManager.validateSession(String(sessionId), { activity: false });
@@ -1976,7 +1980,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         permissions,
       });
       if (!rotated) return reply.status(401).send({ success: false, error: { code: "TOKEN_INVALID", message: "Invalid or reused refresh token" } });
-      return reply.send({ success: true, data: { accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, sessionId: session.id } });
+      setRefreshCookie(reply, rotated.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
+      return reply.send({ success: true, data: { accessToken: rotated.accessToken, sessionId: session.id } });
     } catch {
       return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Invalid or expired session" } });
     }
@@ -1988,6 +1993,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (sessionId) {
       await globalSessionManager.revokeSession(sessionId);
     }
+    clearRefreshCookie(reply, isProductionEnv(config));
     return reply.send({ success: true, data: { loggedOut: true } });
   });
 
@@ -2053,11 +2059,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const accessToken = generateAccessToken(tokenPayload);
       const session = await globalSessionManager.createSession({ tenantId: newTenantId, userId, branchId: resolvedBranchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
+      setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
       return reply.send({
         success: true,
         data: {
           accessToken,
-          refreshToken: session.refreshToken,
           sessionId: session.sessionId,
           tenantName: targetTenantName,
           branchName: targetBranchName,
