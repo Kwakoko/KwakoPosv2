@@ -20,6 +20,30 @@ describe("Internal communication fabric boundary", () => {
     expect(dataChange).not.toContain("localStorage");
   });
 
+  it("routes business data-change publication through the typed event boundary", () => {
+    const roots = [
+      path.resolve(process.cwd(), "apps/web/src/pages"),
+      path.resolve(process.cwd(), "apps/web/src/components"),
+      path.resolve(process.cwd(), "apps/web/src/context"),
+      path.resolve(process.cwd(), "apps/web/src/services"),
+    ];
+    const violations: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && path.relative(process.cwd(), full) !== "apps/web/src/services/dataChangeEvent.ts") {
+          const source = fs.readFileSync(full, "utf8");
+          if (source.includes("CustomEvent(DATA_CHANGED_EVENT")) {
+            violations.push(path.relative(process.cwd(), full));
+          }
+        }
+      }
+    };
+    for (const root of roots) walk(root);
+    expect(violations, violations.join("\n")).toEqual([]);
+  });
+
   it("does not permit UI code to bypass the application API facade", () => {
     const roots = [
       path.resolve(process.cwd(), "apps/web/src/pages"),
