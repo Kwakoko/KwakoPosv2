@@ -88,8 +88,56 @@ export class PrismaAtomicCommercialFinanceService {
         }
         variantProductIds.set(item.variantId, v.productId);
       }
-      const lines = req.items.map((item: any) => { const c = PricingTaxEngine.calculateLineItem({ unitPrice: item.unitPrice, unitCost: item.unitCost || 0, quantity: item.quantity, discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined }); return { id: crypto.randomUUID(), productId: item.productId ?? variantProductIds.get(item.variantId), variantId: item.variantId, quantity: item.quantity, unitPrice: c.unitPrice, unitCost: c.unitCost, discountAmount: c.discountAmount, taxAmount: c.taxAmount, lineTotal: c.lineTotal }; });
-      const totals = PricingTaxEngine.calculateSaleTotals(lines.map((l: any) => ({ lineTotal: l.lineTotal, totalCost: l.unitCost * l.quantity, discountAmount: l.discountAmount, taxAmount: l.taxAmount })), req.discountTotal || 0);
+      // Resolve tax from the authoritative tenant/branch Settings row. Client tax values are
+      // informational only; production financial fields must be derived server-side.
+      const taxSettingRows = await tx.setting.findMany({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          scope: "BRANCH",
+          key: "tax.config",
+          isActive: true,
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 1,
+      });
+      const taxConfigRow = (taxSettingRows[0]?.value || {}) as any;
+      const taxEnabled = Boolean(taxConfigRow.vatEnabled);
+      const configuredTaxRate = Number(taxConfigRow.vatRatePercent ?? 0);
+      const taxConfig = {
+        ratePct: Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && taxEnabled ? configuredTaxRate : 0,
+        isInclusive: taxConfigRow.taxInclusivePricing !== false,
+      };
+
+      const lines = req.items.map((item: any) => {
+        const c = PricingTaxEngine.calculateLineItem({
+          unitPrice: item.unitPrice,
+          unitCost: item.unitCost || 0,
+          quantity: item.quantity,
+          discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
+          taxConfig,
+        });
+        return {
+          id: crypto.randomUUID(),
+          productId: item.productId ?? variantProductIds.get(item.variantId),
+          variantId: item.variantId,
+          quantity: item.quantity,
+          unitPrice: c.unitPrice,
+          unitCost: c.unitCost,
+          discountAmount: c.discountAmount,
+          taxAmount: c.taxAmount,
+          lineTotal: c.lineTotal,
+        };
+      });
+      const totals = PricingTaxEngine.calculateSaleTotals(
+        lines.map((l: any) => ({
+          lineTotal: l.lineTotal,
+          totalCost: l.unitCost * l.quantity,
+          discountAmount: l.discountAmount,
+          taxAmount: l.taxAmount,
+        })),
+        req.discountTotal || 0,
+      );
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
@@ -128,7 +176,9 @@ export class PrismaAtomicCommercialFinanceService {
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
       if (paymentStatus !== "PAID") throw new Error("PAYMENT_NOT_SETTLED");
 
-      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: totals.subtotal, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: totals.grossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
+      const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
+      const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
+      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
