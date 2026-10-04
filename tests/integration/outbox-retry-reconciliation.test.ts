@@ -101,9 +101,11 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       );
     }
 
-    // Verify 5 items pending in outbox
+    // Each offline sale produces a Sale operation and its StockAdjustment operation.
     const pendingItems = await db.outbox.where("status").equals("PENDING").toArray();
-    expect(pendingItems.length).toBe(5);
+    expect(pendingItems.length).toBe(10);
+    expect(pendingItems.filter((item) => item.entityType === "Sale").length).toBe(5);
+    expect(pendingItems.filter((item) => item.entityType === "StockAdjustment").length).toBe(5);
 
     // Verify local inventory shows 100 - (5 * 2) = 90
     expect(db.productVariants.get(variantId)?.inventoryQuantity).toBe(90);
@@ -126,12 +128,12 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
 
     expect(failResult.failed).toBe(5);
     expect(failResult.succeeded).toBe(0);
-    // 5 items * 3 retries each = 15 attempts
-    expect(attemptsCount).toBe(15);
+    // 10 outbox operations * 3 retries each = 30 attempts.
+    expect(attemptsCount).toBe(30);
 
     // Assert that errors were persisted and items marked FAILED with error messages
     const failedItems = db.getFailedOutbox();
-    expect(failedItems.length).toBe(5);
+    expect(failedItems.length).toBe(10);
     for (const item of failedItems) {
       expect(item.status).toBe("FAILED");
       const errReason = db.syncMetadata.get(`error_${item.id}`);
@@ -142,7 +144,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
     for (const item of failedItems) {
       db.retryOutbox(item.id);
     }
-    expect(db.getPendingOutbox().length).toBe(5);
+    expect(db.getPendingOutbox().length).toBe(10);
 
     // 4. Simulate network recovery and successful outbox processing
     const successfulPush = vi.fn().mockResolvedValue({ success: true });
@@ -154,7 +156,7 @@ describe("Outbox Persistence & Reconciliation Integration Drill", () => {
       factor: 2,
     });
 
-    expect(successResult.succeeded).toBe(5);
+    expect(successResult.succeeded).toBe(10);
     expect(successResult.failed).toBe(0);
     expect(db.getPendingOutbox().length).toBe(0);
 
