@@ -272,5 +272,8 @@ export function syncStatusLabel(snapshot: SyncStatusSnapshot): string {
   if (snapshot.abandonedOutboxCount > 0) return "CONFLICT";
   if (snapshot.failedOutboxCount > 0) return "ERROR";
   if (snapshot.pendingOutboxCount > 0) return "PENDING";
+  if (snapshot.state === "ERROR") return "ERROR";
+  if (snapshot.state === "SUCCESS" && snapshot.reconciliationStatus === "DIVERGENT") return "CONFLICT";
+  if (snapshot.state === "SUCCESS" && snapshot.reconciliationStatus !== "IN_SYNC") return "VERIFYING";
   return snapshot.state === "SUCCESS" ? "SYNCED" : "IDLE";
 }
