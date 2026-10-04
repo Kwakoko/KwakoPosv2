@@ -325,6 +325,15 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   });
   await pwaV3.flushPersistence();
   const preservedBeforeUpgrade = pwaV3.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
+  const nativeBeforeUpgrade = (pwaV3 as any).nativeDb
+    ? await new Promise<number>((resolve, reject) => {
+        const tx = (pwaV3 as any).nativeDb.transaction("syncOutbox", "readonly");
+        const request = tx.objectStore("syncOutbox").count();
+        request.onsuccess = () => resolve(Number(request.result || 0));
+        request.onerror = () => reject(request.error || new Error("Native outbox count failed"));
+      })
+    : -1;
+  console.log(` [F-EVIDENCE] native V3 syncOutbox count before close=${nativeBeforeUpgrade}`);
   pwaV3.close();
   // Allow the IndexedDB close event loop to settle before issuing the versioned reopen.
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -336,9 +345,9 @@ export async function runSyntheticProductionSuite(apiBaseUrl?: string): Promise<
   await pwaV6.ready;
   await pwaV6.refreshStoresFromNative(["syncOutbox", "syncMetadata"]);
   const preservedAfterUpgrade = pwaV6.getPendingOutbox(syntheticTenantId, syntheticBranchId).length;
-  const passF = preservedBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
+  const passF = preservedBeforeUpgrade === 1 && nativeBeforeUpgrade === 1 && preservedAfterUpgrade === 1;
   console.log(
-    ` [F-EVIDENCE] PWA V3->V6 outbox preservation: before=${preservedBeforeUpgrade}, after=${preservedAfterUpgrade}`,
+    ` [F-EVIDENCE] PWA V3->V6 outbox preservation: mapBefore=${preservedBeforeUpgrade}, nativeBefore=${nativeBeforeUpgrade}, after=${preservedAfterUpgrade}`,
   );
   results.push({
     testSuite: "SYNTHETIC_TEST_F_PWA_UPGRADE_PRESERVATION",
