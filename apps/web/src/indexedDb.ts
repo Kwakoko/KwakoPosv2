@@ -25,9 +25,10 @@ import {
   PERSISTENCE_STATUS_KEY_PREFIX,
 } from "./persistence/persistenceStatus.js";
 
-const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
+// Identity and HR records are privileged PostgreSQL authorities and never use the generic business sync outbox.\nconst SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
   "User",
   "Role",
+  "Employee",
   "PlatformSecurity",
   "SuperAdmin",
 ]);
