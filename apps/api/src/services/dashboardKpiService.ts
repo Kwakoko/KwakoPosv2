@@ -194,10 +194,10 @@ export async function getDashboardKpiSnapshot(
     // Dashboard analytics are derived from the same PostgreSQL transaction snapshot
     // as the core KPIs. Browser/IndexedDB state is never used for online analytics.
     const now = new Date();
-    const windowDays = timeframe === "today" ? 1 : timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : now.getDate();
-    const windowStart = new Date(now);
-    windowStart.setHours(0, 0, 0, 0);
-    windowStart.setDate(windowStart.getDate() - (windowDays - 1));
+    const windowDays = timeframe === "today" ? 1 : timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : now.getUTCDate();
+    // PostgreSQL DATE("soldAt") is date-based; build the reporting window in UTC
+    // so application-local timezone offsets cannot shift the chart day keys.
+    const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (windowDays - 1)));
     const priorStart = new Date(windowStart);
     priorStart.setDate(priorStart.getDate() - windowDays);
 
