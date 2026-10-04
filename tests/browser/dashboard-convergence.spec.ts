@@ -522,6 +522,92 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     expect(finalB.asOfRevision).toBe(finalC.asOfRevision);
     expect(BigInt(finalA.asOfRevision)).toBeGreaterThan(BigInt(initial[0].asOfRevision));
 
+    // Financial closure coverage: authoritative tax calculation, split tender and partial return.
+    await prisma.setting.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        scope: 'BRANCH',
+        key: 'tax.config',
+        value: { vatEnabled: true, vatRatePercent: 18, taxInclusivePricing: true, currencyCode: 'TZS' },
+      },
+    });
+    const taxSaleResponse = await pageA.evaluate(async ({ tenantId, branchId, productId, variantId }) => {
+      const raw = localStorage.getItem('kwakopos:v2:session');
+      const session = raw ? JSON.parse(raw) : null;
+      const response = await fetch('/api/v1/pos/sales', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + String(session?.accessToken || ''),
+          'x-tenant-id': tenantId,
+          'x-branch-id': branchId,
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          items: [{ productId, variantId, quantity: 1, unitPrice: 1180, unitCost: 600 }],
+          payments: [
+            { amount: 590, paymentMethod: 'CASH' },
+            { amount: 590, paymentMethod: 'MOBILE_MONEY' },
+          ],
+          deviceId: 'DEVICE-A',
+          operationId: 'dashboard-financial-closure-' + crypto.randomUUID(),
+          idempotencyKey: 'dashboard-financial-closure-' + crypto.randomUUID(),
+        }),
+      });
+      return { status: response.status, body: await response.json() };
+    }, { tenantId, branchId, productId, variantId });
+    expect(taxSaleResponse.status).toBe(201);
+    const taxSaleId = taxSaleResponse.body?.data?.sale?.id || taxSaleResponse.body?.data?.id;
+    expect(taxSaleId).toBeTruthy();
+    const taxSale = await prisma.sale.findUnique({ where: { id: taxSaleId }, select: { grandTotal: true, subtotal: true, taxTotal: true, totalCost: true, grossProfit: true } });
+    expect(Number(taxSale?.grandTotal)).toBe(1180);
+    expect(Number(taxSale?.subtotal)).toBe(1000);
+    expect(Number(taxSale?.taxTotal)).toBe(180);
+    expect(Number(taxSale?.totalCost)).toBe(600);
+    expect(Number(taxSale?.grossProfit)).toBe(400);
+
+    await prisma.return.create({
+      data: {
+        id: randomUUID(),
+        tenantId,
+        branchId,
+        returnNumber: 'RET-DASH-' + randomUUID().slice(0, 8),
+        originalSaleId: taxSaleId,
+        reason: 'Financial closure certification partial return',
+        refundType: 'CASH',
+        totalRefundAmount: 590,
+        status: 'COMPLETED',
+        lines: {
+          create: [{
+            id: randomUUID(),
+            variantId,
+            quantityReturned: 1,
+            refundUnitPrice: 590,
+            refundLineTotal: 590,
+            condition: 'GOOD',
+          }],
+        },
+      },
+    });
+    const financialSnapshot = await readDashboardSnapshot(pageA, tenantId, branchId);
+    expect(financialSnapshot.salesToday).toBe(2000);
+    expect(financialSnapshot.grossProfit).toBe(1000);
+    expect(financialSnapshot.netSalesToday).toBe(2000);
+    expect(financialSnapshot.cogsToday).toBe(1000);
+    expect(financialSnapshot.analytics.paymentTotalVolume).toBe(2680);
+    expect(financialSnapshot.analytics.paymentTotalCount).toBe(3);
+    expect(financialSnapshot.analytics.paymentTotalOrderCount).toBe(2);
+    expect(financialSnapshot.analytics.paymentOverallAov).toBe(1340);
+    const cashChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'CASH');
+    const mobileChannel = financialSnapshot.analytics.paymentChannels.find((c) => c.name === 'MOBILE_MONEY');
+    expect(cashChannel?.orderCount).toBe(2);
+    expect(cashChannel?.paymentCount).toBe(2);
+    expect(mobileChannel?.orderCount).toBe(1);
+    expect(mobileChannel?.paymentCount).toBe(1);
+    expect(financialSnapshot.analytics.topProducts[0]?.units).toBe(1);
+    expect(financialSnapshot.analytics.topProducts[0]?.revenue).toBe(2000);
     // Browser C: real logout -> login -> dashboard recovery.
     await pageC.locator("#topbar-user-btn").click();
     const signOutResponse = pageC.waitForResponse((response) =>
@@ -579,6 +665,9 @@ test("dashboard converges PostgreSQL -> Browser A/B/C and survives offline sale 
     await Promise.all(contexts.map((context) => context.close()));
     await prisma.$executeRawUnsafe("DELETE FROM sync_change_journal WHERE tenant_id = $1", tenantId);
     await prisma.$executeRawUnsafe("DELETE FROM sync_conflict_record WHERE tenant_id = $1", tenantId);
+    await prisma.returnLine.deleteMany({ where: { returnRel: { tenantId } } });
+    await prisma.return.deleteMany({ where: { tenantId } });
+    await prisma.setting.deleteMany({ where: { tenantId } });
     await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.saleLine.deleteMany({ where: { sale: { tenantId } } });
     await prisma.sale.deleteMany({ where: { tenantId } });
