@@ -2,10 +2,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { once } from "node:events";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 
 const ROOT = process.cwd();
+process.env.JWT_SECRET ||= randomBytes(48).toString("hex");
 const PORT = 3012;
 const BASE = "http://127.0.0.1:" + PORT;
 
