@@ -44,7 +44,4 @@ describe("syncStatusLabel", () => {
     expect(syncStatusLabel({ ...base(), state: "SUCCESS" })).toBe("SYNCED");
   });
 
-  it("reports synced only after a successful sync with an empty clean queue", () => {
-    expect(syncStatusLabel({ ...base(), state: "SUCCESS" })).toBe("SYNCED");
-  });
 });
