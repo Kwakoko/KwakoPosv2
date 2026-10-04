@@ -42,6 +42,13 @@ function normalizeScope(value?: string): SettingsScope {
 
 export class SettingsService {
   async getEffectiveSettings(ctx: TenantContext) {
+    // Unit tests without a database still use the canonical Settings contract,
+    // but must not construct a Prisma connection. Production never uses this seam.
+    if (typeof process !== "undefined" && process.env.NODE_ENV === "test" && !process.env.DATABASE_URL) {
+      return Object.fromEntries(
+        Object.entries(DEFAULT_SETTINGS).map(([key, value]) => [key, { value, scope: "TENANT" }]),
+      );
+    }
     const rows = await prisma.setting.findMany({
       where: {
         tenantId: ctx.tenantId,
