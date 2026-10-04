@@ -14,7 +14,18 @@ import {
   restoreSession,
   switchContext as apiSwitchContext,
   safeUUID,
+  refreshSession as apiRefreshSession,
+  validateSession as apiValidateSession,
+  heartbeatSession as apiHeartbeatSession,
 } from "../services/apiClient.js";
+import {
+  IdleDetector,
+  HeartbeatService,
+  SessionWarningModal,
+  TimeoutRedirect,
+  sessionSyncService,
+} from "../session/index.js";
+import { captureRegisteredDrafts, restoreSessionDrafts, type SessionDraft } from "../session/sessionDraftStore.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { reconcileLocalInventoryToOutbox } from "../services/inventoryReconciliationService.js";
 import { processTraVfdOutbox } from "../services/traVfdOutboxService.js";
