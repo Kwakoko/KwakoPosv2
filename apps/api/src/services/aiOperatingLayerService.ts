@@ -1,4 +1,4 @@
-import type { AiRecommendation,TenantContext } from "@kwakopos2/contracts";
+import type { AiRecommendation, AiInsightRecord, TenantContext } from "@kwakopos2/contracts";
 import { globalPrismaAiInsightsRepository,type PrismaAiInsightsRepository } from "@kwakopos2/database";
 import { AiOperatingLayerEngine } from "@kwakopos2/domain";
 
@@ -6,7 +6,7 @@ function allowed(ctx:TenantContext,required:string[]){const permissions=new Set(
 
 export class AiOperatingLayerService{
   constructor(private readonly repository:PrismaAiInsightsRepository=globalPrismaAiInsightsRepository,private readonly engine=new AiOperatingLayerEngine()){}
-  async getInsightsAndRecommendations(ctx:TenantContext){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Insights permission required.");if(await this.repository.getKillSwitchActive(ctx))return {insights:[],recommendations:[]};const snapshot=await this.repository.loadBusinessSnapshot(ctx);const result=this.engine.generateInsightsAndRecommendations(ctx,snapshot,false);await this.repository.persistInsightsAndRecommendations(ctx,result);return {insights:await this.repository.listInsights(ctx,50),recommendations:await this.repository.listRecommendations(ctx,50)};}
+  async getInsightsAndRecommendations(ctx:TenantContext){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Insights permission required.");if(await this.repository.getKillSwitchActive(ctx))return {insights:[],recommendations:[]};const snapshot=await this.repository.loadBusinessSnapshot(ctx);const result: { insights: AiInsightRecord[]; recommendations: AiRecommendation[] } = this.engine.generateInsightsAndRecommendations(ctx,snapshot,false);await this.repository.persistInsightsAndRecommendations(ctx,result);return {insights:await this.repository.listInsights(ctx,50),recommendations:await this.repository.listRecommendations(ctx,50)};}
   async listInsights(ctx:TenantContext,limit=50){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Insights permission required.");return this.repository.listInsights(ctx,limit);}
   async listRecommendations(ctx:TenantContext,limit=50){if(!allowed(ctx,["inventory_view","report_view","financial_report_view"]))throw new Error("FORBIDDEN: AI Recommendations permission required.");return this.repository.listRecommendations(ctx,limit);}
   async askAi(ctx:TenantContext,q:string){if(!allowed(ctx,["finance_view","financial_report_view"]))throw new Error("FORBIDDEN: Finance analytical permission required.");if(await this.repository.getKillSwitchActive(ctx))throw new Error("AI_KILL_SWITCH_ACTIVE: AI query disabled.");return this.engine.askAi(ctx,q,ctx.permissions,await this.repository.getGrossMarginMetric(ctx));}
