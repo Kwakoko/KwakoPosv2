@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { ALL_MODULE_KEYS, MODULE_MANIFESTS } from "../../apps/web/src/modules/moduleRegistry.js";
@@ -98,4 +98,4 @@ const result = {
 
 console.log(JSON.stringify(result, null, 2));
 if (failures.length > 0) process.exit(1);
-console.log(`NAVIGATION PRODUCTION LOCK: PASS â€” ${LOCK_ID}`);
+console.log(`NAVIGATION PRODUCTION LOCK: PASS — ${LOCK_ID}`);
