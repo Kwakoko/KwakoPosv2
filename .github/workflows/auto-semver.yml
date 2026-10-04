@@ -77,7 +77,55 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+
+          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag exists." >&2
+            exit 1
+          fi
+          if [[ "$VERSION" != "${LATEST_TAG#v}" ]]; then
+            export LATEST_TAG
+            node --input-type=module - <<'NODE'
+            import fs from "node:fs";
+            const { compareSemVer } = await import("./packages/config/src/semverEngine.ts");
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const latest = process.env.LATEST_TAG.slice(1);
+            if (compareSemVer(p.version, latest) > 0) {
+              console.log(`RELEASE_CANDIDATE_PENDING: v${p.version} is already committed ahead of ${process.env.LATEST_TAG}; no duplicate release commit will be created.`);
+              process.exit(0);
+            }
+            throw new Error(`RELEASE_BLOCKED: committed version v${p.version} is not ahead of baseline ${process.env.LATEST_TAG}.`);
+            NODE
+          fi
+
+      - name: Wait for required mainline checks
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflows=("CI Quality Gates" "Security & Vulnerability Scanning")
+          deadline=$((SECONDS + 1800))
+          for workflow in "${workflows[@]}"; do
+            while true; do
+              result="$(gh run list --workflow "$workflow" --commit "$GITHUB_SHA" --limit 1 --json status,conclusion --jq 'if length == 0 then "" else .[0].status + "|" + (.[0].conclusion // "") end' 2>/dev/null || true)"
+              case "$result" in
+                completed\|success) break ;;
+                completed\|*) echo "RELEASE_BLOCKED: $workflow failed for $GITHUB_SHA ($result)" >&2; exit 1 ;;
+                "")
+                  if (( SECONDS >= deadline )); then echo "RELEASE_BLOCKED: $workflow did not publish a completed run for $GITHUB_SHA within 30 minutes." >&2; exit 1; fi
+                  sleep 10 ;;
+                *)
+                  if (( SECONDS >= deadline )); then echo "RELEASE_BLOCKED: $workflow remained incomplete for $GITHUB_SHA for 30 minutes." >&2; exit 1; fi
+                  sleep 10 ;;
+              esac
+            done
+          done
+          echo "Required mainline CI and security checks are green for $GITHUB_SHA."
+
+      - name: Calculate automatic SemVer bump
+        if: steps.guard.outputs.skip != 'true'
+        run: npx tsx scripts/release/prepare-release.ts
       - name: Resolve authoritative release candidate
         if: steps.guard.outputs.skip != 'true'
         id: candidate
