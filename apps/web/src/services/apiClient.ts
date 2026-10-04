@@ -262,7 +262,10 @@ export async function refreshSession(): Promise<boolean> {
 }
 
 export async function validateSession(): Promise<any> {
-  return requestJson<any>("/auth/session/validate", { method: "GET" }, false);
+  // allowRefresh=true: access tokens are memory-only (lost on page reload) so
+  // a 401 here almost always means the token needs refreshing, not that the
+  // session is actually invalid. Let requestJson auto-refresh before throwing.
+  return requestJson<any>("/auth/session/validate", { method: "GET" }, true);
 }
 
 export async function recordSessionEvent(event: string, metadata?: Record<string, unknown>): Promise<void> {
@@ -277,7 +280,8 @@ export async function recordSessionEvent(event: string, metadata?: Record<string
 }
 
 export async function heartbeatSession(): Promise<any> {
-  return requestJson<any>("/auth/session/heartbeat", { method: "POST" }, false);
+  // allowRefresh=true: same rationale as validateSession — token is memory-only.
+  return requestJson<any>("/auth/session/heartbeat", { method: "POST" }, true);
 }
 
 export interface SuperAdminSetupDetails {
