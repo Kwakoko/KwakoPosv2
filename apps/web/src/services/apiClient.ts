@@ -252,6 +252,17 @@ export async function validateSession(): Promise<any> {
   return requestJson<any>("/auth/session/validate", { method: "GET" }, false);
 }
 
+export async function recordSessionEvent(event: string, metadata?: Record<string, unknown>): Promise<void> {
+  try {
+    await requestJson("/auth/session/event", {
+      method: "POST",
+      body: JSON.stringify({ event, metadata }),
+    }, false);
+  } catch {
+    // Observability must not break the active session.
+  }
+}
+
 export async function heartbeatSession(): Promise<any> {
   return requestJson<any>("/auth/session/heartbeat", { method: "POST" }, false);
 }
