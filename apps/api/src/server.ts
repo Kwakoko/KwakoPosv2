@@ -1038,6 +1038,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     let userId: string;
     let userName = email.split("@")[0] || "Admin User";
     let userRole = "ADMIN";
+    let userPermissions: string[] = ["*"];
     let tenantName: string | undefined;
     let tenantSlug: string | undefined;
     let branchName: string | undefined;
@@ -1061,6 +1062,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         branchId = existingUser.branchId;
         userName = existingUser.name || userName;
         userRole = String(existingUser.role?.name || "ADMIN");
+        userPermissions = Array.isArray(existingUser.role?.permissions)
+          ? existingUser.role.permissions.map((permission: unknown) => String(permission))
+          : [];
         tenantName = existingUser.tenant?.name;
         tenantSlug = existingUser.tenant?.slug;
         branchName = existingUser.branch?.name;
@@ -1184,7 +1188,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
-    const tokenPayload = { sub: userId, tenantId, branchId, email: normalizedEmail, roles: [userRole], permissions: ["*"], deviceId: deviceId || "device-server-01" };
+    const tokenPayload = {
+      sub: userId,
+      tenantId,
+      branchId,
+      email: normalizedEmail,
+      roles: [userRole],
+      permissions: userPermissions,
+      deviceId: deviceId || "device-server-01",
+    };
     const accessToken = generateAccessToken(tokenPayload);
     const session = await globalSessionManager.createSession(tenantId, userId, tokenPayload.deviceId);
 
@@ -1213,7 +1225,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Refresh token rotation
   // H-004: Strict rate limit on refresh token endpoint
   server.post("/auth/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (req, reply) => {
-    const { sessionId, refreshToken, email, tenantId, branchId, userId } = (req.body as any) || {};
+    const { sessionId, refreshToken } = (req.body as any) || {};
     if (!sessionId) {
       return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "Missing sessionId" } });
     }
@@ -1226,10 +1238,57 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or revoked session" } });
     }
 
-    const effectiveTenantId = tenantId || session.tenantId || "TNT-TZ-001";
-    const effectiveUserId = userId || session.userId || "user-001";
-    const effectiveBranchId = branchId || "BR-DSM-01";
-    const effectiveEmail = email || "admin@kwakopos.com";
+    let effectiveTenantId = String(session.tenantId);
+    let effectiveUserId = String(session.userId);
+    let effectiveBranchId = "";
+    let effectiveEmail = "";
+    let effectiveRole = "ADMIN";
+    let effectivePermissions: string[] = [];
+
+    if (productionPersistence) {
+      const sessionUser = await prisma.user.findFirst({
+        where: { id: effectiveUserId, tenantId: effectiveTenantId, status: "ACTIVE" },
+        include: { role: true },
+      });
+      if (!sessionUser) {
+        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session user is no longer active" } });
+      }
+      effectiveTenantId = sessionUser.tenantId;
+      effectiveUserId = sessionUser.id;
+      effectiveBranchId = sessionUser.branchId;
+      effectiveEmail = sessionUser.email;
+      effectiveRole = String(sessionUser.role?.name || "ADMIN");
+      effectivePermissions = Array.isArray(sessionUser.role?.permissions)
+        ? sessionUser.role.permissions.map((permission: unknown) => String(permission))
+        : [];
+    } else {
+      const inMemoryUser = Array.from(globalInMemoryStore.users.values()).find(
+        (candidate: any) => candidate.id === effectiveUserId && candidate.tenantId === effectiveTenantId,
+      ) as any;
+      if (inMemoryUser) {
+        effectiveBranchId = String(inMemoryUser.branchId || "");
+        effectiveEmail = String(inMemoryUser.email || "");
+        effectiveRole = String(inMemoryUser.role || "ADMIN");
+      }
+      effectiveBranchId ||= String(session.branchId || "");
+      effectiveEmail ||= "system@kwakopos.local";
+      effectivePermissions = ["*"];
+    }
+
+    if (!effectiveBranchId || !effectiveEmail) {
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Session context is incomplete" } });
+    }
+
+    const tokenPayload = {
+      sub: effectiveUserId,
+      tenantId: effectiveTenantId,
+      branchId: effectiveBranchId,
+      email: effectiveEmail,
+      roles: [effectiveRole],
+      permissions: effectivePermissions,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+    };
 
     if (refreshToken) {
       const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
@@ -1237,8 +1296,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         tenantId: effectiveTenantId,
         branchId: effectiveBranchId,
         email: effectiveEmail,
-        roles: ["ADMIN"],
-        permissions: ["*"],
+        roles: [effectiveRole],
+        permissions: effectivePermissions,
       });
 
       if (rotated) {
@@ -1252,23 +1311,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
     }
 
-    // Fallback: If session is valid and not revoked, issue a new access token
-    const newAccessToken = generateAccessToken({
-      sub: effectiveUserId,
-      tenantId: effectiveTenantId,
-      branchId: effectiveBranchId,
-      email: effectiveEmail,
-      roles: ["ADMIN"],
-      permissions: ["*"],
-      deviceId: session.deviceId,
-      sessionId: session.id,
-    });
+    // Compatibility recovery path for offline-first clients that persist only the
+    // opaque session identity; RBAC claims still come exclusively from the authoritative user record.
+    const newAccessToken = generateAccessToken(tokenPayload);
 
     return reply.send({
       success: true,
       data: {
         accessToken: newAccessToken,
-        refreshToken: refreshToken || undefined,
       },
     });
   });
