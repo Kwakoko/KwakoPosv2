@@ -152,6 +152,12 @@ describe("Dashboard financial closures", () => {
         },
       });
 
+      // Return COGS must use the cost captured on the original sale line, not a later master-price change.
+      await prisma.productVariant.update({
+        where: { id: variantId },
+        data: { costPrice: 900 },
+      });
+
       const snapshot = await getDashboardKpiSnapshot(ctx, "7d");
 
       expect(snapshot.salesToday).toBe(500);
