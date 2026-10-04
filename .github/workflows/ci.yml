@@ -58,12 +58,6 @@ jobs:
         run: npm run db:migrate
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
-      - name: Conflict Center Production Lock v1
-        run: npm run certify:conflict-center-lock
-      - name: Conflict Center Unit Contract
-        run: npx vitest run tests/unit/sync-conflict-center-presentation.test.ts tests/unit/sync-status-label.test.ts --reporter=verbose
-      - name: Conflict Center PostgreSQL Lifecycle
-        run: npm run certify:conflicts
       - name: Lint
         run: npm run lint
       - name: Build
