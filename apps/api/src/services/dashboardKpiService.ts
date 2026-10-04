@@ -429,7 +429,7 @@ export async function getDashboardKpiSnapshot(
       stockAlerts: lowStockCount + outOfStockCount,
       lowStockCount,
       outOfStockCount,
-      customerDebts: numberValue(customers.customerDebts),
+      customerDebts: numberValue(customers.customer_debts),
       customerCount: numberValue(customers.customer_count),
       productCount: numberValue(productRows[0]?.product_count),
       supplierCount: numberValue(supplierRows[0]?.supplier_count),
