@@ -503,7 +503,7 @@ Execution of `npm audit` and package manifest inspection reveals critical supply
 
 #### [MEDIUM] QUAL-06: Extreme Monolithic "God-Files"
 - **Locations:**  
-  - `apps/api/src/server.ts`: 4,810 lines, 223.5 KB.  
+  - `apps/api/src/server.ts`: approximately 6,330 lines in the reconciled implementation; still a monolithic route/auth/service file.  
   - `apps/web/src/pages/InventoryPage.tsx`: 218.3 KB.  
   - `apps/web/src/pages/DashboardPage.tsx`: 180.7 KB.  
   - `apps/web/src/pages/PosPage.tsx`: 149.3 KB.
