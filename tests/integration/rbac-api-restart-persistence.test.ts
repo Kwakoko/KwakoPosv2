@@ -28,7 +28,7 @@ describe("RBAC API mutations survive exact API restart", () => {
 
   async function startApi() {
     const tsx = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
-    api = spawn(process.execPath, [tsx, "apps/api/src/serverFixed.ts"], {
+    api = spawn(process.execPath, [tsx, "apps/api/src/server.ts"], {
       cwd: ROOT,
       env: {
         ...process.env,

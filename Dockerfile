@@ -58,7 +58,6 @@ COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8080
 
-# The TypeScript project emits the API beneath its source-root path.  Always
-# launch the hardened production wrapper; the base server contains development
-# authentication handlers and must never be used as the production entrypoint.
-CMD ["node", "apps/api/dist/apps/api/src/serverFixed.js"]
+# Launch the single canonical API server implementation. Authentication and
+# production hardening are registered directly in server.ts.
+CMD ["node", "apps/api/dist/server.js"]

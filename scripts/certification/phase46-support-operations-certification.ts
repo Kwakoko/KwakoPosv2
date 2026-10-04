@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 const root=process.cwd();
-const files=["packages/database/prisma/migrations/202609020002_phase46_support_operations/migration.sql","apps/api/src/services/supportOperationsService.ts","apps/api/src/routes/supportOperationsRoutes.ts","apps/api/src/routes/supportControlTowerRoutes.ts","apps/api/src/serverFixed.ts","apps/web/src/pages/SupportOperationsPage.tsx","apps/web/src/pages/SuperAdminSupportControlTowerPage.tsx","apps/api/src/services/supportAutomationScheduler.ts","tests/unit/phase46-hardening.test.ts","packages/database/prisma/migrations/202609020003_phase46_resolution_verification/migration.sql"];
+const files=["packages/database/prisma/migrations/202609020002_phase46_support_operations/migration.sql","apps/api/src/services/supportOperationsService.ts","apps/api/src/routes/supportOperationsRoutes.ts","apps/api/src/routes/supportControlTowerRoutes.ts","apps/api/src/server.ts","apps/web/src/pages/SupportOperationsPage.tsx","apps/web/src/pages/SuperAdminSupportControlTowerPage.tsx","apps/api/src/services/supportAutomationScheduler.ts","tests/unit/phase46-hardening.test.ts","packages/database/prisma/migrations/202609020003_phase46_resolution_verification/migration.sql"];
 const read=(p:string)=>fs.readFileSync(path.join(root,p),"utf8");
 const exists=(p:string)=>fs.existsSync(path.join(root,p));
 const checks:Array<[string,()=>boolean]>=[

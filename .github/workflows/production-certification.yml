@@ -89,7 +89,7 @@ jobs:
           if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
             exit 0
           fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
           echo $! > /tmp/kwakopos-candidate-security-api.pid
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
@@ -118,7 +118,7 @@ jobs:
           if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
             exit 0
           fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
           echo $! > /tmp/kwakopos-candidate-security-api.pid
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then

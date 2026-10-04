@@ -15,6 +15,7 @@ describe("password hardening", () => {
   it("rejects malformed and empty password hashes safely", async () => {
     expect(await comparePassword("anything", "")).toBe(false);
     expect(await comparePassword("anything", "$argon2id$malformed")).toBe(false);
+    expect(await comparePassword("anything", "4f0d0d1d7f1d9a5c9fbb6f7c0d2a0b6e9a2d9e2c1a3f8b5d7c9e1f2a4b6c8d0e")).toBe(false);
     expect(passwordNeedsRehash("scrypt:legacy:salt")).toBe(true);
   });
 });

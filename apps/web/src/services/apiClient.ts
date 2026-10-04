@@ -202,11 +202,6 @@ async function refreshAccessToken(): Promise<string | null> {
           method: "POST",
           body: JSON.stringify({
             sessionId: stored.sessionId,
-            deviceId: getDeviceId(),
-            email: stored.user.email,
-            tenantId: stored.user.tenantId,
-            branchId: stored.user.branchId,
-            userId: stored.user.id,
           }),
         },
         false,

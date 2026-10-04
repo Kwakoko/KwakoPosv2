@@ -8,8 +8,8 @@ const sourceContains = (relative: string, needle: string, forbidden = false) => 
 
 for (const file of [
   "apps/web/src/main.tsx","apps/web/src/App.tsx","apps/web/src/context/KwakoPosContexts.tsx","apps/web/src/services/apiClient.ts","apps/web/src/indexedDb.ts","apps/web/src/versionManager.ts",
-  "apps/api/src/server.ts","apps/api/src/serverFixed.ts","packages/sync/src/worldStandardPrismaSyncEngine.ts","packages/database/src/atomicCommercialFinance.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
-  "apps/web/dist/index.html","apps/web/dist/manifest.json","apps/web/dist/sw.js","apps/api/dist/serverFixed.js",
+  "apps/api/src/server.ts","packages/sync/src/worldStandardPrismaSyncEngine.ts","packages/database/src/atomicCommercialFinance.ts","apps/api/package.json","apps/web/package.json","package.json","release-manifest.json","index.js",
+  "apps/web/dist/index.html","apps/web/dist/manifest.json","apps/web/dist/sw.js","apps/api/dist/server.js",
 ]) requireFile(file);
 
 sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "apiLogin");
@@ -23,18 +23,18 @@ sourceContains("apps/web/src/indexedDb.ts", "indexedDB.open");
 sourceContains("apps/web/src/indexedDb.ts", "objectStore(");
 sourceContains("apps/web/src/indexedDb.ts", "this.nativeDb");
 sourceContains("apps/web/src/versionManager.ts", "isUpToDate: false");
-sourceContains("apps/api/src/serverFixed.ts", "prisma.user.findMany");
-sourceContains("apps/api/src/serverFixed.ts", "prisma.deviceSession.findUnique");
-sourceContains("apps/api/src/serverFixed.ts", "requireSecuritySecrets");
-sourceContains("apps/api/src/serverFixed.ts", "ensureSuperAdminSecurity");
-sourceContains("apps/api/src/serverFixed.ts", "verifySuperAdminMfa");
-sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\"");
+sourceContains("apps/api/src/server.ts", "prisma.user.findMany");
+sourceContains("apps/api/src/server.ts", "prisma.deviceSession.findUnique");
+sourceContains("apps/api/src/server.ts", "requireSecuritySecrets");
+sourceContains("apps/api/src/server.ts", "ensureSuperAdminSecurity");
+sourceContains("apps/api/src/server.ts", "verifySuperAdminMfa");
+sourceContains("apps/api/src/server.ts", "server.addHook(\"preValidation\"");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PurchaseReceipt");
 sourceContains("packages/database/src/atomicCommercialFinance.ts", "createSale");
 sourceContains("packages/database/src/atomicCommercialFinance.ts", "stockLedger");
-sourceContains("apps/api/package.json", "serverFixed.js");
-sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
+sourceContains("apps/api/package.json", "server.js");
+sourceContains("index.js", "apps/api/dist/apps/api/src/server.js");
 
 const readJson = (relative: string): any => { try { return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); } catch { return null; } };
 const rootPkg = readJson("package.json");
