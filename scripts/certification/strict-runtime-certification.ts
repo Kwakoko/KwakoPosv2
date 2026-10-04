@@ -32,7 +32,7 @@ sourceContains("apps/api/src/serverFixed.ts", "server.addHook(\"preValidation\""
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PrismaAtomicCommercialFinanceService");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PurchaseReceipt");
 sourceContains("packages/database/src/atomicCommercialFinance.ts", "createSale");
-sourceContains("packages/database/src/atomicCommercialFinance.ts", "StockLedger");
+sourceContains("packages/database/src/atomicCommercialFinance.ts", "stockLedger");
 sourceContains("apps/api/package.json", "serverFixed.js");
 sourceContains("index.js", "apps/api/dist/apps/api/src/serverFixed.js");
 
