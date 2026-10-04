@@ -1,232 +1,69 @@
-import {
-  AiAgentDefinition,
-  AiToolDefinition,
-  AiInsightRecord,
-  AiRecommendation,
-  AiActionLedgerEntry,
-  AiKillSwitchStatus,
-  AiOperatingHealthSummary,
-} from "@kwakopos2/contracts";
-import { globalBiAnalyticsEngine } from "./biAnalyticsEngine.js";
+import { AiBusinessSnapshot,AiEvidenceItem,AiInsightRecord,AiRecommendation,AiRiskLevel,AiSemanticMetricResult,TenantContext } from "@kwakopos2/contracts";
 
 export class AiOperatingLayerEngine {
-  private agents: Map<string, AiAgentDefinition> = new Map();
-  private tools: Map<string, AiToolDefinition> = new Map();
-  private recommendations: Map<string, AiRecommendation> = new Map();
-  private actionLedger: AiActionLedgerEntry[] = [];
-  private killSwitchStatus: AiKillSwitchStatus = {
-    scope: "GLOBAL",
-    isActive: false,
-    disabledTargets: [],
-    triggeredBy: "SYSTEM",
-    triggeredAt: new Date().toISOString(),
-  };
-
-  constructor() {
-    // Register Default Specialist Agents
-    this.registerAgent({
-      agentId: "agent-inventory-specialist",
-      name: "Inventory Specialist Agent",
-      purpose: "Analyzes stock levels, predicts stockouts, and generates reorder recommendations",
-      permissions: ["inventory.read", "suppliers.read", "reorder.recommend"],
-      tools: ["tool-get-stock-levels", "tool-predict-stockout", "tool-create-reorder-recommendation"],
-      autonomyLevel: "GUARDED",
-    });
-
-    this.registerAgent({
-      agentId: "agent-finance-specialist",
-      name: "Finance & Profitability Agent",
-      purpose: "Monitors cash flow, margin anomalies, and expense variances",
-      permissions: ["finance.read", "accounting.read"],
-      tools: ["tool-get-gross-margin", "tool-analyze-expense-spike"],
-      autonomyLevel: "RECOMMEND",
-    });
-
-    // Register Default Tools
-    this.registerTool({
-      toolId: "tool-get-stock-levels",
-      name: "Get Stock Levels",
-      inputSchema: { type: "object", properties: { productId: { type: "string" } } },
-      outputSchema: { type: "object", properties: { quantity: { type: "number" } } },
-      permission: "inventory.read",
-      riskLevel: "LOW",
-      owner: "Supply Chain Domain",
-    });
-  }
-
-  /**
-   * 1. Register Specialist Agent
-   */
-  public registerAgent(agent: AiAgentDefinition): { success: boolean; error?: string } {
-    if (!agent.agentId || !agent.name) {
-      return { success: false, error: "Invalid agent definition" };
+  public generateInsightsAndRecommendations(ctx:TenantContext,snapshot:AiBusinessSnapshot,killSwitchActive=false){
+    if(killSwitchActive)return {insights:[] as AiInsightRecord[],recommendations:[] as AiRecommendation[]};
+    const active=snapshot.variants.filter(v=>v.active);
+    const atRisk=active.map(v=>{
+      const stock=Number(snapshot.stockByVariant[v.variantId]??0);
+      const available=Math.max(0,stock-Number(v.reservedQuantity??0));
+      const reorder=Number(v.reorderLevel??0);
+      const sold7=Number(snapshot.unitsSoldLast7DaysByVariant[v.variantId]??0);
+      const days=Number(snapshot.salesDaysByVariant[v.variantId]??0);
+      const velocity=sold7/7;
+      const projected=velocity>0?available/velocity:null;
+      return {v,available,reorder,sold7,days,projected};
+    }).filter(r=>r.reorder>0&&r.available<=r.reorder).sort((a,b)=>(a.projected??Infinity)-(b.projected??Infinity));
+    if(!atRisk.length){
+      return {insights:[{
+        insightId:`INS-${ctx.tenantId}-${ctx.branchId}-HEALTH`,tenantId:ctx.tenantId,branchId:ctx.branchId,dedupeKey:"STOCKOUT-HEALTHY",
+        title:"No immediate stockout risk detected",observation:`Reviewed ${active.length} active variants against configured reorder levels.`,
+        evidence:[{sourceType:"BI_METRIC",sourceId:`stock-risk-scan-${ctx.tenantId}-${ctx.branchId}`,label:"Active variants reviewed",value:active.length,observedAt:snapshot.now,evidenceClass:"MEASURED"}],
+        interpretation:"No active variant is currently at or below its configured reorder level.",impact:"No immediate stockout intervention is indicated by the current inventory ledger.",
+        recommendedNextStep:"Continue normal stock monitoring.",confidenceScore:0.9,evidenceClass:"CALCULATED",sourceKind:"DETERMINISTIC_RULE",status:"ACTIVE",createdAt:snapshot.now,updatedAt:snapshot.now,
+      }],recommendations:[]};
     }
-    this.agents.set(agent.agentId, agent);
-    return { success: true };
-  }
-
-  /**
-   * 2. Register AI Tool
-   */
-  public registerTool(tool: AiToolDefinition): { success: boolean; error?: string } {
-    if (!tool.toolId || !tool.name) {
-      return { success: false, error: "Invalid tool definition" };
+    const insights:AiInsightRecord[]=[]; const recommendations:AiRecommendation[]=[];
+    for(const r of atRisk.slice(0,10)){
+      const projected=r.projected==null?null:Number(Math.max(0,r.projected).toFixed(2));
+      const riskLevel:AiRiskLevel=projected!=null&&projected<1?"CRITICAL":projected!=null&&projected<3?"HIGH":"MEDIUM";
+      const evidence:AiEvidenceItem[]=[
+        {sourceType:"PRODUCT_VARIANT",sourceId:r.v.variantId,label:"Product variant",value:r.v.sku,observedAt:snapshot.now,evidenceClass:"MEASURED"},
+        {sourceType:"STOCK_LEDGER",sourceId:`stock-balance-${r.v.variantId}`,label:"Ledger-derived available stock",value:r.available,observedAt:snapshot.now,evidenceClass:"CALCULATED"},
+        {sourceType:"SALE_LINE",sourceId:`sales-7d-${r.v.variantId}`,label:"Units sold in trailing 7 days",value:r.sold7,observedAt:snapshot.now,evidenceClass:"MEASURED"},
+      ];
+      const velocityText=projected==null?"No positive 7-day sales velocity was observed.":`Projected stock coverage is about ${projected} days at the observed sales velocity.`;
+      const confidence=Math.min(0.98,0.70+Math.min(0.28,(r.days/7)*0.28));
+      const insightId=`INS-${ctx.tenantId}-${ctx.branchId}-${r.v.variantId}`;
+      insights.push({
+        insightId,tenantId:ctx.tenantId,branchId:ctx.branchId,dedupeKey:`STOCKOUT-${r.v.variantId}`,
+        title:`Stockout risk: ${r.v.productName}`,
+        observation:`${r.v.productName} (${r.v.sku}) is at ${r.available} available units versus reorder level ${r.reorder}. ${velocityText}`,
+        evidence,interpretation:projected==null?"Inventory is at or below its reorder threshold, but recent demand is insufficient to estimate a stockout date.":`At the observed 7-day sales velocity, available stock covers approximately ${projected} days.`,
+        impact:projected==null?"The item requires inventory review because the ledger-derived balance is below the configured reorder point.":`The item may reach zero available stock in approximately ${projected} days if recent demand continues.`,
+        recommendedNextStep:`Review replenishment for ${r.v.productName} and confirm supplier availability before creating a purchase order.`,
+        confidenceScore:Number(confidence.toFixed(2)),evidenceClass:"CALCULATED",sourceKind:"DETERMINISTIC_RULE",status:"ACTIVE",createdAt:snapshot.now,updatedAt:snapshot.now,
+      });
+      recommendations.push({
+        recommendationId:`REC-${ctx.tenantId}-${ctx.branchId}-${r.v.variantId}`,tenantId:ctx.tenantId,branchId:ctx.branchId,insightId,
+        title:`Review replenishment: ${r.v.productName}`,summary:`Available stock is ${r.available} against reorder level ${r.reorder}.`,
+        evidence,expectedImpact:"Reduce stockout probability by reviewing replenishment before available stock is exhausted.",
+        riskLevel,policyStatus:"VALIDATED",approvalStatus:"PENDING",expiresAt:new Date(Date.now()+48*60*60*1000).toISOString(),createdAt:snapshot.now,updatedAt:snapshot.now,
+      });
     }
-    this.tools.set(tool.toolId, tool);
-    return { success: true };
+    return {insights,recommendations};
   }
 
-  /**
-   * 3. Generate Evidence-Backed Insights & Recommendations
-   */
-  public generateInsightsAndRecommendations(tenantId: string): {
-    insights: AiInsightRecord[];
-    recommendations: AiRecommendation[];
-  } {
-    if (this.killSwitchStatus.isActive || this.killSwitchStatus.disabledTargets.includes(tenantId)) {
-      return { insights: [], recommendations: [] };
-    }
-
-    const insight: AiInsightRecord = {
-      insightId: `INS-AI-${Date.now()}`,
-      title: "Inventory Stockout Vulnerability",
-      observation: "SKU-9020 (Panadol 500mg) stock dropped to 8 units",
-      evidence: ["StockLedger active quantity fact: 8", "Daily sales run rate: 14 units/day"],
-      interpretation: "Stockout will occur within 14 hours if purchase reorder is not placed",
-      impact: "Estimated $450 lost revenue and customer frustration",
-      recommendedNextStep: "Approve 100-unit PO purchase reorder to primary supplier",
-      confidenceScore: 0.96,
-    };
-
-    const recommendationId = `REC-AI-${Date.now()}`;
-    const recommendation: AiRecommendation = {
-      recommendationId,
-      title: "Approve Panadol 500mg Stock Reorder PO",
-      summary: "Generate 100-unit purchase order for $240 to prevent stockout",
-      evidence: ["StockLedger fact", "Phase 32 BI Demand Forecast"],
-      expectedImpact: "Prevent stockout & maintain 99.8% customer fulfillment",
-      riskLevel: "MEDIUM",
-      policyStatus: "VALIDATED",
-      approvalStatus: "PENDING",
-      createdAt: new Date().toISOString(),
-    };
-
-    this.recommendations.set(recommendationId, recommendation);
-
-    return {
-      insights: [insight],
-      recommendations: [recommendation],
-    };
+  public askAi(_ctx:TenantContext,queryText:string,userPermissions:string[],metric:AiSemanticMetricResult){
+    const allowed=userPermissions.some(p=>["*","finance_view","financial_report_view","finance.read"].includes(String(p).toLowerCase()));
+    if(!allowed)throw new Error("FORBIDDEN: Finance analytical permission required.");
+    const q=queryText.trim().toLowerCase();
+    if(!q.includes("margin")&&!q.includes("gross profit"))throw new Error("AI_QUERY_UNSUPPORTED: Only governed gross-margin queries are currently enabled.");
+    return {answer:`Based on the current tenant and branch financial ledger, Gross Margin Percentage is ${metric.calculatedValue.toFixed(2)}%.`,evidence:metric.evidence,semanticMetricUsed:metric.metricId};
   }
 
-  /**
-   * 4. Ask AI Natural Language Query (Governed via Phase 32 BI Semantic Layer)
-   */
-  public askAi(queryText: string, userPermissions: string[]): {
-    answer: string;
-    evidence: string[];
-    semanticMetricUsed?: string;
-  } {
-    if (this.killSwitchStatus.isActive) {
-      return {
-        answer: "AI Operating System is currently disabled under emergency Kill Switch policy.",
-        evidence: ["Kill Switch Active"],
-      };
-    }
-
-    const biResult = globalBiAnalyticsEngine.executeSemanticQuery(queryText, userPermissions);
-
-    return {
-      answer: `Based on verified financial ledgers, your current ${biResult.metricName} is ${biResult.calculatedValue}%.`,
-      evidence: ["POS Sales Fact table", "StockLedger Cost valuation"],
-      semanticMetricUsed: biResult.metricId,
-    };
-  }
-
-  /**
-   * 5. Explain Recommendation (Verifiable Evidence & Business Impact)
-   */
-  public explainRecommendation(recommendationId: string): {
-    found: boolean;
-    explanation?: string;
-    evidence?: string[];
-  } {
-    const rec = this.recommendations.get(recommendationId);
-    if (!rec) return { found: false };
-
-    return {
-      found: true,
-      explanation: `Recommendation [${rec.title}] was derived from low stock thresholds. Expected business impact: ${rec.expectedImpact}. Risk classification: ${rec.riskLevel}.`,
-      evidence: rec.evidence,
-    };
-  }
-
-  /**
-   * 6. Execute Approved Recommendation Action with Independent Verification & Ledger Audit
-   */
-  public executeApprovedAction(recommendationId: string, approverId: string): {
-    success: boolean;
-    ledgerEntry?: AiActionLedgerEntry;
-  } {
-    const rec = this.recommendations.get(recommendationId);
-    if (!rec || rec.approvalStatus === "REJECTED") {
-      return { success: false };
-    }
-
-    rec.approvalStatus = "APPROVED";
-
-    const ledgerEntry: AiActionLedgerEntry = {
-      auditId: `AUDIT-AI-${Date.now()}`,
-      recommendationId,
-      tenantId: "TEN-001",
-      domain: "INVENTORY",
-      actionExecuted: "CREATE_PURCHASE_ORDER",
-      executedByIdentity: approverId,
-      executionVerified: true,
-      verificationDetails: "PO created and verified in PurchaseLedger",
-      timestamp: new Date().toISOString(),
-    };
-
-    this.actionLedger.push(ledgerEntry);
-
-    return {
-      success: true,
-      ledgerEntry,
-    };
-  }
-
-  /**
-   * 7. Toggle AI Kill Switch
-   */
-  public toggleKillSwitch(scope: "GLOBAL" | "TENANT" | "AGENT" | "TOOL" | "FEATURE", idOrDisabled: string | boolean): boolean {
-    if (scope === "GLOBAL") {
-      this.killSwitchStatus.isActive = Boolean(idOrDisabled);
-    } else if (scope === "TENANT" && typeof idOrDisabled === "string") {
-      if (!this.killSwitchStatus.disabledTargets.includes(idOrDisabled)) {
-        this.killSwitchStatus.disabledTargets.push(idOrDisabled);
-      }
-    }
-    return true;
-  }
-
-  /**
-   * 8. Health Summary
-   */
-  public getHealthSummary(): AiOperatingHealthSummary {
-    let pendingCount = 0;
-    for (const r of this.recommendations.values()) {
-      if (r.approvalStatus === "PENDING") pendingCount++;
-    }
-
-    return {
-      activeAgentsCount: this.agents.size,
-      totalToolsCount: this.tools.size,
-      pendingApprovalsCount: pendingCount,
-      ledgerEntriesCount: this.actionLedger.length,
-      killSwitchActive: this.killSwitchStatus.isActive,
-      aiPlatformOperational: true,
-    };
+  public explainRecommendation(rec:AiRecommendation){
+    return {found:true,explanation:`Recommendation [${rec.title}] is based on tenant/branch-scoped records and structured source evidence. The approval endpoint records approval only; it does not execute a business mutation.`,evidence:rec.evidence};
   }
 }
-
-export const globalAiOperatingLayerEngine = new AiOperatingLayerEngine();
+export const globalAiOperatingLayerEngine=new AiOperatingLayerEngine();
