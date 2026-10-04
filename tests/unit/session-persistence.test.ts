@@ -55,8 +55,8 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
 
     setStoredSession(session);
 
-    // Verify stored in both
-    expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeTruthy();
+    // Default sessions are browser-session scoped unless rememberMe is enabled.
+    expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeNull();
     expect(mockSessionStorage.getItem("kwakopos:v2:session")).toBeTruthy();
 
     const retrieved = getStoredSession();
@@ -124,6 +124,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     };
 
     setStoredSession(session);
+    vi.stubGlobal("navigator", { onLine: false });
 
     // Mock network failure (e.g. offline POS terminal)
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
