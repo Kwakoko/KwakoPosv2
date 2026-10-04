@@ -81,7 +81,15 @@ export async function commitLocalOutboxes(
         window.dispatchEvent(new CustomEvent("kwakopos:outbox-enqueued", { detail: { item } }));
         if ("BroadcastChannel" in window) {
           const bc = new BroadcastChannel("kwakopos_sync_channel");
-          bc.postMessage({ type: "OUTBOX_MUTATION", item, timestamp: Date.now() });
+          bc.postMessage({
+            type: "OUTBOX_MUTATION",
+            tenantId: item.tenantId,
+            branchId: item.branchId,
+            operationId: item.id,
+            entityType: item.entityType,
+            entityId: item.entityId,
+            timestamp: Date.now(),
+          });
           bc.close();
         }
       }

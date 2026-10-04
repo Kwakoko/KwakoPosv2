@@ -23,7 +23,7 @@ import {
   Building, Briefcase, FileText, UserPlus, Sliders, ShieldCheck, Terminal, Cpu, Zap, Archive
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 // User and Role mutations are privileged PostgreSQL operations; they never use the business sync outbox.
 

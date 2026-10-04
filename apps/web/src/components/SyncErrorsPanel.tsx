@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth, useBranch, useTenant } from "../context/KwakoPosContexts.js";
 import {
   AlertTriangle,
   ShieldAlert,
@@ -17,7 +18,7 @@ import {
   type SyncDiagnosticErrorEntry
 } from "../services/syncDiagnosticService.js";
 import { clientSyncEngine } from "../clientSyncEngine.js";
-import { db, processOutbox } from "../atomicOutbox.js";
+import { db } from "../atomicOutbox.js";
 import { Button } from "./UI/Button.js";
 
 export interface SyncErrorsPanelProps {
@@ -37,6 +38,9 @@ export const SyncErrorsPanel: React.FC<SyncErrorsPanelProps> = ({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const { user } = useAuth();
+  const { currentTenantId } = useTenant();
+  const { currentBranchId } = useBranch();
 
   useEffect(() => {
     const unsub = syncDiagnosticService.subscribe((updated) => {
@@ -105,8 +109,12 @@ export const SyncErrorsPanel: React.FC<SyncErrorsPanelProps> = ({
       if (onRetry) {
         await onRetry();
       } else {
-        await processOutbox({ db });
-        await clientSyncEngine.runSync();
+        const tenantId = user?.tenantId || currentTenantId;
+        const branchId = user?.branchId || currentBranchId;
+        if (!tenantId || !branchId) {
+          throw new Error("SYNC_CONTEXT_REQUIRED: cannot retry outbox without tenant and branch context");
+        }
+        await clientSyncEngine.runSync(undefined, undefined, tenantId, branchId);
       }
       refreshTelemetry();
     } catch (e) {

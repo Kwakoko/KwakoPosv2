@@ -24,7 +24,7 @@ import {
   Calendar, Clock, ChevronDown, ChevronRight, FileText, Monitor, Barcode
 } from "lucide-react";
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
-import { apiFetch, safeUUID } from "../services/apiClient.js";
+import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";

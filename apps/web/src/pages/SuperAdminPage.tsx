@@ -21,7 +21,7 @@ import {
   Terminal,
   Sparkles,
 } from "lucide-react";
-import { apiFetch, changeSuperAdminPassword } from "../services/apiClient.js";
+import { apiFetch, changeSuperAdminPassword } from "../services/applicationApiService.js";
 import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { ToggleSwitch } from "../UI/ToggleSwitch.js";
 import { useToast } from "../UI/Toast.js";
-import { apiFetch } from "../../services/apiClient.js";
+import { apiFetch } from "../../services/applicationApiService.js";
 
 export interface TraVfdCardConfig {
   enabled: boolean;

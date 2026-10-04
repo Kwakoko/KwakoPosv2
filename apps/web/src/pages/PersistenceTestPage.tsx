@@ -28,7 +28,7 @@ import {
 import { useAuth, useTenant, useSync } from "../context/KwakoPosContexts.js";
 import { LocalIndexedDbStore } from "../indexedDb.js";
 import { hlcEngine } from "../services/hlcEngine.js";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { queueAddStock, recordPosSaleDeductions, getEffectiveStock } from "../services/inventoryStockService.js";
 import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
 

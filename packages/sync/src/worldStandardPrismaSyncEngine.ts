@@ -4,6 +4,12 @@ import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialF
 import { computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
 import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
+import {
+  buildDomainEvent,
+  ensureDurableDomainEventJournal,
+  persistDomainEvent,
+  publishPendingDomainEvents,
+} from "./durableDomainEventBridge.js";
 
 const MAX_DELTA = 500;
 
@@ -84,6 +90,7 @@ export class WorldStandardPrismaSyncEngine {
       await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
       await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
+      await ensureDurableDomainEventJournal(prisma);
        await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ)`);
        await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
     })();
@@ -497,6 +504,21 @@ export class WorldStandardPrismaSyncEngine {
       const payload = op.payload as any;
       const existing = await tx.product.findUnique({ where: { id: op.entityId } });
       if (!existing) {
+        const buyingPrice = Number(payload.buyingPrice ?? payload.costPrice ?? 0);
+        const sellingPrice = Number(payload.sellingPrice ?? payload.price ?? 0);
+        const explicitVariants = Array.isArray(payload.variants) ? payload.variants : [];
+        const variantsToCreate = explicitVariants.length > 0
+          ? explicitVariants
+          : [{
+              id: `${op.entityId}-default`,
+              name: payload.name,
+              sku: `${payload.sku}-STD`,
+              barcode: null,
+              price: sellingPrice,
+              costPrice: buyingPrice,
+              isActive: true,
+              attributes: { __systemDefaultVariant: "true" },
+            }];
         await tx.product.create({
           data: {
             id: op.entityId,
@@ -510,19 +532,23 @@ export class WorldStandardPrismaSyncEngine {
             supplierId: payload.supplierId ?? null,
             taxId: payload.taxId ?? null,
             category: payload.category ?? "General",
-            buyingPrice: payload.buyingPrice ?? 0,
-            sellingPrice: payload.sellingPrice ?? 0,
+            buyingPrice,
+            sellingPrice,
             isActive: payload.isActive ?? true,
             variants: {
-              create: (payload.variants || []).map((v: any) => ({
+              create: variantsToCreate.map((v: any) => ({
                 id: v.id,
                 tenantId: ctx.tenantId,
                 branchId: ctx.branchId,
                 name: v.name,
                 sku: v.sku,
                 barcode: v.barcode ?? null,
-                price: v.price,
-                costPrice: v.costPrice,
+                price: Number(v.price ?? sellingPrice),
+                costPrice: Number(v.costPrice ?? v.buyingPrice ?? buyingPrice),
+                inventoryQuantity: 0,
+                reservedQuantity: v.reservedQuantity ?? 0,
+                reorderLevel: v.reorderLevel ?? 0,
+                attributes: v.attributes ?? {},
                 isActive: v.isActive ?? true,
               })),
             },
@@ -968,9 +994,14 @@ const now = new Date();
             });
             if (fingerprint !== operationFingerprint(op)) return { status: "IDEMPOTENCY_CONFLICT" as const };
             const snapshot = await this.snapshot(ctx, op, tx);
-            await this.journal(ctx, op, snapshot, "replay", tx);
+            const revision = await this.journal(ctx, op, snapshot, "replay", tx);
+            await persistDomainEvent(
+              tx,
+              buildDomainEvent(ctx, op, snapshot, revision, "sync-replay"),
+              "sync-replay",
+            );
             await this.journalGeneratedStockLedgers(ctx, op, "replay", tx);
-            return { status: "ALREADY_PROCESSED" as const };
+            return { status: "ALREADY_PROCESSED" as const, revision };
           }
 
           await this.applyOperationInTransaction(ctx, req, op, tx);
@@ -984,6 +1015,11 @@ const now = new Date();
             },
           });
           const revision = await this.journal(ctx, op, snapshot, "push", tx);
+          await persistDomainEvent(
+            tx,
+            buildDomainEvent(ctx, op, snapshot, revision, "sync"),
+            "sync",
+          );
           await this.journalGeneratedStockLedgers(ctx, op, "push", tx);
           return { status: "SUCCESS" as const, revision };
         });
@@ -1028,6 +1064,15 @@ const now = new Date();
         }
         results.push({ operationId: op.operationId, idempotencyKey: op.idempotencyKey, status: "FAILED", error: err?.message || "Sync operation failed" });
       }
+    }
+    try {
+      // Durable journal rows are the delivery boundary. The process-local event
+      // bus receives events only after PostgreSQL has committed the mutation.
+      // Pending rows remain durable and can be redelivered on a later request.
+      await publishPendingDomainEvents(ctx);
+    } catch (eventError) {
+      // Event delivery must never roll back an already committed business mutation.
+      console.warn("[DOMAIN_EVENT] pending delivery deferred:", eventError);
     }
     return { processedCount, results };
   }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Building2, CheckCircle2, ChevronLeft, ChevronRight, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { useAuth, useTranslation } from "../context/KwakoPosContexts.js";
 import { ALL_MODULE_KEYS } from "../modules/moduleRegistry.js";
 import { LanguageSelector } from "../components/LanguageSelector.js";
