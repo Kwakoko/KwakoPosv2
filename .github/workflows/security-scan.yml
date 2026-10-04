@@ -22,6 +22,25 @@ jobs:
     name: Dependency Audit & Vulnerability Scan
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_security_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_security_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_security_ci?schema=public
+      CI: true
+      NODE_ENV: test
+      KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +51,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
+      - run: npm run db:migrate
       - run: npm run build
       - name: Production dependency vulnerability audit
         run: npm audit --omit=dev --audit-level=high
