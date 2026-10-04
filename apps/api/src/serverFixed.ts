@@ -79,6 +79,7 @@ function configurePersistentSessions() {
           rememberMe: Boolean(record.rememberMe),
           offlineStartedAt: record.offlineStartedAt || null,
           offlineExpiresAt: record.offlineExpiresAt || null,
+          idleTimeoutMs: record.idleTimeoutMs,
         },
       });
     },
@@ -366,6 +367,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
     userAgent: requestUserAgent(req),
     platform: requestPlatform(req),
     rememberMe,
+    idleTimeoutMs: policy.idleTimeoutMs,
     absoluteLifetimeMs: policy.absoluteTimeoutMs,
     refreshTokenLifetimeMs: rememberMe ? policy.rememberMeDurationMs : policy.refreshTokenDurationMs,
   });
