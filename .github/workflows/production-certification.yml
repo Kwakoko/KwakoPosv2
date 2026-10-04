@@ -16,6 +16,23 @@ jobs:
   production-candidate-certification:
     name: Candidate → Build → Tests → Certification — No Production Mutation
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_ci?schema=public
+      CI: true
     timeout-minutes: 60
     steps:
       - name: Checkout source
@@ -45,6 +62,8 @@ jobs:
         run: npx tsx scripts/release/version-consistency-gate.ts
       - name: Generate Prisma client
         run: npm run db:generate
+      - name: Synchronize test database schema
+        run: npm run db:migrate
       - name: Build all workspaces
         run: npm run build
       - name: Run unit and invariant tests
