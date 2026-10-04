@@ -663,7 +663,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             status: s.status || 'Completed',
             paymentMethod: s.payments?.length > 1 ? 'Split' : (s.paymentMethod || s.method || s.payments?.[0]?.paymentMethod || 'Cash'),
             syncStatus: 'Synced',
-            cashierName: s.cashierName || s.cashier || s.user || s.soldById || 'Cashier',
+            customer: s.customer?.name || s.customerName || s.customer?.displayName || 'Walk-In Customer',
+            cashierName: s.cashierName || s.cashier || s.user || s.soldByName || s.soldById || 'Cashier',
             module: s.module,
             branch_id: s.branchId || s.branch_id,
             items: (Array.isArray(s.items) ? s.items : Array.isArray(s.cart) ? s.cart : Array.isArray(s.lines) ? s.lines : []).map((it: any) => ({
@@ -2422,7 +2423,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                                 <span>Volume:</span> <span>{fmtCcy(d.volume)} ({d.volumeShare}%)</span>
                               </div>
                               <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex justify-between">
-                                <span>Sales:</span> <span>{d.count} ({d.countShare}%)</span>
+                                <span>Payments:</span> <span>{d.paymentCount ?? d.count} ({d.countShare}%)</span>
                               </div>
                               <div className="text-[10px] text-slate-400 dark:text-slate-500 flex justify-between pt-1 border-t border-slate-100 dark:border-darkbg-border/60">
                                 <span>Avg Ticket:</span> <span className="font-semibold">{fmtCcy(d.aov)}</span>
@@ -2446,7 +2447,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           {activePaymentChannel.name}
                         </span>
                         <span className="text-sm font-black font-mono tracking-tight text-slate-800 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.count} Sales`}
+                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.paymentCount ?? activePaymentChannel.count} Payments`}
                         </span>
                         <span className="text-[9px] font-bold" style={{ color: activePaymentChannel.color }}>
                           {paymentMetricMode === 'volume' ? `${activePaymentChannel.volumeShare}% Share` : `${activePaymentChannel.countShare}% Share`}
@@ -2512,7 +2513,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                             {fmtCcy(item.volume)}
                           </div>
                           <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% orders`}
+                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% payments`}
                           </div>
                         </div>
                       </div>
