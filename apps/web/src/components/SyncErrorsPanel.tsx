@@ -20,6 +20,7 @@ import {
 import { clientSyncEngine } from "../clientSyncEngine.js";
 import { db } from "../atomicOutbox.js";
 import { Button } from "./UI/Button.js";
+import { countUniqueLocalConflictIds } from "../services/syncConflictPresentationService.js";
 
 export interface SyncErrorsPanelProps {
   onRetry?: () => Promise<void> | void;
@@ -56,12 +57,9 @@ export const SyncErrorsPanel: React.FC<SyncErrorsPanelProps> = ({
     try {
       const failed = typeof db.getFailedOutbox === "function" ? db.getFailedOutbox().length : 0;
       setStrandedOutboxCount(failed);
-      let conflicts = 0;
-      if (db.syncMetadata) {
-        for (const k of db.syncMetadata.keys()) {
-          if (k.startsWith("sync_conflict_")) conflicts++;
-        }
-      }
+      const conflicts = db.syncMetadata
+        ? countUniqueLocalConflictIds(db.syncMetadata.entries())
+        : 0;
       setConflictCount(conflicts);
     } catch {
       /* ignore */
