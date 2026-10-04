@@ -133,39 +133,39 @@ async function readPostgresKpis(tenantId: string, branchId: string) {
     supplier_count: bigint | number | string;
   }>>(
     `SELECT
-       COALESCE((SELECT SUM(grand_total) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS sales_today,
-       COALESCE((SELECT SUM(gross_profit) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day'), 0) AS gross_profit,
+       COALESCE((SELECT SUM("grandTotal" - "taxTotal") FROM sales
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'), 0) AS sales_today,
+       COALESCE((SELECT SUM(("grandTotal" - "taxTotal") - "totalCost") FROM sales
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day'), 0) AS gross_profit,
        (SELECT COUNT(*) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS order_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day') AS order_count,
        (SELECT COUNT(*) FROM sales
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'COMPLETED'
-            AND sold_at >= CURRENT_DATE AND sold_at < CURRENT_DATE + INTERVAL '1 day') AS completed_orders,
-       (SELECT COALESCE(SUM(stock_value), 0) FROM product_branch_stock
-          WHERE tenant_id = $1 AND branch_id = $2) AS inventory_value,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'COMPLETED'
+            AND "soldAt" >= CURRENT_DATE AND "soldAt" < CURRENT_DATE + INTERVAL '1 day') AS completed_orders,
+       (SELECT COALESCE(SUM("stockValue"), 0) FROM product_branch_stock
+          WHERE "tenantId" = $1 AND "branchId" = $2) AS inventory_value,
        (SELECT COUNT(*) FROM product_branch_stock pbs
-          JOIN product_variants pv ON pv.id = pbs.variant_id
-          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
-          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
-            AND pv.is_active = TRUE AND pbs.current_quantity > 0
-            AND pbs.current_quantity <= pv.reorder_level) AS low_stock,
+          JOIN product_variants pv ON pv."id" = pbs."variantId"
+          AND pv."tenantId" = pbs."tenantId" AND pv."branchId" = pbs."branchId"
+          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+            AND pv."isActive" = TRUE AND pbs."currentQuantity" > 0
+            AND pbs."currentQuantity" <= pv."reorderLevel") AS low_stock,
        (SELECT COUNT(*) FROM product_branch_stock pbs
-          JOIN product_variants pv ON pv.id = pbs.variant_id
-          AND pv.tenant_id = pbs.tenant_id AND pv.branch_id = pbs.branch_id
-          WHERE pbs.tenant_id = $1 AND pbs.branch_id = $2
-            AND pv.is_active = TRUE AND pbs.current_quantity <= 0) AS out_of_stock,
-       (SELECT COALESCE(SUM(current_balance), 0) FROM customers
-          WHERE tenant_id = $1 AND branch_id = $2) AS customer_debts,
+          JOIN product_variants pv ON pv."id" = pbs."variantId"
+          AND pv."tenantId" = pbs."tenantId" AND pv."branchId" = pbs."branchId"
+          WHERE pbs."tenantId" = $1 AND pbs."branchId" = $2
+            AND pv."isActive" = TRUE AND pbs."currentQuantity" <= 0) AS out_of_stock,
+       (SELECT COALESCE(SUM("currentBalance"), 0) FROM customers
+          WHERE "tenantId" = $1 AND "branchId" = $2) AS customer_debts,
        (SELECT COUNT(*) FROM customers
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS customer_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'ACTIVE') AS customer_count,
        (SELECT COUNT(*) FROM products
-          WHERE tenant_id = $1 AND branch_id = $2 AND is_active = TRUE) AS product_count,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "isActive" = TRUE) AS product_count,
        (SELECT COUNT(*) FROM suppliers
-          WHERE tenant_id = $1 AND branch_id = $2 AND status = 'ACTIVE') AS supplier_count`,
+          WHERE "tenantId" = $1 AND "branchId" = $2 AND "status" = 'ACTIVE') AS supplier_count`,
     tenantId,
     branchId,
   );
