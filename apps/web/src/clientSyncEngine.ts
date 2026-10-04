@@ -129,6 +129,7 @@ export async function applyRevisionedChanges(
       case "PurchaseReceipt": return "receipts";
       case "Category": return "configuration";
       case "Brand": return "configuration";
+      case "Setting": return "configuration";
       default: return null;
     }
   };
@@ -240,6 +241,23 @@ export async function applyRevisionedChanges(
     const deleted = change.operationType === "DELETE" || Boolean(change.record?._deleted);
     if (change.entityType === "Category" || change.entityType === "Brand") {
       await upsertCatalogConfig(change.entityType, change, deleted);
+    } else if (change.entityType === "Setting") {
+      const record: any = change.record || {};
+      const configKey = String(record.key || "");
+      if (configKey) {
+        const key = tenantId + ":" + branchId + ":" + configKey;
+        if (deleted || record.isActive === false || record._deleted) await waitRequest(configuration.delete(key));
+        else configuration.put({
+          key: configKey,
+          value: record.value,
+          tenantId,
+          branchId,
+          scope: record.scope || "BRANCH",
+          settingId: change.entityId,
+          version: Number(record.version || 1),
+          updatedAt: record.updatedAt || serverTimestamp,
+        }, key);
+      }
     } else if (change.entityType === "Expense") {
       await upsertExpenseConfig(change, deleted);
       if (deleted) {
