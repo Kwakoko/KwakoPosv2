@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { LocalIndexedDbStore } from '../../apps/web/src/indexedDb.js';
+import { loadConfig, getReleaseIdentity } from '../../packages/config/src/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,11 +54,12 @@ export class BrowserWorkflowVerificationEngine {
     this.verifyIndustryModuleWorkflow();
 
     const allPassed = this.results.every(r => r.passed);
+    const releaseIdentity = getReleaseIdentity(loadConfig({ NODE_ENV: "test" }));
     const evidenceBundle = {
-      releaseVersion: "2.5.0",
-      environment: "production",
+      releaseVersion: releaseIdentity.version,
+      environment: releaseIdentity.environment,
       timestamp: new Date().toISOString(),
-      gitSha: "bac4f23",
+      gitSha: releaseIdentity.gitSha,
       totalJourneys: this.results.length,
       passedJourneys: this.results.filter(r => r.passed).length,
       overallResult: allPassed ? "PRODUCTION_CERTIFIED" : "VERIFICATION_FAILED",
