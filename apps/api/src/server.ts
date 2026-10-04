@@ -1783,7 +1783,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
 
-  server.get("/sync/conflicts", async (req) => {
+  server.get("/sync/conflicts", async (req, reply) => {
+    reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     const query = z.object({ status: z.enum(["OPEN", "ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE", "ALL"]).optional() }).parse(req.query || {});
     const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
     return { success: true, data: result };
