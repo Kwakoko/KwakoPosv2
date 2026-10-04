@@ -39,7 +39,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     setAccessToken(null);
   });
 
-  it("persists session in both localStorage and sessionStorage on setStoredSession", () => {
+  it("persists session in the active browser storage according to session policy", () => {
     const session: StoredSession = {
       sessionId: "sess-12345",
       accessToken: "token-abc",
