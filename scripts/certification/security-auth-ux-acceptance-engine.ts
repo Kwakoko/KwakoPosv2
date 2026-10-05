@@ -170,7 +170,7 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     const logout = await liveRequest(baseUrl, "/auth/logout", {
       method: "POST",
       body: JSON.stringify({ sessionId }),
-      headers: setCookie ? { Cookie: setCookie.split(",")[0] } : {},
+      headers: { ...(setCookie ? { Cookie: setCookie.split(",")[0] } : {}), Origin: "https://app.kwakopos.com" },
     });
     const afterLogout = await liveRequest(baseUrl, "/api/v1/customers", {
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
