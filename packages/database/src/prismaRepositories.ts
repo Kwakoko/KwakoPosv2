@@ -700,11 +700,13 @@ export class PrismaStockRepository {
   async getAvailableStock(ctx: TenantContext, variantId: string): Promise<number> {
     const variant = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { reservedQuantity: true, tenantId: true, branchId: true } });
     if (variant && (variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
-    const rows = await prisma.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId }, orderBy: { occurredAt: "asc" } });
-    const ledgerBalance = calculateAvailableStock(rows.map(ledgerShape));
+    const aggregate = await prisma.stockLedger.aggregate({
+      _sum: { quantityChange: true },
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId },
+    });
+    const ledgerBalance = Number(aggregate._sum.quantityChange ?? 0);
     return Math.max(0, ledgerBalance - Number(variant?.reservedQuantity || 0));
   }
 }
-
 
 
