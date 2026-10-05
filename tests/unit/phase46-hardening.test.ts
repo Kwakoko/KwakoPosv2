@@ -50,7 +50,7 @@ describe("Phase 46 production hardening contracts", () => {
     const source = read("apps/api/src/routes/supportControlTowerRoutes.ts");
     expect(source).toContain("SUPER_ADMIN");
     expect(source).toContain("support:global");
-    expect(source).toContain("admin:*");
+    expect(source).toContain("admin:support");
     expect(source).toContain("/control-tower");
   });
 });
