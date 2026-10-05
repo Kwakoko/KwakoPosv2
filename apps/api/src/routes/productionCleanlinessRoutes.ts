@@ -6,7 +6,7 @@ function requireTenantAdmin(req: any, targetTenantId: string): string {
   if (!ctx || ctx.tenantId !== targetTenantId) throw new Error("FORBIDDEN: Tenant context does not match target tenant");
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
   const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: unknown) => String(p).toLowerCase()) : [];
-  if (!roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("*") && !permissions.includes("admin:*")) {
+  if (!roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("admin:production")) {
     throw new Error("FORBIDDEN: Tenant administrator authorization required");
   }
   return String(ctx.userId);
