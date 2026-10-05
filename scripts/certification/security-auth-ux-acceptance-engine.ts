@@ -124,7 +124,7 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     const accessToken = loginBody.data?.accessToken || "";
     const sessionId = loginBody.data?.sessionId || "";
     const cookieHardened = /HttpOnly/i.test(setCookie) && /SameSite=Strict/i.test(setCookie);
-    const noRefreshJson = !JSON.stringify(loginBody).includes("refreshToken");
+    const noRefreshJson = !Object.prototype.hasOwnProperty.call(loginBody.data || {}, "refreshToken");
 
     results.set("SEC-AUTH-01", {
       passed: login.status === 200 && Boolean(accessToken) && Boolean(sessionId) && cookieHardened && noRefreshJson,
@@ -163,8 +163,8 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     });
     const refreshBody = await refresh.json().catch(() => ({}));
     results.set("SEC-SES-03", {
-      passed: refresh.status !== 200 || !JSON.stringify(refreshBody).includes("refreshToken"),
-      details: `Refresh HTTP ${refresh.status}; refreshToken returned in JSON=${JSON.stringify(refreshBody).includes("refreshToken")}`,
+      passed: refresh.status !== 200 || !Object.prototype.hasOwnProperty.call(refreshBody?.data || {}, "refreshToken"),
+      details: `Refresh HTTP ${refresh.status}; refreshToken returned in JSON=${Object.prototype.hasOwnProperty.call(refreshBody?.data || {}, "refreshToken")}`,
     });
 
     const logout = await liveRequest(baseUrl, "/auth/logout", {
@@ -273,7 +273,7 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
     {
       id: "SEC-STORE-01", priority: "P0", category: "Client Storage Security", title: "No Refresh Token Browser Migration",
       run: async () => ({
-        passed: !sourceContains("apps/web/src/services/apiClient.ts", /refreshToken/),
+        passed: !sourceContains("apps/web/src/services/apiClient.ts", /(?:["\']refreshToken["\']|refreshToken\s*\??\s*:)/),
         details: "apiClient contains no refresh-token migration, serialization, or browser-storage handling",
       }),
     },

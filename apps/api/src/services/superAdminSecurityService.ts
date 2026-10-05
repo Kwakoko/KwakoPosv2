@@ -180,7 +180,7 @@ export async function isLoginThrottled(keys: string[]): Promise<boolean> {
 export async function recordLoginFailure(keys: string[]): Promise<void> {
   try {
     for (const key of keys) {
-      await prisma.$executeRaw`INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), ${key}, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}) THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}) ELSE auth_login_throttles.locked_until END, updated_at = NOW()`;
+      await prisma.$executeRaw`INSERT INTO auth_login_throttles(id, throttle_key, window_start, attempts, updated_at) VALUES (gen_random_uuid(), ${key}, NOW(), 1, NOW()) ON CONFLICT (throttle_key) DO UPDATE SET attempts = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}::int) THEN 1 ELSE auth_login_throttles.attempts + 1 END, window_start = CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}::int) THEN NOW() ELSE auth_login_throttles.window_start END, locked_until = CASE WHEN (CASE WHEN auth_login_throttles.window_start < NOW() - make_interval(mins => ${RATE_WINDOW_MINUTES}::int) THEN 1 ELSE auth_login_throttles.attempts + 1 END) >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}::int) ELSE auth_login_throttles.locked_until END, updated_at = NOW()`;
     }
   } catch (error) {
     console.warn("recordLoginFailure warning:", error);
@@ -198,7 +198,7 @@ export async function clearLoginFailures(keys: string[]): Promise<void> {
 
 export async function recordSuperAdminFailure(userId: string): Promise<void> {
   await ensureSuperAdminSecurity(userId);
-  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = failed_login_count + 1, last_failed_at = NOW(), locked_until = CASE WHEN failed_login_count + 1 >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}) ELSE locked_until END, updated_at = NOW() WHERE user_id = ${userId}`;
+  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = failed_login_count + 1, last_failed_at = NOW(), locked_until = CASE WHEN failed_login_count + 1 >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}::int) ELSE locked_until END, updated_at = NOW() WHERE user_id = ${userId}`;
 }
 
 export async function clearSuperAdminFailureState(userId: string): Promise<void> {

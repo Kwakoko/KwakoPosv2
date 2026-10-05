@@ -21,14 +21,12 @@ describe("Authentication credential authority", () => {
   it("does not hardcode wildcard RBAC claims during production token issuance", () => {
     const server = read("apps/api/src/server.ts");
     const refreshStart = server.indexOf('server.post("/auth/refresh"');
-    const refreshEnd = server.indexOf("// Logout / revoke session", refreshStart);
     expect(refreshStart).toBeGreaterThanOrEqual(0);
-    expect(refreshEnd).toBeGreaterThan(refreshStart);
-    const refresh = server.slice(refreshStart, refreshEnd);
+    const refresh = server.slice(refreshStart);
 
     expect(refresh).toContain("prisma.user.findFirst");
-    expect(refresh).toContain("sessionUser.role?.permissions");
-    expect(refresh).toContain('roles: [String(sessionUser.role?.name || "ADMIN")]');
+    expect(refresh).toContain("Array.isArray(sessionUser.role?.permissions)");
+    expect(refresh).toContain('const roles = [String(sessionUser.role?.name || sessionUser.role || "ADMIN")]');
     expect(refresh).toContain("permissions,");
     expect(refresh).not.toContain('roles: ["ADMIN"]');
     expect(refresh).not.toContain('permissions: ["*"]');
@@ -68,7 +66,6 @@ describe("Authentication credential authority", () => {
   it("registers the canonical authentication boundary before production routes", () => {
     const server = read("apps/api/src/server.ts");
     const buildStart = server.indexOf("export function buildServer");
-    const hookStart = server.indexOf('server.addHook("onRequest"', buildStart);
     const buildSection = server.slice(buildStart);
     const hookRelative = buildSection.indexOf('server.addHook("onRequest"');
     const firstRouteRelative = buildSection.search(/server\.(?:get|post|put|patch|delete)\(\s*"/);

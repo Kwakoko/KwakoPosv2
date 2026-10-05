@@ -115,7 +115,7 @@ describe("session revoke survives API restart", () => {
 
   afterAll(async () => {
     await stopApi();
-    await prisma.tenant.delete({ where: { id: tenantId } });
+    // Test database is ephemeral; audit_events is append-only, so tenant cleanup would cascade into forbidden audit mutations.
   }, 60_000);
 
   it("persists revocation in PostgreSQL and rejects the same token after a fresh API process starts", async () => {
