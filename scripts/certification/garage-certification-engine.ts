@@ -38,7 +38,8 @@ export async function runGarageCertification(): Promise<GarageCertificationResul
   add("GAR-EST-02", globalGarageEngine.isEstimateOverrun(estimate, 1200) === true, "Approved estimate exceeding tolerance is flagged.");
   add("GAR-EST-03", globalGarageEngine.isEstimateOverrun({ ...estimate, approvalStatus: "DRAFT" }, 1) === true, "Unapproved work is always blocked.");
 
-  const alert = globalGarageEngine.generatePredictiveMaintenanceAlert(vehicle);
+  const alertVehicle = { ...vehicle, currentMileageKm: Math.max(0, vehicle.serviceIntervalKm - 500) };
+  const alert = globalGarageEngine.generatePredictiveMaintenanceAlert(alertVehicle);
   add("GAR-PM-01", alert !== null, "Maintenance alert is generated near service interval.");
   add("GAR-PM-02", alert?.vehicleId === vehicle.id, "Maintenance alert identifies the correct vehicle.");
 
