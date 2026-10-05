@@ -497,8 +497,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     let active = true;
     void import("recharts").then((module) => {
       if (active) setRechartsModule(module);
-    }).catch((error) => {
-      console.error("[DashboardPage] Failed to load analytics charts:", error);
+    }).catch((error) => {      console.error("[DashboardPage] Failed to load analytics charts:", error);
     });
     return () => { active = false; };
   }, []);
@@ -997,8 +996,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       const key = String(item.name || "OTHER").toUpperCase();
       const cfg = channelConfig[key] || {
         color: ["#14b8a6", "#f43f5e", "#a855f7", "#06b6d4"][idx % 4],
-        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",
-      };
+        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",      };
       const rawMetric = paymentMetricMode === "volume" ? item.volume : item.count;
       return {
         ...item,
@@ -1420,6 +1418,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Quiet dashboard freshness metadata: useful for auditability without competing with business KPIs. */}
+          {isOnline && authoritativeKpis && (
+            <span
+              className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap"
+              title={dashboardFreshness.isBehind
+                ? `Server revision ${dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision} is ahead of local revision ${dashboardFreshness.localRevision}`
+                : "Authoritative dashboard freshness"}
+            >
+              <RefreshCw className="h-3 w-3" />
+              <span>
+                Last synced {dashboardFreshness.syncedAt || "—"} · Rev {dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision}
+              </span>
+              {dashboardFreshness.isBehind && (
+                <span
+                  className="ml-0.5 h-1.5 w-1.5 rounded-full bg-amber-500"
+                  aria-label="Local dashboard replica is behind"
+                />
+              )}
+            </span>
+          )}
           {/* Status Badge 1: authoritative TRA VFD integration state */}
           <button
             type="button"
@@ -1497,38 +1515,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       {/* ── KPI Cards ───────────────────────────────────────────────────────── */}
       {isOnline && isLoadingAuthoritativeKpis && !authoritativeKpis && (
         <div className="rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
-          Loading authoritative PostgreSQL dashboard KPIs…
-        </div>
+          Loading authoritative PostgreSQL dashboard KPIs…        </div>
       )}
       {isOnline && authoritativeKpiError && !authoritativeKpis && !isLoadingAuthoritativeKpis && (
         <div className="rounded-xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
           Dashboard reporting is waiting for the PostgreSQL authoritative KPI snapshot. Local IndexedDB values are not used while connected.
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
-        </div>
-      )}
-      {isOnline && authoritativeKpis && (
-        <div className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/70 px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>
-              Authoritative Dashboard snapshot: Revision {dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision}
-              {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : ""}
-            </span>
-            <span>
-              Sync epoch: {dashboardFreshness.syncEpoch ? dashboardFreshness.syncEpoch.slice(0, 8) : "unknown"}
-            </span>
-          </div>
-          {dashboardFreshness.isBehind && (
-            <div className="rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
-              Dashboard snapshot is ahead of the local replica · Local revision: {dashboardFreshness.localRevision} · Server revision: {dashboardFreshness.serverRevision}
-            </div>
-          )}
-        </div>
-      )}
-      {!isOnline && (
-        <div className="rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card px-4 py-2.5 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-          Offline replica state: Local revision {dashboardFreshness.localRevision}
-          {dashboardFreshness.syncedAt ? ` · Synced: ${dashboardFreshness.syncedAt}` : " · Sync time unavailable"}
-          {dashboardFreshness.syncEpoch ? ` · Sync epoch: ${dashboardFreshness.syncEpoch.slice(0, 8)}` : ""}
         </div>
       )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -1997,8 +1989,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   Number(revenueAnalytics.profitDeltaPct) >= 0 ? (
                     <span style={{ color: "var(--success)" }}>+{revenueAnalytics.profitDeltaPct}% vs prior</span>
                   ) : (
-                    <span style={{ color: "var(--danger)" }}>{revenueAnalytics.profitDeltaPct}% vs prior</span>
-                  )
+                    <span style={{ color: "var(--danger)" }}>{revenueAnalytics.profitDeltaPct}% vs prior</span>                  )
                 ) : (
                   <span>Net margin earnings</span>
                 )}
@@ -2497,8 +2488,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                             style={{ background: item.badgeBg, color: item.textColor }}
                           >
                             <Icon size={14} />
-                          </div>
-                          <div className="min-w-0">
+                          </div>                          <div className="min-w-0">
                             <div className="font-bold text-slate-800 dark:text-slate-100 truncate text-xs flex items-center gap-1.5">
                               <span className="truncate">{item.name}</span>
                               {item.name === 'Cash' && (
@@ -2997,7 +2987,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </CardContent>
         </Card>
       </div>
-
       {/* ── Onboarding Banner (When workspace has no products/sales yet - Legacy Parity) ── */}
       {(products.length === 0 || isCleanTenant) && renderOnboarding()}
 
@@ -3497,8 +3486,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
                 <div style={{ color: '#475569', margin: '2px 0' }}>
                   PENDING FISCALIZATION: {traVfdQueuedCount}
-                </div>
-                <div style={{ color: '#475569' }}>
+                </div>                <div style={{ color: '#475569' }}>
                   REJECTED FISCALIZATIONS: {traVfdRejectedCount}
                 </div>
 
@@ -3699,7 +3687,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     </div>
   );
 };
-
 
 
 
