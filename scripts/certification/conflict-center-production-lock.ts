@@ -57,6 +57,10 @@ sourceContains("tests/unit/sync-status-label.test.ts", "never reports synced whi
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "name: Conflict Center Production Lock v1");
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "pull_request:");
 sourceContains(".github/workflows/conflict-center-production-lock.yml", "push:");
+sourceContains("package.json", '"certify:conflict-lock"');
+sourceContains(".github/workflows/production-certification.yml", "npm run certify:conflict-lock");
+sourceContains(".github/workflows/production-release-exact-main.yml", "npm run certify:conflict-lock");
+sourceContains(".github/workflows/ci.yml", "npm run certify:conflict-lock");
 sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "sync.conflict.read");');
 sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "sync.conflict.resolve");');
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
