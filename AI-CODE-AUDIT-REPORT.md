@@ -1,6 +1,6 @@
 # KwakoPOS v2 — P0/P1/P2 Closed-Loop Audit
 
-**Audit state:** REMEDIATION IN PROGRESS — release gated until CI is green  
+**Audit state:** P0/P1/P2 REMEDIATION COMPLETE — release remains gated until CI is green  
 **Target branch:** `audit/close-p0-p1-p2-2026-10-05`  
 **Base:** `main` @ `20a6854523a00d9ab7a6dedf5d3129ed56783d76`
 
@@ -45,6 +45,14 @@ No finding is considered closed merely because a document says it is fixed.
 - Garage certification now executes real GarageEngine/GarageService invariants.
 - Removed fabricated 61/58-pillar marketing claims from the certification UI.
 - Certification tests now assert actual check counts and passed evidence rather than vanity pillar counters.
+
+## POS production lock
+
+Added `scripts/certification/pos-terminal-production-lock.ts`, wired into PR CI, production certification, and exact-main production release. The lock cryptographically pins the authoritative POS page, checkout engine, inventory stock service, and API client, and verifies tenant isolation, authoritative cash-session checks, atomic local sale boundaries, explicit supervisor permissions, stock authority, and checkout event evidence.
+
+## Closure status
+
+The original audit P0/P1/P2 findings are remediated or were already resolved on the current branch: path traversal confinement, raw SQL backdoor removal, parameterized SQL, privileged wildcard removal, MFA/step-up hardening, schema reconciliation, PostgreSQL rollback/export authority, build mutation removal, stock/sync database filtering, and synchronous request-path I/O. Medium `QUAL-06` monolithic-file decomposition is a P3 maintainability item and is intentionally outside this P0/P1/P2 release gate.
 
 ## Release gate
 
