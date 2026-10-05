@@ -497,7 +497,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     let active = true;
     void import("recharts").then((module) => {
       if (active) setRechartsModule(module);
-    }).catch((error) => {      console.error("[DashboardPage] Failed to load analytics charts:", error);
+    }).catch((error) => {
+      console.error("[DashboardPage] Failed to load analytics charts:", error);
     });
     return () => { active = false; };
   }, []);
@@ -996,7 +997,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       const key = String(item.name || "OTHER").toUpperCase();
       const cfg = channelConfig[key] || {
         color: ["#14b8a6", "#f43f5e", "#a855f7", "#06b6d4"][idx % 4],
-        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",      };
+        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",
+      };
       const rawMetric = paymentMetricMode === "volume" ? item.volume : item.count;
       return {
         ...item,
@@ -1515,7 +1517,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       {/* ── KPI Cards ───────────────────────────────────────────────────────── */}
       {isOnline && isLoadingAuthoritativeKpis && !authoritativeKpis && (
         <div className="rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
-          Loading authoritative PostgreSQL dashboard KPIs…        </div>
+          Loading authoritative PostgreSQL dashboard KPIs…
+        </div>
       )}
       {isOnline && authoritativeKpiError && !authoritativeKpis && !isLoadingAuthoritativeKpis && (
         <div className="rounded-xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-xs font-semibold text-amber-700 dark:text-amber-300">
@@ -1989,7 +1992,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   Number(revenueAnalytics.profitDeltaPct) >= 0 ? (
                     <span style={{ color: "var(--success)" }}>+{revenueAnalytics.profitDeltaPct}% vs prior</span>
                   ) : (
-                    <span style={{ color: "var(--danger)" }}>{revenueAnalytics.profitDeltaPct}% vs prior</span>                  )
+                    <span style={{ color: "var(--danger)" }}>{revenueAnalytics.profitDeltaPct}% vs prior</span>
+                  )
                 ) : (
                   <span>Net margin earnings</span>
                 )}
@@ -2488,7 +2492,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                             style={{ background: item.badgeBg, color: item.textColor }}
                           >
                             <Icon size={14} />
-                          </div>                          <div className="min-w-0">
+                          </div>
+                          <div className="min-w-0">
                             <div className="font-bold text-slate-800 dark:text-slate-100 truncate text-xs flex items-center gap-1.5">
                               <span className="truncate">{item.name}</span>
                               {item.name === 'Cash' && (
@@ -2987,6 +2992,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </CardContent>
         </Card>
       </div>
+
       {/* ── Onboarding Banner (When workspace has no products/sales yet - Legacy Parity) ── */}
       {(products.length === 0 || isCleanTenant) && renderOnboarding()}
 
@@ -3486,7 +3492,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
                 <div style={{ color: '#475569', margin: '2px 0' }}>
                   PENDING FISCALIZATION: {traVfdQueuedCount}
-                </div>                <div style={{ color: '#475569' }}>
+                </div>
+                <div style={{ color: '#475569' }}>
                   REJECTED FISCALIZATIONS: {traVfdRejectedCount}
                 </div>
 
