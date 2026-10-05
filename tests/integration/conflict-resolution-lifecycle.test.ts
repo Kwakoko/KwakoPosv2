@@ -201,6 +201,30 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       const acceptedConversion = await sync.resolveConflict(ctx, conversionConflictId, "ACCEPT_SERVER");
       expect(acceptedConversion.status).toBe("RESOLVED");
 
+      const revalidateConflictId = "conflict:revalidate-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: revalidateConflictId,
+        operationId: "revalidate-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "UPDATE",
+        localPayload: { name: "Local Again", sku: "SERVER-PROD" },
+        remotePayload: { name: "Local New", sku: "SERVER-PROD", description: null },
+      });
+      await prisma.product.update({ where: { id: productId }, data: { description: "Changed after conflict detection" } });
+      await expect(sync.resolveConflict(ctx, revalidateConflictId, "ACCEPT_LOCAL")).rejects.toThrow("SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
+      expect((await sync.listConflicts(ctx)).some((c: any) => c.id === revalidateConflictId && c.status === "OPEN")).toBe(true);
+
+      await expect(sync.registerConflict(ctx, {
+        conflictId: revalidateConflictId,
+        operationId: "different-operation",
+        entityType: "Product",
+        entityId: productId,
+        operationType: "UPDATE",
+        localPayload: { name: "Different Local" },
+        remotePayload: { name: "Different Remote" },
+      })).rejects.toThrow("SYNC_CONFLICT_ID_REUSE");
+
       // Client-side conflict state must be durable and must not be replayed after resolution.
       const localDb = new LocalIndexedDbStore();
       await localDb.ready;
