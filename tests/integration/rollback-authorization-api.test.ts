@@ -193,7 +193,7 @@ describe("KwakoPos Rollback Authorization Platform - Integration Tests", () => {
       const res = await server.inject({
         method: "POST",
         url: "/api/v1/rollback/emergency",
-        headers: peerApproverHeaders,
+        headers: { ...peerApproverHeaders, "x-step-up-token": issueStepUpToken("user-peer-approver-02", "ROLLBACK_EMERGENCY") },
         payload: {
           rollbackScope: "EMERGENCY",
           targetType: "PLATFORM_DEPLOYMENT",
