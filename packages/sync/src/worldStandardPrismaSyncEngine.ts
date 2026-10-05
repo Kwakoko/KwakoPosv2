@@ -1170,6 +1170,7 @@ const now = new Date();
 
   async resolveConflict(ctx: TenantContext, conflictId: string, resolution: "ACCEPT_SERVER" | "ACCEPT_LOCAL" | "MERGE", mergedPayload?: Record<string, unknown>): Promise<{ status: string; operationId?: string; revision?: string }> {
     await this.ensureInfrastructure();
+    assertSyncConflictPermission(ctx, "sync.conflict.resolve");
     return prisma.$transaction(async (tx: any) => {
       const rows = await tx.$queryRawUnsafe(
         "SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, local_fingerprint, remote_fingerprint, status, resolution_operation_id, resolved_server_revision FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3 FOR UPDATE",
