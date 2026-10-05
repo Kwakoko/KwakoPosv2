@@ -1381,6 +1381,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const hasToday = orders.some(o => o.timestamp >= new Date().setHours(0,0,0,0));
+  const dashboardExceptionCount = stats.outOfStockCount + stats.lowStockCount + (stats.nearExpiryCount || 0) + (stats.totalLoans > 0 ? 1 : 0) + stats.conflictCount + stats.unsyncedCount;
 
   return (
     <div className="space-y-6">
@@ -1673,151 +1674,55 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* ── Register Till & Cash In Drawer Reconciliation Strip ─────────── */}
-      <div
-        style={{
-          background: "var(--surface-2)",
-          border: "1px solid var(--surface-border)",
-          borderRadius: "var(--radius-md)",
-          padding: "0.85rem 1.25rem",
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "1rem",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: "220px" }}>
-          <div
-            style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "10px",
-              background: "rgba(16, 185, 129, 0.12)",
-              color: "#10b981",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <Wallet size={18} />
-          </div>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ fontWeight: 800, fontSize: "13px", color: "var(--text)" }}>
-                Register Till Balance
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "3.5px",
-                  padding: "1px 6px",
-                  borderRadius: "10px",
-                  background: tillReconciliation.isShiftOpen ? "rgba(16, 185, 129, 0.12)" : "rgba(148, 163, 184, 0.12)",
-                  color: tillReconciliation.isShiftOpen ? "#10b981" : "var(--muted)",
-                  fontSize: "9.5px",
-                  fontWeight: 700,
-                  border: `1px solid ${tillReconciliation.isShiftOpen ? "rgba(16, 185, 129, 0.25)" : "var(--surface-border)"}`,
-                }}
-              >
-                <span
-                  style={{
-                    width: "5px",
-                    height: "5px",
-                    borderRadius: "50%",
-                    background: tillReconciliation.isShiftOpen ? "#10b981" : "var(--muted)",
-                  }}
-                />
-                {tillReconciliation.isShiftOpen ? "Shift In Progress" : "Continuous Till"}
-              </span>
+      {/* ── Cash, Exceptions & Actions: operational command center ─────────────── */}
+      <div className="grid gap-5 lg:grid-cols-12">
+        <Card className="lg:col-span-5 rounded-2xl border-emerald-200/70 dark:border-emerald-900/50 shadow-sm overflow-hidden">
+          <div className="p-5 bg-gradient-to-br from-emerald-500/[0.10] via-transparent to-transparent">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="h-10 w-10 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"><Wallet className="h-5 w-5" /></div>
+                  <div><p className="text-[10px] font-black uppercase tracking-widest text-emerald-700/70 dark:text-emerald-400/70">Cash position</p><p className="text-xs font-bold text-slate-600 dark:text-slate-300">{tillReconciliation.isShiftOpen ? "Current shift · live drawer" : "Continuous till"}</p></div>
+                </div>
+                <p className="mt-5 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Expected in drawer</p>
+                <p className="mt-1 text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white font-mono">{fmtCcy(tillReconciliation.expectedCash)}</p>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{tillReconciliation.shiftNumber}</p>
+              </div>
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{tillReconciliation.isShiftOpen ? "OPEN" : "ACTIVE"}</span>
             </div>
-            <div style={{ fontSize: "10.5px", color: "var(--muted)", marginTop: "1px" }}>
-              Real-time cash in drawer vs logged cash sales
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-slate-200/80 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/60 p-3"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Cash sales</p><p className="mt-1 text-sm font-black font-mono text-slate-900 dark:text-white">{fmtCcy(tillReconciliation.cashSalesToday)}</p></div>
+              <div className="rounded-xl border border-slate-200/80 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/60 p-3"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Opening float</p><p className="mt-1 text-sm font-black font-mono text-slate-900 dark:text-white">{fmtCcy(tillReconciliation.openingFloat)}</p></div>
+              <div className="rounded-xl border border-slate-200/80 dark:border-darkbg-border bg-white/70 dark:bg-darkbg-card/60 p-3"><p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Drops / out</p><p className="mt-1 text-sm font-black font-mono text-slate-900 dark:text-white">{fmtCcy(tillReconciliation.totalPayouts)}</p></div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" onClick={() => handleNav("CashDrawer")} className="inline-flex flex-1 min-w-[150px] items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]"><Wallet className="h-3.5 w-3.5" />Manage Cash Drawer<ArrowRight className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => setIsZReportOpen(true)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white/80 dark:bg-darkbg-card px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-darkbg"><Printer className="h-3.5 w-3.5" />Z-Report</button>
             </div>
           </div>
-        </div>
+        </Card>
 
-        {/* Financial Flow Formula Blocks */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "0.6rem",
-            fontSize: "11px",
-          }}
-        >
-          {/* Float */}
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
-              Opening Float
-            </span>
-            <span className="v2-mono" style={{ fontWeight: 700, color: "var(--text)" }}>
-              {fmtCcy(tillReconciliation.openingFloat)}
-            </span>
-          </div>
+        <Card className="lg:col-span-4 rounded-2xl border-amber-200/70 dark:border-amber-900/40 shadow-sm overflow-hidden">
+          <CardHeader className="pb-3"><div className="flex items-center justify-between gap-3"><div><CardTitle className="text-sm font-black flex items-center gap-2"><AlertTriangle className={dashboardExceptionCount > 0 ? "h-4 w-4 text-amber-500" : "h-4 w-4 text-emerald-500"} />Exceptions</CardTitle><CardDescription className="text-[11px]">{dashboardExceptionCount > 0 ? "Items that need attention" : "Nothing needs attention right now"}</CardDescription></div><span className={dashboardExceptionCount > 0 ? "inline-flex min-w-7 justify-center rounded-full px-2 py-1 text-[10px] font-black bg-amber-500/15 text-amber-700 dark:text-amber-400" : "inline-flex min-w-7 justify-center rounded-full px-2 py-1 text-[10px] font-black bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"}>{dashboardExceptionCount}</span></div></CardHeader>
+          <CardContent className="pt-0 pb-4"><div className="space-y-2">
+            {stats.outOfStockCount > 0 && <button type="button" onClick={() => handleNav("Purchasing")} className="w-full flex items-center gap-3 rounded-xl border border-red-200/70 dark:border-red-900/40 bg-red-500/[0.06] px-3 py-2.5 text-left transition hover:bg-red-500/[0.10]"><div className="h-8 w-8 rounded-lg bg-red-500/15 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0"><Package className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-800 dark:text-slate-100">{stats.outOfStockCount} out of stock</p><p className="text-[10px] text-slate-500">Restock immediately</p></div><ArrowRight className="h-3.5 w-3.5 text-red-500 shrink-0" /></button>}
+            {stats.lowStockCount > 0 && <button type="button" onClick={() => handleNav("Purchasing")} className="w-full flex items-center gap-3 rounded-xl border border-amber-200/70 dark:border-amber-900/40 bg-amber-500/[0.06] px-3 py-2.5 text-left transition hover:bg-amber-500/[0.10]"><div className="h-8 w-8 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0"><AlertTriangle className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-800 dark:text-slate-100">{stats.lowStockCount} low-stock items</p><p className="text-[10px] text-slate-500">Review reorder levels</p></div><ArrowRight className="h-3.5 w-3.5 text-amber-500 shrink-0" /></button>}
+            {stats.nearExpiryCount > 0 && <button type="button" onClick={() => handleNav("Inventory")} className="w-full flex items-center gap-3 rounded-xl border border-orange-200/70 dark:border-orange-900/40 bg-orange-500/[0.06] px-3 py-2.5 text-left transition hover:bg-orange-500/[0.10]"><div className="h-8 w-8 rounded-lg bg-orange-500/15 text-orange-600 dark:text-orange-400 flex items-center justify-center shrink-0"><Clock className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-800 dark:text-slate-100">{stats.nearExpiryCount} items nearing expiry</p><p className="text-[10px] text-slate-500">Review inventory dates</p></div><ArrowRight className="h-3.5 w-3.5 text-orange-500 shrink-0" /></button>}
+            {stats.totalLoans > 0 && <button type="button" onClick={() => handleNav("Customers")} className="w-full flex items-center gap-3 rounded-xl border border-violet-200/70 dark:border-violet-900/40 bg-violet-500/[0.06] px-3 py-2.5 text-left transition hover:bg-violet-500/[0.10]"><div className="h-8 w-8 rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0"><Users className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-800 dark:text-slate-100">Customer debt outstanding</p><p className="text-[10px] text-slate-500 font-mono">{fmtCcy(stats.totalLoans)} · collect / review</p></div><ArrowRight className="h-3.5 w-3.5 text-violet-500 shrink-0" /></button>}
+            {(stats.conflictCount + stats.unsyncedCount) > 0 && <button type="button" onClick={() => { if (isOnline) void forceBootstrap(); }} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 dark:border-darkbg-border bg-slate-500/[0.05] px-3 py-2.5 text-left transition hover:bg-slate-500/[0.09]"><div className="h-8 w-8 rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0"><RefreshCw className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-800 dark:text-slate-100">{stats.conflictCount + stats.unsyncedCount} sync items pending</p><p className="text-[10px] text-slate-500">{stats.conflictCount > 0 ? "Conflicts require review" : "Synchronize when ready"}</p></div><ArrowRight className="h-3.5 w-3.5 text-slate-500 shrink-0" /></button>}
+            {dashboardExceptionCount === 0 && <div className="rounded-xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-500/[0.06] px-4 py-5 text-center"><CheckCircle className="mx-auto h-6 w-6 text-emerald-500" /><p className="mt-2 text-xs font-black text-slate-800 dark:text-slate-100">All clear</p><p className="mt-0.5 text-[10px] text-slate-500">No stock, receivable, or sync exceptions detected.</p></div>}
+          </div></CardContent>
+        </Card>
 
-          <span style={{ color: "var(--muted)", fontWeight: 800 }}>+</span>
-
-          {/* Cash Sales */}
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
-              Cash Collected
-            </span>
-            <span className="v2-mono" style={{ fontWeight: 700, color: "#10b981" }}>
-              {fmtCcy(tillReconciliation.cashSalesToday)}
-              <span style={{ fontSize: "9.5px", fontWeight: 500, color: "var(--muted)", marginLeft: "3px" }}>
-                ({tillReconciliation.cashTransactionsCount})
-              </span>
-            </span>
-          </div>
-
-          <span style={{ color: "var(--muted)", fontWeight: 800 }}>−</span>
-
-          {/* Payouts / Drops */}
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 700, color: "var(--muted)" }}>
-              Drops / Payouts
-            </span>
-            <span className="v2-mono" style={{ fontWeight: 700, color: "var(--text)" }}>
-              {fmtCcy(tillReconciliation.totalPayouts)}
-            </span>
-          </div>
-
-          <span style={{ color: "var(--muted)", fontWeight: 800 }}>=</span>
-
-          {/* Expected Cash in Drawer */}
-          <div
-            style={{
-              padding: "4px 10px",
-              borderRadius: "8px",
-              background: "rgba(16, 185, 129, 0.1)",
-              border: "1px solid rgba(16, 185, 129, 0.25)",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <span style={{ fontSize: "9px", textTransform: "uppercase", fontWeight: 800, color: "#10b981", letterSpacing: "0.03em" }}>
-              Expected in Drawer
-            </span>
-            <span className="v2-mono" style={{ fontWeight: 900, fontSize: "14px", color: "#10b981" }}>
-              {fmtCcy(tillReconciliation.expectedCash)}
-            </span>
-          </div>
-        </div>
-
-        {/* Action Button */}
-        <button
-          type="button"
-          onClick={() => handleNav('CashDrawer')}
-          className="v2-btn v2-btn-sm v2-btn-secondary"
-          style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "8px" }}
-        >
-          <span>Shift Details & Drop</span>
-          <ArrowRight size={12} />
-        </button>
+        <Card className="lg:col-span-3 rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm">
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-black">Quick actions</CardTitle><CardDescription className="text-[11px]">Do the next important thing</CardDescription></CardHeader>
+          <CardContent className="pt-0 pb-4"><div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => handleNav("POS")} className="min-h-[82px] rounded-xl bg-primary px-3 py-3 text-left text-white shadow-sm transition hover:shadow-md hover:brightness-105 active:scale-[0.98]"><ShoppingCart className="h-4 w-4" /><span className="mt-3 block text-xs font-black">Launch POS</span><span className="mt-0.5 block text-[9px] text-white/75">Start a sale</span></button>
+            <button type="button" onClick={() => handleNav("CashDrawer")} className="min-h-[82px] rounded-xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-500/[0.06] px-3 py-3 text-left text-emerald-700 dark:text-emerald-400 transition hover:bg-emerald-500/[0.10]"><Wallet className="h-4 w-4" /><span className="mt-3 block text-xs font-black">Cash Drawer</span><span className="mt-0.5 block text-[9px] text-slate-500">Manage till</span></button>
+            <button type="button" onClick={() => handleNav("Inventory")} className="min-h-[82px] rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card px-3 py-3 text-left text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-darkbg"><Package className="h-4 w-4" /><span className="mt-3 block text-xs font-black">Inventory</span><span className="mt-0.5 block text-[9px] text-slate-500">{stats.lowStockCount + stats.outOfStockCount} stock alerts</span></button>
+            <button type="button" onClick={() => handleNav("Customers")} className="min-h-[82px] rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card px-3 py-3 text-left text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-darkbg"><Users className="h-4 w-4" /><span className="mt-3 block text-xs font-black">Customers</span><span className="mt-0.5 block text-[9px] text-slate-500">{stats.totalLoans > 0 ? fmtCcy(stats.totalLoans) + " outstanding" : "Manage customers"}</span></button>
+          </div></CardContent>
+        </Card>
       </div>
 
       {/* ── Charts Row ─────────────────────────────────────────────────── */}
