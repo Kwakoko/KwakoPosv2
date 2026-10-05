@@ -2445,14 +2445,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/sync/status", async (req) => {
+    const ctx = requireTenantContext(req);
+    const openConflictCount = typeof (syncEngine as any).countOpenConflicts === "function"
+      ? await (syncEngine as any).countOpenConflicts(ctx)
+      : 0;
     return {
       success: true,
       data: {
-        tenantId: req.tenantContext?.tenantId,
-        branchId: req.tenantContext?.branchId,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
         serverVersion: config.APP_VERSION || "2.12.5",
         schemaVersion: 4,
         status: "OPERATIONAL",
+        openConflictCount,
         timestamp: new Date().toISOString(),
       },
     };
