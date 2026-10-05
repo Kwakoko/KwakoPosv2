@@ -75,7 +75,7 @@ async function main() {
   const auditResolved = await prisma.auditEvent.count({ where: { tenantId, branchId, action: "SYNC_CONFLICT_RESOLVED" } });
   const journalRows = await prisma.$queryRawUnsafe<any[]>("SELECT source FROM sync_change_journal WHERE tenant_id=$1 AND branch_id=$2", tenantId, branchId);
   if (auditDetected !== 5 || auditResolved !== 5) throw new Error("PERSISTENT_CONFLICT_AUDIT_INCOMPLETE");
-  if (journalRows.filter((r) => r.source === "conflict-resolution").length !== 3) throw new Error("CONFLICT_RESOLUTION_JOURNAL_INCOMPLETE");
+  if (journalRows.filter((r) => r.source === "conflict-resolution").length !== 5) throw new Error("CONFLICT_RESOLUTION_JOURNAL_INCOMPLETE");
 
   console.log(JSON.stringify({ status:"PASS", test:"postgresql-conflict-resolution-lifecycle", gates:{
     staleProductAcceptLocal:"PASS", categoryAcceptLocal:"PASS", brandMerge:"PASS",
