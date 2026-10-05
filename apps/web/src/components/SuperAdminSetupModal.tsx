@@ -11,7 +11,6 @@ import {
   EyeOff,
   CheckCircle2,
   ArrowRight,
-  Sparkles,
   Lock,
 } from "lucide-react";
 import {
@@ -700,44 +699,6 @@ export const SuperAdminSetupModal: React.FC<SuperAdminSetupModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Testing Helper / Auto-fill Current Code */}
-                  {setupDetails?.currentOtp && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        flexWrap: "wrap",
-                        gap: "0.5rem",
-                        padding: "0.55rem 0.75rem",
-                        background: "rgba(245, 158, 11, 0.08)",
-                        border: "1px dashed rgba(245, 158, 11, 0.35)",
-                        borderRadius: "0.5rem",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.75rem", color: "#fbbf24" }}>
-                        <Sparkles size={13} color="#f59e0b" />
-                        <span>Active TOTP Token: <strong>{setupDetails.currentOtp}</strong></span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setTotpCode(setupDetails.currentOtp || "")}
-                        style={{
-                          padding: "0.3rem 0.65rem",
-                          background: "rgba(245, 158, 11, 0.2)",
-                          border: "1px solid rgba(245, 158, 11, 0.45)",
-                          borderRadius: "0.375rem",
-                          color: "#fef3c7",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        ⚡ Click to Auto-fill Code
-                      </button>
-                    </div>
-                  )}
-
                   {/* 6-Digit Code Input */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -750,22 +711,7 @@ export const SuperAdminSetupModal: React.FC<SuperAdminSetupModalProps> = ({
                       >
                         Enter 6-digit Authenticator Code to verify
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => setTotpCode("000000")}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: "#94a3b8",
-                          fontSize: "0.7rem",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          padding: 0,
-                        }}
-                      >
-                        Dev Bypass (000000)
-                      </button>
-                    </div>
+                      </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                       <input
                         type="text"
