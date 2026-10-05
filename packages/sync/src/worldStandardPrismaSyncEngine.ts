@@ -1222,7 +1222,9 @@ const now = new Date();
       } else {
         const current = await this.scopedRecord(tx, ctx, entityType, String(conflict.entity_id));
         const effective: any = { ...current, ...payload };
-        const deleting = String(conflict.operation_type || "UPDATE") === "DELETE";
+        const deleting =
+          String(conflict.operation_type || "UPDATE") === "DELETE" &&
+          resolution === "ACCEPT_LOCAL";
         switch (entityType) {
           case "Product":
             await tx.product.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, description: effective.description ?? null, sku: effective.sku, categoryId: effective.categoryId ?? null, brandId: effective.brandId ?? effective.brand_id ?? null, supplierId: effective.supplierId ?? null, taxId: effective.taxId ?? null, category: effective.category ?? current.category, buyingPrice: effective.buyingPrice ?? current.buyingPrice, sellingPrice: effective.sellingPrice ?? current.sellingPrice, isActive: deleting ? false : (effective.isActive ?? true) } });
@@ -1275,7 +1277,7 @@ const now = new Date();
           operationId: resolverOperationId,
           entityType,
           entityId: String(conflict.entity_id),
-          operationType: "UPDATE",
+          operationType: deleting ? "DELETE" : "UPDATE",
           payload: effective,
           clientCreatedAt: new Date().toISOString(),
           idempotencyKey: resolverOperationId,
