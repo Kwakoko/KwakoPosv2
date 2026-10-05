@@ -397,6 +397,10 @@ export class WorldStandardPrismaSyncEngine {
     const preconditionedEntities = new Set([
       "Product", "ProductVariant", "Customer", "Supplier", "Category", "Brand", "Expense",
     ]);
+    if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
+      // Preserve the domain-specific ledger-only error for forbidden absolute inventory writes.
+      rejectNonZeroAbsoluteInventoryMutation(op.payload);
+    }
     if (preconditionedEntities.has(op.entityType) && ["UPDATE", "DELETE"].includes(op.operationType)) {
       requireBaseUpdatedAt(op.payload, op.entityType);
     }
