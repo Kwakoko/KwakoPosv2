@@ -130,7 +130,7 @@ export function hasSyncConflictPermission(
   if (roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN")) return true;
   if (permission === "sync.conflict.read") return roles.some((r) => ["OWNER", "ADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
   if (permission === "sync.conflict.resolve") {
-    return permissions.includes("settings.manage") || roles.some((r) => ["OWNER", "ADMIN", "BUSINESS_ADMIN"].includes(r));
+    return roles.some((r) => ["OWNER", "ADMIN", "BUSINESS_ADMIN"].includes(r));
   }
   return false;
 }
