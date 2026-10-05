@@ -5578,10 +5578,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
-    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
-    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
+    if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
+      return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Super Admin privileges required." } });
+    }
+    const identity = req.user as any;
+    return reply.status(200).send({
+      success: true,
+      data: globalSuperAdminPlatformService.getOperatingPlane(ctx.userId, String(identity?.email || ""), "PLATFORM_ADMIN"),
+    });
   });
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
