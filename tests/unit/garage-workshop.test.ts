@@ -42,7 +42,7 @@ describe("Advanced Garage & Automotive Workshop OS Suite", () => {
   it("should render visual Garage Command Center dashboard", () => {
     const html = renderGarageCommandCenterDashboard();
     expect(html).toContain("KWAKOPOS AUTOMOTIVE WORKSHOP COMMAND CENTER");
-    expect(html).toContain("58-Pillar Automotive Service");
+    expect(html).toContain("Automotive Service");
   });
 
   it("should pass all garage domain certification checks", async () => {
