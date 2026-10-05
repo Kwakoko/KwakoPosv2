@@ -107,6 +107,35 @@ const api = isWindows
       env: { ...process.env, PORT: "3000", HOST: "0.0.0.0" },
     });
 
+async function waitForApiReady(child: ChildProcess, timeoutMs = 30_000) {
+  const startedAt = Date.now();
+  const readyUrl = "http://127.0.0.1:3000/api/system/version";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (child.exitCode !== null) {
+      throw new Error(`[KwakoPos] API exited before becoming ready (code ${child.exitCode}).`);
+    }
+
+    try {
+      const response = await fetch(readyUrl, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (response.ok) {
+        console.log("\x1b[32m[KwakoPos]\x1b[0m API is ready; starting Web client...");
+        return;
+      }
+    } catch {
+      // API is still starting; keep polling.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`[KwakoPos] API did not become ready within ${timeoutMs}ms.`);
+}
+
+await waitForApiReady(api);
+
 const webEnv = { ...process.env, WEB_PORT: "5173" };
 delete (webEnv as any).PORT; // Ensure web client does not inherit backend API PORT=3000
 
