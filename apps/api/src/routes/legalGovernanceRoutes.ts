@@ -23,7 +23,7 @@ function requireAdmin(req: FastifyRequest) {
     roles.includes("SUPER_ADMIN") ||
     roles.includes("SUPERADMIN") ||
     roles.includes("OWNER") ||
-    permissions.includes("*") ||
+    permissions.includes("legal:manage") ||
     permissions.includes("SUPER_ADMIN_OPERATIONS") ||
     permissions.includes("ADMIN:*");
 
@@ -43,7 +43,7 @@ function requirePlatformSuperAdmin(req: FastifyRequest) {
     roles.includes("PLATFORM_SUPER_ADMIN") ||
     permissions.includes("SUPER_ADMIN_OPERATIONS") ||
     permissions.includes("ADMIN:PLATFORM") ||
-    permissions.includes("*") ||
+    permissions.includes("platform:governance") ||
     permissions.includes("ALL");
   if (!isPlatformSuperAdmin) {
     throw new Error("FORBIDDEN: Platform Super Admin privileges required");
