@@ -976,6 +976,11 @@ function registerCanonicalProductionAuthentication(
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
+        const authHeader = String(req.headers.authorization || "");
+        let accessContext: any = null;
+        if (authHeader.startsWith("Bearer ")) {
+          try { accessContext = verifyAccessToken(authHeader.slice(7)); } catch { accessContext = null; }
+        }
         if (!sessionId) {
           clearRefreshCookie(reply, secureCookies);
           return reply.status(400).send({ success: false, error: { code: "SESSION_REQUIRED", message: "Session id is required." } });
