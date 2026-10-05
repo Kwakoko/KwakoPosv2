@@ -1186,7 +1186,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
             branchId: testBranchId,
             userId: testUserId,
             roles: isSuperAdmin ? ["ADMIN", "SUPER_ADMIN"] : ["ADMIN"],
-            permissions: ["admin:manage", "admin:export", "admin:rbac", "admin:users", "admin:support", "admin:cleanliness", "rollback:view", "rollback:request", "rollback:approve", "rollback:execute", "rollback:cancel", "rollback:verify", "rollback:recover", "rollback:emergency", "rollback:platform", "rollback:audit", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
+            permissions: ["admin:manage", "admin:export", "admin:rbac", "admin:users", "admin:support", "admin:cleanliness", "rollback.view", "rollback.request", "rollback.approve", "rollback.execute", "rollback.cancel", "rollback.verify", "rollback.recover", "rollback.emergency", "rollback.platform", "rollback.audit", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
           };
           if (req.traceContext) {
             req.traceContext.tenantId = testTenantId;
