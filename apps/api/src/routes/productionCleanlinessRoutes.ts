@@ -16,7 +16,7 @@ function requireSuperAdmin(req: any): string {
   const ctx = req.tenantContext;
   const roles = Array.isArray(ctx?.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
   const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions.map((p: unknown) => String(p).toLowerCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !permissions.includes("*") && !permissions.includes("admin:*")) {
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !permissions.includes("admin:manage") && !permissions.includes("admin:cleanliness")) {
     throw new Error("FORBIDDEN: Super Admin platform credentials required");
   }
   return String(ctx.userId);
