@@ -124,7 +124,7 @@ export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: s
     branchId: payload.branchId,
     email: payload.email || "system@kwakopos.local",
     roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"],
-    permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"],
+    permissions: payload.permissions && payload.permissions.length ? payload.permissions : [],
     deviceId: payload.deviceId || "dev_system",
     ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
   };
