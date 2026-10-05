@@ -1281,7 +1281,7 @@ const now = new Date();
         const eventRecord = snapshot && typeof snapshot === "object"
           ? { ...(snapshot as Record<string, unknown>), __conflictResolution: { conflictId, originalOperationId: conflict.operation_id, entityType, entityId: String(conflict.entity_id), resolution } }
           : { __conflictResolution: { conflictId, originalOperationId: conflict.operation_id, entityType, entityId: String(conflict.entity_id), resolution } };
-        await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType, entityId: String(conflict.entity_id), operationType: "UPDATE", payload: effective, status: "PROCESSED", idempotencyKey: resolverOperationId, clientCreatedAt: new Date(), processedAt: new Date() } });
+        await tx.syncOperation.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: "conflict-resolver:" + ctx.userId, operationId: resolverOperationId, entityType, entityId: String(conflict.entity_id), operationType: deleting ? "DELETE" : "UPDATE", payload: effective, status: "PROCESSED", idempotencyKey: resolverOperationId, clientCreatedAt: new Date(), processedAt: new Date() } });
         revision = await this.journal(ctx, op, eventRecord, "conflict-resolution", tx);
       }
 
@@ -1319,6 +1319,15 @@ const now = new Date();
       );
       return { status: "RESOLVED", operationId: resolverOperationId, revision };
     });
+  }
+
+  async countOpenConflicts(ctx: TenantContext): Promise<number> {
+    await this.ensureInfrastructure();
+    const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint | number | string }>>(
+      "SELECT COUNT(*) AS count FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = 'OPEN'",
+      ctx.tenantId, ctx.branchId,
+    );
+    return Number(rows[0]?.count ?? 0);
   }
 
   async listConflicts(ctx: TenantContext, status: string = "OPEN"): Promise<any[]> {
