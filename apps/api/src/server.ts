@@ -1376,6 +1376,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       )
         return [404, "NOT_FOUND", "Resource not found."];
 
+      // Optimistic-concurrency preconditions → 428.
+      // This keeps clients from bypassing the lost-update guard by omitting _baseUpdatedAt.
+      if (code.includes("SYNC_PRECONDITION_REQUIRED") || msg.includes("SYNC_PRECONDITION_REQUIRED"))
+        return [428, "PRECONDITION_REQUIRED", "A fresh concurrency precondition is required."];
+
       // Duplicate / already-exists / conflict-state errors → 409.
       if (
         code.includes("DUPLICATE") ||

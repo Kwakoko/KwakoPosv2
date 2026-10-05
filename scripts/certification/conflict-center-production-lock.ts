@@ -30,7 +30,9 @@ for (const file of [
   "tests/unit/sync-conflict-center-presentation.test.ts",
   "tests/unit/sync-status-label.test.ts",
   "tests/unit/sync-conflict-authorization.test.ts",
+  "tests/unit/sync-integrity-preconditions.test.ts",
   "tests/integration/conflict-hardening-concurrency.test.ts",
+  "tests/integration/conflict-baseline-immutability.test.ts",
   "scripts/certify-sync-conflict-resolution.ts",
   "packages/database/prisma/migrations/202610050001_sync_conflict_hardening/migration.sql",
   ".github/workflows/conflict-center-production-lock.yml",
@@ -65,9 +67,13 @@ sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "syn
 sourceContains("apps/api/src/server.ts", 'server.post("/sync/conflicts/register"', true);
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_ID_REUSE");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "Preserve the original authoritative snapshot for the lifetime of the conflict");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_MERGE_FIELD_FORBIDDEN");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_MERGE_DELETE_UNSUPPORTED");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "resolution === \"ACCEPT_LOCAL\"");
+sourceContains("packages/sync/src/syncIntegrity.ts", "requireBaseUpdatedAt");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "requireBaseUpdatedAt(op.payload, op.entityType)");
+sourceContains("apps/api/src/server.ts", "return [428, \"PRECONDITION_REQUIRED\", \"A fresh concurrency precondition is required.\"]");
 sourceContains("packages/database/prisma/migrations/202610050001_sync_conflict_hardening/migration.sql", "resolved_server_revision");
 sourceContains("tests/integration/conflict-hardening-concurrency.test.ts", "serializes concurrent unit conversions");
 sourceContains("tests/unit/sync-conflict-authorization.test.ts", "denies conflict resolution to ordinary operational permissions");

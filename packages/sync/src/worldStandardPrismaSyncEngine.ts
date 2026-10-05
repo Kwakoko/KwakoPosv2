@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
-import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
+import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
 import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
 import {
@@ -133,10 +133,9 @@ export class WorldStandardPrismaSyncEngine {
         )) {
           throw new Error("SYNC_CONFLICT_ID_REUSE");
         }
-        await tx.$executeRawUnsafe(
-          "UPDATE sync_conflict_record SET remote_payload = $1::jsonb, remote_fingerprint = $2 WHERE id = $3 AND tenant_id = $4 AND branch_id = $5 AND status = 'OPEN'",
-          JSON.stringify(conflict.remotePayload || {}), remoteFingerprint, conflict.id, ctx.tenantId, ctx.branchId,
-        );
+        // Preserve the original authoritative snapshot for the lifetime of the conflict.
+        // Re-registration must never move the conflict baseline forward and hide a later
+        // server-side change from resolution-time concurrency validation.
         return;
       }
       await tx.$executeRawUnsafe(
@@ -395,6 +394,13 @@ export class WorldStandardPrismaSyncEngine {
   }
 
   private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
+    const preconditionedEntities = new Set([
+      "Product", "ProductVariant", "Customer", "Supplier", "Category", "Brand", "Expense",
+    ]);
+    if (preconditionedEntities.has(op.entityType) && ["UPDATE", "DELETE"].includes(op.operationType)) {
+      requireBaseUpdatedAt(op.payload, op.entityType);
+    }
+
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);
       const key = String(payload.key || "").trim();
