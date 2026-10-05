@@ -1,4 +1,4 @@
-name: CI Quality Gates
+      - name: POS Terminal Production Lock\n        run: npm run certify:pos-lock\nname: CI Quality Gates
 
 # Closed-loop certification contract: every PR/main candidate must pass all gates.
 
