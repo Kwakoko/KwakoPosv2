@@ -13,12 +13,11 @@ export interface ReleaseManifest {
   releaseChannel: string;
   releasedAt: string;
   brand: {
-    parentBrand: "Kwakoko";
-    platform: "Kwakoko Business Operating System";
-    pos: "KwakoPos";
+    parentBrand: string;
+    platform: string;
+    posCapability: string;
   };
   certification: "PASS" | "FAIL";
-  brand: { parentBrand: string; platform: string; posCapability: string; };
   compatibility: {
     databaseSchemaVersion: number;
     syncProtocolVersion: number;
