@@ -1131,9 +1131,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     ) {
       const relativePath = url.startsWith("/") ? url.slice(1) : url;
       const assetPath = resolveWebDistFile(relativePath);
-      if (assetPath && fs.existsSync(assetPath)) {
-        reply.type(getMimeType(assetPath)).send(fs.readFileSync(assetPath));
-        return;
+      if (assetPath) {
+        try {
+          const asset = await fs.promises.readFile(assetPath);
+          reply.type(getMimeType(assetPath)).send(asset);
+          return;
+        } catch {
+          // Continue to normal routing when the asset disappears between resolution and read.
+        }
       }
     }
 
