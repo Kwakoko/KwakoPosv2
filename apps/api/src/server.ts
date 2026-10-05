@@ -878,11 +878,11 @@ function registerCanonicalProductionAuthentication(
           const ctx = verifyAccessToken(token);
           const authHeader = String(req.headers.authorization || "");
         const accessToken = authHeader.replace(/^Bearer\\s+/i, "");
-        let accessContext: ReturnType<typeof verifyAccessToken> | null = null;
+        let logoutAccessContext: ReturnType<typeof verifyAccessToken> | null = null;
         try {
-          if (accessToken) accessContext = verifyAccessToken(accessToken);
+          if (accessToken) logoutAccessContext = verifyAccessToken(accessToken);
         } catch {
-          accessContext = null;
+          logoutAccessContext = null;
         }
         const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
           if (!target || target.tenantId !== ctx.tenantId || target.userId !== ctx.sub) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Session not found." } });
@@ -977,9 +977,9 @@ function registerCanonicalProductionAuthentication(
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
         const authHeader = String(req.headers.authorization || "");
-        let accessContext: any = null;
+        let logoutAccessContext: any = null;
         if (authHeader.startsWith("Bearer ")) {
-          try { accessContext = verifyAccessToken(authHeader.slice(7)); } catch { accessContext = null; }
+          try { logoutAccessContext = verifyAccessToken(authHeader.slice(7)); } catch { logoutAccessContext = null; }
         }
         if (!sessionId) {
           clearRefreshCookie(reply, secureCookies);
@@ -990,7 +990,7 @@ function registerCanonicalProductionAuthentication(
           clearRefreshCookie(reply, secureCookies);
           return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
         }
-        if (accessContext && (accessContext.sub !== target.userId || accessContext.tenantId !== target.tenantId || accessContext.branchId !== target.branchId)) {
+        if (logoutAccessContext && (logoutAccessContext.sub !== target.userId || logoutAccessContext.tenantId !== target.tenantId || logoutAccessContext.branchId !== target.branchId)) {
           clearRefreshCookie(reply, secureCookies);
           return reply.status(403).send({ success: false, error: { code: "SESSION_CONTEXT_MISMATCH", message: "Session does not belong to the authenticated user." } });
         }
