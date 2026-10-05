@@ -3234,3 +3234,145 @@ model SyncControlState {
 
   @@map("sync_control_state")
 }
+
+
+model PlatformSuperAdminSecurity {
+  userId               String   @id @map("user_id")
+  bootstrapPending     Boolean  @default(true) @map("bootstrap_pending")
+  mustChangePassword   Boolean  @default(true) @map("must_change_password")
+  mfaRequired          Boolean  @default(true) @map("mfa_required")
+  mfaEnrolled          Boolean  @default(false) @map("mfa_enrolled")
+  mfaType              String?  @map("mfa_type")
+  mfaSecretCiphertext  String?  @map("mfa_secret_ciphertext")
+  lockedUntil          DateTime? @map("locked_until")
+  failedLoginCount     Int      @default(0) @map("failed_login_count")
+  lastFailedAt         DateTime? @map("last_failed_at")
+  lastLoginAt          DateTime? @map("last_login_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([lockedUntil])
+  @@map("platform_super_admin_security")
+}
+
+model AuthLoginThrottle {
+  id           String   @id @default(uuid())
+  throttleKey String   @unique @map("throttle_key")
+  windowStart DateTime @default(now()) @map("window_start")
+  attempts    Int      @default(0)
+  lockedUntil DateTime? @map("locked_until")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([lockedUntil])
+  @@map("auth_login_throttles")
+}
+
+model AuthTotpReplay {
+  userId  String   @map("user_id")
+  counter BigInt
+  usedAt DateTime @default(now()) @map("used_at")
+
+  @@id([userId, counter])
+  @@map("auth_totp_replay")
+}
+
+model SupportTicket {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  branchId        String?  @map("branch_id")
+  createdByUserId String?  @map("created_by_user_id")
+  subject         String
+  description     String
+  status          String   @default("OPEN")
+  severity        String   @default("P3")
+  category        String   @default("GENERAL")
+  module          String?
+  diagnosticState Json     @default("{}") @map("diagnostic_state")
+  aiSummary       String?  @map("ai_summary")
+  assignedTeam    String?  @map("assigned_team")
+  slaDueAt        DateTime? @map("sla_due_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  resolvedAt      DateTime? @map("resolved_at")
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, severity, createdAt])
+  @@index([status, slaDueAt])
+  @@map("SupportTicket")
+}
+
+model SupportEvent {
+  id        String   @id
+  tenantId  String?  @map("tenant_id")
+  ticketId  String?  @map("ticket_id")
+  incidentId String? @map("incident_id")
+  actorType String   @map("actor_type")
+  actorId   String?  @map("actor_id")
+  eventType String   @map("event_type")
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([ticketId, createdAt])
+  @@map("SupportEvent")
+}
+
+model SupportIncident {
+  id              String   @id
+  severity        String   @default("P2")
+  status          String   @default("INVESTIGATING")
+  title           String
+  rootCause       String?  @map("root_cause")
+  affectedModule  String?  @map("affected_module")
+  affectedVersion String?  @map("affected_version")
+  evidence        Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  resolvedAt      DateTime? @map("resolved_at")
+
+  @@index([status, createdAt])
+  @@map("SupportIncident")
+}
+
+model SupportIncidentTenant {
+  incidentId  String   @map("incident_id")
+  tenantId    String   @map("tenant_id")
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  @@id([incidentId, tenantId])
+  @@index([tenantId, lastSeenAt])
+  @@map("SupportIncidentTenant")
+}
+
+model SupportRemediation {
+  id             String   @id
+  tenantId       String   @map("tenant_id")
+  ticketId       String?  @map("ticket_id")
+  action         String
+  riskLevel      String   @map("risk_level")
+  policyDecision String   @map("policy_decision")
+  requestedBy    String   @map("requested_by")
+  result         String?
+  verification   Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+
+  @@index([tenantId, createdAt])
+  @@map("SupportRemediation")
+}
+
+model SupportKnowledgeArticle {
+  id             String   @id
+  title          String
+  problemPattern String   @map("problem_pattern")
+  resolution     String
+  verification   String
+  module         String?
+  version        String?
+  status         String   @default("DRAFT")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("SupportKnowledgeArticle")
+}
