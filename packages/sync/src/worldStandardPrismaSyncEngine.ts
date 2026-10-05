@@ -1200,6 +1200,22 @@ const now = new Date();
         resolvedEntityFingerprint = await this.assertConflictEntityUnchanged(tx, ctx, conflict);
       }
       const payload: any = stripSyncControlFields(chosen as Record<string, unknown>);
+      if (resolution === "MERGE") {
+        if (String(conflict.operation_type || "UPDATE") === "DELETE") {
+          throw new Error("SYNC_CONFLICT_MERGE_DELETE_UNSUPPORTED");
+        }
+        const mergeableFields: Record<string, string[]> = {
+          Product: ["name", "description", "categoryId", "brandId", "supplierId", "taxId", "category", "isActive"],
+          ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
+          Customer: ["name", "phone", "email", "address"],
+          Supplier: ["name", "phone", "email", "address", "taxPin"],
+          Category: ["name", "code", "parentId", "description", "color", "isActive"],
+          Brand: ["name", "code", "origin", "notes", "isActive"],
+        };
+        const allowed = new Set(mergeableFields[entityType] || []);
+        const forbidden = Object.keys(payload).filter((key) => !allowed.has(key));
+        if (forbidden.length) throw new Error("SYNC_CONFLICT_MERGE_FIELD_FORBIDDEN:" + forbidden.sort().join(","));
+      }
 
       if (entityType === "SaleOversell") {
         // Committed business incident: resolution acknowledges the incident without rewriting sale/ledger history.
