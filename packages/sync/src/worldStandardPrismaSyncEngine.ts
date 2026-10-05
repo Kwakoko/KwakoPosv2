@@ -176,7 +176,6 @@ export class WorldStandardPrismaSyncEngine {
   }): Promise<{ status: string; conflictId: string }> {
     await this.ensureInfrastructure();
     if (!ctx.tenantId || !ctx.branchId) throw new Error("SYNC_CONTEXT_REQUIRED");
-    assertSyncConflictPermission(ctx, "sync.conflict.read");
     if (!input.conflictId || !input.operationId || !input.entityType || !input.entityId) {
       throw new Error("SYNC_CONFLICT_REGISTRATION_INVALID");
     }
@@ -1153,7 +1152,10 @@ const now = new Date();
     const baseline = conflict.remote_payload && typeof conflict.remote_payload === "object"
       ? conflict.remote_payload as Record<string, unknown>
       : {};
-    const currentRecord = current && typeof current === "object" ? current as Record<string, unknown> : {};
+    const canonicalize = (value: unknown): unknown => {
+      return JSON.parse(JSON.stringify(value));
+    };
+    const currentRecord = canonicalize(current) as Record<string, unknown>;
     const filteredCurrent: Record<string, unknown> = {};
     const filteredBaseline: Record<string, unknown> = {};
     for (const key of Object.keys(baseline)) {
