@@ -985,6 +985,10 @@ function registerCanonicalProductionAuthentication(
           clearRefreshCookie(reply, secureCookies);
           return reply.status(400).send({ success: false, error: { code: "SESSION_REQUIRED", message: "Session id is required." } });
         }
+        if (!logoutAccessContext) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authenticated access token required for logout." } });
+        }
         const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
         if (!target) {
           clearRefreshCookie(reply, secureCookies);
