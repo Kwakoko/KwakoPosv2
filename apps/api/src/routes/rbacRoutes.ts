@@ -7,7 +7,7 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   const roles = Array.isArray(req.tenantContext.roles) ? req.tenantContext.roles.map((r) => String(r).toUpperCase()) : [];
   const permissions = Array.isArray(req.tenantContext.permissions) ? req.tenantContext.permissions.map((p) => String(p).toLowerCase()) : [];
   const isAdmin = roles.some((role) => ["ADMIN", "SUPER_ADMIN", "SUPERADMIN", "OWNER"].includes(role));
-  const hasAdminPermission = permissions.includes("*") || permissions.includes("admin:*") || permissions.some((p) => p.startsWith("admin:"));
+  const hasAdminPermission = permissions.some((p) => ["admin:manage", "admin:rbac", "admin:users"].includes(p));
   if (!isAdmin && !hasAdminPermission) throw new RbacMutationError("FORBIDDEN", "Administrative privileges required", 403);
   return req.tenantContext;
 }
