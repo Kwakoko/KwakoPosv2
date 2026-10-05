@@ -26,35 +26,40 @@ async function main() {
   await prisma.category.create({ data: { id: categoryId, tenantId, branchId, name: "Server Category", code: "CRC-C-" + categoryId.slice(0, 8) } });
   await prisma.brand.create({ data: { id: brandId, tenantId, branchId, name: "Server Brand", code: "CRC-B-" + brandId.slice(0, 8) } });
 
-  const productConflict = "conflict:" + randomUUID();
-  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: randomUUID(), entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product" }, deviceId: "DEVICE-A" });
-  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: randomUUID(), entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product v2" }, deviceId: "DEVICE-A" });
+  const productOperationId = randomUUID();
+  const productConflict = "conflict:" + productOperationId;
+  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: productOperationId, entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product" }, deviceId: "DEVICE-A" });
+  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: productOperationId, entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product v2" }, deviceId: "DEVICE-A" });
   const detectCount = await prisma.auditEvent.count({ where: { tenantId, branchId, action: "SYNC_CONFLICT_DETECTED", entityType: "Product" } });
   if (detectCount !== 1) throw new Error("CONFLICT_DETECTION_AUDIT_DEDUP_FAILED");
   await engine.resolveConflict(ctx, productConflict, "ACCEPT_LOCAL");
   if ((await prisma.product.findUnique({ where: { id: productId } }))?.name !== "Local Product") throw new Error("PRODUCT_RESOLUTION_FAILED");
   await assertConflictStatus(productConflict, "ACCEPT_LOCAL");
 
-  const categoryConflict = "conflict:" + randomUUID();
-  await engine.registerConflict(ctx, { conflictId: categoryConflict, operationId: randomUUID(), entityType: "Category", entityId: categoryId, localPayload: { name: "Local Category", code: "LOCAL-C" }, remotePayload: { name: "Server Category" } });
+  const categoryOperationId = randomUUID();
+  const categoryConflict = "conflict:" + categoryOperationId;
+  await engine.registerConflict(ctx, { conflictId: categoryConflict, operationId: categoryOperationId, entityType: "Category", entityId: categoryId, localPayload: { name: "Local Category", code: "LOCAL-C" }, remotePayload: { name: "Server Category" } });
   await engine.resolveConflict(ctx, categoryConflict, "ACCEPT_LOCAL");
   if ((await prisma.category.findUnique({ where: { id: categoryId } }))?.name !== "Local Category") throw new Error("CATEGORY_RESOLUTION_FAILED");
   await assertConflictStatus(categoryConflict, "ACCEPT_LOCAL");
 
-  const brandConflict = "conflict:" + randomUUID();
-  await engine.registerConflict(ctx, { conflictId: brandConflict, operationId: randomUUID(), entityType: "Brand", entityId: brandId, localPayload: { name: "Local Brand" }, remotePayload: { name: "Server Brand" } });
+  const brandOperationId = randomUUID();
+  const brandConflict = "conflict:" + brandOperationId;
+  await engine.registerConflict(ctx, { conflictId: brandConflict, operationId: brandOperationId, entityType: "Brand", entityId: brandId, localPayload: { name: "Local Brand" }, remotePayload: { name: "Server Brand" } });
   await engine.resolveConflict(ctx, brandConflict, "MERGE", { name: "Merged Brand", code: "MERGED-B" });
   const brand = await prisma.brand.findUnique({ where: { id: brandId } });
   if (brand?.name !== "Merged Brand" || brand.code !== "MERGED-B") throw new Error("BRAND_MERGE_FAILED");
   await assertConflictStatus(brandConflict, "MERGE");
 
-  const oversellConflict = "conflict:oversell:" + randomUUID();
-  await engine.registerConflict(ctx, { conflictId: oversellConflict, operationId: randomUUID(), entityType: "SaleOversell", entityId: randomUUID(), operationType: "CREATE", localPayload: { shortfall: 2 }, remotePayload: { currentInventory: 3 } });
+  const oversellOperationId = randomUUID();
+  const oversellConflict = "conflict:" + oversellOperationId;
+  await engine.registerConflict(ctx, { conflictId: oversellConflict, operationId: oversellOperationId, entityType: "SaleOversell", entityId: randomUUID(), operationType: "CREATE", localPayload: { shortfall: 2 }, remotePayload: { currentInventory: 3 } });
   await engine.resolveConflict(ctx, oversellConflict, "ACCEPT_SERVER");
   await assertConflictStatus(oversellConflict, "ACCEPT_SERVER");
 
-  const conversionConflict = "conflict:conversion:" + randomUUID();
-  await engine.registerConflict(ctx, { conflictId: conversionConflict, operationId: randomUUID(), entityType: "UnitConversionConflict", entityId: randomUUID(), operationType: "CREATE", localPayload: { parentUnitsDeducted: 5 }, remotePayload: { availableParentStock: 3 } });
+  const conversionOperationId = randomUUID();
+  const conversionConflict = "conflict:" + conversionOperationId;
+  await engine.registerConflict(ctx, { conflictId: conversionConflict, operationId: conversionOperationId, entityType: "UnitConversionConflict", entityId: randomUUID(), operationType: "CREATE", localPayload: { parentUnitsDeducted: 5 }, remotePayload: { availableParentStock: 3 } });
   await engine.resolveConflict(ctx, conversionConflict, "ACCEPT_SERVER");
   await assertConflictStatus(conversionConflict, "ACCEPT_SERVER");
 
