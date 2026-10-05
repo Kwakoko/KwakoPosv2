@@ -177,6 +177,84 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, tre
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
 
+interface ReferenceKPICardProps {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  accent: string;
+  description: string;
+  trend?: string;
+  variant?: 'hero' | 'compact';
+  onClick?: () => void;
+  action?: { label: string; onClick: () => void };
+  spark?: number[];
+}
+
+const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
+  title, value, icon, accent, description, trend, variant = 'compact', onClick, action,
+  spark = [18, 26, 22, 34, 28, 42, 36, 48],
+}) => {
+  const width = 112;
+  const height = 48;
+  const min = Math.min(...spark);
+  const max = Math.max(...spark);
+  const points = spark.map((v, i) => {
+    const x = (i / Math.max(1, spark.length - 1)) * width;
+    const y = height - 6 - ((v - min) / Math.max(1, max - min)) * (height - 14);
+    return x + ',' + y;
+  }).join(' ');
+  const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
+  const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
+    (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
+    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[126px] p-4');
+  const iconClass = (variant === 'hero' ? 'h-11 w-11 rounded-xl' : 'h-10 w-10 rounded-xl') +
+    ' flex items-center justify-center shrink-0';
+  const valueClass = (variant === 'hero' ? 'mt-5 text-[38px]' : 'mt-3 text-[27px]') +
+    ' font-black leading-none tracking-tight text-white';
+
+  return (
+    <div onClick={onClick} className={cardClass}
+      style={{
+        background: 'linear-gradient(135deg, ' + accent + '12 0%, rgba(5, 18, 38, 0.96) 72%)',
+        borderColor: accent + 'cc',
+        boxShadow: 'inset 0 0 28px ' + accent + '0d, 0 0 14px ' + accent + '0a',
+      }}>
+      <div className={'absolute rounded-full blur-2xl opacity-20 pointer-events-none ' +
+        (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
+        style={{ background: accent }} />
+      <div className="relative z-10 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <div className={iconClass} style={{ background: accent + '22', color: accent, boxShadow: '0 0 18px ' + accent + '22' }}>
+              {icon}
+            </div>
+            <div>
+              <p className="text-[12px] font-black uppercase tracking-wide text-slate-100">{title}</p>
+              {trend && <p className="mt-1 text-[11px] font-semibold text-emerald-400">{'↑'} {trend}</p>}
+            </div>
+          </div>
+          <p className={valueClass}>{value}</p>
+          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed text-slate-300/90">{description}</p>
+          {action && (
+            <button type="button"
+              onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+              className="mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold"
+              style={{ background: accent + '18', color: accent }}>
+              <RefreshCw className="h-3 w-3" />
+              {action.label}
+            </button>
+          )}
+        </div>
+        <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
+          viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
+          <polygon points={area} fill={accent} opacity="0.10" />
+          <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+    </div>
+  );
+};
+
 interface LocalProduct {
   id: string;
   name: string;
@@ -948,11 +1026,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const grossSales = totalSales + todayRefunds + todayDiscounts;
     const netSales = totalSales;
     const todayAOV = todayOrders.length > 0 ? Math.round(netSales / todayOrders.length) : 0;
+    const yesterdayAOV = yesterdayOrders.length > 0 ? Math.round(yesterdaySales / yesterdayOrders.length) : 0;
+    const aovTrendPct = yesterdayAOV === 0
+      ? (todayAOV > 0 ? 'New AOV today' : undefined)
+      : (todayAOV >= yesterdayAOV ? '+' : '') + Math.abs(((todayAOV - yesterdayAOV) / yesterdayAOV) * 100).toFixed(0) + '% vs yesterday';
 
     return {
       totalSales, yesterdaySales, allSales,
       grossSales, todayRefunds, todayRefundCount, todayDiscounts, netSales, todayAOV,
       salesTrend, salesTrendPct,
+      aovTrendPct,
       completedOrders, pendingOrders,
       todayPendingOrders, activeTables, todayUniqueCustomers,
       inventoryVal, lowStockCount, outOfStockCount,
@@ -1407,23 +1490,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       </svg>
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-white">Business Dashboard</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Live analytics for{' '}
-            <span className="font-bold text-slate-700 dark:text-slate-300">{currentBranchName || 'Main Branch'}</span>
-            {' · '}
-            <span className="font-bold text-primary">{role}</span>
-            {' · '}
-            <span className="text-slate-400">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</span>
-          </p>
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.12)]">
+              <BarChart2 className="h-6 w-6" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black tracking-tight text-white">Business Dashboard</h2>
+              <p className="text-sm text-slate-400 mt-0.5">Track performance, spot issues, and keep your business moving.</p>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-col items-end gap-2.5">
           {/* Quiet dashboard freshness metadata: useful for auditability without competing with business KPIs. */}
           {isOnline && authoritativeKpis && (
             <span
-              className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap"
+              className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-400 whitespace-nowrap"
               title={dashboardFreshness.isBehind
                 ? `Server revision ${dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision} is ahead of local revision ${dashboardFreshness.localRevision}`
                 : "Authoritative dashboard freshness"}
@@ -1458,54 +1541,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           >
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>
-              {!isOnline
-                ? 'TRA VFD: Offline'
-                : traVfdStatus
-                ? `TRA VFD: ${traVfdStatus.status}`
-                : isVfdEnabled
-                ? 'TRA VFD: ON'
-                : 'TRA VFD: OFF'}
+              TRA VFD: {!isOnline ? 'Offline' : traVfdStatus?.status === 'VERIFIED' ? 'Verified' : 'Disabled'}
             </span>
           </button>
 
           {/* Status Badge 2: Offline Readiness */}
           <span
-            className="h-9 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/30 dark:border-emerald-700/50 whitespace-nowrap shrink-0"
+            className="h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0"
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
           >
             <Zap className="h-4 w-4 shrink-0" />
-            <span>Offline Enabled</span>
+            <span>Offline Mode: Available</span>
           </span>
-
-          {/* Action Button 1: Daily Z-Report */}
-          <button
-            type="button"
-            onClick={() => setIsZReportOpen(true)}
-            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-darkbg shadow-xs hover:border-slate-300 dark:hover:border-slate-600 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title="Generate & print 80mm Daily Register Close (Z-Report) thermal slip"
-          >
-            <Printer className="h-4 w-4 text-slate-500 dark:text-slate-400 shrink-0" />
-            <span>Daily Z-Report</span>
-          </button>
-
-          {/* Action Button 2: Export Report */}
-          <button
-            type="button"
-            onClick={exportDashboardSummaryCSV}
-            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 dark:border-darkbg-border bg-white dark:bg-darkbg-card text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-darkbg shadow-xs hover:border-slate-300 dark:hover:border-slate-600 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title="Download multi-tab audited Excel workbook (.xlsx)"
-          >
-            <Download className="h-4 w-4 text-slate-500 dark:text-slate-400 shrink-0" />
-            <span>Export Report</span>
-          </button>
 
           {/* Primary Action Button: Launch POS (Matches OK Reference) */}
           <button
             type="button"
             onClick={() => handleNav('POS')}
-            className="h-9 px-4 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap shrink-0"
+            className="h-10 px-5 inline-flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary-hover text-xs font-bold text-white shadow-[0_0_18px_rgba(37,99,235,0.22)] transition-all cursor-pointer whitespace-nowrap shrink-0"
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
           >
             <ShoppingCart className="h-4 w-4 shrink-0" />
@@ -1526,10 +1579,60 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {kpiCards.map((card, i) => (
-          <KPICard key={i} {...card} />
-        ))}
+      <div className="grid grid-cols-12 gap-4">
+        <div className="col-span-12 lg:col-span-4">
+          <ReferenceKPICard title="Today's Sales"
+            value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
+            icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
+            description="Completed sales recorded by Point of Sale" variant="hero"
+            spark={[28, 34, 31, 43, 38, 50, 45, 58]} />
+        </div>
+        <div className="col-span-12 lg:col-span-4">
+          <ReferenceKPICard title="Gross Profit (REAL)"
+            value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
+            icon={<TrendingUp className="h-6 w-6" />} accent="#2196ff"
+            trend={revenueAnalytics.profitDeltaPct !== null
+              ? (Number(revenueAnalytics.profitDeltaPct) >= 0 ? '+' : '') + revenueAnalytics.profitDeltaPct + '% vs yesterday'
+              : undefined}
+            description="Completed-sales gross profit from PostgreSQL" variant="hero"
+            spark={[34, 39, 36, 46, 41, 53, 48, 62]} />
+        </div>
+        <div className="col-span-12 lg:col-span-4">
+          <ReferenceKPICard title="Avg Order Value (AOV)"
+            value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
+            icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
+            description="Completed sales value divided by completed orders" variant="hero"
+            spark={[22, 29, 28, 37, 33, 44, 39, 51]} />
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+          <ReferenceKPICard title="Stock Alerts"
+            value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
+            icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
+            description="Low-stock plus out-of-stock variants"
+            spark={[22, 30, 25, 34, 29, 38, 33, 42]} />
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+          <ReferenceKPICard title="Customer Debts"
+            value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
+            icon={<Users className="h-5 w-5" />} accent="#ffad22"
+            description="Current customer receivables in the branch"
+            spark={[16, 22, 19, 27, 23, 31, 27, 36]} />
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+          <ReferenceKPICard title="Inventory Value"
+            value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
+            icon={<Package className="h-5 w-5" />} accent="#248bff"
+            description="Current branch stock valuation"
+            spark={[19, 26, 23, 32, 29, 39, 34, 45]} />
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+          <ReferenceKPICard title="Device Sync"
+            value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
+            icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
+            description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
+            action={kpiCards.find((card) => card.title === 'Device Sync')?.action}
+            spark={[24, 35, 29, 41, 34, 45, 39, 49]} />
+        </div>
       </div>
 
       {/* ── GAAP Net Turnover Ledger Strip (Gross Sales - Discounts - Refunds = Net Sales) ── */}
