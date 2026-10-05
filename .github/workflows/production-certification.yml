@@ -59,7 +59,7 @@ jobs:
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
       - name: Conflict Center Production Lock
-        run: npm run certify:conflict-lock
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Generate release manifest
