@@ -5,10 +5,23 @@ import { prisma } from "@kwakopos2/database";
 export type SupportSeverity = "P0" | "P1" | "P2" | "P3" | "P4";
 export type SupportStatus = "OPEN" | "INVESTIGATING" | "WAITING_CUSTOMER" | "ESCALATED" | "RESOLVED";
 export type RemediationRisk = "SAFE" | "APPROVAL_REQUIRED" | "RESTRICTED";
+function buildSqlTemplate(query: string): TemplateStringsArray {
+  const parts = query.split(/\\$\\d+/);
+  const strings = parts.slice() as unknown as TemplateStringsArray;
+  Object.defineProperty(strings, "raw", { value: strings });
+  return strings;
+}
+
 function safeQuery<T = unknown>(query: string, ...values: unknown[]) {
   const parts = query.split(/\\$\\d+/);
   if (parts.length !== values.length + 1) throw new Error("SAFE_SQL_PARAMETER_MISMATCH");
-  return prisma.$queryRaw<T>(Prisma.sql(parts, ...values) as any);
+  return prisma.$queryRaw<T>(Prisma.sql(buildSqlTemplate(query), ...values) as any);
+}
+
+function safeExecute(client: any, query: string, ...values: unknown[]) {
+  const parts = query.split(/\\$\\d+/);
+  if (parts.length !== values.length + 1) throw new Error("SAFE_SQL_PARAMETER_MISMATCH");
+  return client.$executeRaw(Prisma.sql(buildSqlTemplate(query), ...values) as any);
 }
 
 function safeExecute(client: any, query: string, ...values: unknown[]) {
