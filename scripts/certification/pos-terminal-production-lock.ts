@@ -20,7 +20,7 @@ const MARKERS: Array<[string, string, string]> = [
   ["stock-authority", "packages/domain/src/business/posCheckoutEngine.ts", "INSUFFICIENT_STOCK"],
   ["checkout-event", "packages/domain/src/business/posCheckoutEngine.ts", "CHECKOUT_COMPLETED"],
   ["tenant-scoped-stock", "apps/web/src/services/inventoryStockService.ts", "tenantId"],
-  ["authenticated-api-client", "apps/web/src/services/applicationApiService.ts", "apiFetch"],
+  ["application-api-facade", "apps/web/src/services/applicationApiService.ts", "export * from \"./apiClient.js\";"],
 ];
 
 function sha(content: string): string {
