@@ -107,3 +107,15 @@ This PASS applies to the **conflict-resolution remediation gates** listed above.
 - Deterministic parent/child variant row locking for unit conversion.
 - Conflict audit metadata reduced to fingerprints and changed-field names.
 - Workspace typecheck/build and dedicated authorization/concurrency regression gates added to the production lock.
+
+
+## 5. Additional hardening verified on 2026-10-05
+
+- Explicit function-level authorization for conflict read and resolve.
+- Immutable conflict identity and duplicate-ID reuse rejection.
+- Entity-state revalidation under row lock before privileged resolution, using serialization-safe canonical comparison.
+- Revisioned resolution acknowledgement for every resolution path.
+- Deterministic parent/child variant row locking for unit conversion.
+- Conflict audit metadata reduced to fingerprints and changed-field names.
+- Minimal authoritative conflict counts exposed through `/sync/status` so low-privilege users do not need full conflict-detail access.
+- Dedicated authorization, concurrency, lifecycle, typecheck, and build gates added to the production lock.
