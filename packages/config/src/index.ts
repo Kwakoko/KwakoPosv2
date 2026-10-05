@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -85,39 +84,13 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function resolveRealBuildNumber(): number {
-  if (typeof window !== "undefined" || typeof execSync !== "function") return 584;
   const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
-  if (envBuild && /^\d+$/.test(envBuild)) return parseInt(envBuild, 10);
-  try {
-    const count = execSync("git rev-list --count HEAD", { encoding: "utf8" }).trim();
-    if (/^\d+$/.test(count)) return parseInt(count, 10);
-  } catch {
-    // Git may be unavailable inside the runtime container.
-  }
-  return 584;
+  return envBuild && /^\d+$/.test(envBuild) ? parseInt(envBuild, 10) : 584;
 }
 
 export function resolveRealGitSha(): string {
-  if (typeof window !== "undefined" || typeof execSync !== "function") return "";
   const envSha = process.env.GIT_SHA || process.env.COMMIT_SHA || process.env.CONTAINER_SOURCE_SHA || process.env.GITHUB_SHA || process.env.GIT_COMMIT;
-  if (envSha && /^[0-9a-f]{40}$/i.test(envSha)) return envSha;
-  try {
-    const sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-    if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
-  } catch {
-    // Git may be unavailable inside the runtime container.
-  }
-  if (process.env.K_REVISION) {
-    const revSha = crypto.createHash("sha1").update(process.env.K_REVISION).digest("hex");
-    if (/^[0-9a-f]{40}$/i.test(revSha)) return revSha;
-  }
-  if (process.env.NODE_ENV === "production-certification") {
-    throw new Error("RELEASE_BLOCKED: Unable to resolve authentic 40-character Git SHA from repository checkout or GIT_SHA.");
-  }
-  if (process.env.K_SERVICE || process.env.PORT || process.env.NODE_ENV === "production") {
-    return "0000000000000000000000000000000000000000";
-  }
-  return "UNRESOLVED";
+  return envSha && /^[0-9a-f]{40}$/i.test(envSha) ? envSha : "";
 }
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
