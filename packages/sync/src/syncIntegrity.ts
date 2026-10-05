@@ -114,10 +114,50 @@ export function verifyPayloadChecksum(payload: unknown, expectedChecksum: string
   return computePayloadChecksum(payload) === expectedChecksum;
 }
 
+export type SyncConflictPermission = "sync.conflict.read" | "sync.conflict.resolve";
+export type SyncConflictAuthContext = {
+  permissions?: string[];
+  roles?: string[];
+};
+
+export function hasSyncConflictPermission(
+  ctx: SyncConflictAuthContext,
+  permission: SyncConflictPermission,
+): boolean {
+  const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
+  const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
+  if (permissions.includes("*") || permissions.includes(permission)) return true;
+  if (roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN")) return true;
+  if (permission === "sync.conflict.read") return roles.some((r) => ["OWNER", "ADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+  if (permission === "sync.conflict.resolve") {
+    return roles.some((r) => ["OWNER", "ADMIN", "BUSINESS_ADMIN"].includes(r));
+  }
+  return false;
+}
+
+export function assertSyncConflictPermission(
+  ctx: SyncConflictAuthContext,
+  permission: SyncConflictPermission,
+): void {
+  if (!hasSyncConflictPermission(ctx, permission)) {
+    throw new Error("FORBIDDEN: " + permission + " permission is required");
+  }
+}
+
 export function getBaseUpdatedAt(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const value = (payload as Record<string, unknown>)._baseUpdatedAt;
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+export function requireBaseUpdatedAt(payload: unknown, entityType: string): string {
+  const value = getBaseUpdatedAt(payload);
+  if (!value) {
+    throw new Error(
+      `SYNC_PRECONDITION_REQUIRED: ${entityType} UPDATE/DELETE requires a valid _baseUpdatedAt`,
+    );
+  }
+  return value;
 }
 
 export function stripSyncControlFields<T extends Record<string, unknown>>(payload: T): T {

@@ -189,8 +189,57 @@ export async function applyRevisionedChanges(
   };
 
   for (const change of sorted) {
-    const pendingMutation = pending.find((item) => item.tenantId === tenantId && (!item.branchId || item.branchId === branchId) && item.entityType === change.entityType && item.entityId === change.entityId && ["UPDATE", "DELETE"].includes(item.operationType));
-    if (pendingMutation) {
+    const resolutionMeta = change.source === "conflict-resolution" && change.record?.__conflictResolution
+      ? change.record.__conflictResolution as {
+          conflictId?: string;
+          originalOperationId?: string;
+          entityType?: string;
+          entityId?: string;
+          resolution?: string;
+        }
+      : null;
+    if (resolutionMeta?.originalOperationId) {
+      const matchedIndex = pending.findIndex((item) =>
+        item.tenantId === tenantId &&
+        (!item.branchId || item.branchId === branchId) &&
+        item.id === String(resolutionMeta.originalOperationId),
+      );
+      if (matchedIndex >= 0) {
+        const pendingMutation = pending[matchedIndex];
+        outbox.put({
+          ...pendingMutation,
+          status: "CONFLICT_RESOLVED",
+          resolution: String(resolutionMeta.resolution || "RESOLVED"),
+          error: undefined,
+          abandonedAt: undefined,
+        });
+        if (resolutionMeta.conflictId) metadata.delete("sync_conflict_" + String(resolutionMeta.conflictId));
+        if (resolutionMeta.entityType && resolutionMeta.entityId) {
+          metadata.delete("sync_conflict_" + String(resolutionMeta.entityType) + "_" + String(resolutionMeta.entityId));
+          metadata.delete(persistenceStatusKey(tenantId, branchId, String(resolutionMeta.entityType), String(resolutionMeta.entityId)));
+        }
+        pending.splice(matchedIndex, 1);
+      } else if (resolutionMeta.conflictId) {
+        metadata.delete("sync_conflict_" + String(resolutionMeta.conflictId));
+      }
+    }
+
+    const materialRecord = change.record && typeof change.record === "object"
+      ? (() => {
+          const clone = { ...(change.record as Record<string, unknown>) };
+          delete (clone as any).__conflictResolution;
+          return clone;
+        })()
+      : change.record;
+    const effectiveChange = materialRecord === change.record ? change : { ...change, record: materialRecord };
+    const pendingMutation = pending.find((item) =>
+      item.tenantId === tenantId &&
+      (!item.branchId || item.branchId === branchId) &&
+      item.entityType === effectiveChange.entityType &&
+      item.entityId === effectiveChange.entityId &&
+      ["UPDATE", "DELETE"].includes(item.operationType),
+    );
+    if (pendingMutation && change.source !== "conflict-resolution") {
       const conflictId = "conflict:" + pendingMutation.id;
       const conflictRecord = { conflictId, revision: change.revision, entityType: change.entityType, entityId: change.entityId, operationId: pendingMutation.id, operationType: pendingMutation.operationType, localPayload: pendingMutation.payload, remoteRecord: change.record, detectedAt: new Date().toISOString(), status: "OPEN" };
       metadata.put(JSON.stringify(conflictRecord), "sync_conflict_" + conflictId);
@@ -238,12 +287,13 @@ export async function applyRevisionedChanges(
       break;
     }
 
-    const storeName = storeForEntity(change.entityType);
-    const deleted = change.operationType === "DELETE" || Boolean(change.record?._deleted);
-    if (change.entityType === "Category" || change.entityType === "Brand") {
-      await upsertCatalogConfig(change.entityType, change, deleted);
-    } else if (change.entityType === "Setting") {
-      const record: any = change.record || {};
+    const changeToApply = effectiveChange;
+    const storeName = storeForEntity(changeToApply.entityType);
+    const deleted = changeToApply.operationType === "DELETE" || Boolean(changeToApply.record?._deleted);
+    if (changeToApply.entityType === "Category" || changeToApply.entityType === "Brand") {
+      await upsertCatalogConfig(changeToApply.entityType, changeToApply, deleted);
+    } else if (changeToApply.entityType === "Setting") {
+      const record: any = changeToApply.record || {};
       const configKey = String(record.key || "");
       if (configKey) {
         const key = tenantId + ":" + branchId + ":" + configKey;
@@ -254,22 +304,22 @@ export async function applyRevisionedChanges(
           tenantId,
           branchId,
           scope: record.scope || "BRANCH",
-          settingId: change.entityId,
+          settingId: changeToApply.entityId,
           version: Number(record.version || 1),
           updatedAt: record.updatedAt || serverTimestamp,
         }, key);
       }
-    } else if (change.entityType === "Expense") {
-      await upsertExpenseConfig(change, deleted);
+    } else if (changeToApply.entityType === "Expense") {
+      await upsertExpenseConfig(changeToApply, deleted);
       if (deleted) {
-        metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + change.entityType + ":" + change.entityId);
+        metadata.put(JSON.stringify({ revision: change.revision, entityType: changeToApply.entityType, entityId: changeToApply.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + changeToApply.entityType + ":" + changeToApply.entityId);
       }
     } else if (deleted) {
-      if (storeName) await waitRequest(tx.objectStore(storeName).delete(change.entityId));
+      if (storeName) await waitRequest(tx.objectStore(storeName).delete(changeToApply.entityId));
       const tombstonedAt = new Date().toISOString();
-      metadata.put(JSON.stringify({ revision: change.revision, entityType: change.entityType, entityId: change.entityId, deletedAt: tombstonedAt }), "tombstone:" + change.entityType + ":" + change.entityId);
+      metadata.put(JSON.stringify({ revision: change.revision, entityType: changeToApply.entityType, entityId: changeToApply.entityId, deletedAt: tombstonedAt }), "tombstone:" + changeToApply.entityType + ":" + changeToApply.entityId);
       const rawStatus = await new Promise<any>((resolve) => {
-        const request = metadata.get(persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+        const request = metadata.get(persistenceStatusKey(tenantId, branchId, changeToApply.entityType, changeToApply.entityId));
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => resolve(null);
       });
@@ -283,8 +333,8 @@ export async function applyRevisionedChanges(
         {
           tenantId,
           branchId,
-          entityType: change.entityType,
-          entityId: change.entityId,
+          entityType: changeToApply.entityType,
+          entityId: changeToApply.entityId,
           operationId: "server:" + change.revision,
           operationType: "DELETE",
         },
@@ -292,24 +342,24 @@ export async function applyRevisionedChanges(
         previous,
         { serverRevision: change.revision },
       );
-      metadata.put(JSON.stringify(tombstoneStatus), persistenceStatusKey(tenantId, branchId, change.entityType, change.entityId));
+      metadata.put(JSON.stringify(tombstoneStatus), persistenceStatusKey(tenantId, branchId, changeToApply.entityType, changeToApply.entityId));
       persistenceStatusEvents.push(tombstoneStatus);
     } else if (storeName) {
-      const record = change.record;
+      const record = changeToApply.record;
       const recoveryPatch = Boolean(record?.__syncRecoveryPatch);
       const targetStore = tx.objectStore(storeName);
 
       // A locally committed StockLedger row can be echoed back by the server's
       // canonical journal event. Reconcile by durable idempotency key so the
       // replica replaces the local row instead of double-counting inventory.
-      if (change.entityType === "StockLedger" && record?.idempotencyKey) {
+      if (changeToApply.entityType === "StockLedger" && record?.idempotencyKey) {
         const existingRows = await new Promise<any[]>((resolve, reject) => {
           const request = targetStore.getAll();
           request.onsuccess = () => resolve(request.result || []);
           request.onerror = () => reject(request.error || new Error("IndexedDB ledger read failed"));
         });
         for (const existingRow of existingRows) {
-          if (existingRow?.idempotencyKey === record.idempotencyKey && String(existingRow.id) !== String(change.entityId)) {
+          if (existingRow?.idempotencyKey === record.idempotencyKey && String(existingRow.id) !== String(changeToApply.entityId)) {
             await waitRequest(targetStore.delete(existingRow.id));
           }
         }
@@ -317,15 +367,15 @@ export async function applyRevisionedChanges(
 
       if (recoveryPatch) {
         const existing = await new Promise<any>((resolve, reject) => {
-          const request = targetStore.get(change.entityId);
+          const request = targetStore.get(changeToApply.entityId);
           request.onsuccess = () => resolve(request.result || {});
           request.onerror = () => reject(request.error || new Error("IndexedDB read failed"));
         });
         const merged = { ...existing, ...record };
         delete merged.__syncRecoveryPatch;
-        await waitRequest(targetStore.put(merged, change.entityId));
+        await waitRequest(targetStore.put(merged, changeToApply.entityId));
       } else {
-        await waitRequest(targetStore.put(record, change.entityId));
+        await waitRequest(targetStore.put(record, changeToApply.entityId));
       }
     }
 

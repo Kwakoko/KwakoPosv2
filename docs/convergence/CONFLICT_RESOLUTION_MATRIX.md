@@ -39,3 +39,29 @@ KwakoPos v2 strictly bans blind "Last Write Wins" (LWW). Every conflict is categ
 
 ## 2. Audit Trail
 Conflict detection and resolution are recorded in the persistent PostgreSQL `audit_events` table with tenant, branch, actor/device, operation and conflict metadata. `ProductionAuditStream` remains operational in-process telemetry and is not the durable conflict authority.
+
+
+## 3. Hardened Resolution Preconditions
+
+Privileged conflict resolution now locks the underlying authoritative entity and compares the relevant server state against the state captured when the conflict was detected. A subsequent authoritative mutation causes `SYNC_CONFLICT_CHANGED_SINCE_DETECTION` and leaves the conflict OPEN.
+
+Conflict identities are immutable within tenant/branch scope. Reuse with different operation/entity identity or local content is rejected.
+
+Every resolution, including `ACCEPT_SERVER`, produces an ordered `conflict-resolution` journal record containing resolution metadata. Offline replicas consume this event to retire the original failed outbox mutation without re-triggering the same conflict.
+
+Inventory unit conversion locks parent and child variants in deterministic order before reading stock and appending the paired ledger movements.
+
+Conflict audit metadata uses fingerprints and changed-field names rather than copying entire business payloads into audit events.
+
+
+## 3. Hardened Resolution Preconditions
+
+Privileged conflict resolution now locks the underlying authoritative entity and compares the relevant server state against the state captured when the conflict was detected. A subsequent authoritative mutation causes `SYNC_CONFLICT_CHANGED_SINCE_DETECTION` and leaves the conflict OPEN.
+
+Conflict identities are immutable within tenant/branch scope. Reuse with different operation/entity identity or local content is rejected.
+
+Every resolution, including `ACCEPT_SERVER`, produces an ordered `conflict-resolution` journal record containing resolution metadata. Offline replicas consume this event to retire the original failed outbox mutation without re-triggering the same conflict.
+
+Inventory unit conversion locks parent and child variants in deterministic order before reading stock and appending the paired ledger movements.
+
+Conflict audit metadata uses fingerprints and changed-field names rather than copying entire business payloads into audit events.
