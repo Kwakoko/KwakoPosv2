@@ -1,4 +1,4 @@
-      - name: POS Terminal Production Lock\n        run: npm run certify:pos-lock\nname: CI Quality Gates
+name: CI Quality Gates
 
 # Closed-loop certification contract: every PR/main candidate must pass all gates.
 
@@ -82,6 +82,8 @@ jobs:
         run: npm run certify:navigation-lock
       - name: Dashboard Analytics Production Lock
         run: npm run certify:dashboard-lock
+      - name: POS Terminal Production Lock
+        run: npm run certify:pos-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates
