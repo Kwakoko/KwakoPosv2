@@ -19,12 +19,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS "devices_deviceId_key" ON "devices"("deviceId"
 CREATE INDEX IF NOT EXISTS "devices_tenantId_userId_idx" ON "devices"("tenantId","userId");
 CREATE INDEX IF NOT EXISTS "devices_deviceId_idx" ON "devices"("deviceId");
 
-ALTER TABLE "devices"
-  ADD CONSTRAINT "devices_tenantId_fkey"
-  FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE "devices"
-  ADD CONSTRAINT "devices_userId_fkey"
-  FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'devices_tenantId_fkey') THEN
+    ALTER TABLE "devices" ADD CONSTRAINT "devices_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'devices_userId_fkey') THEN
+    ALTER TABLE "devices" ADD CONSTRAINT "devices_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "branchId" TEXT;
 ALTER TABLE "device_sessions" ADD COLUMN IF NOT EXISTS "tokenFamilyId" TEXT;
@@ -78,6 +80,8 @@ CREATE INDEX IF NOT EXISTS "device_sessions_status_expiresAt_idx" ON "device_ses
 CREATE INDEX IF NOT EXISTS "device_sessions_expiresAt_idx" ON "device_sessions"("expiresAt");
 CREATE INDEX IF NOT EXISTS "device_sessions_createdAt_idx" ON "device_sessions"("createdAt");
 
-ALTER TABLE "device_sessions"
-  ADD CONSTRAINT "device_sessions_deviceId_fkey"
-  FOREIGN KEY ("deviceId") REFERENCES "devices"("deviceId") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'device_sessions_deviceId_fkey') THEN
+    ALTER TABLE "device_sessions" ADD CONSTRAINT "device_sessions_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "devices"("deviceId") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;

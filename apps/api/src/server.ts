@@ -435,12 +435,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         return [429, "RATE_LIMIT", "Too many requests."];
 
       // Auth / session errors → 401.
+      // NOTE: Only match well-known JWT/bearer-token error phrases.
+      // Do NOT match the bare words "token" or "session" — they appear in
+      // countless unrelated error messages (DB errors, Prisma, etc.) and would
+      // incorrectly convert legitimate login failures into misleading 401s.
       if (
         code === "UNAUTHORIZED" ||
         code.includes("UNAUTHORIZED") ||
         msg.includes("UNAUTHORIZED") ||
-        msg.toLowerCase().includes("token") ||
-        msg.toLowerCase().includes("session")
+        msg.includes("JsonWebToken") ||
+        msg.toLowerCase().includes("jwt malformed") ||
+        msg.toLowerCase().includes("invalid signature") ||
+        msg.toLowerCase().includes("token expired") ||
+        msg.toLowerCase().includes("bearer token") ||
+        msg.toLowerCase().includes("jwt expired")
       )
         return [401, "UNAUTHORIZED", "Authentication required."];
 

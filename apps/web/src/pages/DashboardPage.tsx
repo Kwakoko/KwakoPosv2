@@ -49,6 +49,26 @@ const fmtTime = (ts: number) =>
 const fmtDate = (ts: number) =>
   new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
 
+const formatOrderRef = (ref?: string | null): string => {
+  if (!ref) return '#ORD-0001';
+  const clean = String(ref).trim();
+  if (/^(REC|SO|INV|ORD|SALE|RCP)[\-_#]?\d+/i.test(clean)) {
+    return clean.toUpperCase();
+  }
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean);
+  if (isUuid) {
+    return `#ORD-${clean.slice(0, 8).toUpperCase()}`;
+  }
+  if (clean.startsWith('ord_') || clean.startsWith('sale_')) {
+    const rest = clean.slice(clean.indexOf('_') + 1);
+    return `#ORD-${rest.slice(0, 8).toUpperCase()}`;
+  }
+  if (clean.length > 12) {
+    return `#ORD-${clean.slice(0, 8).toUpperCase()}`;
+  }
+  return clean.startsWith('#') ? clean : `#${clean}`;
+};
+
 const getTenderBadge = (method?: string) => {
   const m = (method || 'Cash').toLowerCase();
   if (m.includes('mpesa') || m.includes('m-pesa') || m.includes('mobile')) {
@@ -983,38 +1003,60 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   const paymentChannelSummary = useMemo(() => {
     const channels = authoritativeKpis?.analytics?.paymentChannels ?? [];
-    const channelConfig: Record<string, { color: string; icon: any; badgeBg: string; textColor: string }> = {
-      CASH: { color: "#3b82f6", icon: Banknote, badgeBg: "rgba(59,130,246,0.12)", textColor: "#3b82f6" },
-      CARD: { color: "#f59e0b", icon: CreditCard, badgeBg: "rgba(245,158,11,0.12)", textColor: "#f59e0b" },
-      BANK: { color: "#6366f1", icon: Building2, badgeBg: "rgba(99,102,241,0.12)", textColor: "#6366f1" },
-      MOBILE_MONEY: { color: "#10b981", icon: Smartphone, badgeBg: "rgba(16,185,129,0.12)", textColor: "#10b981" },
-      CREDIT: { color: "#8b5cf6", icon: Wallet, badgeBg: "rgba(139,92,246,0.12)", textColor: "#8b5cf6" },
-      OTHER: { color: "#64748b", icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b" },
+    const channelConfig: Record<string, { label: string; color: string; icon: any; badgeBg: string; textColor: string }> = {
+      MOBILE_MONEY: { label: "Mobile Money",    color: "#10b981", icon: Smartphone, badgeBg: "rgba(16,185,129,0.16)",  textColor: "#10b981" }, // vivid emerald
+      CASH:         { label: "Cash",            color: "#f59e0b", icon: Banknote,   badgeBg: "rgba(245,158,11,0.16)",  textColor: "#f59e0b" }, // warm golden amber
+      CARD:         { label: "Card / Terminal", color: "#8b5cf6", icon: CreditCard, badgeBg: "rgba(139,92,246,0.16)", textColor: "#8b5cf6" }, // electric violet
+      BANK:         { label: "Bank Wire",       color: "#06b6d4", icon: Building2,  badgeBg: "rgba(6,182,212,0.16)",  textColor: "#06b6d4" }, // electric cyan
+      CREDIT:       { label: "Store Credit",    color: "#f43f5e", icon: Wallet,     badgeBg: "rgba(244,63,94,0.16)",  textColor: "#f43f5e" }, // rose pink
+      OTHER:        { label: "Other Tender",    color: "#94a3b8", icon: Wallet,     badgeBg: "rgba(148,163,184,0.16)",textColor: "#94a3b8" }, // cool slate
     };
+
+    const analytics = authoritativeKpis?.analytics;
+    const totalVolume = Number(analytics?.paymentTotalVolume) || channels.reduce((s, it) => s + (Number(it.volume) || 0), 0) || 0;
+    const totalCount = Number(analytics?.paymentTotalCount) || channels.reduce((s, it) => s + (Number(it.count) || 0), 0) || 0;
+
     const items = channels.map((item, idx) => {
       const key = String(item.name || "OTHER").toUpperCase();
       const cfg = channelConfig[key] || {
-        color: ["#14b8a6", "#f43f5e", "#a855f7", "#06b6d4"][idx % 4],
-        icon: Wallet, badgeBg: "rgba(100,116,139,0.12)", textColor: "#64748b",
+        label: (item.name || "Other").replace(/_/g, " "),
+        color: ["#10b981", "#f59e0b", "#8b5cf6", "#06b6d4"][idx % 4],
+        icon: Wallet,
+        badgeBg: "rgba(100,116,139,0.16)",
+        textColor: "#94a3b8",
       };
-      const rawMetric = paymentMetricMode === "volume" ? item.volume : item.count;
+      const rawMetric = paymentMetricMode === "volume" ? Number(item.volume || 0) : Number(item.count || 0);
+      const vol = Number(item.volume) || 0;
+      const cnt = Number(item.paymentCount ?? item.count) || 0;
+      const volumeShare = item.volumeShare != null ? Number(item.volumeShare) : (totalVolume > 0 ? Math.round((vol / totalVolume) * 100) : 0);
+      const countShare = item.countShare != null ? Number(item.countShare) : (totalCount > 0 ? Math.round((cnt / totalCount) * 100) : 0);
+
       return {
         ...item,
-        paymentCount: item.paymentCount ?? item.count,
-        orderCount: item.orderCount ?? item.count,
+        name: cfg.label,
+        rawName: item.name,
+        paymentCount: cnt,
+        orderCount: Number(item.orderCount ?? item.count) || 0,
         value: Math.max(rawMetric, 0),
         rawMetric,
-        color: cfg.color, icon: cfg.icon, badgeBg: cfg.badgeBg, textColor: cfg.textColor,
+        volume: vol,
+        volumeShare,
+        countShare,
+        color: cfg.color,
+        icon: cfg.icon,
+        badgeBg: cfg.badgeBg,
+        textColor: cfg.textColor,
       };
     });
+
     items.sort((a, b) => b.rawMetric - a.rawMetric);
-    const analytics = authoritativeKpis?.analytics;
+
     return {
       items,
-      totalVolume: analytics?.paymentTotalVolume ?? 0,
-      totalCount: analytics?.paymentTotalCount ?? 0,
-      totalOrderCount: analytics?.paymentTotalOrderCount ?? 0,
-      overallAov: analytics?.paymentOverallAov ?? 0,
+      totalVolume,
+      totalCount,
+      totalOrderCount: Number(analytics?.paymentTotalOrderCount) || items.reduce((s, it) => s + (Number(it.orderCount) || 0), 0) || 0,
+      overallAov: Number(analytics?.paymentOverallAov) || (totalCount > 0 ? Math.round(totalVolume / totalCount) : 0),
     };
   }, [authoritativeKpis, paymentMetricMode]);
 
@@ -2334,7 +2376,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         </Card>
 
         {/* Payment Methods Donut */}
-        <Card className="rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col justify-between">
+        <Card className="rounded-2xl border-slate-200 dark:border-darkbg-border shadow-sm flex flex-col">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <div>
@@ -2370,7 +2412,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               )}
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col items-center justify-between pb-4 flex-1">
+          <CardContent className="flex flex-col items-center justify-start gap-2 pb-4 flex-1 min-h-0">
             {paymentChannelSummary.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-52 text-center w-full">
                 <div className="h-16 w-16 rounded-full border-4 border-dashed border-slate-200 dark:border-darkbg-border flex items-center justify-center mb-3">
@@ -2381,141 +2423,182 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               </div>
             ) : (
               <>
-                {/* Donut Chart with Center KPI */}
-                <div className="relative h-44 w-full flex items-center justify-center">
-                  {!isChartEngineReady ? (
-                    <ChartFallback />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={paymentChannelSummary.items}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={68}
-                        paddingAngle={paymentChannelSummary.items.length > 1 ? 3 : 0}
-                        dataKey="value"
-                        onMouseEnter={(_entry: unknown, index: number) => setActivePaymentIndex(index)}
-                        onMouseLeave={() => setActivePaymentIndex(null)}
-                      >
-                        {paymentChannelSummary.items.map((entry, i) => (
-                          <Cell
-                            key={i}
-                            fill={entry.color}
-                            strokeWidth={0}
-                            style={{
-                              filter: activePaymentIndex === i ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.25))' : 'none',
-                              cursor: 'pointer',
-                            }}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        content={({ active, payload }: any) => {
-                          if (!active || !payload?.length) return null;
-                          const d = payload[0].payload;
-                          return (
-                            <div className="bg-white dark:bg-darkbg-card border border-slate-200 dark:border-darkbg-border rounded-xl shadow-lg p-2.5 text-xs min-w-[140px] space-y-1">
-                              <div className="flex items-center gap-1.5 font-black text-slate-800 dark:text-slate-100">
-                                <span className="h-2 w-2 rounded-full" style={{ background: d.color }} />
-                                <span>{d.name}</span>
-                              </div>
-                              <div className="text-[11px] font-mono font-bold text-slate-700 dark:text-slate-200 flex justify-between">
-                                <span>Volume:</span> <span>{fmtCcy(d.volume)} ({d.volumeShare}%)</span>
-                              </div>
-                              <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 flex justify-between">
-                                <span>Payments:</span> <span>{d.paymentCount ?? d.count} ({d.countShare}%)</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500 flex justify-between pt-1 border-t border-slate-100 dark:border-darkbg-border/60">
-                                <span>Avg Ticket:</span> <span className="font-semibold">{fmtCcy(d.aov)}</span>
-                              </div>
-                            </div>
-                          );
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  )}
-
-                  {/* Donut Center KPI */}
-                  <div
-                    className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center select-none"
-                    style={{ zIndex: 1 }}
+                {/* ── High-Precision SVG Donut Chart with Center KPI ── */}
+                <div className="relative w-[176px] h-[176px] shrink-0 mx-auto my-1 flex items-center justify-center">
+                  <svg
+                    viewBox="0 0 176 176"
+                    className="w-full h-full transform -rotate-90 origin-center select-none"
+                    aria-label="Payment channels breakdown chart"
                   >
-                    {activePaymentChannel ? (
-                      <>
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[90px]">
-                          {activePaymentChannel.name}
-                        </span>
-                        <span className="text-sm font-black font-mono tracking-tight text-slate-800 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(activePaymentChannel.volume) : `${activePaymentChannel.paymentCount ?? activePaymentChannel.count} Payments`}
-                        </span>
-                        <span className="text-[9px] font-bold" style={{ color: activePaymentChannel.color }}>
-                          {paymentMetricMode === 'volume' ? `${activePaymentChannel.volumeShare}% Share` : `${activePaymentChannel.countShare}% Share`}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-[8.5px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          {paymentMetricMode === 'volume' ? 'Total Collected' : 'Payment Records'}
-                        </span>
-                        <span className="text-sm font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight">
-                          {paymentMetricMode === 'volume' ? fmtCcy(paymentChannelSummary.totalVolume) : `${paymentChannelSummary.totalCount} Payments`}
-                        </span>
-                        <span className="text-[9.5px] text-slate-400 dark:text-slate-500 font-medium">
-                          {paymentMetricMode === 'volume'
-                            ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'payments' : 'payments'} · ${paymentChannelSummary.totalOrderCount} ${paymentChannelSummary.totalOrderCount === 1 ? 'order' : 'orders'}`
-                            : `Distinct orders ${paymentChannelSummary.totalOrderCount} · Avg order ${fmtCcy(paymentChannelSummary.overallAov)}`}
-                        </span>
-                      </>
-                    )}
+                    {/* Background subtle track circle */}
+                    <circle
+                      cx="88"
+                      cy="88"
+                      r="62"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="14"
+                      className="text-slate-100 dark:text-slate-800/80"
+                    />
+
+                    {/* Interactive Donut Slices */}
+                    {(() => {
+                      const radius = 62;
+                      const circumference = 2 * Math.PI * radius; // ~389.56
+                      const totalMetric = paymentChannelSummary.items.reduce(
+                        (acc, it) => acc + (Number(it.value) || 0),
+                        0
+                      ) || 1;
+                      let accumulatedOffset = 0;
+
+                      return paymentChannelSummary.items.map((item, idx) => {
+                        const val = Math.max(Number(item.value) || 0, 0);
+                        const ratio = val / totalMetric;
+                        const arcLength = ratio * circumference;
+                        const hasGap = paymentChannelSummary.items.length > 1 && ratio > 0.04;
+                        const gap = hasGap ? 4 : 0;
+                        const effectiveLength = Math.max(arcLength - gap, 1.5);
+                        const isHovered = activePaymentIndex === idx;
+                        const isAnyHovered = activePaymentIndex !== null;
+
+                        const strokeDasharray = `${effectiveLength} ${circumference - effectiveLength}`;
+                        const strokeDashoffset = -accumulatedOffset;
+                        accumulatedOffset += arcLength;
+
+                        return (
+                          <circle
+                            key={idx}
+                            cx="88"
+                            cy="88"
+                            r={radius}
+                            fill="none"
+                            stroke={item.color}
+                            strokeWidth={isHovered ? 18 : 14}
+                            strokeDasharray={strokeDasharray}
+                            strokeDashoffset={strokeDashoffset}
+                            strokeLinecap="round"
+                            className="cursor-pointer transition-all duration-200 ease-out"
+                            style={{
+                              opacity: isAnyHovered ? (isHovered ? 1 : 0.4) : 1,
+                              filter: isHovered ? `drop-shadow(0 0 10px ${item.color}99)` : 'none',
+                            }}
+                            onMouseEnter={() => setActivePaymentIndex(idx)}
+                            onMouseLeave={() => setActivePaymentIndex(null)}
+                          />
+                        );
+                      });
+                    })()}
+                  </svg>
+
+                  {/* Donut Center KPI — perfectly aligned inside 106px aperture */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+                    <div className="w-[94px] flex flex-col items-center justify-center text-center overflow-hidden">
+                      {activePaymentChannel ? (
+                        <>
+                          <span
+                            className="text-[9px] font-extrabold uppercase tracking-wider truncate w-full"
+                            style={{ color: activePaymentChannel.color }}
+                          >
+                            {activePaymentChannel.name}
+                          </span>
+                          <span className="text-[17px] font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight truncate w-full mt-0.5">
+                            {paymentMetricMode === 'volume'
+                              ? fmtCcy(activePaymentChannel.volume)
+                              : String(activePaymentChannel.paymentCount ?? activePaymentChannel.count)}
+                          </span>
+                          <span
+                            className="text-[9.5px] font-bold leading-none mt-1"
+                            style={{ color: activePaymentChannel.color }}
+                          >
+                            {paymentMetricMode === 'volume'
+                              ? `${activePaymentChannel.volumeShare}% vol`
+                              : `${activePaymentChannel.countShare}% share`}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-[8px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500 leading-none">
+                            {paymentMetricMode === 'volume' ? 'Total Collected' : 'Total Count'}
+                          </span>
+                          <span className="text-[17px] font-black font-mono tracking-tight text-slate-900 dark:text-white leading-tight truncate w-full mt-1">
+                            {paymentMetricMode === 'volume'
+                              ? fmtCcy(paymentChannelSummary.totalVolume)
+                              : String(paymentChannelSummary.totalCount)}
+                          </span>
+                          <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium leading-none mt-1 truncate w-full">
+                            {paymentMetricMode === 'volume'
+                              ? `${paymentChannelSummary.totalCount} ${paymentChannelSummary.totalCount === 1 ? 'pmt' : 'pmts'} · ${paymentChannelSummary.totalOrderCount} ${paymentChannelSummary.totalOrderCount === 1 ? 'ord' : 'ords'}`
+                              : `${paymentChannelSummary.totalOrderCount} orders`}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Channel List Breakdown */}
-                <div className="mt-2 w-full space-y-1.5 px-0.5">
+                {/* ── Channel List Breakdown ── */}
+                <div className="w-full space-y-1.5 px-0.5 mt-1">
                   {paymentChannelSummary.items.map((item, i) => {
                     const Icon = item.icon;
                     const isHighlighted = activePaymentIndex === i;
+                    const shareVal = paymentMetricMode === 'volume' ? item.volumeShare : item.countShare;
                     return (
                       <div
                         key={i}
                         onMouseEnter={() => setActivePaymentIndex(i)}
                         onMouseLeave={() => setActivePaymentIndex(null)}
-                        className={`flex items-center justify-between text-xs py-1.5 px-2 rounded-xl transition-all cursor-pointer ${
+                        className={`flex items-center gap-3 py-2 px-2.5 rounded-xl transition-all cursor-pointer ${
                           isHighlighted
-                            ? 'bg-slate-100 dark:bg-darkbg-border/60 shadow-xs'
+                            ? 'bg-slate-100/90 dark:bg-darkbg-border/70 shadow-xs ring-1 ring-slate-200 dark:ring-darkbg-border'
                             : 'hover:bg-slate-50 dark:hover:bg-darkbg-border/30'
                         }`}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 shadow-xs"
-                            style={{ background: item.badgeBg, color: item.textColor }}
-                          >
-                            <Icon size={14} />
+                        {/* Leading Icon Badge */}
+                        <div
+                          className="h-8 w-8 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200"
+                          style={{
+                            background: item.badgeBg,
+                            color: item.color,
+                            transform: isHighlighted ? 'scale(1.08)' : 'scale(1)',
+                          }}
+                        >
+                          <Icon size={15} />
+                        </div>
+
+                        {/* Middle Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-[12px] font-bold text-slate-800 dark:text-slate-100 truncate leading-none">
+                              {item.name}
+                            </span>
+                            {item.rawName === 'CASH' && (
+                              <span className="text-[8.5px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/40 leading-none shrink-0">
+                                Drawer
+                              </span>
+                            )}
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-slate-800 dark:text-slate-100 truncate text-xs flex items-center gap-1.5">
-                              <span className="truncate">{item.name}</span>
-                              {item.name === 'Cash' && (
-                                <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1 py-0.2 rounded border border-emerald-200 dark:border-emerald-800/40">
-                                  Drawer
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium truncate">
-                              {item.orderCount} {item.orderCount === 1 ? 'order' : 'orders'} · {item.paymentCount} {item.paymentCount === 1 ? 'payment' : 'payments'} · AOV {fmtCcy(item.aov)}
-                            </div>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-medium leading-none mb-1.5 truncate">
+                            {item.orderCount} {item.orderCount === 1 ? 'order' : 'orders'} · {item.paymentCount} {item.paymentCount === 1 ? 'pmt' : 'pmts'} · AOV {fmtCcy(item.aov)}
+                          </div>
+                          {/* Segmented Share Progress Bar */}
+                          <div className="h-[3.5px] w-full rounded-full bg-slate-100 dark:bg-darkbg-border/60 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-500 ease-out"
+                              style={{ width: `${Math.max(shareVal, 2)}%`, background: item.color }}
+                            />
                           </div>
                         </div>
-                        <div className="text-right shrink-0 pl-2">
-                          <div className="font-black font-mono text-xs text-slate-900 dark:text-white">
+
+                        {/* Trailing Metrics */}
+                        <div className="text-right shrink-0 pl-1 flex flex-col items-end gap-0.5">
+                          <div className="text-[12px] font-black font-mono text-slate-900 dark:text-white leading-none">
                             {fmtCcy(item.volume)}
                           </div>
-                          <div className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
-                            {paymentMetricMode === 'volume' ? `${item.volumeShare}% vol` : `${item.countShare}% payments`}
+                          <div
+                            className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md leading-none"
+                            style={{ background: item.badgeBg, color: item.color }}
+                          >
+                            {shareVal}%
                           </div>
                         </div>
                       </div>
@@ -2523,8 +2606,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   })}
                 </div>
 
-                {/* Footer Micro-Summary */}
-                <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-darkbg-border/60 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 px-1">
+                {/* ── Footer ───────────────────────────────────────────── */}
+                <div className="w-full pt-2 border-t border-slate-100 dark:border-darkbg-border/60 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 px-1">
                   <span>Reconciled across {paymentChannelSummary.items.length} {paymentChannelSummary.items.length === 1 ? 'tender' : 'tenders'}</span>
                   <span className="font-bold text-slate-600 dark:text-slate-300">AOV: {fmtCcy(paymentChannelSummary.overallAov)}</span>
                 </div>
@@ -2793,18 +2876,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
           </CardHeader>
           <CardContent className="p-0 flex-1 flex flex-col justify-between">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
+            <div className="overflow-x-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <table className="w-full text-left table-auto">
                 <thead>
                   <tr className="border-b border-slate-100 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg/50 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                    <th className="p-3 pl-4">Order</th>
-                    <th className="p-3">Date & Time</th>
-                    <th className="p-3">Customer</th>
-                    <th className="p-3">Items</th>
-                    <th className="p-3">Total</th>
-                    <th className="p-3">Channel</th>
-                    <th className="p-3 text-center">Sync</th>
-                    <th className="p-3 text-center">Action</th>
+                    <th className="py-2.5 px-3 pl-4">Order</th>
+                    <th className="py-2.5 px-3">Date & Time</th>
+                    <th className="py-2.5 px-3">Customer</th>
+                    <th className="py-2.5 px-3">Items</th>
+                    <th className="py-2.5 px-3">Total</th>
+                    <th className="py-2.5 px-3">Channel</th>
+                    <th className="py-2.5 px-3 text-center">Sync</th>
+                    <th className="py-2.5 px-3 text-center w-10">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 dark:divide-darkbg-border/20">
@@ -2819,6 +2902,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                       const totalItems = order.items.reduce((s, i) => s + i.quantity, 0);
                       const tender = getTenderBadge(order.paymentMethod);
                       const TenderIcon = tender.Icon;
+                      const humanOrderRef = formatOrderRef(order.saleNumber || order.id);
 
                       return (
                         <tr
@@ -2826,74 +2910,49 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           onClick={() => setSelectedOrderForDrawer(order)}
                           className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors text-xs cursor-pointer group"
                         >
-                          <td className="p-3 pl-4">
-                            <span className="v2-mono font-extrabold text-[11px] text-primary dark:text-blue-400">
-                              {order.saleNumber || order.id}
+                          <td className="py-2.5 px-3 pl-4 whitespace-nowrap">
+                            <span
+                              className="v2-mono font-extrabold text-[11px] text-primary dark:text-blue-400 bg-primary/10 dark:bg-blue-500/15 px-2 py-0.5 rounded-md inline-block tracking-tight"
+                              title={`Full Reference: ${order.saleNumber || order.id}`}
+                            >
+                              {humanOrderRef}
                             </span>
                           </td>
-                          <td className="p-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                            <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
-                              <span style={{ fontWeight: 600, color: "var(--text)" }}>{fmtDate(order.timestamp)}</span>
-                              <span style={{ fontSize: "10px", color: "var(--muted)" }}>{fmtTime(order.timestamp)}</span>
+                          <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-semibold text-slate-800 dark:text-slate-100 leading-tight">{fmtDate(order.timestamp)}</span>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-none">{fmtTime(order.timestamp)}</span>
                             </div>
                           </td>
-                          <td className="p-3">
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: "110px" }}>
-                              <div
-                                style={{
-                                  width: "20px",
-                                  height: "20px",
-                                  borderRadius: "50%",
-                                  background: "var(--surface-2)",
-                                  border: "1px solid var(--surface-border)",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                <User size={11} style={{ color: "var(--muted)" }} />
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5 max-w-[130px]">
+                              <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-darkbg-border flex items-center justify-center shrink-0">
+                                <User size={10} className="text-slate-400" />
                               </div>
-                              <div style={{ minWidth: 0 }}>
+                              <div className="min-w-0">
                                 <span
-                                  style={{
-                                    fontWeight: 600,
-                                    color: "var(--text)",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                    maxWidth: "115px",
-                                    display: "block",
-                                  }}
+                                  className="font-semibold text-slate-800 dark:text-slate-100 truncate block leading-tight text-[11px]"
                                   title={order.customer || 'Walk-In Customer'}
                                 >
                                   {order.customer || 'Walk-In Customer'}
                                 </span>
-                                <div style={{ display: "flex", alignItems: "center", gap: "3px", fontSize: "9px", color: "var(--muted)", marginTop: "1px" }}>
-                                  <UserCheck size={9} style={{ color: "var(--accent)" }} />
-                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "90px" }}>
-                                    {order.cashierName || 'Cashier'}
-                                  </span>
+                                <div className="flex items-center gap-1 text-[9px] text-slate-400 dark:text-slate-500 truncate leading-none mt-0.5">
+                                  <UserCheck size={9} className="text-primary shrink-0" />
+                                  <span className="truncate">{order.cashierName || 'Cashier'}</span>
                                 </div>
                               </div>
                             </div>
                           </td>
-                          <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                          <td className="py-2.5 px-3 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-[11px]">
                             {totalItems} {totalItems === 1 ? 'item' : 'items'}
                           </td>
-                          <td className="p-3 font-black text-slate-900 dark:text-white whitespace-nowrap font-mono">
+                          <td className="py-2.5 px-3 font-black text-slate-900 dark:text-white whitespace-nowrap font-mono text-xs">
                             {fmtCcy(order.total)}
                           </td>
-                          <td className="p-3 whitespace-nowrap">
+                          <td className="py-2.5 px-3 whitespace-nowrap">
                             <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold"
                               style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                padding: "2px 8px",
-                                borderRadius: "6px",
-                                fontSize: "10px",
-                                fontWeight: 700,
                                 background: tender.bg,
                                 color: tender.color,
                                 border: `1px solid ${tender.border}`,
@@ -2903,15 +2962,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                               {tender.label}
                             </span>
                           </td>
-                          <td className="p-3 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
                             <span
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
                                 gap: "4px",
                                 borderRadius: "9999px",
-                                padding: "2px 8px",
-                                fontSize: "9.5px",
+                                padding: "2px 7px",
+                                fontSize: "9px",
                                 fontWeight: 800,
                                 background:
                                   order.syncStatus === 'Synced'
@@ -2944,7 +3003,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                               {order.syncStatus}
                             </span>
                           </td>
-                          <td className="p-3 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2952,27 +3011,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                                 setSelectedOrderForDrawer(order);
                               }}
                               title="Inspect Receipt Breakdown"
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                width: "26px",
-                                height: "26px",
-                                borderRadius: "6px",
-                                border: "1px solid var(--surface-border)",
-                                background: "var(--surface-2)",
-                                color: "var(--muted)",
-                                cursor: "pointer",
-                                transition: "all 0.15s ease",
-                              }}
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.color = "var(--accent)";
-                                e.currentTarget.style.borderColor = "var(--accent)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.currentTarget.style.color = "var(--muted)";
-                                e.currentTarget.style.borderColor = "var(--surface-border)";
-                              }}
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-slate-200 dark:border-darkbg-border bg-slate-50 dark:bg-darkbg-card text-slate-400 hover:text-primary hover:border-primary transition"
                             >
                               <Eye size={12} />
                             </button>
@@ -3010,6 +3049,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             {selectedOrderForDrawer && (
               <span
                 className="v2-mono"
+                title={`Full ID: ${selectedOrderForDrawer.saleNumber || selectedOrderForDrawer.id}`}
                 style={{
                   fontSize: '11px',
                   fontWeight: 700,
@@ -3020,7 +3060,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   color: 'var(--accent)',
                 }}
               >
-                {selectedOrderForDrawer.saleNumber || selectedOrderForDrawer.id}
+                {formatOrderRef(selectedOrderForDrawer.saleNumber || selectedOrderForDrawer.id)}
               </span>
             )}
           </div>

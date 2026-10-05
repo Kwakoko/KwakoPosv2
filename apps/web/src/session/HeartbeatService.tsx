@@ -25,7 +25,10 @@ export const HeartbeatService: React.FC<HeartbeatServiceProps> = ({ enabled, int
         running.current = false;
       }
     };
-    void beat();
+    // Do not fire immediately when authentication becomes active. The login/refresh
+    // flow has just established the bearer token and durable session; an immediate
+    // heartbeat can race that state transition and incorrectly trigger logout.
+    // The session validation/expiry ticker is authoritative during this window.
     const id = window.setInterval(() => void beat(), Math.max(60_000, intervalMs));
     return () => window.clearInterval(id);
   }, [enabled, intervalMs, lastActivityAt, onFailure, onSuccess]);
