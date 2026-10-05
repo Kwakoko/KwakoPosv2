@@ -82,6 +82,8 @@ jobs:
         run: npm run certify:navigation-lock
       - name: Dashboard Analytics Production Lock
         run: npm run certify:dashboard-lock
+      - name: Conflict Center Production Lock
+        run: npm run certify:conflict-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates
