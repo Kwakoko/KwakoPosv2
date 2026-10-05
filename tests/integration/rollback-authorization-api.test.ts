@@ -3,6 +3,7 @@ import { buildServer } from "../../apps/api/src/server.js";
 import { loadConfig } from "../../packages/config/src/index.js";
 import { prisma } from "../../packages/database/src/client.js";
 import { randomUUID } from "node:crypto";
+import { issueStepUpToken } from "../../apps/api/src/services/superAdminSecurityService.js";
 
 describe("KwakoPos Rollback Authorization Platform - Integration Tests", () => {
   let server: any;
@@ -43,6 +44,7 @@ describe("KwakoPos Rollback Authorization Platform - Integration Tests", () => {
     "x-branch-id": branchId,
     "x-user-id": "user-peer-approver-02",
     "x-role": "SUPER_ADMIN",
+    "x-step-up-token": issueStepUpToken("user-peer-approver-02", "ROLLBACK_EXECUTE"),
   };
 
   describe("1. Dry-Run Impact Simulation", () => {
