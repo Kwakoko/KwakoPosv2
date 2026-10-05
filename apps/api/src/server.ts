@@ -684,6 +684,18 @@ function registerCanonicalProductionAuthentication(
     server.addHook("preValidation", async (req, reply) => {
       if (!productionPersistence) return;
       const routePath = req.url.split("?")[0];
+      const unsafeMethod = !["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase());
+      const cookies = parseCookies(String(req.headers.cookie || ""));
+      if (unsafeMethod && cookies[REFRESH_COOKIE]) {
+        const origin = String(req.headers.origin || "").trim();
+        const referer = String(req.headers.referer || "").trim();
+        const configuredOrigins = (process.env.CORS_ORIGIN || "https://app.kwakopos.com,https://admin.kwakopos.com").split(",").map((v) => v.trim()).filter(Boolean);
+        const suppliedOrigin = origin || (referer ? (() => { try { return new URL(referer).origin; } catch { return ""; } })() : "");
+        if (!suppliedOrigin || !configuredOrigins.includes(suppliedOrigin)) {
+          reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_REJECTED", message: "Cross-site cookie request rejected." } });
+          return;
+        }
+      }
   
       if (routePath === "/auth/login" && req.method === "POST") {
         await handleProductionLogin(req, reply);
