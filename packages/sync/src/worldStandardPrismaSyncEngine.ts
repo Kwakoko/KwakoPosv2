@@ -180,6 +180,11 @@ export class WorldStandardPrismaSyncEngine {
       throw new Error("SYNC_CONFLICT_REGISTRATION_INVALID");
     }
     if (input.conflictId !== "conflict:" + input.operationId) {
+      const existing = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        "SELECT id FROM sync_conflict_record WHERE id = $1 AND tenant_id = $2 AND branch_id = $3",
+        input.conflictId, ctx.tenantId, ctx.branchId,
+      );
+      if (existing.length) throw new Error("SYNC_CONFLICT_ID_REUSE");
       throw new Error("SYNC_CONFLICT_ID_INVALID");
     }
     await this.persistConflict(ctx, {
