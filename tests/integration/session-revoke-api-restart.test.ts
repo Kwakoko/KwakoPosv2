@@ -141,7 +141,7 @@ describe("session revoke survives API restart", () => {
       },
       body: JSON.stringify({ sessionId }),
     });
-    expect(refreshResponse.status).toBe(200);
+    expect(refreshResponse.status, "refresh must succeed").toBe(200);
     const refreshed = await refreshResponse.json() as any;
     accessToken = String(refreshed?.data?.accessToken || "");
     const rotatedRefreshCookie = String(refreshResponse.headers.get("set-cookie") || "").split(";")[0];
@@ -152,19 +152,19 @@ describe("session revoke survives API restart", () => {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    expect(acceptance.ok).toBe(true);
+    expect(acceptance.ok, "legal acceptance must succeed").toBe(true);
 
     const authorized = await fetch(`${API_URL}/sync/delta?since=rev:0`, {
       headers: { authorization: `Bearer ${accessToken}` },
     });
-    expect(authorized.status).toBe(200);
+    expect(authorized.status, "authorized sync must succeed").toBe(200);
 
     const revokeResponse = await fetch(`${API_URL}/auth/logout`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ sessionId }),
     });
-    expect(revokeResponse.status).toBe(200);
+    expect(revokeResponse.status, "logout must succeed").toBe(200);
 
     const persisted = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
     expect(persisted?.revokedAt).toBeTruthy();
