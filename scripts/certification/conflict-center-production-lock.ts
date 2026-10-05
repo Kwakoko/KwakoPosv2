@@ -62,6 +62,7 @@ sourceContains(".github/workflows/production-release-exact-main.yml", "npx tsx s
 sourceContains(".github/workflows/ci.yml", "npx tsx scripts/certification/conflict-center-production-lock.ts");
 sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "sync.conflict.read");');
 sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "sync.conflict.resolve");');
+sourceContains("apps/api/src/server.ts", 'server.post("/sync/conflicts/register"', true);
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_ID_REUSE");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_MERGE_FIELD_FORBIDDEN");
