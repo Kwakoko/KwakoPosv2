@@ -121,7 +121,6 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       const customerConflictId = String(staleCustomer.results[0].error).slice("SYNC_CONFLICT:".length);
       const mergedCustomer = await sync.resolveConflict(ctx, customerConflictId, "MERGE", {
         name: "Conflict Customer",
-        customerCode: "C-" + customerId.slice(0, 8),
         phone: "+255700000002",
         email: "merged@example.test",
       });
