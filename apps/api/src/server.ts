@@ -876,7 +876,15 @@ function registerCanonicalProductionAuthentication(
         const sessionId = routePath.split("/")[3];
         try {
           const ctx = verifyAccessToken(token);
-          const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+          const authHeader = String(req.headers.authorization || "");
+        const accessToken = authHeader.replace(/^Bearer\\s+/i, "");
+        let accessContext: ReturnType<typeof verifyAccessToken> | null = null;
+        try {
+          if (accessToken) accessContext = verifyAccessToken(accessToken);
+        } catch {
+          accessContext = null;
+        }
+        const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
           if (!target || target.tenantId !== ctx.tenantId || target.userId !== ctx.sub) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Session not found." } });
           await globalSessionManager.revokeSession(sessionId, "DEVICE_SESSION_REVOKED");
           await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: "SESSION_REVOKED", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
@@ -976,6 +984,10 @@ function registerCanonicalProductionAuthentication(
         if (!target) {
           clearRefreshCookie(reply, secureCookies);
           return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
+        }
+        if (accessContext && (accessContext.sub !== target.userId || accessContext.tenantId !== target.tenantId || accessContext.branchId !== target.branchId)) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(403).send({ success: false, error: { code: "SESSION_CONTEXT_MISMATCH", message: "Session does not belong to the authenticated user." } });
         }
         const revokeReason = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "USER_LOGOUT";
         await globalSessionManager.revokeSession(sessionId, revokeReason);
