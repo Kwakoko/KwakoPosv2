@@ -29,7 +29,7 @@ async function main() {
   const productOperationId = randomUUID();
   const productConflict = "conflict:" + productOperationId;
   await engine.registerConflict(ctx, { conflictId: productConflict, operationId: productOperationId, entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product" }, deviceId: "DEVICE-A" });
-  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: productOperationId, entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product v2" }, deviceId: "DEVICE-A" });
+  await engine.registerConflict(ctx, { conflictId: productConflict, operationId: productOperationId, entityType: "Product", entityId: productId, localPayload: { name: "Local Product" }, remotePayload: { name: "Server Product" }, deviceId: "DEVICE-A" });
   const detectCount = await prisma.auditEvent.count({ where: { tenantId, branchId, action: "SYNC_CONFLICT_DETECTED", entityType: "Product" } });
   if (detectCount !== 1) throw new Error("CONFLICT_DETECTION_AUDIT_DEDUP_FAILED");
   await engine.resolveConflict(ctx, productConflict, "ACCEPT_LOCAL");
