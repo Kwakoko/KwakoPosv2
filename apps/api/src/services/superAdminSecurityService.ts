@@ -296,7 +296,7 @@ export async function completeSuperAdminSetup(token: string, newPassword: string
   });
 }
 
-export async function verifySuperAdminMfa(userId: string, code: string): Promise<boolean> {
+async function verifyAndConsumeTotpCode(userId: string, secret: string, code: string): Promise<boolean> {\n  if (!/^\\d{6}$/.test(code)) return false;\n  const nowCounter = Math.floor(Date.now() / 1000 / 30);\n  const matchedCounter = [0, -1, 1].map((offset) => nowCounter + offset).find((counter) => hotp(secret, counter) === code);\n  if (matchedCounter === undefined) return false;\n  try {\n    await ensureSuperAdminSecurityTables();\n    const inserted = await prisma.$queryRaw<Array<{ counter: bigint }>>`INSERT INTO auth_totp_replay(user_id, counter) VALUES (${userId}, ${matchedCounter}) ON CONFLICT (user_id, counter) DO NOTHING RETURNING counter`;\n    return inserted.length === 1;\n  } catch {\n    return false;\n  }\n}\n\nexport async function verifySuperAdminMfa(userId: string, code: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean; mfa_type: string | null }[]>`SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required, mfa_type FROM platform_super_admin_security WHERE user_id = ${userId}`;
   const state = rows[0];
   if (!state || !state.mfa_required) return true;
@@ -307,7 +307,7 @@ export async function verifySuperAdminMfa(userId: string, code: string): Promise
     return verifyWebAuthnResponse(code);
   }
 
-  return verifyTotpCode(decryptSecret(state.mfa_secret_ciphertext), code);
+  return verifyAndConsumeTotpCode(userId, decryptSecret(state.mfa_secret_ciphertext), code);
 }
 
 export function generateWebAuthnChallenge(userId: string): { challenge: string; rp: { name: string; id: string }; user: { id: string; name: string } } {
