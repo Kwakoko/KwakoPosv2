@@ -93,7 +93,7 @@ describe("session revoke survives API restart", () => {
           create: { id: branchId, name: "Proof Branch", code: `SRP-${branchId.slice(0, 8)}` },
         },
         roles: {
-          create: { id: roleId, name: "ADMIN", permissions: ["users.manage", "roles.manage"] },
+          create: { id: roleId, name: "OWNER", permissions: ["users.manage", "roles.manage"] },
         },
       },
     });
