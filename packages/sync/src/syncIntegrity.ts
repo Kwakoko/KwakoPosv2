@@ -128,9 +128,9 @@ export function hasSyncConflictPermission(
   const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
   if (permissions.includes("*") || permissions.includes(permission)) return true;
   if (roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN")) return true;
-  if (permission === "sync.conflict.read") return roles.some((r) => ["OWNER", "ADMIN", "MANAGER"].includes(r));
+  if (permission === "sync.conflict.read") return roles.some((r) => ["OWNER", "ADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
   if (permission === "sync.conflict.resolve") {
-    return permissions.includes("settings.manage") || roles.some((r) => ["OWNER", "ADMIN"].includes(r));
+    return permissions.includes("settings.manage") || roles.some((r) => ["OWNER", "ADMIN", "BUSINESS_ADMIN"].includes(r));
   }
   return false;
 }
