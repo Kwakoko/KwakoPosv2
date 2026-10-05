@@ -79,13 +79,13 @@ describe("KwakoPos v2 — Super Admin Bootstrap & Authentication Security Suite"
     expect(isValid).toBe(false);
   });
 
-  it("6. WebAuthn passkey challenge generation & signature verification", () => {
+  it("6. WebAuthn passkey challenge generation fails closed until a standards-compliant verifier is configured", () => {
     const challenge = generateWebAuthnChallenge("usr-super-admin-001");
     expect(challenge.challenge).toBeDefined();
-    expect(challenge.rp.name).toBe("KwakoPos Platform");
+    expect(challenge.rp.name).toBe("Kwakoko Business Operating System");
     expect(challenge.user.name).toBe("admin@kwakoko.co.tz");
 
-    expect(verifyWebAuthnResponse("webauthn:valid-mock-signature-payload-12345")).toBe(true);
+    expect(verifyWebAuthnResponse("webauthn:valid-mock-signature-payload-12345")).toBe(false);
     expect(verifyWebAuthnResponse("invalid-payload")).toBe(false);
   });
 
