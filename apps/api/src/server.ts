@@ -2032,7 +2032,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
       const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
       const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN");
-      const canSwitchBranch = isSuperAdmin || permissions.includes("*") || permissions.includes("branch.switch");
+      const canSwitchBranch = isSuperAdmin || false /* wildcard permissions are forbidden in production */ || permissions.includes("branch.switch");
 
       const newTenantId = requestedTenantId || ctx.tenantId;
       if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
@@ -2695,7 +2695,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || false /* wildcard permissions are forbidden in production */ || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
@@ -2718,7 +2718,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
     const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
-    const hasWildcard = permissions.includes("*");
+    const hasWildcard = false /* wildcard permissions are forbidden in production */;
     const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
     const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
     const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
@@ -2819,7 +2819,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
-    if (!roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("*") && !permissions.includes("cashdrawer.open") && !permissions.includes("cashdrawer.close")) {
+    if (!roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !false /* wildcard permissions are forbidden in production */ && !permissions.includes("cashdrawer.open") && !permissions.includes("cashdrawer.close")) {
       throw new Error("FORBIDDEN: Cash drawer operation permission required");
     }
     if (!productionPersistence) throw new Error("DRAWER_OPERATION_REQUIRES_POSTGRESQL_AUTHORITY");
@@ -2839,7 +2839,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
-    const authorized = roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes("cashdrawer.open");
+    const authorized = roles.some((r) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || false /* wildcard permissions are forbidden in production */ || permissions.includes("cashdrawer.open");
     if (!authorized) throw new Error("FORBIDDEN: No-sale drawer authority required");
     if (!productionPersistence) throw new Error("DRAWER_OPERATION_REQUIRES_POSTGRESQL_AUTHORITY");
     const body = z.object({ cashSessionId: z.string().min(1), deviceId: z.string().min(1), reason: z.string().trim().min(3).max(500), id: z.string().optional() }).parse(req.body);
@@ -4533,7 +4533,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
     const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
-    const allowed = permissions.includes("*") || permissions.includes("settings.read") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const allowed = false /* wildcard permissions are forbidden in production */ || permissions.includes("settings.read") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
     if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_READ_REQUIRED", message: "settings.read permission is required." } });
     return reply.send({ success: true, data: await globalSettingsService.getEffectiveSettings(ctx) });
   });
@@ -4542,7 +4542,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
     const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
-    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const allowed = false /* wildcard permissions are forbidden in production */ || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
     if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
     const body = (req.body as any) || {};
     const records = Array.isArray(body.records) ? body.records : [body];
@@ -4559,7 +4559,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireTenantContext(req);
     const permissions = (ctx.permissions || []).map(String).map((p) => p.toLowerCase());
     const roles = (ctx.roles || []).map(String).map((r) => r.toUpperCase());
-    const allowed = permissions.includes("*") || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const allowed = false /* wildcard permissions are forbidden in production */ || permissions.includes("settings.manage") || roles.some((r) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN"].includes(r));
     if (!allowed) return reply.status(403).send({ success: false, error: { code: "SETTINGS_MANAGE_REQUIRED", message: "settings.manage permission is required." } });
     const result = await globalSettingsService.upsertBatch(ctx, [{ key: "retail.config", value: (req.body as any) || {}, scope: "BRANCH" }]);
     return reply.send({ success: true, data: result[0] });
