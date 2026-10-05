@@ -61,6 +61,9 @@ sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "syn
 sourceContains("apps/api/src/server.ts", 'assertSyncConflictPermission(ctx, "sync.conflict.resolve");');
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
 sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_ID_REUSE");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_MERGE_FIELD_FORBIDDEN");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "SYNC_CONFLICT_MERGE_DELETE_UNSUPPORTED");
+sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "resolution === \"ACCEPT_LOCAL\"");
 sourceContains("packages/database/prisma/migrations/202610050001_sync_conflict_hardening/migration.sql", "resolved_server_revision");
 sourceContains("tests/integration/conflict-hardening-concurrency.test.ts", "serializes concurrent unit conversions");
 sourceContains("tests/unit/sync-conflict-authorization.test.ts", "denies conflict resolution to ordinary operational permissions");
