@@ -11,9 +11,9 @@ describe("Sync conflict authorization", () => {
     expect(() => assertSyncConflictPermission({ permissions: ["sales.create"] }, "sync.conflict.resolve")).toThrow("FORBIDDEN");
   });
 
-  it("allows resolution to an explicit permission or settings administrator", () => {
+  it("allows resolution only through the dedicated permission", () => {
     expect(hasSyncConflictPermission({ permissions: ["sync.conflict.resolve"] }, "sync.conflict.resolve")).toBe(true);
-    expect(hasSyncConflictPermission({ permissions: ["settings.manage"] }, "sync.conflict.resolve")).toBe(true);
+    expect(hasSyncConflictPermission({ permissions: ["settings.manage"] }, "sync.conflict.resolve")).toBe(false);
   });
 
   it("treats branch managers as readers but not resolvers", () => {
