@@ -968,16 +968,20 @@ function registerCanonicalProductionAuthentication(
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
-        if (sessionId) {
-          const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
-          if (target) {
-            const revokeReason = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "USER_LOGOUT";
-            await globalSessionManager.revokeSession(sessionId, revokeReason);
-            await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "SESSION_LOGOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req), metadata: { reason } });
-          }
+        if (!sessionId) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(400).send({ success: false, error: { code: "SESSION_REQUIRED", message: "Session id is required." } });
         }
+        const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+        if (!target) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
+        }
+        const revokeReason = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "USER_LOGOUT";
+        await globalSessionManager.revokeSession(sessionId, revokeReason);
+        await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "SESSION_LOGOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req), metadata: { reason } });
         clearRefreshCookie(reply, secureCookies);
-        reply.send({ success: true, data: { loggedOut: true, reason } });
+        return reply.send({ success: true, data: { loggedOut: true, reason } });
       }
     })
 
