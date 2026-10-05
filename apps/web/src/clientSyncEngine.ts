@@ -291,7 +291,7 @@ export async function applyRevisionedChanges(
     const storeName = storeForEntity(changeToApply.entityType);
     const deleted = changeToApply.operationType === "DELETE" || Boolean(changeToApply.record?._deleted);
     if (changeToApply.entityType === "Category" || changeToApply.entityType === "Brand") {
-      await upsertCatalogConfig(changeToApply.entityType, change, deleted);
+      await upsertCatalogConfig(changeToApply.entityType, changeToApply, deleted);
     } else if (changeToApply.entityType === "Setting") {
       const record: any = changeToApply.record || {};
       const configKey = String(record.key || "");
@@ -310,7 +310,7 @@ export async function applyRevisionedChanges(
         }, key);
       }
     } else if (changeToApply.entityType === "Expense") {
-      await upsertExpenseConfig(change, deleted);
+      await upsertExpenseConfig(changeToApply, deleted);
       if (deleted) {
         metadata.put(JSON.stringify({ revision: change.revision, entityType: changeToApply.entityType, entityId: changeToApply.entityId, deletedAt: new Date().toISOString() }), "tombstone:" + changeToApply.entityType + ":" + changeToApply.entityId);
       }
