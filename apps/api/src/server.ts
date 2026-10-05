@@ -994,7 +994,7 @@ function registerCanonicalProductionAuthentication(
           clearRefreshCookie(reply, secureCookies);
           return reply.status(404).send({ success: false, error: { code: "SESSION_NOT_FOUND", message: "Session not found." } });
         }
-        if (logoutAccessContext && (logoutAccessContext.sub !== target.userId || logoutAccessContext.tenantId !== target.tenantId)) {
+        if (logoutAccessContext.sessionId !== sessionId || logoutAccessContext.sub !== target.userId || logoutAccessContext.tenantId !== target.tenantId) {
           clearRefreshCookie(reply, secureCookies);
           return reply.status(403).send({ success: false, error: { code: "SESSION_CONTEXT_MISMATCH", message: "Session does not belong to the authenticated user." } });
         }
