@@ -4,7 +4,7 @@ export function renderGarageCommandCenterDashboard(): string {
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; padding-bottom: 20px; margin-bottom: 28px;">
         <div>
           <h1 style="margin: 0; font-size: 28px; font-weight: 700; color: #38bdf8;">KWAKOPOS AUTOMOTIVE WORKSHOP COMMAND CENTER</h1>
-          <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 14px;">58-Pillar Automotive Service, Job Cards, Parts, Labor & Predictive Maintenance OS</p>
+          <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 14px;">Automotive Service, Job Cards, Parts, Labor & Predictive Maintenance OS</p>
         </div>
         <div style="background: #15803d; color: white; padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 13px;">
           WORKSHOP OPERATIONAL 100%
