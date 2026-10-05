@@ -225,6 +225,32 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
         remotePayload: { name: "Different Remote" },
       })).rejects.toThrow("SYNC_CONFLICT_ID_REUSE");
 
+      const deleteConflictId = "conflict:delete-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: deleteConflictId,
+        operationId: "delete-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "DELETE",
+        localPayload: { _deleted: true },
+        remotePayload: { id: productId, name: "Local New", sku: "SERVER-PROD", isActive: true },
+      });
+      await sync.resolveConflict(ctx, deleteConflictId, "ACCEPT_SERVER");
+      expect((await prisma.product.findUnique({ where: { id: productId } }))?.isActive).toBe(true);
+
+      const deleteLocalConflictId = "conflict:delete-local-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: deleteLocalConflictId,
+        operationId: "delete-local-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "DELETE",
+        localPayload: { _deleted: true },
+        remotePayload: { id: productId, name: "Local New", sku: "SERVER-PROD", isActive: true },
+      });
+      await sync.resolveConflict(ctx, deleteLocalConflictId, "ACCEPT_LOCAL");
+      expect((await prisma.product.findUnique({ where: { id: productId }))?.isActive).toBe(false);
+
       // Client-side conflict state must be durable and must not be replayed after resolution.
       const localDb = new LocalIndexedDbStore();
       await localDb.ready;
