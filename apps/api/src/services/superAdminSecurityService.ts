@@ -74,7 +74,7 @@ export function verifyTotpCode(secret: string, code: string, timestamp = Date.no
   if (!/^[A-Z2-7]{16,64}$/.test(secret)) return false;
   if (!/^\d{6}$/.test(code)) return false;
   const counter = Math.floor(timestamp / 1000 / 30);
-  return [-4, -3, -2, -1, 0, 1, 2, 3, 4].some((offset) => hotp(secret, counter + offset) === code);
+  return [-1, 0, 1].some((offset) => hotp(secret, counter + offset) === code);
 }
 
 function encryptSecret(secret: string): string {
@@ -225,13 +225,13 @@ export function verifySetupToken(token: string): string {
 }
 
 export function issueStepUpToken(userId: string, action: string): string {
-  return jwt.sign({ sub: userId, scope: "step_up", action }, getJwtSecret(), { expiresIn: 300 });
+  return jwt.sign({ sub: userId, scope: "step_up", action }, getJwtSecret(), { algorithm: "HS256", expiresIn: 300, issuer: getJwtIssuer(), audience: getJwtAudience() });
 }
 
 export function verifyStepUpToken(token: string, expectedAction?: string): { userId: string; action: string } {
-  const payload = jwt.verify(token, getJwtSecret()) as { sub?: string; scope?: string; action?: string };
+  const payload = jwt.verify(token, getJwtSecret(), { algorithms: ["HS256"], issuer: getJwtIssuer(), audience: getJwtAudience() }) as { sub?: string; scope?: string; action?: string };
   if (payload.scope !== "step_up" || !payload.sub || !payload.action) throw new Error("Invalid or expired step-up token.");
-  if (expectedAction && payload.action !== expectedAction && payload.action !== "*") {
+  if (expectedAction && payload.action !== expectedAction) {
     throw new Error(`Step-up token action mismatch. Expected ${expectedAction}, got ${payload.action}`);
   }
   return { userId: payload.sub, action: payload.action };
@@ -509,4 +509,3 @@ export function requireSecuritySecrets(): void {
   if (!process.env.JWT_SECRET) throw new Error("SECURITY_FATAL: JWT_SECRET is required in production.");
   if (!process.env.SUPER_ADMIN_MFA_ENCRYPTION_KEY) throw new Error("SECURITY_FATAL: SUPER_ADMIN_MFA_ENCRYPTION_KEY is required in production.");
 }
-
