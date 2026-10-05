@@ -205,7 +205,7 @@ import {
 
 
 
-import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
+import { SyncEngine, PrismaSyncEngine, assertSyncConflictPermission } from "@kwakopos2/sync";
 import { PrivilegedRbacMutationService, RbacMutationError } from "./services/rbacMutationService.js";
 import {
   createTraceContext,
@@ -1376,12 +1376,16 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       )
         return [404, "NOT_FOUND", "Resource not found."];
 
-      // Duplicate / already-exists → 409.
+      // Duplicate / already-exists / conflict-state errors → 409.
       if (
         code.includes("DUPLICATE") ||
         code.includes("EXISTS") ||
+        code.includes("SYNC_CONFLICT_") ||
         msg.includes("DUPLICATE") ||
         msg.includes("EXISTS") ||
+        msg.includes("SYNC_CONFLICT_CHANGED_SINCE_DETECTION") ||
+        msg.includes("SYNC_CONFLICT_ID_REUSE") ||
+        msg.includes("SYNC_CONFLICT_ID_INVALID") ||
         msg.toLowerCase().includes("already")
       )
         return [409, "CONFLICT", "Resource already exists."];
@@ -2456,8 +2460,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
   server.get("/sync/conflicts", async (req) => {
+    const ctx = requireTenantContext(req);
+    assertSyncConflictPermission(ctx, "sync.conflict.read");
     const query = z.object({ status: z.enum(["OPEN", "ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE", "ALL"]).optional() }).parse(req.query || {});
-    const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
+    const result = await (syncEngine as any).listConflicts(ctx, query.status || "OPEN");
     return { success: true, data: result };
   });
   server.post("/sync/conflicts/register", async (req) => {
@@ -2475,9 +2481,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: result };
   });
   server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
+    const ctx = requireTenantContext(req);
+    assertSyncConflictPermission(ctx, "sync.conflict.resolve");
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
-    const result = await (syncEngine as any).resolveConflict(requireTenantContext(req), params.conflictId, body.resolution, body.mergedPayload);
+    const result = await (syncEngine as any).resolveConflict(ctx, params.conflictId, body.resolution, body.mergedPayload);
     return { success: true, data: result };
   });
 
