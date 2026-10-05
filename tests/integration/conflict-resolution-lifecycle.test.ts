@@ -249,7 +249,7 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
         remotePayload: { id: productId, name: "Local New", sku: "SERVER-PROD", isActive: true },
       });
       await sync.resolveConflict(ctx, deleteLocalConflictId, "ACCEPT_LOCAL");
-      expect((await prisma.product.findUnique({ where: { id: productId }))?.isActive).toBe(false);
+      expect((await prisma.product.findUnique({ where: { id: productId } }))?.isActive).toBe(false);
 
       // Client-side conflict state must be durable and must not be replayed after resolution.
       const localDb = new LocalIndexedDbStore();
