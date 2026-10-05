@@ -68,11 +68,6 @@ export function generateReleaseManifest(options?: {
     environment,
     releaseChannel,
     releasedAt: new Date().toISOString(),
-    brand: {
-      parentBrand: "Kwakoko",
-      platform: "Kwakoko Business Operating System",
-      pos: "KwakoPos",
-    },
     certification,
     brand: { parentBrand: "Kwakoko", platform: "Kwakoko Business Operating System", posCapability: "KwakoPos" },
     compatibility: {
