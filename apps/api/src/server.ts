@@ -296,7 +296,7 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
   const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((permission) => String(permission).toLowerCase()) : [];
   const isAdmin = roles.some((role) => ["ADMIN", "SUPER_ADMIN", "SUPERADMIN", "OWNER"].includes(role));
-  const hasAdminPermission = permissions.includes("*") || permissions.some((permission) => permission === "admin:*" || permission.startsWith("admin:"));
+  const hasAdminPermission = permissions.some((permission) => ["admin:manage", "admin:users", "admin:settings", "admin:rbac"].includes(permission));
   if (!isAdmin && !hasAdminPermission) {
     throw new Error("FORBIDDEN: Administrative privileges required");
   }
@@ -309,7 +309,7 @@ function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VI
   const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
   const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
   const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
-  const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
+  const allowed = isOwner || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:manage");
   if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
   return ctx;
 }
