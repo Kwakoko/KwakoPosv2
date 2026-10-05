@@ -1,4 +1,4 @@
-      - name: POS Terminal Production Lock\n        run: npm run certify:pos-lock\nname: KwakoPos Production Candidate Certification
+name: KwakoPos Production Candidate Certification
 
 on:
   pull_request:
@@ -58,6 +58,8 @@ jobs:
         run: npm run certify:navigation-lock
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
+      - name: POS Terminal Production Lock
+        run: npm run certify:pos-lock
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Generate release manifest
