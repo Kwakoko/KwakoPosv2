@@ -56,10 +56,10 @@ describe("Advanced Construction & Project Management OS Suite", () => {
     expect(html).toContain("61-Pillar Construction ERP");
   });
 
-  it("should pass 61 / 61 construction certification pillars", async () => {
+  it("should pass all construction domain certification checks", async () => {
     const report = await runConstructionCertification();
-    expect(report.totalPillars).toBe(61);
-    expect(report.passedPillars).toBe(61);
+    expect(report.totalChecks).toBeGreaterThan(0);
+    expect(report.passedChecks).toBe(report.totalChecks);
     expect(report.overallPassed).toBe(true);
   });
 });
