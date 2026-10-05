@@ -5588,7 +5588,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
       return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Super Admin privileges required." } });
     }
-    const identity = req.user as any;
+    const identity = (req as any).user as any;
     return reply.status(200).send({
       success: true,
       data: globalSuperAdminPlatformService.getOperatingPlane(ctx.userId, String(identity?.email || ""), "PLATFORM_ADMIN"),
