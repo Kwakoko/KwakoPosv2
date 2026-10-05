@@ -59,10 +59,10 @@ jobs:
       - name: Static Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Conflict Center Unit Contract
-        run: npx vitest run tests/unit/sync-conflict-center-presentation.test.ts tests/unit/sync-status-label.test.ts tests/unit/sync-conflict-authorization.test.ts --reporter=verbose
+        run: npx vitest run tests/unit/sync-conflict-center-presentation.test.ts tests/unit/sync-status-label.test.ts tests/unit/sync-conflict-authorization.test.ts tests/unit/sync-integrity-preconditions.test.ts --reporter=verbose
       - name: PostgreSQL Conflict Lifecycle
         run: npx tsx scripts/certify-sync-conflict-resolution.ts
       - name: Conflict Hardening Integration
-        run: npx vitest run tests/integration/conflict-resolution-lifecycle.test.ts tests/integration/conflict-hardening-concurrency.test.ts --reporter=verbose
+        run: npx vitest run tests/integration/conflict-resolution-lifecycle.test.ts tests/integration/conflict-hardening-concurrency.test.ts tests/integration/conflict-baseline-immutability.test.ts --reporter=verbose
       - name: Workspace Build
         run: npm run build

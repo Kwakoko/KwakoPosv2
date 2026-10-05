@@ -150,6 +150,16 @@ export function getBaseUpdatedAt(payload: unknown): string | null {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
 }
 
+export function requireBaseUpdatedAt(payload: unknown, entityType: string): string {
+  const value = getBaseUpdatedAt(payload);
+  if (!value) {
+    throw new Error(
+      `SYNC_PRECONDITION_REQUIRED: ${entityType} UPDATE/DELETE requires a valid _baseUpdatedAt`,
+    );
+  }
+  return value;
+}
+
 export function stripSyncControlFields<T extends Record<string, unknown>>(payload: T): T {
   const { _baseUpdatedAt, ...businessPayload } = payload;
   return businessPayload as T;
