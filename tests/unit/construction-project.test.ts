@@ -53,7 +53,7 @@ describe("Advanced Construction & Project Management OS Suite", () => {
   it("should render visual Construction Command Center dashboard", () => {
     const html = renderConstructionCommandCenterDashboard();
     expect(html).toContain("KWAKOPOS CONSTRUCTION & PROJECT CONTROLS COMMAND CENTER");
-    expect(html).toContain("61-Pillar Construction ERP");
+    expect(html).toContain("Construction Project Controls");
   });
 
   it("should pass all construction domain certification checks", async () => {
