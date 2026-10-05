@@ -141,6 +141,14 @@ export async function ensureSuperAdminSecurityTables(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_platform_super_admin_security_lock
         ON platform_super_admin_security(locked_until)
     `;
+    await prisma.$executeRaw`
+      CREATE TABLE IF NOT EXISTS auth_totp_replay (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        counter BIGINT NOT NULL,
+        used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, counter)
+      )
+    `;
     tablesEnsured = true;
   } catch (err) {
     console.error("ENSURE_TABLES_FAILED", err instanceof Error ? err.message : err);
