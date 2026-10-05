@@ -828,7 +828,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const canVoidCart =
       hasPermission("sales.void") ||
       hasPermission("pos.supervisor") ||
-      hasPermission("*");
+      false /* wildcard permissions are never accepted by production POS */;
     setSupervisorModal(false);
     if (canVoidCart) {
       pendingCallback?.();
