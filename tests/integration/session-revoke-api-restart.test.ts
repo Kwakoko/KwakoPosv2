@@ -161,7 +161,7 @@ describe("session revoke survives API restart", () => {
 
     const revokeResponse = await fetch(`${API_URL}/auth/logout`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ sessionId }),
     });
     expect(revokeResponse.status).toBe(200);
