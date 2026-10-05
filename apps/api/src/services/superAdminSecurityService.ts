@@ -257,7 +257,7 @@ export async function beginSuperAdminSetup(token: string): Promise<{ userId: str
 export async function rotateSuperAdminTotp(userId: string, newTotpSecret: string, verificationCode: string): Promise<void> {
   const secret = String(newTotpSecret || "").toUpperCase().replace(/\s+/g, "");
   if (!/^[A-Z2-7]{16,64}$/.test(secret)) throw new Error("Invalid TOTP secret format.");
-  if (!/^\d{6}$/.test(String(verificationCode || "")) || !verifyTotpCode(secret, verificationCode)) {
+  if (!/^\d{6}$/.test(String(verificationCode || "")) || !(await verifyAndConsumeTotpCode(userId, secret, verificationCode))) {
     throw new Error("New TOTP secret verification failed.");
   }
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
