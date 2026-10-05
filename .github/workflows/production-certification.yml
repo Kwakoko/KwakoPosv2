@@ -1,4 +1,4 @@
-name: KwakoPos Production Candidate Certification
+      - name: POS Terminal Production Lock\n        run: npm run certify:pos-lock\nname: KwakoPos Production Candidate Certification
 
 on:
   pull_request:
