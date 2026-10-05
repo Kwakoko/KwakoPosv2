@@ -62,9 +62,6 @@ export const SuperAdminSetupModal: React.FC<SuperAdminSetupModalProps> = ({
     startSuperAdminSetup(setupToken)
       .then((data) => {
         setSetupDetails(data);
-        if (data?.currentOtp) {
-          setTotpCode(data.currentOtp);
-        }
         setLoading(false);
       })
       .catch((err) => {
