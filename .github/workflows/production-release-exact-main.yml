@@ -189,7 +189,7 @@ jobs:
           if (!/^sha256:[0-9a-f]{64}$/.test(c.containerDigest)) { console.error('RELEASE_BLOCKED: Candidate container digest is missing or invalid'); process.exit(1); }
           if (!c.imageRef.endsWith(`@${c.containerDigest}`)) { console.error('RELEASE_BLOCKED: Candidate image reference does not bind to immutable digest'); process.exit(1); }
           if (!/^[0-9a-f]{40}$/.test(c.containerSourceSha) || c.containerSourceSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate container source SHA mismatch: expected=${expected} actual=${c.containerSourceSha}`); process.exit(1); }
-          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCANDIDATE_IMAGE_REF=${c.imageRef}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\      - name: POS Terminal Production Lock\n        run: npm run certify:pos-lock\nnCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCANDIDATE_IMAGE_REF=${c.imageRef}\n`);
           NODE
 
       - name: Independently verify container OCI source provenance
