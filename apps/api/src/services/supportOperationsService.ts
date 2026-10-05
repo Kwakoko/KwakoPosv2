@@ -11,10 +11,10 @@ function safeQuery<T = unknown>(query: string, ...values: unknown[]) {
   return prisma.$queryRaw<T>(Prisma.sql(parts, ...values) as any);
 }
 
-function safeExecute(query: string, ...values: unknown[]) {
+function safeExecute(client: any, query: string, ...values: unknown[]) {
   const parts = query.split(/\\$\\d+/);
   if (parts.length !== values.length + 1) throw new Error("SAFE_SQL_PARAMETER_MISMATCH");
-  return prisma.$executeRaw(Prisma.sql(parts, ...values) as any);
+  return client.$executeRaw(Prisma.sql(parts, ...values) as any);
 }
 
 
@@ -63,7 +63,7 @@ export class SupportOperationsService {
   async executeSafeRemediation(tenantId: string, ticketId: string, remediationId: string, requestedBy: string) {
     const t = assertTenant(tenantId); const rows = await safeQuery<any[]>(`SELECT * FROM "SupportRemediation" WHERE "tenant_id"=$1 AND "ticket_id"=$2 AND "id"=$3 LIMIT 1`, t, ticketId, remediationId); const remediation = rows[0]; if (!remediation) throw new Error("REMEDIATION_NOT_FOUND"); if (remediation.policy_decision !== "AUTO_ALLOWED" || remediation.risk_level !== "SAFE") throw new Error("REMEDIATION_APPROVAL_REQUIRED"); if (String(remediation.action) !== "RETRY_FAILED_SYNC") throw new Error("REMEDIATION_ACTION_NOT_ALLOWED");
     // sync_operations camelCase: tenantId, status, createdAt, processedAt
-    const result = await prisma.$transaction(async (tx: any) => { const changed = await tx.$executeRawUnsafe(`UPDATE "sync_operations" SET "status"='PENDING',"processedAt"=NULL WHERE tenant_id=$1 AND "status"='FAILED' AND created_at>NOW()-INTERVAL '24 hours'`, t); await tx.$executeRawUnsafe(`UPDATE "SupportRemediation" SET "result"=$1,"completed_at"=NOW(),"verification"=$2::jsonb WHERE "id"=$3 AND "tenant_id"=$4`, `Requeued ${changed} failed sync operations`, JSON.stringify({ requeued: Number(changed), status: "PENDING_RETRY_VERIFICATION", executedAt: new Date().toISOString() }), remediationId, t); return Number(changed); });
+    const result = await prisma.$transaction(async (tx: any) => { const changed = await safeExecute(tx, `UPDATE "sync_operations" SET "status"='PENDING',"processedAt"=NULL WHERE tenant_id=$1 AND "status"='FAILED' AND created_at>NOW()-INTERVAL '24 hours'`, t); await safeExecute(tx, `UPDATE "SupportRemediation" SET "result"=$1,"completed_at"=NOW(),"verification"=$2::jsonb WHERE "id"=$3 AND "tenant_id"=$4`, `Requeued ${changed} failed sync operations`, JSON.stringify({ requeued: Number(changed), status: "PENDING_RETRY_VERIFICATION", executedAt: new Date().toISOString() }), remediationId, t); return Number(changed); });
     await audit(t, "SAFE_REMEDIATION_EXECUTED", { remediationId, action: remediation.action, requeued: result }, ticketId, undefined, requestedBy); return { remediationId, action: remediation.action, requeued: result, verification: { required: true, state: "PENDING_RETRY_VERIFICATION" } };
   }
 
