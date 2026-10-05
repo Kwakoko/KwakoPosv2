@@ -96,3 +96,14 @@ PostgreSQL transaction
 
 This PASS applies to the **conflict-resolution remediation gates** listed above. It does not assert that unrelated repository governance workflows, migration-order workflows, or live multi-device deployment certification are green.
 
+
+
+## 5. Additional hardening verified on 2026-10-05
+
+- Explicit function-level authorization for conflict read and resolve.
+- Immutable conflict identity and duplicate-ID reuse rejection.
+- Entity-state revalidation under row lock before privileged resolution.
+- Revisioned resolution acknowledgement for every resolution path.
+- Deterministic parent/child variant row locking for unit conversion.
+- Conflict audit metadata reduced to fingerprints and changed-field names.
+- Workspace typecheck/build and dedicated authorization/concurrency regression gates added to the production lock.
