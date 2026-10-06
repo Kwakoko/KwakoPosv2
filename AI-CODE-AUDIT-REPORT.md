@@ -4,6 +4,7 @@
 **Audit Date:** September 14, 2026  
 **Target Codebase:** `c:\Users\Administrator\Desktop\Projects\KwakoPos v2.0.0`  
 **Classification:** HIGH-STAKES SYSTEM FORENSICS & SECURITY AUDIT  
+**Remediation Reconciliation:** October 4, 2026  
 
 ---
 
@@ -15,13 +16,15 @@ While the platform features extensive domain modeling, granular role contracts, 
 
 ### Vulnerability & Finding Breakdown
 
+The dashboard below counts active findings. SEC-08 (browser token storage) and SEC-09 (legacy SHA-256 password verification) are resolved in the current implementation. The server split-brain portion of ARCH-01 is also resolved; the remaining ARCH-01 risk is the build-time regex source mutation described below.
+
 | Severity | Architecture & Deps | OWASP Top 10 Security | Performance & Scalability | Code Quality & AI Drift | Total |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **CRITICAL** | 1 | 3 | 2 | 1 | **7** |
-| **HIGH** | 2 | 5 | 3 | 3 | **13** |
-| **MEDIUM** | 2 | 4 | 1 | 2 | **9** |
+| **HIGH** | 2 | 4 | 3 | 3 | **12** |
+| **MEDIUM** | 2 | 3 | 1 | 2 | **8** |
 | **LOW / INFO** | 1 | 0 | 0 | 2 | **3** |
-| **TOTAL** | **6** | **12** | **6** | **8** | **32** |
+| **TOTAL** | **6** | **10** | **6** | **8** | **30** |
 
 ---
 
@@ -34,13 +37,13 @@ While the platform features extensive domain modeling, granular role contracts, 
 | **SEC-03** | **CRITICAL** | Security (A01/A03) | **Arbitrary SQL Execution HTTP Backdoor (`/api/v1/super-admin/db/query`)** | `apps/api/src/routes/superAdminDatabaseRoutes.ts:81-111` |
 | **PERF-01** | **CRITICAL** | Performance | **$O(N)$ Unbounded In-Memory Stock Calculation (Heap Exhaustion)** | `packages/database/src/prismaRepositories.ts:426-429` |
 | **PERF-02** | **CRITICAL** | Performance | **Sync Engine Delta Memory Bomb (Full-Table Client Pull & JS Filtering)** | `packages/sync/src/prismaSyncEngine.ts:166-168` |
-| **ARCH-01** | **CRITICAL** | Architecture | **Split-Brain Server Duality & Build-Time Regex Code Patching** | `scripts/ci/harden-production-finance.ts:16-34` |
+| **ARCH-01** | **CRITICAL** | Architecture | **Build-Time Regex Source Mutation (server split-brain resolved)** | `scripts/ci/harden-production-finance.ts:16-34` |
 | **QUAL-01** | **CRITICAL** | AI Drift | **Synthetic / Fabricated Certification Scripts (Vanity `for` Loops)** | `scripts/certification/full-system-certification-engine.ts:53-57` |
 | **SEC-04** | **HIGH** | Security (A01) | **Super-Admin Authorization Bypass via `x-admin-role` Header & `*` Wildcard** | `apps/api/src/routes/superAdminDatabaseRoutes.ts:16-21` |
 | **SEC-05** | **HIGH** | Security (A07) | **Super-Admin 2FA Setup Leaks Valid TOTP Code (`currentOtp`) in Response** | `apps/api/src/services/superAdminSecurityService.ts:260-268` |
 | **SEC-06** | **HIGH** | Security (A07) | **Overly Permissive 4.5-Minute TOTP Replay Window (±4 Clock Steps)** | `apps/api/src/services/superAdminSecurityService.ts:77` |
 | **SEC-07** | **HIGH** | Security (A07) | **Unenforced / Decorative Step-Up Authentication (Dead Security Logic)** | `apps/api/src/services/superAdminSecurityService.ts:251` |
-| **SEC-08** | **HIGH** | Security (A02) | **Unencrypted Token Persistence in Client `localStorage` (XSS Attack Vector)** | `apps/web/src/services/apiClient.ts:55-89` |
+| **SEC-08** | **RESOLVED** | Security (A02) | **Browser credential storage migrated to memory-only access tokens + HttpOnly refresh cookie** | `apps/web/src/services/apiClient.ts`; `apps/api/src/server.ts` |
 | **PERF-03** | **HIGH** | Performance | **Sequential N+1 Unbatched Operations Loop in Sync Engine `processPush`** | `packages/sync/src/prismaSyncEngine.ts:49-158` |
 | **PERF-04** | **HIGH** | Performance | **Full Table Scan & Concurrency Collision on Transaction Sequence Numbering** | `packages/database/src/atomicCommercialFinance.ts:42-50` |
 | **PERF-05** | **HIGH** | Performance | **Event-Loop Blocking Synchronous I/O (`execSync` & `fs.readFileSync`)** | `packages/config/src/index.ts:78`, `apps/api/src/server.ts:481` |
@@ -59,14 +62,13 @@ While the platform features extensive domain modeling, granular role contracts, 
 graph TD
     Client[Client PWA - React 18 / Vite / IndexedDB]
     Gateway[Fastify 5.12 API Server]
-    FixedWrapper[serverFixed.ts - PreValidation Interceptor]
-    BaseServer[server.ts - 4,810 lines Monolith]
+    CanonicalServer[server.ts - Fastify API + centralized authentication/security]
+
     PrismaDB[(PostgreSQL / Prisma 5.9.1)]
     MemStore[(Volatile In-Memory Maps Store)]
     
     Client -->|HTTP / REST / Static Assets| Gateway
-    Gateway --> FixedWrapper
-    FixedWrapper -->|Bypasses/Overrides| BaseServer
+    Gateway --> CanonicalServer
     
     BaseServer -->|Persistence Mode: TRUE| PrismaDB
     BaseServer -->|Persistence Mode: FALSE| MemStore
@@ -77,6 +79,17 @@ graph TD
     end
 ```
 
+### 1.1A Current-State Authentication & Server Topology Reconciliation
+
+As of October 4, 2026, the authentication/server topology has been consolidated since the September 14 audit:
+
+- `apps/api/src/server.ts` is the single API server/authentication implementation. The superseded `serverFixed.ts` and `testServerFixed.ts` files are removed.
+- The current `server.ts` is approximately 6,330 lines; the earlier 4,810-line figure is historical and should not be used as the current architecture measure.
+- `buildServer()` registers one shared `onRequest` authentication boundary before the first route declaration. The hook verifies the Bearer access token, validates the bound server-side session, populates `req.tenantContext`, and applies the admin/Super Admin gates used by protected routes.
+- Route modules and the canonical production authentication registration are attached after this shared hook, so protected production routes inherit the same authentication boundary rather than depending on route-by-route copies of JWT verification.
+- Explicit exceptions are intentional authentication/public endpoints: health/readiness/version discovery, `/auth/login`, `/auth/refresh`, `/auth/logout`, Super Admin setup endpoints authenticated by setup tokens, approved legal/telemetry endpoints, and static/PWA assets. These are not bearer-protected business routes.
+- Browser credential transport is now split-token: access tokens are memory-only; refresh tokens are delivered and rotated through the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, plus `Secure` in production. The client sends only `sessionId` in the refresh body and uses `credentials: "include"`.
+- The legacy secret-dependent SHA-256 password verifier has been removed. New and migrated passwords use Argon2id; existing scrypt hashes are the only legacy compatibility format still accepted and are rehashed after successful authentication.
 The system is structured as an npm workspaces monorepo:
 - `apps/web`: React 18 SPA / PWA utilizing IndexedDB for offline queueing.
 - `apps/api`: Fastify 5 REST API handling enterprise commerce, auth, sync, and vertical industry routes.
@@ -90,27 +103,12 @@ The system is structured as an npm workspaces monorepo:
 
 ### 1.2 Core Architectural Defects
 
-#### Defect ARCH-01: Split-Brain Server Duality & Build-Time Regex Patching
-- **Locations:**  
-  - `apps/api/package.json:6`  
-  - `scripts/ci/harden-production-finance.ts:16-34`  
-  - `apps/api/src/serverFixed.ts:1-334`  
-  - `apps/api/src/server.ts:1-4810`
-- **Finding:**  
-  The codebase has two competing API server implementations:
-  1. `server.ts`: A massive 4,810-line monolithic server containing legacy in-memory fallback routes and developmental auth bypasses.
-  2. `serverFixed.ts`: A 334-line wrapper created to intercept `/auth/login`, `/auth/refresh`, and setup routes before they reach `server.ts`.
-  
-  To make `server.ts` use persistent PostgreSQL repositories instead of in-memory maps, the project's build pipeline (`apps/api/package.json`) executes a script (`harden-production-finance.ts`) that **modifies `server.ts` via regex string manipulation prior to compilation**:
-  ```typescript
-  // scripts/ci/harden-production-finance.ts:25-34
-  let financeBlock = source.slice(financeStart, financeEnd).replaceAll("globalFinanceRepository.", "financeRepository.");
-  financeBlock = financeBlock.replace(/(?<!await )financeRepository\.(\w+\([^;\n]+\))/g, "await financeRepository.$1");
-  fs.writeFileSync(file, source);
-  ```
-- **Architectural Risk:**  
-  This demonstrates severe technical debt and unmanaged build mutations. If formatting in `server.ts` changes, the build script fails with `FINANCE_PATCH_TARGET_NOT_FOUND` or silently corrupts the API server source code.
+#### Defect ARCH-01: Build-Time Regex Patching Remains; Server Split-Brain Resolved
 
+- **Current status:** The split-brain API/server implementation described in the original audit is **resolved**. `apps/api/src/server.ts` is now the sole API entrypoint and owns the authentication/security flow; the superseded `serverFixed.ts` wrapper is removed.
+- **Current remaining risk:** `scripts/ci/harden-production-finance.ts` still mutates `server.ts` through regex-based source rewriting before compilation. That build-time mutation remains a maintenance and release-integrity risk even though there is no longer a second authentication server implementation.
+- **Authentication consequence:** The production route surface now has a single shared `onRequest` authentication boundary registered before route declarations. The current implementation was explicitly changed to avoid ordering-based auth gaps: the hook is installed before `buildServer()` begins registering business routes, and the canonical production auth registration occurs after that boundary is established.
+- **Maintenance control:** Keep the server-entrypoint consolidation as resolved, but retain the build-time source-rewrite issue as an independent remediation item until the finance hardening script is eliminated.
 #### Defect ARCH-02: Volatile In-Memory Repository Duality in Critical Modules
 - **Locations:**  
   - `packages/database/src/rollbackRepositories.ts:16-50`  
@@ -314,30 +312,27 @@ Execution of `npm audit` and package manifest inspection reveals critical supply
 - **Impact:**  
   Any authenticated administrator can invoke destructive endpoints (such as tenant deletions or rollback executions) without being challenged for step-up credentials.
 
-#### [MEDIUM] SEC-09: Weak Legacy Password Hashing Fallback
-- **Vulnerability Type:** CWE-916: Use of Password Hash With Insufficient Computational Effort
-- **Location:** `packages/auth/src/index.ts:108-114`
-- **Code:**
-  ```typescript
-  const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
-  const expected = Buffer.from(storedHash);
-  const actual = Buffer.from(legacyHash);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-  ```
-- **Finding:**  
-  For legacy hashes, the system falls back to a single SHA-256 round using `password + getJwtSecret()`. This couples password verification directly to the cluster `JWT_SECRET` (if the secret is rotated, all legacy password verifications break) and provides no work-factor protection against GPU cracking.
+#### [RESOLVED] SEC-09: Legacy secret-dependent SHA-256 password fallback removed
+- **Status:** Resolved in the current authentication implementation.
+- **Location:** `packages/auth/src/index.ts`
+- **Current behavior:**  
+  `comparePassword` accepts Argon2id hashes and retains the existing scrypt compatibility path; unsupported legacy formats now fail closed. The prior SHA-256 derivation using `password + JWT_SECRET` has been removed, eliminating the weak work factor and the coupling between password verification and JWT secret rotation.
+- **Migration note:**  
+  New and rehashed passwords use Argon2id. Existing scrypt hashes remain temporarily verifiable so successful authentication can trigger migration to Argon2id; unsupported SHA-256 hashes are no longer accepted.
 
 ---
 
 ### 2.4 CSRF & Browser Client Security
 
-#### [HIGH] SEC-08: Sensitive Tokens Stored in Web `localStorage`
-- **Vulnerability Type:** CWE-922: Insecure Storage of Sensitive Information
-- **Location:** `apps/web/src/services/apiClient.ts:55-89`
-- **Finding:**  
-  The web client stores both `accessToken` AND `refreshToken` in `window.localStorage` under the key `kwakopos:v2:session`. Any Cross-Site Scripting (XSS) vulnerability on the domain allows complete extraction of persistent sessions.
-- **Remediation:**  
-  Rely exclusively on `HttpOnly`, `Secure`, `SameSite=Strict` cookies for refresh tokens. Store access tokens only in application memory.
+#### [RESOLVED] SEC-08: Browser credential storage has been migrated to split-token transport
+- **Status:** Resolved in the current authentication implementation.
+- **Location:** `apps/web/src/services/apiClient.ts`; `apps/api/src/server.ts`
+- **Current behavior:**  
+  The browser persists only non-secret session metadata: `sessionId`, user identity, and session policy/expiry metadata. Remembered sessions may use `localStorage`; otherwise the session record uses `sessionStorage`. The `StoredSession.accessToken` field is retained only for source/API compatibility; `setStoredSession()` serializes no access token, and `getStoredSession()` strips any legacy persisted access token during migration. The live bearer access token exists only in the module's in-memory `accessToken` variable.
+- **Refresh credential transport:**  
+  The refresh token is never persisted in browser storage and is never returned in authentication JSON. Login and refresh issue/rotate the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict`, `Max-Age`, and `Secure` in production. The client calls `/auth/refresh` with only `sessionId` and `credentials: "include"`, so the browser supplies the HttpOnly cookie automatically. Logout clears the same cookie.
+- **Residual security note:**  
+  This prevents JavaScript from directly reading the refresh credential, but it does not eliminate the impact of an XSS flaw that can execute authenticated actions from the victim's browser while the session is active.
 
 #### [MEDIUM] SEC-10: Missing CSRF Tokens & Permissive CORS Defaults
 - **Location:** `apps/api/src/server.ts:250-254`, `apps/api/src/middleware/securityMiddleware.ts:27-28`
@@ -508,7 +503,7 @@ Execution of `npm audit` and package manifest inspection reveals critical supply
 
 #### [MEDIUM] QUAL-06: Extreme Monolithic "God-Files"
 - **Locations:**  
-  - `apps/api/src/server.ts`: 4,810 lines, 223.5 KB.  
+  - `apps/api/src/server.ts`: approximately 6,330 lines in the reconciled implementation; still a monolithic route/auth/service file.  
   - `apps/web/src/pages/InventoryPage.tsx`: 218.3 KB.  
   - `apps/web/src/pages/DashboardPage.tsx`: 180.7 KB.  
   - `apps/web/src/pages/PosPage.tsx`: 149.3 KB.
@@ -531,7 +526,7 @@ gantt
     section Phase 2: Architecture & Schema (P1)
     Reconcile schema.prisma with Migrations :p2_1, after p1_4, 3d
     Abolish Regex Monkey-Patching in Build  :p2_2, after p2_1, 2d
-    Unify serverFixed.ts into Modular Routes :p2_3, after p2_2, 4d
+    Unify API authentication into server.ts :p2_3, after p2_2, 4d
     Migrate Rollback Repos to PostgreSQL    :p2_4, after p2_3, 3d
     section Phase 3: Performance & Scale (P2)
     Implement Stock Cache & SQL Aggregates  :p3_1, after p2_4, 3d
@@ -548,7 +543,7 @@ gantt
 2. **Decommission Raw SQL Backdoor (SEC-03):** Delete `/api/v1/super-admin/db/query` from `apps/api/src/routes/superAdminDatabaseRoutes.ts`.
 3. **Parameterize SQL Injections (SEC-02):** In `packages/database/src/rlsContext.ts` and `apps/api/src/services/supportOperationsService.ts`, replace string templates with tagged template literals `$executeRaw` and parameterized `$queryRaw`.
 4. **Sanitize 2FA Setup (SEC-05 & SEC-06):** In `apps/api/src/services/superAdminSecurityService.ts`, remove `currentOtp` from `beginSuperAdminSetup` and narrow the TOTP verification window from $[-4..4]$ to $[-1..1]$.
-5. **Secure Token Storage (SEC-08):** Remove `refreshToken` from `window.localStorage` in `apps/web/src/services/apiClient.ts`.
+5. **Secure Token Storage (SEC-08) — completed:** The client persists only non-secret session metadata. Access tokens are memory-only, while refresh credentials use the `kwakopos_refresh` cookie with `HttpOnly; SameSite=Strict; Secure` in production. The refresh request body contains only `sessionId`.
 
 ### Phase 2: Architectural Unification & Persistence (Days 4–8)
 1. **Prisma Schema Re-synchronization (QUAL-03):** Add `PlatformSuperAdminSecurity`, `AuthLoginThrottle`, `SupportTicket`, `SupportEvent`, `SupportIncident`, and `SupportRemediation` models to `schema.prisma`. Run `prisma generate` to establish authentic type safety.

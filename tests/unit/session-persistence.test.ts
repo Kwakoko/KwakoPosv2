@@ -55,8 +55,8 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
 
     setStoredSession(session);
 
-    // Verify stored in both
-    expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeTruthy();
+    // Default non-remembered sessions stay in sessionStorage only.
+    expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeNull();
     expect(mockSessionStorage.getItem("kwakopos:v2:session")).toBeTruthy();
 
     const retrieved = getStoredSession();
@@ -66,7 +66,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     // Refresh-token credentials are intentionally not persisted in browser storage.
     // The sessionId is the durable refresh handle for the HTTP-only server session.
     expect((retrieved as any)?.refreshToken).toBeUndefined();
-    const raw = mockLocalStorage.getItem("kwakopos:v2:session");
+    const raw = mockSessionStorage.getItem("kwakopos:v2:session");
     expect(raw).toBeTruthy();
     expect(raw).not.toContain("refresh-xyz");
     expect(retrieved?.user.name).toBe("Amina Cashier");
@@ -126,6 +126,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     setStoredSession(session);
 
     // Mock network failure (e.g. offline POS terminal)
+    vi.stubGlobal("navigator", { onLine: false });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
 
     const user = await restoreSession();

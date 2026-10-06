@@ -7,6 +7,34 @@ All notable changes to KwakoPos will be documented in this file.
 ## [2.13.0] - 2026-10-04
 
 ### ✨ New Features
+- **session**: expose complete effective session policy metadata
+- **session**: persist session state and audit lifecycle transitions
+- **session**: expose session audit event client
+- **session**: add authoritative session audit event endpoint
+- **session**: add dedicated non-secret IndexedDB session state store
+- **settings**: expose tenant session security controls
+- **session**: restore safe pre-timeout route after reauthentication
+- **session**: add session-expired login notice and remember-me input
+- **session**: activate timeout warning, offline lock, heartbeat and tab sync
+- **session**: add timeout-safe login, logout, refresh and draft recovery
+- **session**: add client session state machine state
+- **session**: expose centralized useSession contract
+- **session**: connect hybrid session runtime dependencies
+- **session**: add centralized session context contract
+- **session**: expose session client components
+- **session**: expose secure session lifecycle APIs to web client
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: add reusable hybrid session client components
+- **session**: wire hybrid server lifecycle and device APIs
+- **settings**: add hybrid session security defaults
+- **session**: add tenant-aware session policy service
+- **auth**: implement production hybrid session state machine
+- **auth**: add canonical hybrid session policy
 - **sync**: bridge durable domain events to event bus
 - **sync**: add durable domain event journal
 - **reports**: expose authoritative tenant-scoped report data API
@@ -58,6 +86,53 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #75 from Kwakoko/fix/unify-api-auth-server
+- **audit**: align token storage details with current client
+- **audit**: update current server size in architecture finding
+- **auth**: document canonical route authentication boundary
+- **security**: update audit finding matrix for server consolidation
+- **security**: reconcile audit with current auth topology
+- **auth**: correct canonical route hook ordering assertion
+- **auth**: enforce single production authentication boundary
+- **security**: reconcile audit findings and remediation status
+- **security**: reconcile audit with current token storage
+- **auth**: lock removal of SHA-256 password fallback
+- **auth**: reject legacy SHA-256 password hashes
+- **auth**: lock hardened refresh cookie attributes
+- **auth**: lock hardened refresh cookie attributes
+- **auth**: verify cookie-only refresh lifecycle
+- **auth**: align refresh claims assertions
+- **auth**: enforce cookie refresh contract
+- **security**: remove remaining duplicate server references
+- **security**: match canonical refresh response contract
+- **security**: remove duplicate server audit references
+- **security**: document single canonical API server
+- **cert**: remove duplicate canonical server requirement
+- **api**: remove stale compiled duplicate server
+- **api**: align package entrypoint with build output
+- **api**: align container entrypoint with build output
+- **api**: align root entrypoint with build output
+- **security**: assert cookie transport on canonical server
+- **cert**: use canonical server for support operations
+- **security**: inspect canonical server source
+- **cert**: verify canonical API server artifacts
+- **security**: lock auth transport to canonical server
+- **security**: track canonical server source only
+- **auth**: restart canonical server in session revocation test
+- **ci**: use canonical API server in production certification
+- **ci**: use canonical API server in security scan
+- **api**: remove duplicate testServerFixed.ts
+- **api**: remove duplicate serverFixed.ts
+- **api**: use canonical server scripts
+- **api**: launch canonical server in container
+- **api**: point root entrypoint at canonical server
+- **api**: make server.ts the canonical auth entrypoint
+- **core**: Merge pull request #72 from Kwakoko/fix/dashboard-final-lock
+- **core**: Merge pull request #69 from Kwakoko/feat/session-manager-hybrid
+- **core**: refresh dashboard lock for daily return isolation
+- **core**: refresh dashboard lock for API boundary fix
+- **release**: v2.13.0
+- **auth**: cover hybrid session manager security invariants
 - **core**: Merge pull request #67 from Kwakoko/fix/dashboard-final-closure
 - **core**: refresh dashboard lock after return ownership fix
 - **core**: refresh dashboard lock after return hardening
@@ -408,20 +483,47 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **auth**: register production authentication hooks before routes
+- **auth**: remove legacy SHA-256 password fallback
+- **security**: distinguish refresh credential from expiry metadata
+- **auth**: align all refresh flows to HttpOnly cookie contract
+- **auth**: send only session id for cookie refresh
+- **auth**: make refresh endpoint cookie-based
+- **auth**: use environment-aware refresh cookie transport
+- **web**: remove duplicate session context declarations
+- **core**: isolate daily dashboard returns by original sale owner
+- **db**: complete tenant device relation
+- **core**: preserve top-product identifiers at API boundary
+- **auth**: resolve remaining session manager TypeScript errors
+- **session**: return remember-me policy to client
+- **session**: honor remember-me and browser-close storage policy
+- **auth**: export canonical session policy contracts
+- **session**: bind durable session state and warning to actual device and deadline
+- **session**: expose stable device identity to session runtime
 - **core**: exclude cross-tenant original-sale returns
 - **core**: preserve valid orphan return analytics under tenant isolation
+- **auth**: remove session-id-only refresh compatibility bypass
+- **session**: block refresh after idle expiry and preserve legacy callers
 - **core**: add dashboard lock as separate release step
 - **core**: add dashboard lock as separate candidate step
 - **core**: add dashboard lock as separate CI step
+- **auth**: make persisted session validation authoritative for protected APIs
+- **session**: heartbeat only while user remains active
+- **session**: fail closed on online session restore
 - **core**: render payment donut from raw metrics
 - **core**: remove cashier ID fallback and correct order copy
 - **core**: publish governed product ranking fields
 - **core**: scope dashboard return cost lookups
+- **session**: persist tenant idle policy in server sessions
+- **db**: persist session idle timeout migration
+- **db**: persist session idle policy
 - **core**: align top product ranking and recent order labels
+- **session**: enforce server-side idle timeout from persisted policy
 - **core**: expose top product ranking dimensions
 - **core**: resolve authoritative cashier names for recent orders
 - **core**: enforce tenant branch on payment summary
 - **core**: harden dashboard analytics isolation and rankings
+- **db**: preserve non-null device session identity
 - **core**: close Conflict Center P0/P1 convergence loop
 - **core**: terminate synthetic certification CLI deterministically
 - **core**: close synthetic IndexedDB stores before monitor exit
@@ -875,13 +977,21 @@ All notable changes to KwakoPos will be documented in this file.
 - **perf**: enforce structural bundle size limits
 - **perf**: optimize PWA startup and dashboard bundles
 
+### 🗄️ Database Changes
+- **db**: add hybrid session manager migration
+- **db**: extend session and device persistence model
+
+### 🔌 API Changes
+- **api**: assert scheduler on canonical server
+- **api**: restart canonical server in RBAC persistence test
+
 ### 🎨 UI/UX Changes
 - **web-sync**: consume monotonic revisions and preserve conflicts
 - **ui**: implement product registration wizard, offline font persistence, and universal module navigation
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Jack91186, Kwakoko, github-actions[bot], Hilda99-D, Kwakoko1
+Credit to: Kwakoko, Jack91186, github-actions[bot], Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes
