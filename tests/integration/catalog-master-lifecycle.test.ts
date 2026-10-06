@@ -9,12 +9,19 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
     const tenantA = randomUUID(); const branchA = randomUUID(); const tenantB = randomUUID(); const branchB = randomUUID();
     const ctxA: any = { tenantId: tenantA, branchId: branchA, userId: randomUUID() }; const ctxB: any = { tenantId: tenantB, branchId: branchB, userId: randomUUID() };
     const categoryId = randomUUID(); const replacementCategoryId = randomUUID(); const brandId = randomUUID(); const replacementBrandId = randomUUID(); const productId = randomUUID();
+    const hierarchyRootId = randomUUID(); const hierarchyChildId = randomUUID(); const hierarchyGrandchildId = randomUUID();
     const catalog = new PrismaCatalogRepository(); const products = new PrismaProductRepository(); const stock = new PrismaStockRepository(); const sync = new PrismaSyncEngine(products, stock);
     try {
       await prisma.tenant.create({ data: { id: tenantA, name: "Catalog Test A", slug: `catalog-a-${tenantA.slice(0,8)}`, branches: { create: { id: branchA, name: "Main A", code: `A-${branchA.slice(0,6)}` } } } });
       await prisma.tenant.create({ data: { id: tenantB, name: "Catalog Test B", slug: `catalog-b-${tenantB.slice(0,8)}`, branches: { create: { id: branchB, name: "Main B", code: `B-${branchB.slice(0,6)}` } } } });
       const c1 = await catalog.createCategory(ctxA, { id: categoryId, name: "Audit Category", code: "AUDIT_CATEGORY" });
       const c2 = await catalog.createCategory(ctxA, { id: replacementCategoryId, name: "Replacement Category", code: "REPLACEMENT_CATEGORY" });
+      const hierarchyRoot = await catalog.createCategory(ctxA, { id: hierarchyRootId, name: "Hierarchy Root", code: "HIERARCHY_ROOT" });
+      const hierarchyChild = await catalog.createCategory(ctxA, { id: hierarchyChildId, name: "Hierarchy Child", code: "HIERARCHY_CHILD", parentId: hierarchyRootId });
+      const hierarchyGrandchild = await catalog.createCategory(ctxA, { id: hierarchyGrandchildId, name: "Hierarchy Grandchild", code: "HIERARCHY_GRANDCHILD", parentId: hierarchyChildId });
+      expect(hierarchyChild.parentId).toBe(hierarchyRootId);
+      expect(hierarchyGrandchild.parentId).toBe(hierarchyChildId);
+      await expect(catalog.updateCategory(ctxA, hierarchyRootId, { parentId: hierarchyGrandchildId })).rejects.toThrow("circular parent chain");
       const b1 = await catalog.createBrand(ctxA, { id: brandId, name: "Audit Brand", code: "AUDIT_BRAND" });
       const b2 = await catalog.createBrand(ctxA, { id: replacementBrandId, name: "Replacement Brand", code: "REPLACEMENT_BRAND" });
       expect(c1.tenantId).toBe(tenantA); expect(b1.branchId).toBe(branchA);
@@ -37,7 +44,9 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
 
 
       const foreignRead = await catalog.listCategories(ctxB);
+      const foreignBrandRead = await catalog.listBrands(ctxB);
       expect(foreignRead.some((c) => c.id === categoryId)).toBe(false);
+      expect(foreignBrandRead.some((b) => b.id === brandId)).toBe(false);
 
       const deletedCategory = await catalog.deleteCategory(ctxA, categoryId, replacementCategoryId);
       const deletedBrand = await catalog.deleteBrand(ctxA, brandId, replacementBrandId);
