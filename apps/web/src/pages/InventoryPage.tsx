@@ -2099,7 +2099,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </button>
               <button
                 className="v2-btn v2-btn-danger v2-btn-sm"
-                onClick={() => handleConfirmArchive(true)}
+                onClick={() => handleConfirmArchive()}
                 type="button"
               >
                 Archive SKU
