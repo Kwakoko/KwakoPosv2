@@ -24,14 +24,18 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
       await client1.ready; await client2.ready;
       client1.saveCatalogCategoriesLocal([c1, c2], { tenantId: tenantA, branchId: branchA });
       client1.saveCatalogBrandsLocal([b1, b2], { tenantId: tenantA, branchId: branchA });
+      await products.createProduct(ctxA, { id: productId, name: "Catalog Lifecycle Product", sku: `CAT-${productId.slice(0,8)}`, categoryId, brandId, category: c1.name, brand: b1.name, buyingPrice: 10, sellingPrice: 15, hasVariants: false });
       const edited = await catalog.updateCategory(ctxA, categoryId, { name: "Audit Category Edited" });
       const editedBrand = await catalog.updateBrand(ctxA, brandId, { name: "Audit Brand Edited" });
+      const renamedProduct = await prisma.product.findUnique({ where: { id: productId } });
+      expect(renamedProduct?.category).toBe("Audit Category Edited");
+      expect(renamedProduct?.brandId).toBe(brandId);
       const bootstrapBeforeDelete = await sync.processBootstrap(ctxA, { deviceId: "catalog-client-1", schemaVersion: client1.schemaVersion });
       await client2.bootstrapFromAuthoritativeSnapshot(bootstrapBeforeDelete, { tenantId: tenantA, branchId: branchA });
       expect(client2.getConfigurationLocal("inventory_categories_meta", { tenantId: tenantA, branchId: branchA }).some((c: any) => c.id === categoryId && c.name === "Audit Category Edited")).toBe(true);
       expect(client2.getConfigurationLocal("inventory_brands_meta", { tenantId: tenantA, branchId: branchA }).some((b: any) => b.id === brandId && b.name === "Audit Brand Edited")).toBe(true);
 
-      await products.createProduct(ctxA, { id: productId, name: "Catalog Lifecycle Product", sku: `CAT-${productId.slice(0,8)}`, categoryId, brandId, category: edited.name, buyingPrice: 10, sellingPrice: 15, hasVariants: false });
+
       const foreignRead = await catalog.listCategories(ctxB);
       expect(foreignRead.some((c) => c.id === categoryId)).toBe(false);
 

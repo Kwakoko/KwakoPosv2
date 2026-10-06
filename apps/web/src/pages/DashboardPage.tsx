@@ -1667,6 +1667,30 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <span>Offline Mode: Available</span>
           </span>
 
+          {/* Daily Z-Report: kept in the dashboard header for fast register close access. */}
+          <button
+            type="button"
+            onClick={() => setIsZReportOpen(true)}
+            className="h-10 px-4 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/90 text-xs font-bold text-slate-200 border border-slate-600/60 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title="Open Daily Z-Report"
+          >
+            <Printer className="h-4 w-4 shrink-0" />
+            <span>Daily Z-Report</span>
+          </button>
+
+          {/* Dashboard export: generate the executive workbook from the authoritative dashboard data. */}
+          <button
+            type="button"
+            onClick={() => void exportDashboardSummaryCSV()}
+            className="h-10 px-4 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/90 text-xs font-bold text-slate-200 border border-slate-600/60 transition-all cursor-pointer whitespace-nowrap shrink-0"
+            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title="Export dashboard report"
+          >
+            <Download className="h-4 w-4 shrink-0" />
+            <span>Export Report</span>
+          </button>
+
           {/* Primary Action Button: Launch POS (Matches OK Reference) */}
           <button
             type="button"
@@ -1693,12 +1717,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="dashboard-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="dashboard-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <ReferenceKPICard title="Today's Sales"
           value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
           icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
           description="Completed sales recorded by PostgreSQL"
           variant="compact"
+          onClick={() => setSelectedKpiAdvice({
+            title: "Today's Sales",
+            value: kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--',
+            accent: '#10f0c0',
+            problem: 'Today’s sales show current revenue performance, but the headline number alone does not explain whether the result is driven by order volume, average order value, or timing.',
+            recommendation: 'Compare today with yesterday and review completed orders, average order value, and payment mix before making a sales decision.',
+            nextStep: 'Open the sales/POS view to inspect completed transactions and identify what is driving today’s result.',
+            action: { label: 'Open POS', onClick: () => { setSelectedKpiAdvice(null); handleNav('POS'); } },
+          })}
           spark={dashboardSparkData.sales} />
         <ReferenceKPICard title="Gross Profit (REAL)"
           value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
@@ -1708,12 +1741,30 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             : undefined}
           description="Completed-sales gross profit from PostgreSQL"
           variant="compact"
+          onClick={() => setSelectedKpiAdvice({
+            title: 'Gross Profit (REAL)',
+            value: kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--',
+            accent: '#2196ff',
+            problem: 'Gross profit indicates the margin created by completed sales, so a change should be investigated against revenue and cost rather than treated as a standalone target.',
+            recommendation: 'Review the profit movement against sales volume, product mix, discounts, refunds, and cost of goods before changing pricing or purchasing decisions.',
+            nextStep: 'Open the sales and inventory views to identify which products or transactions are driving the profit movement.',
+            action: { label: 'Open Inventory', onClick: () => { setSelectedKpiAdvice(null); handleNav('Inventory'); } },
+          })}
           spark={dashboardSparkData.profit} />
         <ReferenceKPICard title="Avg Order Value (AOV)"
           value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
           icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
           description="Completed sales value divided by completed orders"
           variant="compact"
+          onClick={() => setSelectedKpiAdvice({
+            title: 'Avg Order Value (AOV)',
+            value: kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--',
+            accent: '#c04cff',
+            problem: 'AOV shows how much customers spend per completed order; a movement can reflect basket size, product mix, pricing, or discounts.',
+            recommendation: 'Compare AOV with order count and product mix. Investigate unusual changes before assuming demand has increased or declined.',
+            nextStep: 'Open POS to review recent completed orders and identify changes in basket composition.',
+            action: { label: 'Open POS', onClick: () => { setSelectedKpiAdvice(null); handleNav('POS'); } },
+          })}
           spark={dashboardSparkData.aov} />
         <ReferenceKPICard title="Total Products"
           value={kpiCards.find((card) => card.title === 'Active Products')?.value?.toString() || '0'}

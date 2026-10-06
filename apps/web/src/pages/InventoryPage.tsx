@@ -101,7 +101,9 @@ export interface InventoryItem {
   name: string;
   sku: string;
   category: string;
+  categoryId?: string;
   brand: string;
+  brandId?: string;
   buyingPrice: number;
   sellingPrice: number;
   stock: number;
@@ -349,7 +351,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: prod.id,
           name: prod.name,
           sku: prod.sku,
+          categoryId: pAny.categoryId || undefined,
           category: (pAny.categoryId && categoryById.get(pAny.categoryId)) || pAny.category || "",
+          brandId: pAny.brandId || undefined,
           brand: (pAny.brandId && brandById.get(pAny.brandId)) || pAny.brand || "",
           buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
           sellingPrice: Number(pAny.sellingPrice || pAny.price || 0),
@@ -389,12 +393,12 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       }
       // Hydrate custom categories & brands metadata from configuration
       try {
-        const savedCatsMeta = db.getConfigurationLocal("inventory_categories_meta", currentTenantId ? { tenantId: currentTenantId } : undefined);
+        const savedCatsMeta = db.getConfigurationLocal("inventory_categories_meta", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
         if (Array.isArray(savedCatsMeta) && savedCatsMeta.length > 0) {
           setCategoriesMeta(savedCatsMeta);
         } else {
           // Backward compatibility fallback to legacy string array
-          const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
           if (Array.isArray(legacyCats) && legacyCats.length > 0) {
             const merged: CategoryRecord[] = [];
             let cIdx = 0;
@@ -412,11 +416,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           }
         }
 
-        const savedBrandsMeta = db.getConfigurationLocal("inventory_brands_meta", currentTenantId ? { tenantId: currentTenantId } : undefined);
+        const savedBrandsMeta = db.getConfigurationLocal("inventory_brands_meta", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
         if (Array.isArray(savedBrandsMeta) && savedBrandsMeta.length > 0) {
           setBrandsMeta(savedBrandsMeta);
         } else {
-          const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
           if (Array.isArray(legacyBrands) && legacyBrands.length > 0) {
             const merged: BrandRecord[] = [];
             let bIdx = 0;
@@ -526,7 +530,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     if (allBrands.length === 0) return null;
     let best = { name: allBrands[0].name, units: 0, valuation: 0 };
     for (const b of allBrands) {
-      const brandItems = items.filter((i) => i.brand.toLowerCase() === b.name.toLowerCase());
+      const brandItems = items.filter((i) => (b.id && i.brandId === b.id) || i.brand.toLowerCase() === b.name.toLowerCase());
       const units = brandItems.reduce((acc, i) => acc + i.stock, 0);
       const val = brandItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
       if (units >= best.units) {
@@ -1173,8 +1177,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingCategory?.id && isUuid(editingCategory.id) ? editingCategory.id : safeUUID();
     const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
-    const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId }) : categoriesMeta;
-    const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId }); setCategoriesMeta(next);
+    const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId }) : categoriesMeta;
+    const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId }); setCategoriesMeta(next);
     pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
@@ -1193,7 +1197,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const cat = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.category.toLowerCase()); const replacement = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.fallbackCategory.toLowerCase());
     const replacementId = deleteCategorySafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!cat || !isUuid(cat.id) || (replacementId && !isUuid(replacementId))) return;
-    const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId });
+    const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
     if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
@@ -1206,9 +1210,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingBrand?.id && isUuid(editingBrand.id) ? editingBrand.id : safeUUID();
     const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), origin: newBrandOrigin.trim() || undefined, notes: newBrandNotes.trim() || undefined, isActive: true, updatedAt: now, createdAt: (editingBrand as any)?.createdAt || now };
-    const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId }) : brandsMeta;
-    const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId }); setBrandsMeta(next);
+    const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId, branchId: currentBranchId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId, branchId: currentBranchId }) : brandsMeta;
+    const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId, branchId: currentBranchId }); setBrandsMeta(next);
     pendingOutboxes.push({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    if (editingBrand && brandCascadeRename && editingBrand.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.brandId === id || String(p.brand || "").toLowerCase() === editingBrand.name.toLowerCase())) { db.saveProductLocal({ ...p, brandId: id, brand: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: id, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     setAddBrandModal(false); setEditingBrand(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
   };
@@ -1225,8 +1230,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const pendingOutboxes: any[] = [];
     const brand = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.brand.toLowerCase()); const replacement = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.fallbackBrand.toLowerCase()); const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!brand || !isUuid(brand.id) || (replacementId && !isUuid(replacementId))) return;
-    const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId });
-    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
+    const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
+    if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, brand: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
     setDeleteBrandSafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
@@ -1865,7 +1870,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       </tr>
                     ) : (
                       filteredBrands.map((brand) => {
-                        const brandItems = items.filter((i) => i.brand.toLowerCase() === brand.name.toLowerCase());
+                        const brandItems = items.filter((i) => (brand.id && i.brandId === brand.id) || i.brand.toLowerCase() === brand.name.toLowerCase());
                         const brandSkus = brandItems.length;
                         const brandUnits = brandItems.reduce((acc, i) => acc + i.stock, 0);
                         const brandVal = brandItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
