@@ -212,14 +212,15 @@ interface ReferenceKPICardProps {
 
 const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
   title, value, icon, accent, description, trend, variant = 'compact', onClick, action,
-  spark = [18, 26, 22, 34, 28, 42, 36, 48],
+  spark,
 }) => {
   const width = 112;
   const height = 48;
-  const min = Math.min(...spark);
-  const max = Math.max(...spark);
-  const points = spark.map((v, i) => {
-    const x = (i / Math.max(1, spark.length - 1)) * width;
+  const sparkValues = (spark ?? []).filter((value) => Number.isFinite(value));
+  const min = sparkValues.length > 0 ? Math.min(...sparkValues) : 0;
+  const max = sparkValues.length > 0 ? Math.max(...sparkValues) : 1;
+  const points = sparkValues.map((v, i) => {
+    const x = (i / Math.max(1, sparkValues.length - 1)) * width;
     const y = height - 6 - ((v - min) / Math.max(1, max - min)) * (height - 14);
     return x + ',' + y;
   }).join(' ');
@@ -253,7 +254,11 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             </div>
             <div>
               <p className="text-[12px] font-black uppercase tracking-wide text-slate-100">{title}</p>
-              {trend && <p className="mt-1 text-[11px] font-semibold text-emerald-400">{'↑'} {trend}</p>}
+              {trend && (
+                <p className={'mt-1 text-[11px] font-semibold ' + (trend.includes('−') || trend.includes('-') ? 'text-rose-400' : 'text-emerald-400')}>
+                  {trend.includes('−') || trend.includes('-') ? '↓' : '↑'} {trend.replace(/^[-−+]?/, '')}
+                </p>
+              )}
             </div>
           </div>
           <p className={valueClass}>{value}</p>
@@ -268,11 +273,13 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             </button>
           )}
         </div>
-        <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
-          viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
-          <polygon points={area} fill={accent} opacity="0.10" />
-          <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        {sparkValues.length >= 2 && (
+          <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
+            viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
+            <polygon points={area} fill={accent} opacity="0.10" />
+            <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
       </div>
     </div>
   );
@@ -1089,6 +1096,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     };
   }, [authoritativeKpis]);
 
+  const dashboardSparkData = useMemo(() => {
+    const points = revenueAnalytics.chartPoints ?? [];
+    return {
+      sales: points.map((point) => Number(point.Revenue)).filter(Number.isFinite),
+      profit: points.map((point) => Number(point.Profit)).filter(Number.isFinite),
+      aov: points
+        .map((point) => point.ordersCount > 0 ? Number(point.Revenue) / Number(point.ordersCount) : 0)
+        .filter(Number.isFinite),
+    };
+  }, [revenueAnalytics.chartPoints]);
+
   const paymentChannelSummary = useMemo(() => {
     const channels = authoritativeKpis?.analytics?.paymentChannels ?? [];
     const channelConfig: Record<string, { label: string; color: string; icon: any; badgeBg: string; textColor: string }> = {
@@ -1632,7 +1650,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
             icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
             description="Completed sales recorded by Point of Sale" variant="hero"
-            spark={[28, 34, 31, 43, 38, 50, 45, 58]} />
+            spark={dashboardSparkData.sales} />
         </div>
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Gross Profit (REAL)"
@@ -1642,43 +1660,39 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               ? (Number(revenueAnalytics.profitDeltaPct) >= 0 ? '+' : '') + revenueAnalytics.profitDeltaPct + '% vs yesterday'
               : undefined}
             description="Completed-sales gross profit from PostgreSQL" variant="hero"
-            spark={[34, 39, 36, 46, 41, 53, 48, 62]} />
+            spark={dashboardSparkData.profit} />
         </div>
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Avg Order Value (AOV)"
             value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
             icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
             description="Completed sales value divided by completed orders" variant="hero"
-            spark={[22, 29, 28, 37, 33, 44, 39, 51]} />
+            spark={dashboardSparkData.aov} />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
             icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
-            description="Low-stock plus out-of-stock variants"
-            spark={[22, 30, 25, 34, 29, 38, 33, 42]} />
+            description="Low-stock plus out-of-stock variants" />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Customer Debts"
             value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
             icon={<Users className="h-5 w-5" />} accent="#ffad22"
-            description="Current customer receivables in the branch"
-            spark={[16, 22, 19, 27, 23, 31, 27, 36]} />
+            description="Current customer receivables in the branch" />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Inventory Value"
             value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
             icon={<Package className="h-5 w-5" />} accent="#248bff"
-            description="Current branch stock valuation"
-            spark={[19, 26, 23, 32, 29, 39, 34, 45]} />
+            description="Current branch stock valuation" />
         </div>
         <div className="col-span-12 sm:col-span-6 lg:col-span-3">
           <ReferenceKPICard title="Device Sync"
             value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
             icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
             description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
-            action={kpiCards.find((card) => card.title === 'Device Sync')?.action}
-            spark={[24, 35, 29, 41, 34, 45, 39, 49]} />
+            action={kpiCards.find((card) => card.title === 'Device Sync')?.action} />
         </div>
       </div>
 
