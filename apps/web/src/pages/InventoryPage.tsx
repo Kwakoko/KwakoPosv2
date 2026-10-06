@@ -17,6 +17,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { InventoryValuationEngine } from "@kwakopos2/domain";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   Package, Layers, BarChart3, Tag, Clock, Plus, Search, Edit2, Trash2,
@@ -578,25 +579,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   // mutable catalog buyingPrice. This keeps the UI aligned with server WAC.
   const authoritativeWacByVariant = useMemo(() => {
     const result = new Map<string, number>();
-    const rowsByVariant = new Map<string, any[]>();
-    for (const row of db.stockLedger.values()) {
-      const r = row as any;
-      if (r.tenantId !== currentTenantId || r.branchId !== currentBranchId || !r.variantId) continue;
-      const rows = rowsByVariant.get(String(r.variantId)) || [];
-      rows.push(r);
-      rowsByVariant.set(String(r.variantId), rows);
-    }
-    for (const [variantId, rows] of rowsByVariant) {
-      let positiveQty = 0;
-      let positiveValue = 0;
-      for (const row of rows) {
-        const change = Number(row.quantityChange ?? row.quantity ?? 0);
-        if (change > 0) {
-          positiveQty += change;
-          positiveValue += change * Number(row.unitCost ?? 0);
-        }
-      }
-      result.set(variantId, positiveQty > 0 ? positiveValue / positiveQty : 0);
+    const variants = Array.from(db.productVariants.values()).filter((v: any) =>
+      v.tenantId === currentTenantId && v.branchId === currentBranchId
+    ) as any[];
+    const ledgers = Array.from(db.stockLedger.values()).filter((l: any) =>
+      l.tenantId === currentTenantId && l.branchId === currentBranchId
+    ) as any[];
+    for (const variant of variants) {
+      const summary = InventoryValuationEngine.calculateBranchInventoryValuation([variant], ledgers);
+      result.set(variant.id, Number(summary.variantSummaries[0]?.unitCost || 0));
     }
     return result;
   }, [db, currentTenantId, currentBranchId]);
@@ -854,7 +845,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteConfirmModal(true);
   };
 
-  const handleConfirmArchiveDelete = async (softDelete = true) => {
+  const handleConfirmArchive = async () => {
     if (!itemToDelete) return;
     const target = itemToDelete;
 
@@ -868,7 +859,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       }
     }
 
-    if (softDelete && existing) {
+    if (existing) {
       // Standard SaaS Archival: hides product from POS counter while preserving historical sales and audit ledgers
       const archived = {
         ...existing,
@@ -1318,7 +1309,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           <button
                             className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                             onClick={() => handleOpenDeleteModal(item)}
-                            title="Archive / Delete Product"
+                            title="Archive / Archive Product"
                             type="button"
                             style={{ color: "var(--danger)" }}
                           >
@@ -2071,7 +2062,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         )}
       </Sheet>
 
-      {/* --- Archive / Delete SKU Confirmation Modal --- */}
+      {/* --- Archive Product Confirmation Modal --- */}
       {deleteConfirmModal && itemToDelete && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
@@ -2120,7 +2111,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </button>
               <button
                 className="v2-btn v2-btn-danger v2-btn-sm"
-                onClick={() => handleConfirmArchiveDelete(true)}
+                onClick={() => handleConfirmArchive()}
                 type="button"
               >
                 Archive SKU
