@@ -35,6 +35,7 @@ import {
   assertLedgerRequiredForStockMutation,
   assertAdjustmentAuditable,
   assertPriceHistoryImmutability,
+  assertBackdatingPermission,
 } from "@kwakopos2/domain";
 import { rejectAbsoluteInventoryMutation, rejectNonZeroAbsoluteInventoryMutation } from "./inventoryAuthority.js";
 import { randomUUID } from "crypto";
@@ -651,15 +652,28 @@ export class ScopedStockRepository {
 
     if (req.occurredAt) {
       assertBackdatingThreshold(req.occurredAt);
+      if (Math.abs(Date.now() - new Date(req.occurredAt).getTime()) > 5 * 60 * 1000) {
+        assertBackdatingPermission(ctx);
+      }
     }
 
     const now = new Date().toISOString();
     const movementId = req.id || randomUUID();
     const warehouseId = req.warehouseId || null;
     const movementTime = req.occurredAt ? new Date(req.occurredAt).toISOString() : now;
+    const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - new Date(movementTime).getTime()) > 5 * 60 * 1000;
+    if (isBackdated) assertBackdatingPermission(ctx);
 
-    // 3. Compute Stock Lineage: quantityBefore -> quantityChange -> quantityAfter
-    const quantityBefore = ledgerStockForVariant(this.store, ctx, req.variantId);
+    // 3. Compute Stock Lineage: historical before/after for backdated entries;
+    // current before/after for real-time entries.
+    const currentQuantityBefore = ledgerStockForVariant(this.store, ctx, req.variantId);
+    const priorEntries = isBackdated
+      ? Array.from(this.store.stockLedgers.values()).filter((entry: StockLedger) =>
+          entry.tenantId === ctx.tenantId && entry.branchId === ctx.branchId && entry.variantId === req.variantId &&
+          new Date((entry as any).occurredAt || (entry as any).createdAt).getTime() < new Date(movementTime).getTime()
+        )
+      : [];
+    const quantityBefore = isBackdated ? calculateAvailableStock(priorEntries) : currentQuantityBefore;
     const quantityChange = req.quantityChange;
     const quantityAfter = quantityBefore + quantityChange;
 
