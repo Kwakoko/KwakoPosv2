@@ -13,6 +13,7 @@ export const CommercialPermissionEnum = z.enum([
   "INVENTORY_ADJUST",
   "INVENTORY_TRANSFER",
   "INVENTORY_COUNT",
+  "INVENTORY_BACKDATE",
   "PURCHASE_VIEW",
   "PURCHASE_CREATE",
   "PURCHASE_APPROVE",
