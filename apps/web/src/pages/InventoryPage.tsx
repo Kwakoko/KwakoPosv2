@@ -332,8 +332,12 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         variantsByProduct.set(variant.productId, list);
       }
 
-      const categoryById = new Map(categoriesMeta.map((c) => [c.id, c.name]));
-      const brandById = new Map(brandsMeta.map((b) => [b.id, b.name]));
+      const persistedCategories = db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId });
+      const persistedBrands = db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId });
+      const effectiveCategories = Array.isArray(persistedCategories) ? persistedCategories as CategoryRecord[] : categoriesMeta;
+      const effectiveBrands = Array.isArray(persistedBrands) ? persistedBrands as BrandRecord[] : brandsMeta;
+      const categoryById = new Map(effectiveCategories.map((c) => [c.id, c.name]));
+      const brandById = new Map(effectiveBrands.map((b) => [b.id, b.name]));
       const loaded: InventoryItem[] = [];
       for (const prod of db.products.values()) {
         if (prod.tenantId !== currentTenantId || prod.branchId !== currentBranchId) continue;
@@ -698,7 +702,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
     const baseName = newProd.name.trim() || "Item";
     const prefix = baseName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "SKU";
-    const baseSku = `SKU-${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const baseSku = `SKU-${prefix}-${safeUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
 
     const generated: ProductVariantData[] = [];
     for (const v1 of list1) {
@@ -709,7 +713,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: safeUUID(),
           name: `${baseName} (${label})`,
           sku: `${baseSku}-${suffix}`,
-          barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+          barcode: `890${safeUUID().replace(/-/g, "").slice(0, 9)}`,
           attributes: { [opt1Name]: v1, ...(opt2Name.trim() && v2 ? { [opt2Name]: v2 } : {}) },
           buyingPrice: Number(newProd.buyingPrice) || 0,
           sellingPrice: Number(newProd.sellingPrice) || 0,
