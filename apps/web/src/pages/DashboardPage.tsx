@@ -227,10 +227,10 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
   const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
   const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
     (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
-    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[154px] p-4');
+    (variant === 'hero' ? 'h-[198px] p-5' : 'h-[154px] p-4');
   const iconClass = (variant === 'hero' ? 'h-11 w-11 rounded-xl' : 'h-10 w-10 rounded-xl') +
     ' flex items-center justify-center shrink-0';
-  const valueClass = (variant === 'hero' ? 'mt-5 text-[38px]' : 'mt-3 text-[27px]') +
+  const valueClass = (variant === 'hero' ? 'mt-4 text-[38px]' : 'mt-3 text-[27px]') +
     ' font-black leading-none tracking-tight text-white';
 
   return (
@@ -262,7 +262,7 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             </div>
           </div>
           <p className={valueClass}>{value}</p>
-          <p className="mt-3 max-w-[90%] text-[11px] leading-relaxed text-slate-300/90">{description}</p>
+          <p className={(variant === 'hero' ? 'mt-2.5' : 'mt-3') + ' max-w-[90%] text-[11px] leading-snug text-slate-300/90'}>{description}</p>
           {action && (
             <button type="button"
               onClick={(e) => { e.stopPropagation(); action.onClick(); }}

@@ -30,6 +30,8 @@
 .col-span-12 { grid-column: span 12 / span 12; }
 .min-h-\[198px\] { min-height: 198px; }
 .min-h-\[154px\] { min-height: 154px; }
+.h-\[198px\] { height: 198px; }
+.h-\[154px\] { height: 154px; }
 @media (min-width: 640px) {
   .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sm\:col-span-6 { grid-column: span 6 / span 6; }
