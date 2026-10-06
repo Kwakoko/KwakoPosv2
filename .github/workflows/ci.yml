@@ -84,6 +84,8 @@ jobs:
         run: npm run certify:dashboard-lock
       - name: Conflict Center Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates
