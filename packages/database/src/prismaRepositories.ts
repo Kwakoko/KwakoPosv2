@@ -23,6 +23,7 @@ import {
   assertBackdatingThreshold,
   validateRetroactiveTimeline,
   assertTenantIsolation,
+  assertBackdatingPermission,
 } from "@kwakopos2/domain";
 import { prisma } from "./client.js";
 import {
@@ -487,6 +488,9 @@ export class PrismaStockRepository {
   async recordMovement(ctx: TenantContext, req: any): Promise<StockLedger> {
     if (req.occurredAt) {
       assertBackdatingThreshold(req.occurredAt);
+      if (Math.abs(Date.now() - new Date(req.occurredAt).getTime()) > 5 * 60 * 1000) {
+        assertBackdatingPermission(ctx);
+      }
     }
     const result = await prisma.$transaction(async (tx: any) => {
       const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
@@ -496,12 +500,19 @@ export class PrismaStockRepository {
       if (!variant) throw new Error(`Variant ${req.variantId} not found`);
       assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
       const beforeRow = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId } });
-      const quantityBefore = Number(beforeRow._sum.quantityChange ?? 0);
+      const currentQuantityBefore = Number(beforeRow._sum.quantityChange ?? 0);
       const quantityChange = Number(req.quantityChange ?? req.quantity ?? 0);
-      const quantityAfter = quantityBefore + quantityChange;
-      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
-      const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
       const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
+      const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - movementTime.getTime()) > 5 * 60 * 1000;
+      if (isBackdated) assertBackdatingPermission(ctx);
+      const historicalRows = isBackdated
+        ? (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId, occurredAt: { lt: movementTime } }, orderBy: { occurredAt: "asc" } })).map(ledgerShape)
+        : [];
+      const historicalQuantityBefore = isBackdated ? calculateAvailableStock(historicalRows) : currentQuantityBefore;
+      const quantityBefore = isBackdated ? historicalQuantityBefore : currentQuantityBefore;
+      const quantityAfter = quantityBefore + quantityChange;
+      const currentProjectedStock = currentQuantityBefore + quantityChange;
+      if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
       const row = await tx.stockLedger.create({
         data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, warehouseId: req.warehouseId ?? null, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
@@ -570,7 +581,12 @@ export class PrismaStockRepository {
       await tx.$queryRawUnsafe('SELECT id FROM "product_variants" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE', resolvedVariantId, ctx.tenantId, ctx.branchId);
       const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
       const currentStock = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
-      const quantityBefore = currentStock;
+      const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - new Date(req.occurredAt!).getTime()) > 5 * 60 * 1000;
+      const historicalRowsBefore = isBackdated
+        ? ledgerRowsBefore.filter((r: any) => new Date(r.occurredAt || r.createdAt).getTime() < new Date(req.occurredAt!).getTime())
+        : [];
+      const historicalStockBefore = isBackdated ? calculateAvailableStock(historicalRowsBefore.map(ledgerShape)) : currentStock;
+      const quantityBefore = isBackdated ? historicalStockBefore : currentStock;
       let changeQty = req.quantityChange;
 
       if (req.adjustmentType === "DECREASE") {
@@ -578,7 +594,7 @@ export class PrismaStockRepository {
       } else if (req.adjustmentType === "SET") {
         if (req.occurredAt) {
           const historicalRows = ledgerRowsBefore.filter(
-            (r: any) => new Date(r.occurredAt || r.createdAt).getTime() <= new Date(req.occurredAt!).getTime()
+            (r: any) => new Date(r.occurredAt || r.createdAt).getTime() < new Date(req.occurredAt!).getTime()
           );
           const historicalStock = calculateAvailableStock(historicalRows.map(ledgerShape));
           changeQty = calculateBackdatedDiscrepancy(req.quantityChange, historicalStock);
@@ -611,7 +627,8 @@ export class PrismaStockRepository {
       }
 
       const quantityAfter = quantityBefore + changeQty;
-      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const currentProjectedStock = currentStock + changeQty;
+      if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
 
       const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
 
