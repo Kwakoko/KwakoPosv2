@@ -29,7 +29,13 @@ if (!fs.existsSync(releaseManifestPath)) {
 
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
 const version = String(releaseManifest.version || "2.13.0");
-const gitSha = String(releaseManifest.gitSha || "");
+const gitSha = String(
+  releaseManifest.gitSha ||
+  process.env.GITHUB_SHA ||
+  process.env.COMMIT_SHA ||
+  process.env.GIT_SHA ||
+  ""
+);
 if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error("RELEASE_MANIFEST_INVALID: exact Git SHA is required to build PWA assets.");
 const rawBuildNumber = releaseManifest.buildNumber || 584;
 const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
