@@ -18,6 +18,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
+import { InventoryValuationEngine } from "@kwakopos2/domain";
 import {
   Package, Layers, BarChart3, Tag, Clock, Plus, Search, Edit2, Trash2,
   AlertTriangle, ArrowLeftRight, ClipboardList, FileText, RefreshCw,
@@ -567,25 +568,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   // mutable catalog buyingPrice. This keeps the UI aligned with server WAC.
   const authoritativeWacByVariant = useMemo(() => {
     const result = new Map<string, number>();
-    const rowsByVariant = new Map<string, any[]>();
-    for (const row of db.stockLedger.values()) {
-      const r = row as any;
-      if (r.tenantId !== currentTenantId || r.branchId !== currentBranchId || !r.variantId) continue;
-      const rows = rowsByVariant.get(String(r.variantId)) || [];
-      rows.push(r);
-      rowsByVariant.set(String(r.variantId), rows);
-    }
-    for (const [variantId, rows] of rowsByVariant) {
-      let positiveQty = 0;
-      let positiveValue = 0;
-      for (const row of rows) {
-        const change = Number(row.quantityChange ?? row.quantity ?? 0);
-        if (change > 0) {
-          positiveQty += change;
-          positiveValue += change * Number(row.unitCost ?? 0);
-        }
-      }
-      result.set(variantId, positiveQty > 0 ? positiveValue / positiveQty : 0);
+    const variants = Array.from(db.productVariants.values()).filter((v: any) =>
+      v.tenantId === currentTenantId && v.branchId === currentBranchId
+    ) as any[];
+    const ledgers = Array.from(db.stockLedger.values()).filter((l: any) =>
+      l.tenantId === currentTenantId && l.branchId === currentBranchId
+    ) as any[];
+    for (const variant of variants) {
+      const summary = InventoryValuationEngine.calculateBranchInventoryValuation([variant], ledgers);
+      result.set(variant.id, Number(summary.variantSummaries[0]?.unitCost || 0));
     }
     return result;
   }, [db, currentTenantId, currentBranchId]);
