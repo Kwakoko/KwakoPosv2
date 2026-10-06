@@ -23,10 +23,10 @@ export interface ReleaseCompatibilityMatrix {
 export const AUTHORITATIVE_COMPATIBILITY_MATRIX: ReleaseCompatibilityMatrix = {
   applicationVersion: "2.13.0",
   pwaVersion: "2.13.0",
-  schemaVersion: 5,
+  schemaVersion: 6,
   syncProtocolVersion: 2,
   releaseId: "kwakopos-rel-2.13.0-7cd1d44",
-  databaseCompatibilityRange: ">=1 <=5",
+  databaseCompatibilityRange: ">=1 <=6",
   minimumSupportedClientVersion: "2.0.0",
   maximumSupportedClientVersion: "3.0.0",
   migrationSet: {
