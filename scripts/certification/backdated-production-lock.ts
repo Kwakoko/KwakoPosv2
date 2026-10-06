@@ -11,17 +11,20 @@ const LOCKED_BLOBS: Record<string, string> = {
   ".github/workflows/production-certification.yml": "103963535b668b95f4761c0476545603fb8c6eea",
   ".github/workflows/production-release-exact-main.yml": "253b4a5d57a1310d6cf62baa34489a397c55eec5",
   "apps/web/src/pages/InventoryPage.tsx": "06e5d58d410ae4d8935fa3dae13ecc586ef2f689",
+  "apps/web/src/services/payloadValidationService.ts": "a95c2716f7fe86e3cb641338b3ee8b2b45949895",
   "packages/contracts/src/index.ts": "bf202adfcc2d8610ef62ea6acbd331a41a132223",
   "packages/domain/src/index.ts": "97f7f953f918731832aa56eb957545fb0b07d3a1",
   "packages/database/src/index.ts": "0ded080162d6102b2c9860f86924ff167dbc178d",
   "packages/database/src/prismaRepositories.ts": "5a8d3024a14dfa670d5596197f55acbe0ffdcf66",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "30a0b778ed7963fe383610308275cf5de60fe3d6",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
+  "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "b65484e222627892c47f93c88597a85925b08557",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
   ["ui-backdate-entry", "apps/web/src/pages/InventoryPage.tsx", "Backdate Stock Movement", "Post Backdated Stock"],
+  ["browser-normalization", "apps/web/src/services/payloadValidationService.ts", "NormalizedStockAdjustmentPayload", "occurredAt", "normalizeStockAdjustmentPayload"],
   ["permission-contract", "packages/contracts/src/index.ts", "INVENTORY_BACKDATE"],
   ["domain-threshold", "packages/domain/src/index.ts", "BACKDATING_MAX_THRESHOLD_DAYS = 730", "BACKDATING_PERMISSION", "assertBackdatingPermission"],
   ["domain-insertion-invariant", "packages/domain/src/index.ts", "runningBeforeTarget", "insertionBalance"],
@@ -29,6 +32,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["prisma-governance", "packages/database/src/prismaRepositories.ts", "assertBackdatingPermission(ctx)", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "historicalQuantityBefore"],
   ["sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "payload.occurredAt", "assertBackdatingThreshold", "assertBackdatingPermission", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "occurredAt, deviceId"],
   ["unit-regressions", "tests/unit/backdated-inventory.test.ts", "exact backdated insertion point", "INVENTORY_BACKDATE_PERMISSION_REQUIRED", "ledger.quantityBefore"],
+  ["normalization-regression", "tests/unit/payload-validation-service.test.ts", "preserves occurredAt for offline historical stock movements"],
   ["integration-regressions", "tests/integration/prisma-stock-convergence.test.ts", "preserves backdated timestamps and historical lineage through authoritative sync", "ACCOUNTING_PERIOD_LOCKED"],
   ["ci-hook", ".github/workflows/ci.yml", "npm run certify:backdated-lock"],
   ["candidate-hook", ".github/workflows/production-certification.yml", "npm run certify:backdated-lock"],
