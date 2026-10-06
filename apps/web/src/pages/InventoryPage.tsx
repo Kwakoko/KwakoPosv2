@@ -37,6 +37,7 @@ import { safeUUID } from "../services/applicationApiService.js";
 import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
+import { InventoryOperationalWorkspace } from "../components/InventoryOperationalWorkspace.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -116,7 +117,8 @@ export interface InventoryItem {
 
 export type InventoryTab =
   | "dashboard" | "products" | "categories" | "ledger"
-  | "transfers" | "count" | "recipes" | "wastage" | "reports";
+  | "transfers" | "count" | "recipes" | "wastage" | "reports"
+  | "alerts" | "sync" | "drilldown";
 
 export interface InventoryPageProps {
   activeTab?: string;
@@ -144,6 +146,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "recipes": "Product Bundles & Kits",
       "wastage": "Wastage & Spillage",
       "reports": "Inventory Reports",
+      "alerts": "Stock Alerts",
+      "sync": "Stock Sync Engine",
+      "drilldown": "Ledger Drilldown",
     };
     setGlobalActiveTab(globalTab[tab]);
   }, [setGlobalActiveTab]);
@@ -156,11 +161,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "Categories & Brands": "categories",
       "Stock Adjustment": "ledger",
       "Stock Transfer": "transfers",
-      "Stock Alerts": "dashboard",
-      "Stock Sync Engine": "ledger",
+      "Stock Alerts": "alerts",
+      "Stock Sync Engine": "sync",
       "Product Bundles & Kits": "recipes",
       "Stock Count": "count",
-      "Ledger Drilldown": "ledger",
+      "Ledger Drilldown": "drilldown",
       "Wastage & Spillage": "wastage",
       "Inventory Reports": "reports",
     };
@@ -1784,6 +1789,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           </table>
         </div>
       )}
+
+      {activeTab === "transfers" && <InventoryOperationalWorkspace mode="transfers" />}
+      {activeTab === "count" && <InventoryOperationalWorkspace mode="count" />}
+      {activeTab === "wastage" && <InventoryOperationalWorkspace mode="wastage" />}
+      {activeTab === "alerts" && <InventoryOperationalWorkspace mode="alerts" />}
+      {activeTab === "sync" && <InventoryOperationalWorkspace mode="sync" />}
+      {activeTab === "drilldown" && <InventoryOperationalWorkspace mode="drilldown" />}
 
       {/* ─── TAB 9: VALUATION REPORTS & MULTI-BRANCH SUMMARY ────────────────────── */}
       {activeTab === "reports" && (
