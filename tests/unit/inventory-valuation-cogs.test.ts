@@ -38,8 +38,8 @@ describe("KwakoPos Inventory Valuation & COGS Engine Tests", () => {
     ];
 
     const ledgers: StockLedger[] = [
-      { id: "1", tenantId: "t1", branchId: "b1", productId: "p1", variantId: "v1", movementType: "PURCHASE", quantity: 50, referenceType: "REC", referenceId: null, occurredAt: "", deviceId: "d", operationId: "o", idempotencyKey: "k1", createdAt: "" },
-      { id: "2", tenantId: "t1", branchId: "b1", productId: "p2", variantId: "v2", movementType: "PURCHASE", quantity: 40, referenceType: "REC", referenceId: null, occurredAt: "", deviceId: "d", operationId: "o", idempotencyKey: "k2", createdAt: "" },
+      { id: "1", tenantId: "t1", branchId: "b1", productId: "p1", variantId: "v1", movementType: "PURCHASE_RECEIVE", quantity: 50, unitCost: 2000, referenceType: "REC", referenceId: null, occurredAt: "", deviceId: "d", operationId: "o", idempotencyKey: "k1", createdAt: "" },
+      { id: "2", tenantId: "t1", branchId: "b1", productId: "p2", variantId: "v2", movementType: "PURCHASE_RECEIVE", quantity: 40, unitCost: 1500, referenceType: "REC", referenceId: null, occurredAt: "", deviceId: "d", operationId: "o", idempotencyKey: "k2", createdAt: "" },
     ];
 
     // Valuation: (50 * 2000) + (40 * 1500) = 100,000 + 60,000 = 160,000
@@ -49,6 +49,19 @@ describe("KwakoPos Inventory Valuation & COGS Engine Tests", () => {
     expect(variantSummaries.length).toBe(2);
     expect(variantSummaries[0].totalValuation).toBe(100000);
     expect(variantSummaries[1].totalValuation).toBe(60000);
+  });
+
+  it("uses perpetual WAC from receipt costs instead of mutable variant costPrice", () => {
+    const variant: ProductVariant = { id: "v1", tenantId: "t1", branchId: "b1", productId: "p1", name: "Oil", sku: "OIL-1", barcode: null, price: 5000, costPrice: 1000, isActive: true, createdAt: "", updatedAt: "" };
+    const ledgers: StockLedger[] = [
+      { id: "r1", tenantId: "t1", branchId: "b1", productId: "p1", variantId: "v1", movementType: "PURCHASE_RECEIVE", quantity: 100, unitCost: 2000, referenceType: "REC", referenceId: null, occurredAt: "2026-01-01T00:00:00Z", deviceId: "d", operationId: "o1", idempotencyKey: "wac-1", createdAt: "2026-01-01T00:00:00Z" },
+      { id: "s1", tenantId: "t1", branchId: "b1", productId: "p1", variantId: "v1", movementType: "SALE", quantity: 20, unitCost: 2000, referenceType: "SALE", referenceId: null, occurredAt: "2026-01-02T00:00:00Z", deviceId: "d", operationId: "o2", idempotencyKey: "wac-2", createdAt: "2026-01-02T00:00:00Z" },
+      { id: "r2", tenantId: "t1", branchId: "b1", productId: "p1", variantId: "v1", movementType: "PURCHASE_RECEIVE", quantity: 80, unitCost: 3000, referenceType: "REC", referenceId: null, occurredAt: "2026-01-03T00:00:00Z", deviceId: "d", operationId: "o3", idempotencyKey: "wac-3", createdAt: "2026-01-03T00:00:00Z" },
+    ];
+    const result = InventoryValuationEngine.calculateBranchInventoryValuation([variant], ledgers);
+    expect(result.variantSummaries[0].availableQuantity).toBe(160);
+    expect(result.variantSummaries[0].unitCost).toBe(2500);
+    expect(result.variantSummaries[0].totalValuation).toBe(400000);
   });
 
   it("reconciles physical inventory valuation with GL Account 1410 balance", () => {
