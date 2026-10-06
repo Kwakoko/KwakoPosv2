@@ -236,6 +236,8 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
   return (
     <div onClick={onClick} className={cardClass}
       style={{
+        height: variant === 'hero' ? 198 : 154,
+        minHeight: variant === 'hero' ? 198 : 154,
         background: 'linear-gradient(135deg, ' + accent + '12 0%, rgba(5, 18, 38, 0.96) 72%)',
         borderColor: accent + 'cc',
         boxShadow: 'inset 0 0 28px ' + accent + '0d, 0 0 14px ' + accent + '0a',
@@ -1644,7 +1646,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="grid grid-cols-12 gap-4">
+      <div className="dashboard-hero-grid grid grid-cols-12 gap-4">
         <div className="col-span-12 lg:col-span-4">
           <ReferenceKPICard title="Today's Sales"
             value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
@@ -1670,7 +1672,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             spark={dashboardSparkData.aov} />
         </div>
       </div>
-      <div className="grid grid-cols-12 lg:grid-cols-5 gap-4">
+      <div className="dashboard-secondary-grid grid grid-cols-12 gap-4">
         <div className="col-span-12 sm:col-span-6 lg:col-span-1">
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}

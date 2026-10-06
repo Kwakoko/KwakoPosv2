@@ -42,6 +42,11 @@
   .md\:justify-between { justify-content: space-between; }
 }
 @media (min-width: 1024px) {
+  .dashboard-hero-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboard-secondary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .dashboard-hero-grid > div, .dashboard-secondary-grid > div { grid-column: auto !important; }
+  .dashboard-hero-grid > div { min-width: 0; }
+  .dashboard-secondary-grid > div { min-width: 0; }
   .lg\:flex-row { flex-direction: row; }
   .lg\:items-end { align-items: flex-end; }
   .lg\:justify-between { justify-content: space-between; }
