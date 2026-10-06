@@ -180,6 +180,16 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
     });
     const varId = prod.variants![0].id;
 
+    serverStockRepo.recordMovement(tenantCtx, {
+      id: randomUUID(),
+      variantId: varId,
+      movementType: "OPENING_STOCK",
+      quantityChange: 10,
+      operationId: "OP-B-OPENING",
+      idempotencyKey: "DEV-B/OP-B-OPENING",
+      deviceId: "server-seed",
+    });
+
     // Both browsers sync initial state
     await browserAEngine.syncWithServer(
       async (req) => syncEngine.processPush(tenantCtx, req),
