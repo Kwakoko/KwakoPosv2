@@ -260,14 +260,17 @@ export async function queueStockAdjustment(
   let variant = db.productVariants.get(command.variantId) as any;
   if (!variant) {
     for (const v of db.productVariants.values()) {
-      if (v.id === command.variantId || (v.productId === command.productId && v.sku === command.sku)) {
+      if (v.id === command.variantId) {
         variant = v;
         break;
       }
     }
   }
+  if (!variant || variant.tenantId !== command.tenantId || variant.branchId !== command.branchId || variant.productId !== command.productId) {
+    throw new Error("TENANT_BRANCH_VARIANT_OWNERSHIP_VIOLATION");
+  }
 
-  const unitCost = Number(command.unitCost ?? variant?.costPrice ?? variant?.price ?? 0);
+  const unitCost = Number(command.unitCost ?? variant.costPrice ?? variant.price ?? 0);
   const adjustmentId = safeUUID();
   const ledgerId = safeUUID();
   const operationId = `op-stock-${adjustmentId}`;
@@ -297,6 +300,24 @@ export async function queueStockAdjustment(
     synced: false,
     occurredAt,
     createdAt: occurredAt,
+  };
+
+  const adjustment: any = {
+    id: adjustmentId,
+    tenantId: command.tenantId,
+    branchId: command.branchId,
+    variantId: command.variantId,
+    adjustmentType: command.adjustmentType,
+    quantityChange: delta,
+    reason: command.reason.trim(),
+    referenceNote,
+    status: "COMPLETED",
+    createdByUserId: command.userId || "SYSTEM",
+    deviceId: command.deviceId,
+    operationId,
+    idempotencyKey,
+    createdAt: occurredAt,
+    updatedAt: new Date().toISOString(),
   };
 
   const outbox: OutboxItem = {
@@ -371,6 +392,7 @@ export async function queueStockAdjustment(
   await db.executeAtomicMutation({
     writes: [
       { store: "stockLedger", key: ledgerId, value: ledger },
+      { store: "stockAdjustments", key: adjustmentId, value: adjustment },
       { store: "productVariants", key: updatedVariant.id, value: updatedVariant },
       ...(updatedProd ? [{ store: "products" as const, key: command.productId, value: updatedProd }] : []),
     ],
