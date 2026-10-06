@@ -113,52 +113,141 @@ export async function projectProductStockSummary(tx: any, tenantId: string, bran
   });
 }
 
-export async function projectProductBranchStock(tx: any, tenantId: string, branchId: string, variantId: string, warehouseId: string | null = null): Promise<void> {
-  const variant = await tx.productVariant.findFirst({
-    where: { id: variantId, tenantId, branchId },
-    select: { productId: true },
-  });
-  if (!variant) return;
-  const ledgerRows = await tx.stockLedger.findMany({
-    where: {
-      tenantId,
-      branchId,
-      variantId,
-      ...(warehouseId === null ? {} : { warehouseId }),
-    },
-    orderBy: { occurredAt: "asc" },
-  });
+function calculateMovingWeightedAverage(
+  ledgerRows: Array<{ quantityChange: unknown; unitCost: unknown }>,
+  fallbackCost: number,
+): { quantity: number; averageCost: number; stockValue: number } {
   let quantity = 0;
-  let value = 0;
+  let averageCost = 0;
+
   for (const row of ledgerRows) {
     const change = Number(row.quantityChange ?? 0);
-    quantity += change;
-    if (change > 0) value += change * Number(row.unitCost ?? 0);
+    if (!Number.isFinite(change) || change === 0) continue;
+
+    if (change > 0) {
+      const incomingCostRaw = Number(row.unitCost ?? 0);
+      const incomingCost = Number.isFinite(incomingCostRaw) && incomingCostRaw > 0
+        ? incomingCostRaw
+        : (quantity > 0 ? averageCost : fallbackCost);
+
+      if (quantity <= 0) {
+        quantity = change;
+        averageCost = Math.max(0, incomingCost);
+      } else {
+        const totalCost = (quantity * averageCost) + (change * Math.max(0, incomingCost));
+        quantity += change;
+        averageCost = totalCost / quantity;
+      }
+    } else {
+      // Issues, sales, supplier returns, transfers out and losses consume stock
+      // at the current carrying cost; they do not change the weighted-average
+      // unit cost of the units that remain.
+      quantity = Math.max(0, quantity + change);
+      if (quantity === 0) averageCost = 0;
+    }
   }
+
   quantity = Math.max(0, quantity);
-  const averageCost = quantity > 0 ? value / quantity : 0;
-  const stockValue = quantity * averageCost;
+  averageCost = quantity > 0 ? Math.max(0, averageCost) : 0;
+  return {
+    quantity,
+    averageCost,
+    stockValue: quantity * averageCost,
+  };
+}
+
+async function upsertProductBranchStock(
+  tx: any,
+  tenantId: string,
+  branchId: string,
+  productId: string,
+  variantId: string,
+  warehouseId: string | null,
+  ledgerRows: Array<{ quantityChange: unknown; unitCost: unknown }>,
+  fallbackCost: number,
+): Promise<void> {
+  const valuation = calculateMovingWeightedAverage(ledgerRows, fallbackCost);
   const existing = await tx.productBranchStock.findFirst({
-    where: { tenantId, branchId, productId: variant.productId, variantId, warehouseId },
+    where: { tenantId, branchId, productId, variantId, warehouseId },
   });
+
   if (existing) {
     await tx.productBranchStock.update({
       where: { id: existing.id },
-      data: { currentQuantity: quantity, averageCost, stockValue },
-    });
-  } else {
-    await tx.productBranchStock.create({
       data: {
-        id: randomUUID(),
-        tenantId,
-        branchId,
-        warehouseId,
-        productId: variant.productId,
-        variantId,
-        currentQuantity: quantity,
-        averageCost,
-        stockValue,
+        currentQuantity: valuation.quantity,
+        averageCost: valuation.averageCost,
+        stockValue: valuation.stockValue,
       },
     });
+    return;
   }
+
+  await tx.productBranchStock.create({
+    data: {
+      id: randomUUID(),
+      tenantId,
+      branchId,
+      warehouseId,
+      productId,
+      variantId,
+      currentQuantity: valuation.quantity,
+      averageCost: valuation.averageCost,
+      stockValue: valuation.stockValue,
+    },
+  });
+}
+
+export async function projectProductBranchStock(
+  tx: any,
+  tenantId: string,
+  branchId: string,
+  variantId: string,
+  warehouseId: string | null = null,
+): Promise<void> {
+  const variant = await tx.productVariant.findFirst({
+    where: { id: variantId, tenantId, branchId },
+    select: { productId: true, costPrice: true },
+  });
+  if (!variant) return;
+
+  const orderBy = [{ occurredAt: "asc" as const }, { createdAt: "asc" as const }, { id: "asc" as const }];
+
+  // A warehouse-specific projection is useful for warehouse views, while the
+  // null-warehouse row is the authoritative branch aggregate consumed by the
+  // dashboard KPI. Always refresh the branch aggregate from all branch ledger
+  // movements so the KPI cannot double-count warehouse rows.
+  if (warehouseId !== null) {
+    const warehouseRows = await tx.stockLedger.findMany({
+      where: { tenantId, branchId, variantId, warehouseId },
+      select: { quantityChange: true, unitCost: true },
+      orderBy,
+    });
+    await upsertProductBranchStock(
+      tx,
+      tenantId,
+      branchId,
+      variant.productId,
+      variantId,
+      warehouseId,
+      warehouseRows,
+      Number(variant.costPrice ?? 0),
+    );
+  }
+
+  const branchRows = await tx.stockLedger.findMany({
+    where: { tenantId, branchId, variantId },
+    select: { quantityChange: true, unitCost: true },
+    orderBy,
+  });
+  await upsertProductBranchStock(
+    tx,
+    tenantId,
+    branchId,
+    variant.productId,
+    variantId,
+    null,
+    branchRows,
+    Number(variant.costPrice ?? 0),
+  );
 }

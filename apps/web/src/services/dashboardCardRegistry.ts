@@ -93,7 +93,7 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     key: "InventoryValue",
     kpiKey: "InventoryValue",
     title: "Inventory Value",
-    description: "Current branch stock valuation",
+    description: "On-hand branch inventory at moving weighted-average cost",
     icon: PiggyBank,
     accent: "#ec4899",
     format: "currency",

@@ -867,16 +867,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const variantProductIds = new Set(products.filter(p => isMultiVariantProduct(p)).map(p => p.id));
     const activeProductVariants = products.length === 0 ? [] : productVariants.filter(v => variantProductIds.has(v.productId));
 
-    const inventoryVal = products.reduce((sum, p) => {
-      if (variantProductIds.has(p.id)) {
-        const pVariants = activeProductVariants.filter(v => v.productId === p.id);
-        if (pVariants.length > 0) {
-          return sum + pVariants.reduce((vSum, v) => vSum + ((v.price || p.price || 0) * (v.stock || 0)), 0);
-        }
-      }
-      return sum + ((p.price || 0) * (p.stock || 0));
-    }, 0);
-
     const simpleLowStock  = products.filter(p => !variantProductIds.has(p.id) && p.stock > 0 && p.stock <= (p.reorderLevel ?? 10)).length;
     const variantLowStock = activeProductVariants.filter(v => v.stock > 0 && v.stock <= (v.reorderLevel ?? 5)).length;
     const lowStockCount   = products.length === 0 ? 0 : (simpleLowStock + variantLowStock);
@@ -952,7 +942,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       salesTrend, salesTrendPct,
       completedOrders, pendingOrders,
       todayPendingOrders, activeTables, todayUniqueCustomers,
-      inventoryVal, lowStockCount, outOfStockCount,
+      lowStockCount, outOfStockCount,
       activeVariantCount: activeProductVariants.length,
       todayCOGS, todayGrossProfit, todayMargin,
       nearExpiryCount, totalLoans,
@@ -1155,7 +1145,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`, 'Profitability', 'Gross Profit / Net Sales'],
         ['Completed Orders Count', Number(authoritativeKpis?.completedOrders ?? stats.completedOrders ?? 0), 'Operations', 'Successful completed checkout sales receipts'],
         ['Average Order Value (AOV)', Number(authoritativeKpis?.aov ?? stats.todayAOV ?? 0), 'Performance', 'Net Sales / Completed Orders'],
-        ['Total Inventory Valuation', Number(authoritativeKpis?.inventoryValue ?? stats.inventoryVal ?? 0), 'Balance Sheet', 'Total valuation of on-hand inventory at buying price'],
+        ['Total Inventory Valuation', Number(authoritativeKpis?.inventoryValue ?? 0), 'Balance Sheet', 'Authoritative PostgreSQL valuation of on-hand inventory at cost'],
         ['Total Active SKUs', Number(products.length || 0), 'Catalog', 'Distinct active product master items in catalog'],
         ['Low Stock Alert SKUs', Number(authoritativeKpis?.lowStockCount ?? stats.lowStockCount ?? 0), 'Supply Chain', 'Items at or below minimum reorder threshold'],
         ['Out of Stock SKUs', Number(authoritativeKpis?.outOfStockCount ?? stats.outOfStockCount ?? 0), 'Supply Chain', 'Items with 0 available units on shelf'],
