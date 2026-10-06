@@ -33,6 +33,7 @@ describe("session revoke survives API restart", () => {
         PORT: String(API_PORT),
         KWAKOPOS_MOCK_AUTH: "false",
         KWAKOPOS_DISABLE_SUPPORT_AUTOMATION: "true",
+        KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true",
         JWT_SECRET: process.env.JWT_SECRET || "kwakopos-ci-session-restart-test-secret-20261004",
       },
       stdio: ["ignore", "pipe", "pipe"],
