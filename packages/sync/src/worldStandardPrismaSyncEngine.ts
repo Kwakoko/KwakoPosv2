@@ -510,7 +510,9 @@ export class WorldStandardPrismaSyncEngine {
       if (op.operationType === "DELETE") {
         const replacementId = payload.replacementId;
         const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId, isActive: true } });
+        const childCount = await tx.category.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, parentId: op.entityId, isActive: true } });
         if (count > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
+        if (childCount > 0) throw new Error("Category has active child categories; remove or reassign them before deleting");
         if (replacementId) {
           if (replacementId === op.entityId) throw new Error("Replacement category must differ from deleted category");
           const replacement = await tx.category.findUnique({ where: { id: replacementId } });
