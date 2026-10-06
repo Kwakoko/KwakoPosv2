@@ -738,8 +738,14 @@ function registerCanonicalProductionAuthentication(
         try {
           const ctx = verifyAccessToken(token);
           const userId = (ctx as any).userId || ctx.sub;
-          const user = await prisma.user.findUnique({ where: { id: userId } });
-          if (!user || !(await comparePassword(password, user.passwordHash))) {
+          const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+          const roleName = String(user?.role?.name || "").toUpperCase();
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP"]);
+          if (!allowedStepUpActions.has(action)) {
+            reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
+            return;
+          }
+          if (!user || user.status !== "ACTIVE" || !["SUPER_ADMIN", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(roleName) || !(await comparePassword(password, user.passwordHash))) {
             await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
             reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
             return;
@@ -1177,7 +1183,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
             requireAdminContext(req);
           }
           if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-            if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
+            if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
               globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
             }
             const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
@@ -1227,7 +1233,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         requireAdminContext(req);
       }
       if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-        if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
+        if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
           globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
         }
         const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
@@ -1921,7 +1927,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       userRole = record.role;
     }
 
-    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+    if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
@@ -5570,11 +5576,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
-    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
-    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+      const adminId = String(ctx.userId);
+      const email = String((ctx as any).email || "");
+      const role = String(ctx.roles?.[0] || "SUPER_ADMIN");
+      return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Access denied";
+      const status = message.startsWith("UNAUTHORIZED") ? 401 : 403;
+      return reply.status(status).send({ success: false, error: { code: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN", message: status === 401 ? "Authentication required." : "Access denied." } });
+    }
   });
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {

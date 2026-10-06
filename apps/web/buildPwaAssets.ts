@@ -29,13 +29,21 @@ if (!fs.existsSync(releaseManifestPath)) {
 
 const releaseManifest = JSON.parse(fs.readFileSync(releaseManifestPath, "utf8"));
 const version = String(releaseManifest.version || "2.13.0");
-const gitSha = String(releaseManifest.gitSha || "unknown");
+const gitSha = String(
+  releaseManifest.gitSha ||
+  process.env.GITHUB_SHA ||
+  process.env.COMMIT_SHA ||
+  process.env.GIT_SHA ||
+  ""
+);
+if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error("RELEASE_MANIFEST_INVALID: exact Git SHA is required to build PWA assets.");
 const rawBuildNumber = releaseManifest.buildNumber || 584;
 const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 const buildNumber = `${dateStr}.${rawBuildNumber}`;
 const releaseId = `kwakopos-rel-${version}-${gitSha.slice(0, 7)}`;
 const cacheName = `kwakopos-runtime-v${version}`;
-const pwaSchemaVersion = Number(releaseManifest.compatibility?.pwaSchemaVersion || 4);
+const pwaSchemaVersion = Number(releaseManifest.compatibility?.pwaSchemaVersion || 6);
+if (pwaSchemaVersion !== 6) throw new Error(`RELEASE_MANIFEST_INVALID: expected PWA schema version 6, got ${pwaSchemaVersion}`);
 
 // 1. Write public/release-manifest.json
 safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify({
@@ -49,7 +57,7 @@ safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify(
   releaseId,
   environment: releaseManifest.environment || "production",
   releasedAt: releaseManifest.releasedAt || new Date().toISOString(),
-  certification: "PASS",
+  certification: releaseManifest.certification || "PENDING",
   compatibility: {
     databaseSchemaVersion: releaseManifest.compatibility?.databaseSchemaVersion || 4,
     syncProtocolVersion: releaseManifest.compatibility?.syncProtocolVersion || 2,

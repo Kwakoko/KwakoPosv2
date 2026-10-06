@@ -69,7 +69,7 @@ describe("Runtime Version & Release Endpoints Integration Tests", () => {
     expect(json.success).toBe(true);
     expect(json.data.minSupportedClientVersion).toBe("2.0.0");
     expect(json.data.syncProtocolVersion).toBe(2);
-    expect(json.data.pwaSchemaVersion).toBe(4);
+    expect(json.data.pwaSchemaVersion).toBe(6);
   });
 
   it("GET /admin/releases/history returns auditable release history and active revision", async () => {
