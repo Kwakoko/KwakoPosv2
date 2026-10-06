@@ -152,7 +152,8 @@
     "production:evidence:verify": "tsx scripts/release/verify-live-production-evidence.ts",
     "production:evidence:execute": "tsx scripts/release/prove-production-release.ts",
     "certify:conflicts": "tsx scripts/certify-sync-conflict-resolution.ts",
-    "certify:campaign": "tsx scripts/certification/runKwakoPosCertificationProgram.ts"
+    "certify:campaign": "tsx scripts/certification/runKwakoPosCertificationProgram.ts",
+    "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
