@@ -52,9 +52,27 @@ export class InventoryValuationEngine {
     let grandTotalValuation = 0;
 
     for (const v of variants) {
-      const variantLedgers = ledgers.filter((l) => l.variantId === v.id);
-      const availableQty = calculateAvailableStock(variantLedgers);
-      const unitCost = Number(v.costPrice) || 0;
+      const variantLedgers = ledgers.filter((l) => l.variantId === v.id).slice().sort((a, b) =>
+        new Date(a.occurredAt || a.createdAt || 0).getTime() - new Date(b.occurredAt || b.createdAt || 0).getTime()
+      );
+      let availableQty = 0;
+      let unitCost = Number(v.costPrice) || 0;
+      for (const ledger of variantLedgers) {
+        const rawQty = Number(ledger.quantityChange !== undefined ? ledger.quantityChange : ledger.quantity);
+        if (!Number.isFinite(rawQty) || rawQty === 0) continue;
+        const inbound = ["OPENING_STOCK","OPENING","PURCHASE_RECEIVE","PURCHASE","TRANSFER_IN","CUSTOMER_RETURN","RETURN","ADJUSTMENT_GAIN","PRODUCTION_OUTPUT"].includes(ledger.movementType) && rawQty >= 0;
+        const outbound = rawQty < 0 || ["SALE","SUPPLIER_RETURN","TRANSFER_OUT","DAMAGE","EXPIRY","ADJUSTMENT_LOSS","PRODUCTION_USAGE"].includes(ledger.movementType);
+        if (inbound) {
+          const receivedQty = Math.abs(rawQty);
+          const receiptCost = Number(ledger.unitCost) || 0;
+          unitCost = Math.round(((availableQty * unitCost + receivedQty * receiptCost) / (availableQty + receivedQty)) * 100) / 100;
+          availableQty += receivedQty;
+        } else if (outbound) {
+          availableQty = Math.max(0, availableQty - Math.abs(rawQty));
+        } else {
+          availableQty = Math.max(0, availableQty + rawQty);
+        }
+      }
       const totalValuation = Math.max(0, Math.round(availableQty * unitCost * 100) / 100);
 
       variantSummaries.push({
