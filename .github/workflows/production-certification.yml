@@ -62,6 +62,8 @@ jobs:
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Generate release manifest
