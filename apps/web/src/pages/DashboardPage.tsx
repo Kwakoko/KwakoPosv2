@@ -14,7 +14,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/KwakoPosContexts.js';
+import { useModule, useAuth, useBranch, useTenant, useSync, useSession } from '../context/KwakoPosContexts.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
 import { apiFetch } from '../services/applicationApiService.js';
 import { fetchDashboardKpiSnapshot, type DashboardKpiSnapshot } from '../services/dashboardKpiService.js';
@@ -258,8 +258,14 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
             event.stopPropagation();
             onClick();
           }}
-          className="absolute right-3 top-3 z-50 flex h-8 w-8 items-center justify-center rounded-lg border transition-all hover:scale-105 active:scale-95"
+          className="absolute right-3 top-3 z-[60] flex h-8 w-8 items-center justify-center rounded-lg border transition-all hover:scale-105 active:scale-95"
           style={{
+            position: 'absolute',
+            right: 12,
+            top: 12,
+            left: 'auto',
+            bottom: 'auto',
+            zIndex: 60,
             color: accent,
             borderColor: accent + '66',
             background: 'rgba(5, 18, 38, 0.96)',
@@ -435,12 +441,52 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user } = useAuth();
   const { currentBranchId, currentBranchName } = useBranch();
   const { currentTenantId, currentTenantName } = useTenant();
-  const { db, isOnline, forceBootstrap } = useSync();
+  const { db, isOnline, forceBootstrap, isSyncing, pendingOutboxCount } = useSync();
+  const { status: sessionStatus, offlineExpiresAt } = useSession();
 
   const role = user?.role || 'Admin';
   const tenantId = currentTenantId || user?.tenantId || '';
   const branchId = currentBranchId || user?.branchId || '';
   const syncStatus = useAuthoritativeSyncStatus({ tenantId: tenantId || null, branchId: branchId || null });
+
+  const offlineModeUi = useMemo(() => {
+    if (sessionStatus === 'OFFLINE_LOCKED') {
+      return {
+        label: 'Offline Mode: Locked',
+        className: 'bg-rose-500/10 text-rose-300 border-rose-500/30',
+        title: 'Offline session grace period has expired. Reconnect and authenticate to continue.',
+      };
+    }
+    if (!isOnline) {
+      const expiry = offlineExpiresAt ? new Date(offlineExpiresAt).toLocaleString() : null;
+      return {
+        label: 'Offline Mode: Active',
+        className: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+        title: expiry
+          ? `Device is offline. Local-first operations remain available until ${expiry}.`
+          : 'Device is offline. Local-first operations remain available while the offline session is valid.',
+      };
+    }
+    if (isSyncing) {
+      return {
+        label: pendingOutboxCount > 0 ? `Offline Mode: Syncing · ${pendingOutboxCount}` : 'Offline Mode: Syncing',
+        className: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
+        title: 'The device is online and reconciling local changes with the server.',
+      };
+    }
+    if (pendingOutboxCount > 0) {
+      return {
+        label: `Offline Mode: Pending · ${pendingOutboxCount}`,
+        className: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+        title: `${pendingOutboxCount} local mutation(s) are waiting to synchronize with the server.`,
+      };
+    }
+    return {
+      label: 'Offline Mode: Available',
+      className: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
+      title: 'Device is online and offline-first persistence is available.',
+    };
+  }, [isOnline, isSyncing, offlineExpiresAt, pendingOutboxCount, sessionStatus]);
   const [authoritativeKpis, setAuthoritativeKpis] = useState<DashboardKpiSnapshot | null>(null);
   const [authoritativeKpiError, setAuthoritativeKpiError] = useState<string | null>(null);
   const [activeCashSession, setActiveCashSession] = useState<any | null>(null);
@@ -1677,11 +1723,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
           {/* Status Badge 2: Offline Readiness */}
           <span
-            className="h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0"
+            className={`h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border whitespace-nowrap shrink-0 transition-colors ${offlineModeUi.className}`}
             style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
+            title={offlineModeUi.title}
+            role="status"
+            aria-live="polite"
           >
             <Zap className="h-4 w-4 shrink-0" />
-            <span>Offline Mode: Available</span>
+            <span>{offlineModeUi.label}</span>
           </span>
 
           {/* Daily Z-Report: kept in the dashboard header for fast register close access. */}
