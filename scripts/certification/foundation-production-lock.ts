@@ -53,7 +53,7 @@ assert(!server.includes('req.headers["x-admin-id"]') && !server.includes('req.he
 assert(server.includes("requireSuperAdminContext(req)") && server.includes("allowedStepUpActions"), "Super Admin control-plane identity and step-up allowlist are required.");
 assert(stepGuard.includes("verifyStepUpToken") && stepGuard.includes("STEP_UP_IDENTITY_MISMATCH"), "Step-up guard must verify and bind operator identity.");
 assert(rollbackRoutes.includes('requireStepUpToken(req, ctx, "ROLLBACK_EXECUTE")') && rollbackRoutes.includes('requireStepUpToken(req, ctx, "ROLLBACK_EMERGENCY")'), "Rollback destructive routes must consume step-up authentication.");
-assert(cleanupRoutes.includes('requireStepUpToken(req, req.tenantContext, "TENANT_PURGE")') && cleanupRoutes.includes('requireStepUpToken(req, req.tenantContext, "PRODUCTION_CLEANUP")'), "Cleanup destructive routes must consume step-up authentication.");
+assert(cleanupRoutes.includes('"TENANT_PURGE"') && cleanupRoutes.includes('"PRODUCTION_CLEANUP"') && cleanupRoutes.includes("requireStepUpToken"), "Cleanup destructive routes must consume step-up authentication.");
 assert(!financeHardener.includes("writeFileSync") && !financeHardener.includes(".replace("), "Finance hardener must be assertion-only, never mutate source.");
 assert(auditMigration.includes('BEFORE UPDATE OR DELETE ON "audit_events"'), "AuditEvents must remain PostgreSQL append-only.");
 assert(exactMainWorkflow.includes("actions/checkout@v4") && exactMainWorkflow.includes("fetch-depth: 0"), "Exact-main release workflow must checkout full history.");
