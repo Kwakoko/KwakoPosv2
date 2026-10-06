@@ -684,8 +684,7 @@ export class ScopedStockRepository {
       }
     }
     const quantityAfter = quantityBefore + quantityChange;
-    const currentProjectedStock = currentQuantityBefore + quantityChange;
-    if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+    if (isBackdated && quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative at historical movement point");
 
     // 4. Compute Costs
     const unitCost = req.unitCost !== undefined ? req.unitCost : (variant.costPrice || 0);
@@ -724,7 +723,7 @@ export class ScopedStockRepository {
     this.store.stockLedgers.set(movementId, ledger);
 
     // 6. Update Variant Stock & Effective Costs
-    const updatedStock = Math.max(0, currentProjectedStock);
+    const updatedStock = Math.max(0, currentQuantityBefore + quantityChange);
     variant.inventoryQuantity = updatedStock;
     variant.stock = updatedStock;
     variant.availableStock = updatedStock;
