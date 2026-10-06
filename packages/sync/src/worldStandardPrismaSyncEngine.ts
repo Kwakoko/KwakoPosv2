@@ -714,8 +714,9 @@ export class WorldStandardPrismaSyncEngine {
             status: { in: ["CLOSED", "LOCKED"] },
           },
         });
-        if (closedPeriod && closedPeriod.status === "LOCKED") {
-          throw new Error(`ACCOUNTING_PERIOD_LOCKED: Cannot backdate inventory adjustment into locked accounting period "${closedPeriod.name}".`);
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate inventory adjustment into accounting period "${closedPeriod.name}".`);
         }
       }
 
