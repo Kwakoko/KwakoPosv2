@@ -675,6 +675,14 @@ export class ScopedStockRepository {
       : [];
     const quantityBefore = isBackdated ? calculateAvailableStock(priorEntries) : currentQuantityBefore;
     const quantityChange = req.quantityChange;
+    if (isBackdated) {
+      const validation = validateRetroactiveTimeline(this.getLedger(ctx, req.variantId), movementTime, quantityChange);
+      if (!validation.valid) {
+        throw new Error(
+          `INSUFFICIENT_STOCK: Retroactive movement would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
+        );
+      }
+    }
     const quantityAfter = quantityBefore + quantityChange;
 
     // 4. Compute Costs
