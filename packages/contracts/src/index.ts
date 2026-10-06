@@ -241,6 +241,7 @@ export const UpdateCategoryRequestSchema = z.object({
   description: z.string().optional(),
   color: z.string().optional(),
   isActive: z.boolean().optional(),
+  cascadeAssignedProducts: z.boolean().optional().default(true),
 });
 export type UpdateCategoryRequest = z.infer<typeof UpdateCategoryRequestSchema>;
 
@@ -273,6 +274,7 @@ export const UpdateBrandRequestSchema = z.object({
   origin: z.string().optional(),
   notes: z.string().optional(),
   isActive: z.boolean().optional(),
+  cascadeAssignedProducts: z.boolean().optional().default(true),
 });
 export type UpdateBrandRequest = z.infer<typeof UpdateBrandRequestSchema>;
 
