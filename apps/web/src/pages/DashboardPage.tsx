@@ -14,7 +14,8 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useModule, useAuth, useBranch, useTenant, useSync, useSession } from '../context/KwakoPosContexts.js';
+import { createPortal } from 'react-dom';
+import { useModule, useAuth, useBranch, useTenant, useSync } from '../context/KwakoPosContexts.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/UI/custom-ui.js';
 import { apiFetch } from '../services/applicationApiService.js';
 import { fetchDashboardKpiSnapshot, type DashboardKpiSnapshot } from '../services/dashboardKpiService.js';
@@ -442,51 +443,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { currentBranchId, currentBranchName } = useBranch();
   const { currentTenantId, currentTenantName } = useTenant();
   const { db, isOnline, forceBootstrap, isSyncing, pendingOutboxCount } = useSync();
-  const { status: sessionStatus, offlineExpiresAt } = useSession();
 
   const role = user?.role || 'Admin';
   const tenantId = currentTenantId || user?.tenantId || '';
   const branchId = currentBranchId || user?.branchId || '';
   const syncStatus = useAuthoritativeSyncStatus({ tenantId: tenantId || null, branchId: branchId || null });
 
-  const offlineModeUi = useMemo(() => {
-    if (sessionStatus === 'OFFLINE_LOCKED') {
-      return {
-        label: 'Offline Mode: Locked',
-        className: 'bg-rose-500/10 text-rose-300 border-rose-500/30',
-        title: 'Offline session grace period has expired. Reconnect and authenticate to continue.',
-      };
-    }
-    if (!isOnline) {
-      const expiry = offlineExpiresAt ? new Date(offlineExpiresAt).toLocaleString() : null;
-      return {
-        label: 'Offline Mode: Active',
-        className: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-        title: expiry
-          ? `Device is offline. Local-first operations remain available until ${expiry}.`
-          : 'Device is offline. Local-first operations remain available while the offline session is valid.',
-      };
-    }
-    if (isSyncing) {
-      return {
-        label: pendingOutboxCount > 0 ? `Offline Mode: Syncing · ${pendingOutboxCount}` : 'Offline Mode: Syncing',
-        className: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
-        title: 'The device is online and reconciling local changes with the server.',
-      };
-    }
-    if (pendingOutboxCount > 0) {
-      return {
-        label: `Offline Mode: Pending · ${pendingOutboxCount}`,
-        className: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-        title: `${pendingOutboxCount} local mutation(s) are waiting to synchronize with the server.`,
-      };
-    }
-    return {
-      label: 'Offline Mode: Available',
-      className: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
-      title: 'Device is online and offline-first persistence is available.',
-    };
-  }, [isOnline, isSyncing, offlineExpiresAt, pendingOutboxCount, sessionStatus]);
   const [authoritativeKpis, setAuthoritativeKpis] = useState<DashboardKpiSnapshot | null>(null);
   const [authoritativeKpiError, setAuthoritativeKpiError] = useState<string | null>(null);
   const [activeCashSession, setActiveCashSession] = useState<any | null>(null);
@@ -1722,16 +1684,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </button>
 
           {/* Status Badge 2: Offline Readiness */}
-          <span
-            className={`h-10 px-4 inline-flex items-center gap-2 text-xs font-bold rounded-xl border whitespace-nowrap shrink-0 transition-colors ${offlineModeUi.className}`}
-            style={{ height: '2.25rem', padding: '0 1rem', borderRadius: '0.75rem' }}
-            title={offlineModeUi.title}
-            role="status"
-            aria-live="polite"
-          >
-            <Zap className="h-4 w-4 shrink-0" />
-            <span>{offlineModeUi.label}</span>
-          </span>
+
 
           {/* Daily Z-Report: kept in the dashboard header for fast register close access. */}
           <button
@@ -4023,8 +3976,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
-      {selectedKpiAdvice && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={() => setSelectedKpiAdvice(null)}>
+      {selectedKpiAdvice && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={() => setSelectedKpiAdvice(null)}>
           <div className="w-full max-w-lg rounded-2xl border border-slate-700/80 bg-[#071426] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -4052,7 +4005,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               {selectedKpiAdvice.action && <button type="button" onClick={selectedKpiAdvice.action.onClick} className="rounded-xl px-4 py-2 text-xs font-bold text-white" style={{ background: selectedKpiAdvice.accent }}><span>{selectedKpiAdvice.action.label}</span><ArrowRight className="ml-1 inline h-3.5 w-3.5" /></button>}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
