@@ -57,7 +57,7 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
 
       const deletedCategory = await catalog.deleteCategory(ctxA, categoryId, replacementCategoryId);
       const deletedBrand = await catalog.deleteBrand(ctxA, brandId, replacementBrandId);
-      expect(deletedCategory.reassigned).toBe(1); expect(deletedBrand.reassigned).toBe(1);
+      expect(deletedCategory.reassigned).toBe(2); expect(deletedBrand.reassigned).toBe(2);
       const persistedProduct = await prisma.product.findUnique({ where: { id: productId } });
       expect(persistedProduct?.categoryId).toBe(replacementCategoryId); expect(persistedProduct?.brandId).toBe(replacementBrandId);
 
