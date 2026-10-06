@@ -1,6 +1,7 @@
 import type { StockLedger, StockMovementType } from "@kwakopos2/contracts";
 import {
   assertBackdatingThreshold,
+  calculateAvailableStock,
   calculateStockAsOfDate,
   calculateBackdatedDiscrepancy,
   validateRetroactiveTimeline,
@@ -100,13 +101,30 @@ export function buildStockBalanceProjection(
   const byProduct = new Map<string, number>();
   if (!db?.stockLedger || !tenantId || !branchId) return { byVariant, byProduct };
 
+  const variantEntries = new Map<string, StockLedger[]>();
+  const productEntries = new Map<string, StockLedger[]>();
   for (const entry of db.stockLedger.values()) {
-    const l = entry as any;
+    const l = entry as StockLedger;
     if (l.tenantId !== tenantId || l.branchId !== branchId) continue;
-    const change = Number(l.quantityChange ?? l.quantity ?? 0);
-    if (!Number.isFinite(change)) continue;
-    if (l.variantId) byVariant.set(String(l.variantId), (byVariant.get(String(l.variantId)) || 0) + change);
-    if (l.productId) byProduct.set(String(l.productId), (byProduct.get(String(l.productId)) || 0) + change);
+    if (l.variantId) {
+      const key = String(l.variantId);
+      const rows = variantEntries.get(key) || [];
+      rows.push(l);
+      variantEntries.set(key, rows);
+    }
+    if (l.productId) {
+      const key = String(l.productId);
+      const rows = productEntries.get(key) || [];
+      rows.push(l);
+      productEntries.set(key, rows);
+    }
+  }
+
+  for (const [variantId, entries] of variantEntries) {
+    byVariant.set(variantId, calculateAvailableStock(entries));
+  }
+  for (const [productId, entries] of productEntries) {
+    byProduct.set(productId, calculateAvailableStock(entries));
   }
   return { byVariant, byProduct };
 }
@@ -204,10 +222,7 @@ export async function queueStockAdjustment(
       entry.variantId === command.variantId,
   );
 
-  const currentLedgerBalance = existingLedger.reduce(
-    (sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0),
-    0,
-  );
+  const currentLedgerBalance = calculateAvailableStock(existingLedger as StockLedger[]);
 
   let delta = 0;
   let movementType: StockMovementType = command.movementType || "ADJUSTMENT_GAIN";
@@ -451,10 +466,7 @@ export async function recordPosSaleDeductions(
         entry.branchId === branchId &&
         entry.variantId === resolvedVariantId,
     );
-    const quantityBefore = priorLedger.reduce(
-      (sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0),
-      0,
-    );
+    const quantityBefore = calculateAvailableStock(priorLedger as StockLedger[]);
     if (quantityBefore < qty) {
       throw new Error(`INSUFFICIENT_LOCAL_STOCK:${resolvedVariantId}`);
     }
@@ -614,12 +626,12 @@ export async function recordPosSaleRefundRestock(
     if (!targetVariant) for (const v of db.productVariants.values()) if (v.productId === prod.id && (!item.variantId || v.id === item.variantId)) { targetVariant = v; break; }
     const resolvedVariantId = targetVariant?.id || item.variantId || `${prod.id}-default`;
     const priorLedger = [...db.stockLedger.values()].filter((entry: any) => entry.tenantId === tenantId && entry.branchId === branchId && entry.variantId === resolvedVariantId);
-    const quantityBefore = priorLedger.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
+    const quantityBefore = calculateAvailableStock(priorLedger as StockLedger[]);
     const quantityAfter = quantityBefore + returnedQty;
     const variant = targetVariant || { id: resolvedVariantId, productId: prod.id, name: "Standard", sku: `${prod.sku || prod.id}-STD`, price: Number(prod.sellingPrice || prod.price || 0), costPrice: Number(prod.buyingPrice || prod.costPrice || 0), isActive: true };
     const updatedVariant = { ...variant, tenantId, branchId, inventoryQuantity: quantityAfter, stock: quantityAfter, updatedAt: occurredAt };
     const productLedger = [...db.stockLedger.values()].filter((entry: any) => entry.tenantId === tenantId && entry.branchId === branchId && entry.productId === prod.id);
-    const productBefore = productLedger.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
+    const productBefore = calculateAvailableStock(productLedger as StockLedger[]);
     const updatedProd = { ...prod, tenantId, branchId, availableStock: productBefore + returnedQty, totalStock: productBefore + returnedQty, stock: productBefore + returnedQty, updatedAt: occurredAt };
     const unitCost = Number(item.unitCost || prod.costPrice || prod.buyingPrice || 0);
     const ledgerId = `led-refund-${saleId}-${resolvedVariantId}`;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 import { reconcileInventory } from "../../apps/web/src/clientSyncEngine.js";
 import { enqueueOutbox } from "../../apps/web/src/atomicOutbox.js";
-import { recordPosSaleDeductions } from "../../apps/web/src/services/inventoryStockService.js";
+import { buildStockBalanceProjection, recordPosSaleDeductions } from "../../apps/web/src/services/inventoryStockService.js";
 import type { Product, ProductVariant } from "@kwakopos2/contracts";
 
 describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
@@ -183,5 +183,71 @@ describe("Snapshot Reconciliation Fix (Invisible Sale Prevention)", () => {
     // Reconciled quantity: 50 server baseline - 5 local pending sold = 45!
     expect(finalQty).toBe(45);
     expect(db.productVariants.get(variantId)?.inventoryQuantity).toBe(45);
+  });
+
+  it("projects legacy oversell ledger history without exposing negative stock", () => {
+    const variantId = "var-legacy-oversell";
+    const productId = "prod-legacy-oversell";
+
+    db.saveVariantLocal({
+      id: variantId,
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      name: "Legacy Product",
+      sku: "LEGACY-01",
+      price: 100,
+      costPrice: 50,
+      inventoryQuantity: 0,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as ProductVariant);
+
+    db.stockLedger.set("legacy-open", {
+      id: "legacy-open",
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      variantId,
+      movementType: "OPENING_STOCK",
+      quantityBefore: 0,
+      quantityChange: 10,
+      quantity: 10,
+      quantityAfter: 10,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    } as any);
+    db.stockLedger.set("legacy-oversell", {
+      id: "legacy-oversell",
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      variantId,
+      movementType: "SALE",
+      quantityBefore: 10,
+      quantityChange: -14,
+      quantity: -14,
+      quantityAfter: 0,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    } as any);
+    db.stockLedger.set("legacy-receive", {
+      id: "legacy-receive",
+      tenantId: "tenant-001",
+      branchId: "branch-001",
+      productId,
+      variantId,
+      movementType: "PURCHASE_RECEIVE",
+      quantityBefore: 0,
+      quantityChange: 4,
+      quantity: 4,
+      quantityAfter: 4,
+      occurredAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    } as any);
+
+    const projection = buildStockBalanceProjection(db, "tenant-001", "branch-001");
+    expect(projection.byVariant.get(variantId)).toBe(4);
   });
 });

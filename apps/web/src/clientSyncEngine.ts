@@ -820,7 +820,7 @@ export async function reconcileInventory(
 
   for (const delta of localDeltas) {
     const change = Number((delta as any).change ?? (delta as any).quantityChange ?? (delta as any).quantity ?? 0);
-    reconciledQty += change; // apply relative mutation
+    reconciledQty = Math.max(0, reconciledQty + change); // preserve non-negative local stock invariant
   }
 
   await db.productVariants.update(serverSnapshot.id, {

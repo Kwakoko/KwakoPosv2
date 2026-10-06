@@ -162,7 +162,7 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
     financeService = new PrismaAtomicCommercialFinanceService(mockDb);
   });
 
-  it("detects oversell when sale quantity exceeds available variant inventory, logs conflict record, and preserves audit trail", async () => {
+  it("rejects oversell atomically before creating sale or stock movements", async () => {
     const productId = randomUUID();
     const variantId = randomUUID();
 
@@ -182,14 +182,12 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       tenantId: tenantCtx.tenantId,
       branchId: tenantCtx.branchId,
       name: "750ml Bottle",
-      inventoryQuantity: 3, // Only 3 in stock
+      inventoryQuantity: 3,
       price: 150,
       costPrice: 90,
       isActive: true,
     });
 
-    // StockLedger is the inventory authority. Seed the opening balance in the
-    // ledger rather than relying on the derived ProductVariant projection.
     mockStore.ledgers.push({
       id: randomUUID(),
       tenantId: tenantCtx.tenantId,
@@ -205,7 +203,6 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       idempotencyKey: "OPENING-" + variantId,
     });
 
-    // Attempt to sell 5 units offline (2 units oversold)
     const saleId = randomUUID();
     const saleReq = {
       id: saleId,
@@ -229,24 +226,27 @@ describe("Pillar 5 — Conflict Detection: Oversell Unit Tests", () => {
       ],
     };
 
-    const res = await financeService.createSale(tenantCtx, saleReq);
-    expect(res).toBeDefined();
-
-    // Verification Metric 1: Conflict logged in sync_conflict_record
-    expect(mockStore.conflicts.length).toBe(1);
-    const loggedConflict = mockStore.conflicts[0];
-    expect(loggedConflict.params).toContain("SaleOversell");
-    expect(loggedConflict.params).toContain(variantId);
-
-    // Verification Metric 2: Stock ledger contains explicit OVERSELL DETECTED note with shortfall
-    const saleLedgers = mockStore.ledgers.filter(
-      (l) => l.variantId === variantId && Number(l.quantityChange) < 0,
+    await expect(financeService.createSale(tenantCtx, saleReq)).rejects.toThrow(
+      "INSUFFICIENT_STOCK",
     );
-    expect(saleLedgers.length).toBe(1);
-    expect(saleLedgers[0].notes).toContain("OVERSELL DETECTED: shortfall 2");
 
-    // Inventory is not silently negative in variant table, clamped to 0 with ledger recording the true delta
-    const variantAfter = mockStore.variants.get(variantId);
-    expect(variantAfter.inventoryQuantity).toBe(0);
+    expect(mockStore.sales.size).toBe(0);
+    expect(mockStore.conflicts.length).toBe(0);
+    expect(mockStore.ledgers).toHaveLength(1);
+    expect(mockStore.ledgers[0].quantityAfter).toBe(3);
+    expect(mockStore.variants.get(variantId).inventoryQuantity).toBe(3);
+
+    const validSaleReq = {
+      ...saleReq,
+      id: randomUUID(),
+      operationId: `OP-VALID-${saleId}`,
+      idempotencyKey: `IDEM-VALID-${saleId}`,
+      items: [{ ...saleReq.items[0], quantity: 2 }],
+      payments: [{ amount: 300, paymentMethod: "BANK" }],
+    };
+    const validSale = await financeService.createSale(tenantCtx, validSaleReq);
+    expect(validSale.ledgers[0].quantityBefore).toBe(3);
+    expect(validSale.ledgers[0].quantityChange).toBe(-2);
+    expect(validSale.ledgers[0].quantityAfter).toBe(1);
   });
 });

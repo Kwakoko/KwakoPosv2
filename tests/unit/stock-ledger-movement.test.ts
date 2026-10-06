@@ -5,7 +5,7 @@ import {
   ScopedProductRepository,
   ScopedStockRepository,
 } from "@kwakopos2/database";
-import { assertStockLedgerImmutability } from "@kwakopos2/domain";
+import { assertStockLedgerImmutability, calculateAvailableStock } from "@kwakopos2/domain";
 
 describe("Stock Ledger Movement Module & Cache Engine Test Suite", () => {
   let store: InMemoryStore;
@@ -227,6 +227,24 @@ describe("Stock Ledger Movement Module & Cache Engine Test Suite", () => {
     const rebuilt = stockRepo.recalculateStockCacheFromLedger(ctx, testVariant.id);
     expect(rebuilt.length).toBe(1);
     expect(rebuilt[0].currentQuantity).toBe(120);
+  });
+
+  it("should clamp legacy oversell ledger sequences at zero and recover on later receipts", () => {
+    const ledger = [
+      { movementType: "OPENING_STOCK", quantityChange: 10 },
+      { movementType: "SALE", quantityChange: -14 },
+      { movementType: "PURCHASE_RECEIVE", quantityChange: 4 },
+    ] as any;
+
+    expect(calculateAvailableStock(ledger)).toBe(4);
+  });
+
+  it("should never expose a negative calculated stock balance", () => {
+    const ledger = [
+      { movementType: "SALE", quantityChange: -46 },
+    ] as any;
+
+    expect(calculateAvailableStock(ledger)).toBe(0);
   });
 
   it("should enforce append-only immutability invariant on ledger rows", () => {

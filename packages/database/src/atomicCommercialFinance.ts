@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
-import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering } from "@kwakopos2/domain";
+import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, calculateAvailableStock } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 export class PrismaAtomicCommercialFinanceService {
@@ -176,6 +176,38 @@ export class PrismaAtomicCommercialFinanceService {
       const paymentStatus = PaymentEngine.evaluateSalePaymentStatus(totals.grandTotal, payments.map((p) => ({ amount: p.amount, status: p.status }))).paymentStatus;
       if (paymentStatus !== "PAID") throw new Error("PAYMENT_NOT_SETTLED");
 
+      // Validate inventory before persisting the sale. Variant rows are locked for this transaction,
+      // and the remaining-stock map handles duplicate lines for the same variant.
+      const remainingStockByVariant = new Map<string, number>();
+      for (const item of lines) {
+        if (remainingStockByVariant.has(item.variantId)) continue;
+        if (typeof (tx as any).$queryRawUnsafe === "function") {
+          const lockRows = await (tx as any).$queryRawUnsafe(
+            `SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
+            item.variantId,
+            ctx.tenantId,
+            ctx.branchId,
+          ) as Array<{ id: string }>;
+          if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
+        const ledgerRows = await tx.stockLedger.findMany({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: item.variantId },
+          orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
+        });
+        const available = calculateAvailableStock(ledgerRows as any);
+        remainingStockByVariant.set(item.variantId, available);
+      }
+      for (const item of lines) {
+        const requested = Math.abs(item.quantity);
+        const available = remainingStockByVariant.get(item.variantId) ?? 0;
+        if (available < requested) {
+          throw new Error(
+            `INSUFFICIENT_STOCK: Cannot sell ${requested} units of variant ${item.variantId}; only ${available} available.`
+          );
+        }
+        // Keep remainingStockByVariant unchanged until the inventory write loop.
+      }
+
       const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
@@ -201,67 +233,14 @@ export class PrismaAtomicCommercialFinanceService {
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
         const qtySold = Math.abs(l.quantity);
-        if (typeof (tx as any).$queryRawUnsafe === "function") {
-          const lockRows = await (tx as any).$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, l.variantId, ctx.tenantId, ctx.branchId) as Array<{ id: string }>;
-          if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        const qtyBefore = remainingStockByVariant.get(l.variantId) ?? 0;
+        if (qtyBefore < qtySold) {
+          throw new Error(
+            `INVENTORY_RACE_DETECTED: Variant ${l.variantId} no longer has ${qtySold} units available.`
+          );
         }
-        const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
-        if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
-        const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
-        if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
-
-        const isOversell = qtyBefore < qtySold;
-        const shortfall = isOversell ? qtySold - qtyBefore : 0;
-        const qtyAfter = Math.max(0, qtyBefore - qtySold);
-
-        if (isOversell) {
-          const conflictId = `conflict:oversell:${saleId}:${l.variantId}`;
-          try {
-            await tx.$executeRawUnsafe(
-              `INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, 'OPEN')
-               ON CONFLICT (id) DO NOTHING`,
-              conflictId,
-              ctx.tenantId,
-              ctx.branchId,
-              req.operationId || saleId,
-              "SaleOversell",
-              l.variantId,
-              JSON.stringify({ saleId, variantId: l.variantId, productId: l.productId, qtySold, qtyBefore, shortfall }),
-              JSON.stringify({ currentInventory: qtyBefore }),
-            );
-          } catch {
-            throw new Error("SYNC_CONFLICT_PERSISTENCE_UNAVAILABLE");
-          }
-          await tx.auditEvent.create({
-            data: {
-              id: randomUUID(),
-              tenantId: ctx.tenantId,
-              branchId: ctx.branchId,
-              userId: ctx.userId,
-              deviceId: req.deviceId || "sync-engine",
-              action: "SYNC_CONFLICT_DETECTED",
-              entityType: "SaleOversell",
-              entityId: l.variantId,
-              metadata: {
-                conflictId,
-                operationId: req.operationId || saleId,
-                saleId,
-                variantId: l.variantId,
-                qtySold,
-                qtyBefore,
-                shortfall,
-                source: "oversell",
-              },
-            },
-          });
-        }
-
-        const notes = isOversell
-          ? `POS Sale ${saleId} (OVERSELL DETECTED: shortfall ${shortfall})`
-          : `POS Sale ${saleId}`;
-
+        const qtyAfter = qtyBefore - qtySold;
+        remainingStockByVariant.set(l.variantId, qtyAfter);
         const ledger = await tx.stockLedger.create({
           data: {
             tenantId: ctx.tenantId,
@@ -281,7 +260,7 @@ export class PrismaAtomicCommercialFinanceService {
             deviceId: req.deviceId,
             operationId: req.operationId,
             idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}`,
-            notes,
+            notes: `POS Sale ${sale.id}`,
           },
         });
         ledgers.push(ledger);

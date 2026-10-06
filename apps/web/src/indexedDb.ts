@@ -12,6 +12,7 @@ import type {
   SyncStateManifest,
 } from "@kwakopos2/contracts";
 import { globalMigrationEngine, MigrationJournalEntry } from "./persistence/migrationEngine.js";
+import { calculateAvailableStock } from "@kwakopos2/domain";
 import { globalSnapshotRecoveryEngine, RecoverySnapshot, SnapshotStoreItem } from "./persistence/snapshotRecoveryEngine.js";
 import { globalStoragePressureMonitor } from "./persistence/storagePressure.js";
 import {
@@ -1348,10 +1349,10 @@ export class LocalIndexedDbStore {
     );
     if (pendingDeltas.length === 0) return serverVariant;
 
-    let reconciledQty = Number(serverVariant.inventoryQuantity ?? (serverVariant as any).stock ?? 0);
+    let reconciledQty = Math.max(0, Number(serverVariant.inventoryQuantity ?? (serverVariant as any).stock ?? 0));
     for (const delta of pendingDeltas) {
       const change = Number((delta as any).change ?? (delta as any).quantityChange ?? (delta as any).quantity ?? 0);
-      reconciledQty += change;
+      reconciledQty = Math.max(0, reconciledQty + change);
       (delta as any).status = "RECONCILED";
       this.persist("stockAdjustments", delta.id, delta);
     }
@@ -1583,17 +1584,19 @@ export class LocalIndexedDbStore {
     const product = this.products.get(productId);
     if (!product) return;
     const variants: ProductVariant[] = [];
-    const ledgerStockByVariant = new Map<string, number>();
+    const ledgerEntriesByVariant = new Map<string, StockLedger[]>();
     for (const entry of this.stockLedger.values()) {
-      const l = entry as any;
+      const l = entry as StockLedger;
       if (l.tenantId !== product.tenantId || l.branchId !== product.branchId) continue;
       if (!l.variantId) continue;
-      const change = Number(l.quantityChange ?? l.quantity ?? 0);
-      if (Number.isFinite(change)) ledgerStockByVariant.set(String(l.variantId), (ledgerStockByVariant.get(String(l.variantId)) || 0) + change);
+      const key = String(l.variantId);
+      const rows = ledgerEntriesByVariant.get(key) || [];
+      rows.push(l);
+      ledgerEntriesByVariant.set(key, rows);
     }
     for (const v of this.productVariants.values()) {
       if (v.productId === productId && v.tenantId === product.tenantId && v.branchId === product.branchId) {
-        const projectedStock = Math.max(0, ledgerStockByVariant.get(v.id) || 0);
+        const projectedStock = calculateAvailableStock(ledgerEntriesByVariant.get(v.id) || []);
         const projectedVariant = { ...v, inventoryQuantity: projectedStock, stock: projectedStock } as any;
         variants.push(projectedVariant);
         this.productVariants.set(v.id, projectedVariant);
@@ -1758,13 +1761,18 @@ export class LocalIndexedDbStore {
       ? this.getConfigurationLocal("expenses", { tenantId: tenantId || "", branchId: branchId || "" })
       : []) as any[];
 
-    const stockBalances: Record<string, number> = {};
+    const stockEntriesByVariant = new Map<string, StockLedger[]>();
     for (const entry of ledger) {
-      const l = entry as any;
+      const l = entry as StockLedger;
       if (!l.variantId) continue;
-      const change = Number(l.quantityChange ?? l.quantity ?? 0);
-      if (!Number.isFinite(change)) continue;
-      stockBalances[String(l.variantId)] = (stockBalances[String(l.variantId)] || 0) + change;
+      const key = String(l.variantId);
+      const rows = stockEntriesByVariant.get(key) || [];
+      rows.push(l);
+      stockEntriesByVariant.set(key, rows);
+    }
+    const stockBalances: Record<string, number> = {};
+    for (const [variantId, entries] of stockEntriesByVariant) {
+      stockBalances[variantId] = calculateAvailableStock(entries);
     }
     for (const v of variants) {
       if (!(v.id in stockBalances)) stockBalances[v.id] = 0;

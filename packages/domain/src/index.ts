@@ -12,6 +12,7 @@ import type {
 export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
   return ledgerEntries.reduce((total, entry) => {
     const qty = Number(entry.quantityChange !== undefined ? entry.quantityChange : entry.quantity);
+    let next = total;
     switch (entry.movementType) {
       case "OPENING_STOCK":
       case "OPENING":
@@ -22,7 +23,8 @@ export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
       case "RETURN":
       case "ADJUSTMENT_GAIN":
       case "PRODUCTION_OUTPUT":
-        return total + Math.abs(qty);
+        next = total + Math.abs(qty);
+        break;
       case "SALE":
       case "SUPPLIER_RETURN":
       case "TRANSFER_OUT":
@@ -30,13 +32,17 @@ export function calculateAvailableStock(ledgerEntries: StockLedger[]): number {
       case "EXPIRY":
       case "ADJUSTMENT_LOSS":
       case "PRODUCTION_USAGE":
-        return total - Math.abs(qty);
+        next = total - Math.abs(qty);
+        break;
       case "ADJUSTMENT":
       case "SALE_CORRECTION":
-        return total + qty;
+        next = total + qty;
+        break;
       default:
-        return total + qty;
+        next = total + qty;
+        break;
     }
+    return Math.max(0, next);
   }, 0);
 }
 

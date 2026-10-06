@@ -86,6 +86,9 @@ export default defineConfig({
     host: true,
     port: webPort,
     strictPort: false,
+    hmr: {
+      overlay: false,
+    },
     proxy: {
       "/auth": {
         target: "http://127.0.0.1:3000",
