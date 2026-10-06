@@ -15,9 +15,9 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/domain/src/index.ts": "97f7f953f918731832aa56eb957545fb0b07d3a1",
   "packages/database/src/index.ts": "0ded080162d6102b2c9860f86924ff167dbc178d",
   "packages/database/src/prismaRepositories.ts": "6c8d4b003f1db53a25ea6f0e02a4164ae556f936",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "25905ee2336db8c313b27bfbcebae3cb21b6ed6b",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "30a0b778ed7963fe383610308275cf5de60fe3d6",
   "tests/unit/backdated-inventory.test.ts": "1bfb722d5dcca1629bc6b64ffa69ec710367676f",
-  "tests/integration/prisma-stock-convergence.test.ts": "3a33c50d3d1eea3d6cdd3a6905ec9dc3ca8fca81",
+  "tests/integration/prisma-stock-convergence.test.ts": "b65484e222627892c47f93c88597a85925b08557",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
