@@ -3510,15 +3510,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 />
                               </td>
                               <td>
-                                <NumberStepper
-                                  size="xs"
-                                  min={0}
-                                  step={1}
-                                  width="80px"
-                                  value={inlineVariantEdit.stock}
-                                  ariaLabel="Stock quantity"
-                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, stock: val })}
-                                />
+                                <span className="v2-mono v2-text-xs v2-font-bold" title="Stock is ledger-controlled; use Add Stock / Physical Count">
+                                  {Number(inlineVariantEdit.stock || 0).toLocaleString()}
+                                </span>
                               </td>
                               <td>
                                 <NumberStepper
@@ -3593,20 +3587,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                         attributes: existingVariant?.attributes || v.attributes || {}, isActive: true,
                                         _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt,
                                       }, idempotencyKey: `VAR-UPDATE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      const stockDiff = Number(inlineVariantEdit.stock) - Number(v.stock || 0);
-                                      if (stockDiff !== 0) {
-                                        const adjOpId = `adj-variant-edit-${Date.now()}-${v.id}`;
-                                        db.saveStockLedgerLocal({ id: adjOpId, productId: variantModalProduct.id, variantId: v.id,
-                                          sku: inlineVariantEdit.sku.trim(), name: inlineVariantEdit.name.trim(), quantity: stockDiff, quantityChange: stockDiff,
-                                          balanceAfter: Number(inlineVariantEdit.stock), reason: "VARIANT_INLINE_EDIT", movementType: "ADJUSTMENT",
-                                          timestamp: new Date().toISOString(), tenantId: currentTenantId || "default", branchId: currentBranchId || "default" } as any,
-                                          { tenantId: currentTenantId || "default", branchId: currentBranchId || "default" });
-                                        pendingOutboxes.push({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
-                                          payload: { productId: variantModalProduct.id, variantId: v.id, sku: inlineVariantEdit.sku.trim(),
-                                            adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE", movementType: "ADJUSTMENT", quantityChange: stockDiff,
-                                            reason: "VARIANT_INLINE_EDIT", deviceId: "web-client", operationId: adjOpId },
-                                          idempotencyKey: adjOpId, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      }
                                       if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
