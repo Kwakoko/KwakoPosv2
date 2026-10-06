@@ -1927,7 +1927,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       userRole = record.role;
     }
 
-    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+    if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
