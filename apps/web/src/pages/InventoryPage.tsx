@@ -673,7 +673,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
             const qty = Number(projection.byVariant.get(v.id) || 0);
             units += qty;
             const cost = Number(authoritativeWacByVariant.get(v.id) ?? v.buyingPrice ?? v.costPrice ?? 0);
-            const price = Number(v.price ?? v.sellingPrice ?? p.sellingPrice ?? p.price ?? 0);
+            const price = Number(v.price ?? v.sellingPrice ?? p.sellingPrice ?? 0);
             buyingVal += qty * cost;
             sellingVal += qty * price;
           }
@@ -681,8 +681,8 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           const qty = Number(projection.byProduct.get(p.id) || 0);
           if (p.sku) skus += 1;
           units += qty;
-          buyingVal += qty * Number(p.buyingPrice ?? p.costPrice ?? 0);
-          sellingVal += qty * Number(p.sellingPrice ?? p.price ?? 0);
+          buyingVal += qty * Number(p.buyingPrice ?? 0);
+          sellingVal += qty * Number(p.sellingPrice ?? 0);
         }
       }
 
