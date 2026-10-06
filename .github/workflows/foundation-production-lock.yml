@@ -33,6 +33,6 @@ jobs:
       - name: Build workspaces
         run: npm run build
       - name: Foundation production lock
-        run: npm run certify:foundation-lock
+        run: npx tsx scripts/certification/foundation-production-lock.ts
       - name: Unit tests
         run: npm run test:unit
