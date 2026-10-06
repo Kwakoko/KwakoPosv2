@@ -184,4 +184,98 @@ describe("PostgreSQL multi-device stock convergence", () => {
     }
   });
 
+  it("first-class POS backdated sales preserve historical financial and stock dates", async () => {
+    const tenantId = randomUUID();
+    const branchId = randomUUID();
+    const productId = randomUUID();
+    const variantId = randomUUID();
+    const ctx = { tenantId, branchId, userId: "BACKDATED-SALE-TEST", roles: ["MANAGER"], permissions: ["SALE_CREATE"] } as any;
+    const privilegedCtx = { ...ctx, permissions: ["SALE_CREATE", "SALE_BACKDATE", "INVENTORY_BACKDATE"] };
+    const engine = new PrismaSyncEngine(new PrismaProductRepository(), new PrismaStockRepository());
+    const now = Date.now();
+    const openingAt = new Date(now - 40 * 24 * 3600 * 1000);
+    const backdatedAt = new Date(now - 30 * 24 * 3600 * 1000);
+
+    try {
+      await prisma.tenant.create({ data: { id: tenantId, name: "Backdated POS Sale Test", slug: "backpos-" + tenantId.slice(0, 12) } });
+      await prisma.branch.create({ data: { id: branchId, tenantId, name: "Main", code: "BACKPOS", isMain: true } });
+      await prisma.product.create({ data: { id: productId, tenantId, branchId, name: "Backdated POS Item", sku: "BACKPOS-ITEM", category: "", hasVariants: true } });
+      await prisma.productVariant.create({ data: { id: variantId, tenantId, branchId, productId, name: "Standard", sku: "BACKPOS-STD", price: 100, costPrice: 50 } });
+
+      const opening = await engine.processPush(privilegedCtx, {
+        deviceId: "BACKPOS-OPEN",
+        operations: [{
+          operationId: randomUUID(),
+          entityType: "StockAdjustment",
+          entityId: randomUUID(),
+          operationType: "CREATE" as const,
+          payload: { variantId, productId, adjustmentType: "INCREASE", quantityChange: 50, reason: "Opening", unitCost: 50, occurredAt: openingAt.toISOString() },
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: "BACKPOS-OPEN-" + randomUUID(),
+        }],
+      });
+      expect(opening.results[0].status).toBe("SUCCESS");
+
+      const denied = await engine.processPush(ctx, {
+        deviceId: "BACKPOS-DENIED",
+        operations: [{
+          operationId: randomUUID(),
+          entityType: "Sale",
+          entityId: randomUUID(),
+          operationType: "CREATE" as const,
+          payload: {
+            items: [{ productId, variantId, quantity: 5, unitPrice: 100, unitCost: 50 }],
+            payments: [{ amount: 500, paymentMethod: "MOBILE_MONEY", provider: "MPESA" }],
+            occurredAt: backdatedAt.toISOString(),
+            isBackdated: true,
+          },
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: "BACKPOS-DENIED-" + randomUUID(),
+        }],
+      });
+      expect(denied.results[0].status).toBe("FAILED");
+      expect(denied.results[0].error).toMatch(/SALE_BACKDATE_PERMISSION_REQUIRED/);
+
+      const saleId = randomUUID();
+      const backdated = await engine.processPush(privilegedCtx, {
+        deviceId: "BACKPOS-OFFLINE",
+        operations: [{
+          operationId: randomUUID(),
+          entityType: "Sale",
+          entityId: saleId,
+          operationType: "CREATE" as const,
+          payload: {
+            items: [{ productId, variantId, quantity: 20, unitPrice: 100, unitCost: 50 }],
+            payments: [{ amount: 2000, paymentMethod: "MOBILE_MONEY", provider: "MPESA", providerReference: "BACKPOS-MPESA-1" }],
+            occurredAt: backdatedAt.toISOString(),
+            isBackdated: true,
+          },
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: "BACKPOS-SALE-" + randomUUID(),
+        }],
+      });
+      expect(backdated.results[0].status).toBe("SUCCESS");
+
+      const sale = await prisma.sale.findUnique({ where: { id: saleId } });
+      expect(sale?.soldAt.toISOString()).toBe(backdatedAt.toISOString());
+      const payment = await prisma.payment.findFirst({ where: { tenantId, branchId, saleId } });
+      expect(payment?.paidAt.toISOString()).toBe(backdatedAt.toISOString());
+
+      const ledger = await prisma.stockLedger.findFirst({ where: { tenantId, branchId, variantId, referenceType: "SALE", referenceId: saleId } });
+      expect(ledger).not.toBeNull();
+      expect(ledger?.occurredAt.toISOString()).toBe(backdatedAt.toISOString());
+      expect(Number(ledger?.quantityBefore)).toBe(50);
+      expect(Number(ledger?.quantityAfter)).toBe(30);
+
+      const persistedVariant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+      expect(Number(persistedVariant?.inventoryQuantity)).toBe(30);
+
+      const journal = await prisma.journalEntry.findFirst({ where: { tenantId, branchId, sourceType: "SALE", sourceId: saleId } });
+      expect(journal?.entryDate.toISOString()).toBe(backdatedAt.toISOString());
+      expect(journal?.postingDate.getTime()).toBeGreaterThan(backdatedAt.getTime());
+    } finally {
+      await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => {});
+    }
+  });
+
 });

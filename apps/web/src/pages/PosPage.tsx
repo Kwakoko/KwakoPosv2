@@ -366,6 +366,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [checkoutModal, setCheckoutModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"Cash" | "M-Pesa" | "Card" | "Bank" | "Credit" | "Split">("Cash");
   const [cashReceived, setCashReceived] = useState(0);
+  const [isBackdatedSale, setIsBackdatedSale] = useState(false);
+  const [backdatedSaleAt, setBackdatedSaleAt] = useState("");
   const [mpesaRef, setMpesaRef] = useState("");
   const [cardAuthRef, setCardAuthRef] = useState("");
   const [bankRef, setBankRef] = useState("");
@@ -434,6 +436,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       setCart([]);
       setDiscountPercent(0);
       setSelectedCustomer("Walk-In Customer");
+      setIsBackdatedSale(false);
+      setBackdatedSaleAt("");
       setIsHistoryModalOpen(false);
       setIsReturnsModalOpen(false);
       searchRef.current?.focus();
@@ -916,6 +920,26 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return true;
   };
 
+  const toLocalDateTimeInputValue = (date: Date) => {
+    const offset = date.getTimezoneOffset();
+    return new Date(date.getTime() - offset * 60 * 1000).toISOString().slice(0, 16);
+  };
+
+  const activateBackdatedSale = () => {
+    const canBackdateSale = hasPermission("SALE_BACKDATE") || hasPermission("*");
+    if (!canBackdateSale) {
+      playWarningTone();
+      toast.warning("Backdated Sale Permission Required", "Your role does not have SALE_BACKDATE permission.");
+      return;
+    }
+    if (isBackdatedSale) {
+      setIsBackdatedSale(false);
+      setBackdatedSaleAt("");
+      return;
+    }
+    setBackdatedSaleAt(toLocalDateTimeInputValue(new Date()));
+    setIsBackdatedSale(true);
+  };
   const handleInitiateCheckout = async () => {
     if (!validateSaleProceed()) return;
     try {
@@ -939,6 +963,15 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   // Complete Sale & Checkout
   const handleCompleteSale = async () => {
     if (!validateSaleProceed()) return;
+    if (isBackdatedSale && !backdatedSaleAt) {
+      toast.warning("Backdated Sale Date Required", "Choose the historical sale date and time before completing this sale.");
+      return;
+    }
+    const saleOccurredAt = isBackdatedSale ? new Date(backdatedSaleAt).toISOString() : new Date().toISOString();
+    if (isBackdatedSale && Number.isNaN(new Date(saleOccurredAt).getTime())) {
+      toast.warning("Invalid Sale Date", "Choose a valid historical date and time.");
+      return;
+    }
     let activeCashSession: any = null;
     try {
       const sessionResponse = await apiFetch<{ data?: any }>("/api/v1/cash-sessions/active", { method: "GET" });
@@ -1103,7 +1136,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       bankRef: paymentMethod === "Bank" ? bankRef : undefined,
       splitAmounts: paymentMethod === "Split" ? splitAmounts : undefined,
       fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
-      soldAt: new Date().toISOString(),
+      soldAt: saleOccurredAt,
+      occurredAt: saleOccurredAt,
+      isBackdated: isBackdatedSale,
       createdAt: new Date().toISOString(),
       syncStatus: "Pending",
     };
@@ -1116,7 +1151,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       subtotal: cartSubtotal, discountTotal: discountAmount, taxTotal: taxAmount, selectedTaxRate,
       taxRate: Math.round(selectedTaxRate * 100), grandTotal: cartGrandTotal, paidAmount: effectivePaid,
       changeAmount: changeDue, paymentMethod: paymentMethod.toUpperCase(), currency: "TZS", status: "COMPLETED",
-      items: mappedItems, createdAt: saleRecord.createdAt,
+      items: mappedItems, createdAt: saleRecord.createdAt, soldAt: saleRecord.soldAt,
       fiscalizationState: traVfdEnabled ? "LOCAL_FISCAL_PENDING" : undefined,
     };
     const authoritativeCashSession = payments.some((payment: any) => payment.paymentMethod === "CASH")
@@ -1225,6 +1260,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     setLastSale(saleRecord);
     setCheckoutModal(false);
     setReceiptModal(true);
+    setIsBackdatedSale(false);
+    setBackdatedSaleAt("");
     setCart([]);
     setDiscountPercent(0);
     setSelectedTaxRate(getBaseTaxRate());
@@ -2126,6 +2163,42 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             )}
 
             <button
+              className={isBackdatedSale ? "v2-btn v2-btn-primary" : "v2-btn v2-btn-secondary"}
+              style={{ width: "100%", justifyContent: "center", padding: ".65rem", fontWeight: 800, marginBottom: ".5rem" }}
+              onClick={activateBackdatedSale}
+              disabled={cart.length === 0}
+              type="button"
+              title="Requires SALE_BACKDATE permission"
+            >
+              <Calendar size={14} />
+              {isBackdatedSale ? "Backdated Sale Active" : "Activate Backdated Sale"}
+            </button>
+
+            {isBackdatedSale && (
+              <div
+                className="v2-p-3 v2-mb-3"
+                style={{ background: "var(--surface-2)", border: "1px solid var(--accent)", borderRadius: "var(--radius-md)" }}
+              >
+                <div className="v2-flex v2-items-center v2-gap-2 v2-mb-2">
+                  <Clock size={14} style={{ color: "var(--accent)" }} />
+                  <span className="v2-text-xs v2-font-black">Historical Sale Date & Time</span>
+                </div>
+                <input
+                  className="v2-input"
+                  type="datetime-local"
+                  value={backdatedSaleAt}
+                  min={toLocalDateTimeInputValue(new Date(Date.now() - 730 * 24 * 60 * 60 * 1000))}
+                  max={toLocalDateTimeInputValue(new Date())}
+                  onChange={(e) => setBackdatedSaleAt(e.target.value)}
+                  aria-label="Backdated sale date and time"
+                  required
+                />
+                <div className="v2-text-xs v2-text-muted v2-mt-2">
+                  Historical sale posting is subject to permission, the 730-day limit, stock timeline validation, and accounting-period controls.
+                </div>
+              </div>
+            )}
+            <button
               className="v2-btn v2-btn-primary"
               style={{
                 width: "100%",
@@ -2377,7 +2450,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               aria-disabled={cart.length === 0 || cartGrandTotal <= 0}
               type="button"
             >
-              {t("pos.completeSale")}
+              {isBackdatedSale ? "Complete Backdated Sale" : t("pos.completeSale")}
             </button>
           </div>
         </div>

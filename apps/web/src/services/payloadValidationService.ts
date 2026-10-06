@@ -331,6 +331,8 @@ export function normalizeSalePayload(
     taxTotal: Number(payload.taxTotal || payload.tax || payload.taxAmount || 0),
     grandTotal,
     totalAmount: grandTotal,
+    occurredAt: payload.occurredAt ? new Date(payload.occurredAt).toISOString() : undefined,
+    isBackdated: Boolean(payload.isBackdated),
   };
 }
 

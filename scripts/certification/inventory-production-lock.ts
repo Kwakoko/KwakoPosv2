@@ -14,11 +14,11 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/services/inventoryStockService.ts": "b5b24e3efabb022477173419993f6c4723a483fa",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "f15ce033a7e213104ba92f6ce0be0535611db25e",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "e20e0177c41bb65a40cab11a9b52ae4fcdd77e6c",
   "apps/web/src/indexedDb.ts": "f496065c484c03b75e96e4076eeb045b8db46a3f",
   "apps/web/src/clientSyncEngine.ts": "0ffa3304b334c7eba5b8578851cfc4250cf0ef22",
   "tests/unit/stock-ledger-movement.test.ts": "d24fcfb9a39a76b8d60a282ce2c4401c07e7bb2c",
-  "tests/integration/prisma-stock-convergence.test.ts": "2ef66d7ce922e34c6aea3f05e5ce532e4dbfb70d",
+  "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",
   "tests/integration/catalog-master-lifecycle.test.ts": "3912fadfd502e9df6543b36e8742ae254d3fff7a",
   "tests/integration/tenant-clean-initial-state.test.ts": "0a115000cc032fef05df7e0e954fe46704be2c44",
 };
