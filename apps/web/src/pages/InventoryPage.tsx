@@ -47,6 +47,7 @@ export interface CategoryRecord {
   name: string;
   description?: string;
   color: string;
+  parentId?: string | null;
   isDefault?: boolean;
 }
 
@@ -209,6 +210,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryDesc, setNewCategoryDesc] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#10b981");
+  const [newCategoryParentId, setNewCategoryParentId] = useState("");
   const [categoryCascadeRename, setCategoryCascadeRename] = useState(true);
 
   // Add / Edit Brand State
@@ -221,15 +223,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
   // Delete Safeguard Modals
   const [deleteCategorySafeguard, setDeleteCategorySafeguard] = useState<{
-    category: string;
+    categoryId: string;
     assignedCount: number;
-    fallbackCategory: string;
+    replacementCategoryId: string;
   } | null>(null);
 
   const [deleteBrandSafeguard, setDeleteBrandSafeguard] = useState<{
-    brand: string;
+    brandId: string;
     assignedCount: number;
-    fallbackBrand: string;
+    replacementBrandId: string;
   } | null>(null);
 
   // Variant Builder Modal State
@@ -496,6 +498,29 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     }
     return Array.from(metaMap.values());
   }, [brandsMeta, items]);
+
+  const categoryParentOptions = useMemo(() => {
+    const invalid = new Set<string>();
+    if (editingCategory?.id) {
+      const byParent = new Map<string, string[]>();
+      for (const category of allCategories) {
+        if (!category.parentId) continue;
+        const children = byParent.get(category.parentId) || [];
+        children.push(category.id);
+        byParent.set(category.parentId, children);
+      }
+      const queue = [editingCategory.id];
+      while (queue.length) {
+        const currentId = queue.shift()!;
+        if (invalid.has(currentId)) continue;
+        invalid.add(currentId);
+        for (const childId of byParent.get(currentId) || []) queue.push(childId);
+      }
+    }
+    return allCategories
+      .filter((category) => isUuid(category.id) && !invalid.has(category.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCategories, editingCategory]);
 
   const filteredCategories = useMemo(() => {
     const q = categorySearchQuery.toLowerCase().trim();
@@ -1169,39 +1194,41 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
   const handleOpenEditCategory = (cat: CategoryRecord) => {
     if (!isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; }
-    setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setCategoryCascadeRename(true); setAddCategoryModal(true);
+    setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setNewCategoryParentId(cat.parentId || ""); setCategoryCascadeRename(true); setAddCategoryModal(true);
   };
 
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault(); const name = newCategoryName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingCategory?.id && isUuid(editingCategory.id) ? editingCategory.id : safeUUID();
-    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
+    const parentId = newCategoryParentId && isUuid(newCategoryParentId) ? newCategoryParentId : null;
+    if (parentId === id) { toast.error("Invalid Parent", "A category cannot be its own parent."); return; }
+    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), parentId, description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
     const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId }) : categoriesMeta;
     const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId }); setCategoriesMeta(next);
-    pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, parentId, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setAddCategoryModal(false); setEditingCategory(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
+    setAddCategoryModal(false); setEditingCategory(null); setNewCategoryParentId(""); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Category Sync Rejected", "The server rejected the category change. Local catalog has been reconciled to the authoritative server state."); return; } toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
   };
-  const handleOpenDeleteCategory = (name: string, assignedCount: number) => {
-    const cat = allCategories.find((c) => c.name.toLowerCase() === name.toLowerCase()); const fallback = allCategories.find((c) => c.id !== cat?.id && isUuid(c.id));
+  const handleOpenDeleteCategory = (categoryId: string, assignedCount: number) => {
+    const cat = allCategories.find((c) => c.id === categoryId); const fallback = allCategories.find((c) => c.id !== categoryId && isUuid(c.id));
     if (!cat || !isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement category first."); return; }
-    setDeleteCategorySafeguard({ category: cat.name, assignedCount, fallbackCategory: fallback?.name || "" });
+    setDeleteCategorySafeguard({ categoryId: cat.id, assignedCount, replacementCategoryId: fallback?.id || "" });
   };
 
   const handleConfirmDeleteCategory = async () => {
     if (!deleteCategorySafeguard || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
-    const cat = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.category.toLowerCase()); const replacement = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.fallbackCategory.toLowerCase());
+    const cat = allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId); const replacement = deleteCategorySafeguard.replacementCategoryId ? allCategories.find((c) => c.id === deleteCategorySafeguard.replacementCategoryId) : undefined;
     const replacementId = deleteCategorySafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!cat || !isUuid(cat.id) || (replacementId && !isUuid(replacementId))) return;
     const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
     if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setDeleteCategorySafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
+    setDeleteCategorySafeguard(null); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Category Sync Rejected", "The server rejected the category deletion. Local catalog has been reconciled to the authoritative server state."); }
   };
 
   const handleOpenEditBrand = (brand: BrandRecord) => { if (!isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; } setEditingBrand(brand); setNewBrandName(brand.name); setNewBrandOrigin(brand.origin || ""); setNewBrandNotes(brand.notes || ""); setBrandCascadeRename(true); setAddBrandModal(true); };
@@ -1215,26 +1242,26 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     pendingOutboxes.push({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     if (editingBrand && brandCascadeRename && editingBrand.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.brandId === id || String(p.brand || "").toLowerCase() === editingBrand.name.toLowerCase())) { db.saveProductLocal({ ...p, brandId: id, brand: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: id, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setAddBrandModal(false); setEditingBrand(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
+    setAddBrandModal(false); setEditingBrand(null); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Brand Sync Rejected", "The server rejected the brand change. Local catalog has been reconciled to the authoritative server state."); return; } toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
   };
 
-  const handleOpenDeleteBrand = (name: string, assignedCount: number) => {
-    const brand = allBrands.find((b) => b.name.toLowerCase() === name.toLowerCase()); const fallback = allBrands.find((b) => b.id !== brand?.id && isUuid(b.id));
+  const handleOpenDeleteBrand = (brandId: string, assignedCount: number) => {
+    const brand = allBrands.find((b) => b.id === brandId); const fallback = allBrands.find((b) => b.id !== brandId && isUuid(b.id));
     if (!brand || !isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement brand first."); return; }
-    setDeleteBrandSafeguard({ brand: brand.name, assignedCount, fallbackBrand: fallback?.name || "" });
+    setDeleteBrandSafeguard({ brandId: brand.id, assignedCount, replacementBrandId: fallback?.id || "" });
   };
 
   const handleConfirmDeleteBrand = async () => {
     if (!deleteBrandSafeguard || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
-    const brand = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.brand.toLowerCase()); const replacement = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.fallbackBrand.toLowerCase()); const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
+    const brand = allBrands.find((b) => b.id === deleteBrandSafeguard.brandId); const replacement = deleteBrandSafeguard.replacementBrandId ? allBrands.find((b) => b.id === deleteBrandSafeguard.replacementBrandId) : undefined; const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!brand || !isUuid(brand.id) || (replacementId && !isUuid(replacementId))) return;
     const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
     if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, brand: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setDeleteBrandSafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
+    setDeleteBrandSafeguard(null); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Brand Sync Rejected", "The server rejected the brand deletion. Local catalog has been reconciled to the authoritative server state."); }
   };
 
   return (
@@ -1602,6 +1629,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   setNewCategoryName("");
                   setNewCategoryDesc("");
                   setNewCategoryColor("#10b981");
+                  setNewCategoryParentId("");
                   setAddCategoryModal(true);
                 }}
                 type="button"
@@ -1675,6 +1703,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     setNewCategoryName("");
                     setNewCategoryDesc("");
                     setNewCategoryColor("#10b981");
+                    setNewCategoryParentId("");
                     setAddCategoryModal(true);
                   }}
                   type="button"
@@ -1787,7 +1816,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteCategory(cat.name, catSkus)}
+                                  onClick={() => handleOpenDeleteCategory(cat.id, catSkus)
                                   title="Delete or Reassign Category"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
@@ -1921,7 +1950,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteBrand(brand.name, brandSkus)}
+                                  onClick={() => handleOpenDeleteBrand(brand.id, brandSkus)
                                   title="Delete or Reassign Brand"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
@@ -2136,7 +2165,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         onClose={() => setAddProductModal(false)}
         allCategories={allCategories}
         allBrands={allBrands}
-        onOpenAddCategory={() => setAddCategoryModal(true)}
+        onOpenAddCategory={() => {
+          setEditingCategory(null);
+          setNewCategoryName("");
+          setNewCategoryDesc("");
+          setNewCategoryColor("#10b981");
+          setNewCategoryParentId("");
+          setAddCategoryModal(true);
+        }}
         onOpenAddBrand={() => {
           setEditingBrand(null);
           setNewBrandName("");
@@ -2183,7 +2219,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   <button
                     type="button"
                     className="v2-btn v2-btn-ghost v2-btn-xs"
-                    onClick={() => setAddCategoryModal(true)}
+                    onClick={() => {
+                      setEditingCategory(null);
+                      setNewCategoryName("");
+                      setNewCategoryDesc("");
+                      setNewCategoryColor("#10b981");
+                      setNewCategoryParentId("");
+                      setAddCategoryModal(true);
+                    }}
                     style={{ padding: "0 .25rem", height: "auto", fontSize: "10px" }}
                   >
                     + New
@@ -2396,6 +2439,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 onClick={async () => {
                   setAddCategoryModal(false);
                   setEditingCategory(null);
+                  setNewCategoryParentId("");
                 }}
                 type="button"
               >
@@ -2424,6 +2468,25 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   value={newCategoryDesc}
                   onChange={(e) => setNewCategoryDesc(e.target.value)}
                 />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">PARENT CATEGORY (OPTIONAL)</label>
+                <select
+                  className="v2-input"
+                  value={newCategoryParentId}
+                  onChange={(e) => setNewCategoryParentId(e.target.value)}
+                >
+                  <option value="">No parent — top-level category</option>
+                  {categoryParentOptions.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="v2-text-xs v2-text-muted v2-mt-1">
+                  Parent/child structure is used for taxonomy navigation and reporting. Circular parent chains are blocked.
+                </p>
               </div>
 
               {/* Square Register Style Color Swatches */}
@@ -2498,6 +2561,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   onClick={async () => {
                     setAddCategoryModal(false);
                     setEditingCategory(null);
+                    setNewCategoryParentId("");
                   }}
                   type="button"
                 >
@@ -2647,7 +2711,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     ACTIVE PRODUCTS ASSIGNED
                   </div>
                   <div className="v2-text-xs v2-mt-1">
-                    There are currently <strong>{deleteCategorySafeguard.assignedCount} active products</strong> assigned to category <strong>"{deleteCategorySafeguard.category}"</strong>.
+                    There are currently <strong>{deleteCategorySafeguard.assignedCount} active products</strong> assigned to category <strong>"{allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId)?.name || "Unknown category"}"</strong>.
                   </div>
                 </div>
 
@@ -2657,31 +2721,30 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   </label>
                   <select
                     className="v2-input v2-mt-1"
-                    value={deleteCategorySafeguard.fallbackCategory}
+                    value={deleteCategorySafeguard.replacementCategoryId}
                     onChange={(e) =>
                       setDeleteCategorySafeguard({
                         ...deleteCategorySafeguard,
-                        fallbackCategory: e.target.value,
+                        replacementCategoryId: e.target.value,
                       })
                     }
                   >
                     {allCategories
-                      .filter((c) => c.name.toLowerCase() !== deleteCategorySafeguard.category.toLowerCase())
+                      .filter((c) => c.id !== deleteCategorySafeguard.categoryId && isUuid(c.id))
                       .map((c) => (
-                        <option key={c.id || c.name} value={c.name}>
+                        <option key={c.id} value={c.id}>
                           {c.name}
                         </option>
                       ))}
-                    
                   </select>
                   <p className="v2-text-xs v2-text-muted v2-mt-1">
-                    All {deleteCategorySafeguard.assignedCount} products will be safely moved to this category to prevent orphans.
+                    All {deleteCategorySafeguard.assignedCount} products will be safely moved to the selected replacement category to prevent orphans.
                   </p>
                 </div>
               </div>
             ) : (
               <p className="v2-text-sm">
-                Are you sure you want to delete category <strong>"{deleteCategorySafeguard.category}"</strong>?
+                Are you sure you want to delete category <strong>"{allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId)?.name || "Unknown category"}"</strong>?
                 No active catalog products are assigned to this category.
               </p>
             )}
@@ -2748,7 +2811,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     ACTIVE PRODUCTS ASSIGNED
                   </div>
                   <div className="v2-text-xs v2-mt-1">
-                    There are currently <strong>{deleteBrandSafeguard.assignedCount} active products</strong> assigned to brand <strong>"{deleteBrandSafeguard.brand}"</strong>.
+                    There are currently <strong>{deleteBrandSafeguard.assignedCount} active products</strong> assigned to brand <strong>"{allBrands.find((b) => b.id === deleteBrandSafeguard.brandId)?.name || "Unknown brand"}"</strong>.
                   </div>
                 </div>
 
@@ -2758,31 +2821,30 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   </label>
                   <select
                     className="v2-input v2-mt-1"
-                    value={deleteBrandSafeguard.fallbackBrand}
+                    value={deleteBrandSafeguard.replacementBrandId}
                     onChange={(e) =>
                       setDeleteBrandSafeguard({
                         ...deleteBrandSafeguard,
-                        fallbackBrand: e.target.value,
+                        replacementBrandId: e.target.value,
                       })
                     }
                   >
                     {allBrands
-                      .filter((b) => b.name.toLowerCase() !== deleteBrandSafeguard.brand.toLowerCase())
+                      .filter((b) => b.id !== deleteBrandSafeguard.brandId && isUuid(b.id))
                       .map((b) => (
-                        <option key={b.id || b.name} value={b.name}>
+                        <option key={b.id} value={b.id}>
                           {b.name}
                         </option>
                       ))}
-                    
                   </select>
                   <p className="v2-text-xs v2-text-muted v2-mt-1">
-                    All {deleteBrandSafeguard.assignedCount} products will be safely moved to this brand.
+                    All {deleteBrandSafeguard.assignedCount} products will be safely moved to the selected replacement brand.
                   </p>
                 </div>
               </div>
             ) : (
               <p className="v2-text-sm">
-                Are you sure you want to delete brand <strong>"{deleteBrandSafeguard.brand}"</strong>?
+                Are you sure you want to delete brand <strong>"{allBrands.find((b) => b.id === deleteBrandSafeguard.brandId)?.name || "Unknown brand"}"</strong>?
                 No active catalog products are assigned to this brand.
               </p>
             )}
