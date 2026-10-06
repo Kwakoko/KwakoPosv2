@@ -337,13 +337,24 @@ export class SyncEngine {
     ).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const customers = this.commercialRepo.getCustomers(ctx).filter((c) => new Date(c.updatedAt).getTime() >= sinceDate.getTime() && new Date(c.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
     const suppliers = this.commercialRepo.getSuppliers(ctx).filter((s) => new Date(s.updatedAt).getTime() >= sinceDate.getTime() && new Date(s.updatedAt).getTime() <= maxTime).sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || a.id.localeCompare(b.id));
+    const expensesMap = (this.store as any).expenses || new Map<string, any>();
+    const expenses = Array.from(expensesMap.values())
+      .filter((e: any) =>
+        e.tenantId === ctx.tenantId &&
+        e.branchId === ctx.branchId &&
+        new Date(e.updatedAt).getTime() >= sinceDate.getTime() &&
+        new Date(e.updatedAt).getTime() <= maxTime
+      )
+      .sort((a: any, b: any) =>
+        new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime() || String(a.id).localeCompare(String(b.id))
+      );
 
-    const deltaData = { products, variants, stockLedger, adjustments, customers, suppliers };
+    const deltaData = { products, variants, stockLedger, adjustments, customers, suppliers, expenses };
     return {
       serverTimestamp: anchor.toISOString(),
       ...deltaData,
       integrityChecksum: computePayloadChecksum(deltaData),
-    };
+    } as SyncDeltaResponse;
   }
 
   processBootstrap(ctx: TenantContext, req: SyncBootstrapRequest): SyncBootstrapResponse {

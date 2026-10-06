@@ -141,7 +141,11 @@ export async function getDashboardKpiSnapshot(
         ctx.branchId,
       ),
       tx.$queryRawUnsafe<Array<{ inventory_value: unknown }>>(
-        `SELECT COALESCE(SUM("stockValue"), 0) AS inventory_value
+        `SELECT COALESCE(
+                  SUM("stockValue") FILTER (WHERE "warehouseId" IS NULL),
+                  SUM("stockValue"),
+                  0
+                ) AS inventory_value
            FROM product_branch_stock
           WHERE "tenantId" = $1
             AND "branchId" = $2`,

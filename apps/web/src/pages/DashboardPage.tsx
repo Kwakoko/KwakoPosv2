@@ -216,15 +216,19 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
 }) => {
   const width = 112;
   const height = 48;
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const sparkValues = (spark ?? []).filter((value) => Number.isFinite(value));
   const min = sparkValues.length > 0 ? Math.min(...sparkValues) : 0;
   const max = sparkValues.length > 0 ? Math.max(...sparkValues) : 1;
-  const points = sparkValues.map((v, i) => {
-    const x = (i / Math.max(1, sparkValues.length - 1)) * width;
-    const y = height - 6 - ((v - min) / Math.max(1, max - min)) * (height - 14);
-    return x + ',' + y;
-  }).join(' ');
+  const range = Math.max(1, max - min);
+  const pointCoords = sparkValues.map((v, i) => ({
+    x: (i / Math.max(1, sparkValues.length - 1)) * width,
+    y: height - 6 - ((v - min) / range) * (height - 14),
+    value: v,
+  }));
+  const points = pointCoords.map(({ x, y }) => x + ',' + y).join(' ');
   const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
+  const hoveredPoint = hoverIndex !== null ? pointCoords[hoverIndex] : null;
   const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
     (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
     (variant === 'hero' ? 'h-[198px] p-5' : 'h-[154px] p-4');
@@ -276,11 +280,55 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
           )}
         </div>
         {sparkValues.length >= 2 && (
-          <svg width={variant === 'hero' ? 118 : 100} height={variant === 'hero' ? 58 : 48}
-            viewBox={'0 0 ' + width + ' ' + height} className="mt-8 shrink-0 overflow-visible" aria-hidden="true">
-            <polygon points={area} fill={accent} opacity="0.10" />
-            <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <div
+            className="relative mt-8 shrink-0"
+            style={{ width: variant === 'hero' ? 118 : 100, height: variant === 'hero' ? 58 : 48 }}
+            onMouseLeave={() => setHoverIndex(null)}
+          >
+            <svg
+              width="100%" height="100%" viewBox={'0 0 ' + width + ' ' + height}
+              className="overflow-visible cursor-crosshair"
+              role="img"
+              aria-label={title + ' historical trend'}
+              onMouseMove={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                const x = ((event.clientX - rect.left) / rect.width) * width;
+                const index = Math.max(0, Math.min(pointCoords.length - 1,
+                  Math.round((x / width) * (pointCoords.length - 1))));
+                setHoverIndex(index);
+              }}
+            >
+              <polygon points={area} fill={accent} opacity="0.10" />
+              {hoveredPoint && (
+                <line x1={hoveredPoint.x} x2={hoveredPoint.x} y1="0" y2={height}
+                  stroke={accent} strokeWidth="1" strokeDasharray="2 2" opacity="0.45" />
+              )}
+              <polyline points={points} fill="none" stroke={accent} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              {pointCoords.map((point, index) => (
+                <circle key={index} cx={point.x} cy={point.y}
+                  r={hoverIndex === index ? 3.2 : 1.6}
+                  fill={accent}
+                  stroke="#071426"
+                  strokeWidth={hoverIndex === index ? 1.5 : 0.8}
+                  className="transition-all duration-100"
+                />
+              ))}
+            </svg>
+            {hoveredPoint && (
+              <div
+                className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-[9px] font-bold whitespace-nowrap shadow-lg"
+                style={{
+                  left: (hoveredPoint.x / width) * 100 + '%',
+                  top: Math.max(4, (hoveredPoint.y / height) * 100) + '%',
+                  background: 'rgba(3, 12, 27, 0.96)',
+                  borderColor: accent + '66',
+                  color: '#fff',
+                }}
+              >
+                {fmtCcy(hoveredPoint.value)}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -980,16 +1028,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     const variantProductIds = new Set(products.filter(p => isMultiVariantProduct(p)).map(p => p.id));
     const activeProductVariants = products.length === 0 ? [] : productVariants.filter(v => variantProductIds.has(v.productId));
 
-    const inventoryVal = products.reduce((sum, p) => {
-      if (variantProductIds.has(p.id)) {
-        const pVariants = activeProductVariants.filter(v => v.productId === p.id);
-        if (pVariants.length > 0) {
-          return sum + pVariants.reduce((vSum, v) => vSum + ((v.price || p.price || 0) * (v.stock || 0)), 0);
-        }
-      }
-      return sum + ((p.price || 0) * (p.stock || 0));
-    }, 0);
-
     const simpleLowStock  = products.filter(p => !variantProductIds.has(p.id) && p.stock > 0 && p.stock <= (p.reorderLevel ?? 10)).length;
     const variantLowStock = activeProductVariants.filter(v => v.stock > 0 && v.stock <= (v.reorderLevel ?? 5)).length;
     const lowStockCount   = products.length === 0 ? 0 : (simpleLowStock + variantLowStock);
@@ -1070,7 +1108,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       aovTrendPct,
       completedOrders, pendingOrders,
       todayPendingOrders, activeTables, todayUniqueCustomers,
-      inventoryVal, lowStockCount, outOfStockCount,
+      lowStockCount, outOfStockCount,
       activeVariantCount: activeProductVariants.length,
       todayCOGS, todayGrossProfit, todayMargin,
       nearExpiryCount, totalLoans,
@@ -1311,7 +1349,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         ['Gross Margin %', `${(authoritativeKpis?.grossMarginToday ?? Number(stats.todayMargin ?? 0)).toFixed(1)}%`, 'Profitability', 'Gross Profit / Net Sales'],
         ['Completed Orders Count', Number(authoritativeKpis?.completedOrders ?? stats.completedOrders ?? 0), 'Operations', 'Successful completed checkout sales receipts'],
         ['Average Order Value (AOV)', Number(authoritativeKpis?.aov ?? stats.todayAOV ?? 0), 'Performance', 'Net Sales / Completed Orders'],
-        ['Total Inventory Valuation', Number(authoritativeKpis?.inventoryValue ?? stats.inventoryVal ?? 0), 'Balance Sheet', 'Total valuation of on-hand inventory at buying price'],
+        ['Total Inventory Valuation', Number(authoritativeKpis?.inventoryValue ?? 0), 'Balance Sheet', 'Authoritative PostgreSQL valuation of on-hand inventory at cost'],
         ['Total Active SKUs', Number(products.length || 0), 'Catalog', 'Distinct active product master items in catalog'],
         ['Low Stock Alert SKUs', Number(authoritativeKpis?.lowStockCount ?? stats.lowStockCount ?? 0), 'Supply Chain', 'Items at or below minimum reorder threshold'],
         ['Out of Stock SKUs', Number(authoritativeKpis?.outOfStockCount ?? stats.outOfStockCount ?? 0), 'Supply Chain', 'Items with 0 available units on shelf'],
@@ -1567,11 +1605,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2.5">
+        <div className="flex min-w-max flex-col items-stretch gap-2.5">
           {/* Quiet dashboard freshness metadata: useful for auditability without competing with business KPIs. */}
           {isOnline && authoritativeKpis && (
             <span
-              className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-400 whitespace-nowrap"
+              className="flex w-full items-center justify-end gap-2 text-[11px] font-semibold text-slate-400 whitespace-nowrap"
               title={dashboardFreshness.isBehind
                 ? `Server revision ${dashboardFreshness.serverRevision || authoritativeKpis.asOfRevision} is ahead of local revision ${dashboardFreshness.localRevision}`
                 : "Authoritative dashboard freshness"}
