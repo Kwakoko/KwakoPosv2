@@ -91,6 +91,9 @@ jobs:
       - name: Conflict Center Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
 
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+
       - name: Validate conventional commit
         run: npx tsx scripts/ci/validate-commit-message.ts
 
