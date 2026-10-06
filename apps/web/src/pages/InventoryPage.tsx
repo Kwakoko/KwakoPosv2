@@ -235,7 +235,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [newVarAttrKey, setNewVarAttrKey] = useState("Size");
   const [newVarAttrVal, setNewVarAttrVal] = useState("");
   const [newVarPrice, setNewVarPrice] = useState(0);
-  const [newVarStock, setNewVarStock] = useState(10);
+  const [newVarStock, setNewVarStock] = useState(0);
 
   // In-Flow Variant Builder State (for Add Product Modal)
   const [hasVariantsToggle, setHasVariantsToggle] = useState(false);
@@ -252,7 +252,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [singleVarBarcode, setSingleVarBarcode] = useState("");
   const [singleVarBuying, setSingleVarBuying] = useState<number | "">("");
   const [singleVarSelling, setSingleVarSelling] = useState<number | "">("");
-  const [singleVarStock, setSingleVarStock] = useState<number | "">(10);
+  const [singleVarStock, setSingleVarStock] = useState<number | "">(0);
   const [singleVarReorder, setSingleVarReorder] = useState<number | "">(5);
   const [studioMatrixOpt1, setStudioMatrixOpt1] = useState("Size");
   const [studioMatrixVals1, setStudioMatrixVals1] = useState("Small, Medium, Large");
@@ -646,7 +646,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     }
 
     // For multi-branch setups, allocate products by branchId or assign unallocated to primary HQ
-    const rawProducts = Array.from(db.products.values()).filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive");
+    const rawProducts = Array.from(db.products.values()).filter((p: any) => {
+      const tenantMatches = p.tenantId === currentTenantId || p.tenant_id === currentTenantId;
+      return tenantMatches && !p.deletedAt && !p.deleted_at && p.status !== "Inactive";
+    });
 
     return branches.map((b) => {
       const branchProds = rawProducts.filter((p: any) => {
@@ -658,9 +661,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       });
 
       const bSkus = branchProds.length;
-      const bUnits = branchProds.reduce((sum: number, p: any) => sum + Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0), 0);
-      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
-      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
+      const bUnits = branchProds.reduce((sum: number, p: any) => {
+        const projected = buildStockBalanceProjection(db, currentTenantId, b.id);
+        return sum + Number(projected.byProduct.get(p.id) || 0);
+      }, 0);
+      const branchProjection = buildStockBalanceProjection(db, currentTenantId, b.id);
+      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
+      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
       const bProfit = bSelling - bBuying;
       const bMargin = bSelling > 0 ? Math.round((bProfit / bSelling) * 100) : 0;
 
@@ -675,7 +682,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         margin: bMargin,
       };
     });
-  }, [availableBranches, currentBranchId, currentBranchName, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
+  }, [availableBranches, currentBranchId, currentBranchName, currentTenantId, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
 
   const generateInflowCombinations = (
     opt1Name = varOption1Name,
