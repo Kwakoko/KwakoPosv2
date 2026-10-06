@@ -6,15 +6,22 @@ import { LocalIndexedDbStore } from "../../apps/web/src/indexedDb.js";
 
 describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
   it("persists and converges Category/Brand across clients, edit, delete/reassign and tenant boundaries", async () => {
-    const tenantA = randomUUID(); const branchA = randomUUID(); const tenantB = randomUUID(); const branchB = randomUUID();
-    const ctxA: any = { tenantId: tenantA, branchId: branchA, userId: randomUUID() }; const ctxB: any = { tenantId: tenantB, branchId: branchB, userId: randomUUID() };
+    const tenantA = randomUUID(); const branchA = randomUUID(); const branchA2 = randomUUID(); const tenantB = randomUUID(); const branchB = randomUUID();
+    const ctxA: any = { tenantId: tenantA, branchId: branchA, userId: randomUUID() }; const ctxA2: any = { tenantId: tenantA, branchId: branchA2, userId: randomUUID() }; const ctxB: any = { tenantId: tenantB, branchId: branchB, userId: randomUUID() };
     const categoryId = randomUUID(); const replacementCategoryId = randomUUID(); const brandId = randomUUID(); const replacementBrandId = randomUUID(); const productId = randomUUID();
+    const hierarchyRootId = randomUUID(); const hierarchyChildId = randomUUID(); const hierarchyGrandchildId = randomUUID();
     const catalog = new PrismaCatalogRepository(); const products = new PrismaProductRepository(); const stock = new PrismaStockRepository(); const sync = new PrismaSyncEngine(products, stock);
     try {
-      await prisma.tenant.create({ data: { id: tenantA, name: "Catalog Test A", slug: `catalog-a-${tenantA.slice(0,8)}`, branches: { create: { id: branchA, name: "Main A", code: `A-${branchA.slice(0,6)}` } } } });
+      await prisma.tenant.create({ data: { id: tenantA, name: "Catalog Test A", slug: `catalog-a-${tenantA.slice(0,8)}`, branches: { create: [{ id: branchA, name: "Main A", code: `A-${branchA.slice(0,6)}` }, { id: branchA2, name: "Main A2", code: `A2-${branchA2.slice(0,5)}` }] } } });
       await prisma.tenant.create({ data: { id: tenantB, name: "Catalog Test B", slug: `catalog-b-${tenantB.slice(0,8)}`, branches: { create: { id: branchB, name: "Main B", code: `B-${branchB.slice(0,6)}` } } } });
       const c1 = await catalog.createCategory(ctxA, { id: categoryId, name: "Audit Category", code: "AUDIT_CATEGORY" });
       const c2 = await catalog.createCategory(ctxA, { id: replacementCategoryId, name: "Replacement Category", code: "REPLACEMENT_CATEGORY" });
+      const hierarchyRoot = await catalog.createCategory(ctxA, { id: hierarchyRootId, name: "Hierarchy Root", code: "HIERARCHY_ROOT" });
+      const hierarchyChild = await catalog.createCategory(ctxA, { id: hierarchyChildId, name: "Hierarchy Child", code: "HIERARCHY_CHILD", parentId: hierarchyRootId });
+      const hierarchyGrandchild = await catalog.createCategory(ctxA, { id: hierarchyGrandchildId, name: "Hierarchy Grandchild", code: "HIERARCHY_GRANDCHILD", parentId: hierarchyChildId });
+      expect(hierarchyChild.parentId).toBe(hierarchyRootId);
+      expect(hierarchyGrandchild.parentId).toBe(hierarchyChildId);
+      await expect(catalog.updateCategory(ctxA, hierarchyRootId, { parentId: hierarchyGrandchildId })).rejects.toThrow("circular parent chain");
       const b1 = await catalog.createBrand(ctxA, { id: brandId, name: "Audit Brand", code: "AUDIT_BRAND" });
       const b2 = await catalog.createBrand(ctxA, { id: replacementBrandId, name: "Replacement Brand", code: "REPLACEMENT_BRAND" });
       expect(c1.tenantId).toBe(tenantA); expect(b1.branchId).toBe(branchA);
@@ -24,7 +31,20 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
       await client1.ready; await client2.ready;
       client1.saveCatalogCategoriesLocal([c1, c2], { tenantId: tenantA, branchId: branchA });
       client1.saveCatalogBrandsLocal([b1, b2], { tenantId: tenantA, branchId: branchA });
-      const edited = await catalog.updateCategory(ctxA, categoryId, { name: "Audit Category Edited" });
+      const branchIsolatedClient = new LocalIndexedDbStore();
+      await branchIsolatedClient.ready;
+      branchIsolatedClient.saveCatalogCategoriesLocal([{ ...c1, id: randomUUID(), name: "Branch A2 Category" }], { tenantId: tenantA, branchId: branchA2 });
+      branchIsolatedClient.saveCatalogBrandsLocal([{ ...b1, id: randomUUID(), name: "Branch A2 Brand" }], { tenantId: tenantA, branchId: branchA2 });
+      expect(branchIsolatedClient.getConfigurationLocal("inventory_categories_meta", { tenantId: tenantA, branchId: branchA })).toHaveLength(0);
+      expect(branchIsolatedClient.getConfigurationLocal("inventory_brands_meta", { tenantId: tenantA, branchId: branchA })).toHaveLength(0);
+      expect(branchIsolatedClient.getConfigurationLocal("inventory_categories_meta", { tenantId: tenantA, branchId: branchA2 })).toHaveLength(1);
+      expect(branchIsolatedClient.getConfigurationLocal("inventory_brands_meta", { tenantId: tenantA, branchId: branchA2 })).toHaveLength(1);
+      const productBeforeRename = randomUUID();
+      await products.createProduct(ctxA, { id: productBeforeRename, name: "Cascade Control Product", sku: `CAS-${productBeforeRename.slice(0,8)}`, categoryId, brandId, category: c1.name, brand: b1.name, buyingPrice: 5, sellingPrice: 7, hasVariants: false });
+      await catalog.updateCategory(ctxA, categoryId, { name: "Audit Category No Cascade", cascadeAssignedProducts: false });
+      const noCascadeProduct = await prisma.product.findUnique({ where: { id: productBeforeRename } });
+      expect(noCascadeProduct?.category).toBe("Audit Category");
+      const edited = await catalog.updateCategory(ctxA, categoryId, { name: "Audit Category Edited", cascadeAssignedProducts: true });
       const editedBrand = await catalog.updateBrand(ctxA, brandId, { name: "Audit Brand Edited" });
       const bootstrapBeforeDelete = await sync.processBootstrap(ctxA, { deviceId: "catalog-client-1", schemaVersion: client1.schemaVersion });
       await client2.bootstrapFromAuthoritativeSnapshot(bootstrapBeforeDelete, { tenantId: tenantA, branchId: branchA });
@@ -33,7 +53,9 @@ describe("Catalog master lifecycle: PostgreSQL + sync + fresh client", () => {
 
       await products.createProduct(ctxA, { id: productId, name: "Catalog Lifecycle Product", sku: `CAT-${productId.slice(0,8)}`, categoryId, brandId, category: edited.name, buyingPrice: 10, sellingPrice: 15, hasVariants: false });
       const foreignRead = await catalog.listCategories(ctxB);
+      const foreignBrandRead = await catalog.listBrands(ctxB);
       expect(foreignRead.some((c) => c.id === categoryId)).toBe(false);
+      expect(foreignBrandRead.some((b) => b.id === brandId)).toBe(false);
 
       const deletedCategory = await catalog.deleteCategory(ctxA, categoryId, replacementCategoryId);
       const deletedBrand = await catalog.deleteBrand(ctxA, brandId, replacementBrandId);
