@@ -394,6 +394,28 @@ export class PrismaCatalogRepository {
     return { id: row.id, tenantId: row.tenantId, branchId: row.branchId, name: row.name, code: row.code, origin: row.origin ?? null, notes: row.notes ?? null, isActive: row.isActive, createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
+  private async assertValidCategoryParent(
+    db: any,
+    ctx: TenantContext,
+    categoryId: string | undefined,
+    parentId: string | null | undefined,
+  ): Promise<void> {
+    if (!parentId) return;
+    if (categoryId && parentId === categoryId) throw new Error("Category cannot be its own parent");
+    const visited = new Set<string>();
+    let cursorId: string | null = parentId;
+    while (cursorId) {
+      if (visited.has(cursorId)) throw new Error("Category hierarchy contains an existing cycle");
+      visited.add(cursorId);
+      const parent: any = await db.category.findUnique({ where: { id: cursorId } });
+      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) {
+        throw new Error("Parent category belongs to another tenant/branch or is inactive");
+      }
+      if (categoryId && parent.id === categoryId) throw new Error("Category hierarchy cannot contain a circular parent chain");
+      cursorId = parent.parentId ?? null;
+    }
+  }
+
   /** Production tenants start with zero business master data. */
   async ensureDefaults(_ctx: TenantContext): Promise<void> {
     return;
@@ -406,23 +428,16 @@ export class PrismaCatalogRepository {
   }
 
   async createCategory(ctx: TenantContext, req: CreateCategoryRequest): Promise<Category> {
-    if (req.parentId) {
-      const parent = await prisma.category.findUnique({ where: { id: req.parentId } });
-      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
-    }
+    await this.assertValidCategoryParent(prisma, ctx, req.id, req.parentId);
     const row = await prisma.category.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, name: req.name.trim(), code: req.code.trim().toUpperCase(), parentId: req.parentId ?? null, description: req.description?.trim() || null, color: req.color?.trim() || null } });
     return this.categoryShape(row);
   }
 
   async updateCategory(ctx: TenantContext, id: string, req: UpdateCategoryRequest): Promise<Category> {
-    const existing = await prisma.category.findUnique({ where: { id } });
-    if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
-    if (req.parentId) {
-      if (req.parentId === id) throw new Error("Category cannot be its own parent");
-      const parent = await prisma.category.findUnique({ where: { id: req.parentId } });
-      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
-    }
     const row = await prisma.$transaction(async (tx: any) => {
+      const existing = await tx.category.findUnique({ where: { id } });
+      if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
+      if (req.parentId !== undefined) await this.assertValidCategoryParent(tx, ctx, id, req.parentId);
       const updated = await tx.category.update({ where: { id }, data: { name: req.name?.trim(), code: req.code?.trim().toUpperCase(), parentId: req.parentId !== undefined ? req.parentId : undefined, description: req.description !== undefined ? (req.description.trim() || null) : undefined, color: req.color !== undefined ? (req.color.trim() || null) : undefined, isActive: req.isActive } });
       if (req.name !== undefined && req.name.trim() !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id }, data: { category: req.name.trim() } });
       return updated;
