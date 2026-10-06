@@ -26,8 +26,11 @@
 .gap-5 { gap: 1.25rem; }
 
 .grid { display: grid; }
+.grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.col-span-12 { grid-column: span 12 / span 12; }
 @media (min-width: 640px) {
   .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sm\:col-span-6 { grid-column: span 6 / span 6; }
 }
 @media (min-width: 768px) {
   .md\:flex-row { flex-direction: row; }
