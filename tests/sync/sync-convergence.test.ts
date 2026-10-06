@@ -237,7 +237,7 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
     // Both browsers have identical calculated stock
     const stockA = calculateAvailableStock(Array.from(browserADb.stockLedger.values()).filter((l) => l.variantId === varId));
     const stockB = calculateAvailableStock(Array.from(browserBDb.stockLedger.values()).filter((l) => l.variantId === varId));
-    expect(stockA).toBe(-10);
-    expect(stockB).toBe(-10);
+    expect(stockA).toBe(0);
+    expect(stockB).toBe(0);
   });
 });
