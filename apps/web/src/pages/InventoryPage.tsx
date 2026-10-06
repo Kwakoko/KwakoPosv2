@@ -842,7 +842,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteConfirmModal(true);
   };
 
-  const handleConfirmArchiveDelete = async (softDelete = true) => {
+  const handleConfirmArchive = async () => {
     if (!itemToDelete) return;
     const target = itemToDelete;
 
@@ -856,7 +856,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       }
     }
 
-    if (softDelete && existing) {
+    if (existing) {
       // Standard SaaS Archival: hides product from POS counter while preserving historical sales and audit ledgers
       const archived = {
         ...existing,
@@ -1306,7 +1306,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           <button
                             className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                             onClick={() => handleOpenDeleteModal(item)}
-                            title="Archive / Delete Product"
+                            title="Archive / Archive Product"
                             type="button"
                             style={{ color: "var(--danger)" }}
                           >
@@ -2059,7 +2059,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         )}
       </Sheet>
 
-      {/* --- Archive / Delete SKU Confirmation Modal --- */}
+      {/* --- Archive Product Confirmation Modal --- */}
       {deleteConfirmModal && itemToDelete && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
@@ -2108,7 +2108,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </button>
               <button
                 className="v2-btn v2-btn-danger v2-btn-sm"
-                onClick={() => handleConfirmArchiveDelete(true)}
+                onClick={() => handleConfirmArchive(true)}
                 type="button"
               >
                 Archive SKU
