@@ -1,8 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const serverPath = path.resolve(process.cwd(), "apps/api/src/server.ts");
-if (!fs.existsSync(serverPath)) throw new Error("FINANCE_HARDENING_BLOCKED: canonical API server is missing.");
+function findRepoRoot(start: string): string {
+  let current = path.resolve(start);
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(current, "package.json")) && fs.existsSync(path.join(current, "apps/api/src/server.ts"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  throw new Error("FINANCE_HARDENING_BLOCKED: repository root not found.");
+}
+const serverPath = path.join(findRepoRoot(process.cwd()), "apps/api/src/server.ts");
 const source = fs.readFileSync(serverPath, "utf8");
 
 const required = [
