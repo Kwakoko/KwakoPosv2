@@ -28,7 +28,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["permission-contract", "packages/contracts/src/index.ts", "INVENTORY_BACKDATE"],
   ["domain-threshold", "packages/domain/src/index.ts", "BACKDATING_MAX_THRESHOLD_DAYS = 730", "BACKDATING_PERMISSION", "assertBackdatingPermission"],
   ["domain-insertion-invariant", "packages/domain/src/index.ts", "runningBeforeTarget", "insertionBalance"],
-  ["local-governance", "packages/database/src/index.ts", "assertBackdatingPermission(ctx)", "validateRetroactiveTimeline", "currentProjectedStock"],
+  ["local-governance", "packages/database/src/index.ts", "assertBackdatingPermission(ctx)", "validateRetroactiveTimeline", "currentQuantityBefore + quantityChange", "movement point"],
   ["prisma-governance", "packages/database/src/prismaRepositories.ts", "assertBackdatingPermission(ctx)", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "historicalQuantityBefore"],
   ["sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "payload.occurredAt", "assertBackdatingThreshold", "assertBackdatingPermission", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "occurredAt, deviceId"],
   ["unit-regressions", "tests/unit/backdated-inventory.test.ts", "exact backdated insertion point", "INVENTORY_BACKDATE_PERMISSION_REQUIRED", "ledger.quantityBefore"],
