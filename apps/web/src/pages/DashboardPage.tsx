@@ -27,7 +27,7 @@ import {
   Sparkles, Layers, Egg, Footprints, Truck, ArrowRight, Calendar,
   ShoppingCart, BarChart2, CheckCircle, RefreshCw, Zap, Star,
   Banknote, CreditCard, Smartphone, Building2, ArrowLeftRight, Wallet, Flame,
-  Printer, Award, Eye, User, Download, UserCheck, ShieldCheck
+  Printer, Award, Eye, User, Download, UserCheck, ShieldCheck, ChevronRight
 } from 'lucide-react';
 import { Sheet } from '../components/UI/Sheet.js';
 import { KokoCompanion } from '../components/KokoCompanion.js';
@@ -226,7 +226,7 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
   const area = '0,' + height + ' ' + points + ' ' + width + ',' + height;
   const cardClass = 'relative overflow-hidden rounded-xl border transition-all duration-200 ' +
     (onClick ? 'cursor-pointer hover:-translate-y-0.5 ' : '') +
-    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[126px] p-4');
+    (variant === 'hero' ? 'min-h-[198px] p-5' : 'min-h-[154px] p-4');
   const iconClass = (variant === 'hero' ? 'h-11 w-11 rounded-xl' : 'h-10 w-10 rounded-xl') +
     ' flex items-center justify-center shrink-0';
   const valueClass = (variant === 'hero' ? 'mt-5 text-[38px]' : 'mt-3 text-[27px]') +
@@ -242,6 +242,9 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
       <div className={'absolute rounded-full blur-2xl opacity-20 pointer-events-none ' +
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
+      {variant !== 'hero' && (
+        <ChevronRight className="absolute right-4 top-5 h-5 w-5" style={{ color: accent, opacity: 0.9 }} aria-hidden="true" />
+      )}
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
@@ -1565,6 +1568,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               )}
             </span>
           )}
+          <div className="flex flex-wrap items-center justify-end gap-2.5">
           {/* Status Badge 1: authoritative TRA VFD integration state */}
           <button
             type="button"
@@ -1606,6 +1610,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <ShoppingCart className="h-4 w-4 shrink-0" />
             <span>Launch POS</span>
           </button>
+          </div>
         </div>
       </div>
 

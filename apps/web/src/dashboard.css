@@ -38,6 +38,9 @@
   .md\:justify-between { justify-content: space-between; }
 }
 @media (min-width: 1024px) {
+  .lg\:flex-row { flex-direction: row; }
+  .lg\:items-end { align-items: flex-end; }
+  .lg\:justify-between { justify-content: space-between; }
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .lg\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
