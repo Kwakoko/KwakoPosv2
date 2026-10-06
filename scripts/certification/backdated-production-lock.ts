@@ -15,11 +15,11 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/contracts/src/index.ts": "bf202adfcc2d8610ef62ea6acbd331a41a132223",
   "packages/domain/src/index.ts": "97f7f953f918731832aa56eb957545fb0b07d3a1",
   "packages/database/src/index.ts": "9f6f055ad4c1597d9620a82d1a37eb40de80afa3",
-  "packages/database/src/prismaRepositories.ts": "9873a8a6af0dd063bc86be6ea7e040f53bf7d930",
+  "packages/database/src/prismaRepositories.ts": "d6964817209b17c3a876d256ae5de2cbda66b601",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "30a0b778ed7963fe383610308275cf5de60fe3d6",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
-  "tests/integration/prisma-stock-convergence.test.ts": "b65484e222627892c47f93c88597a85925b08557",
+  "tests/integration/prisma-stock-convergence.test.ts": "2ef66d7ce922e34c6aea3f05e5ce532e4dbfb70d",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
