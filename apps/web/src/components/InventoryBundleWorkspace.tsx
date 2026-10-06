@@ -2,8 +2,6 @@ import React, { useMemo, useState } from "react";
 import { Layers, Plus, Save, Trash2 } from "lucide-react";
 import { useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
-import { commitLocalOutbox } from "../persistence/commitLocalMutation.js";
-import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 
 type ComponentLine = { variantId: string; quantity: number };
 
