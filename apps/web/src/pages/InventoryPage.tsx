@@ -1568,7 +1568,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteCategory(cat.id, catSkus)
+                                  onClick={() => handleOpenDeleteCategory(cat.id, catSkus)}
                                   title="Delete or Reassign Category"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
@@ -1702,7 +1702,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteBrand(brand.id, brandSkus)
+                                  onClick={() => handleOpenDeleteBrand(brand.id, brandSkus)}
                                   title="Delete or Reassign Brand"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
