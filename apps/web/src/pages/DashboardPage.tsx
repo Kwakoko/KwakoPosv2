@@ -249,8 +249,25 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
       <div className={'absolute rounded-full blur-2xl opacity-20 pointer-events-none ' +
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
-      {variant !== 'hero' && (
-        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5" style={{ color: accent, opacity: 0.95 }} aria-hidden="true" />
+      {onClick && variant !== 'hero' && (
+        <button
+          type="button"
+          aria-label={'Open actions for ' + title}
+          title={'Open actions for ' + title}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+          }}
+          className="absolute right-3 top-3 z-50 flex h-8 w-8 items-center justify-center rounded-lg border transition-all hover:scale-105 active:scale-95"
+          style={{
+            color: accent,
+            borderColor: accent + '66',
+            background: 'rgba(5, 18, 38, 0.96)',
+            boxShadow: '0 0 14px ' + accent + '18',
+          }}
+        >
+          <ChevronRight className="h-5 w-5" aria-hidden="true" />
+        </button>
       )}
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0">
