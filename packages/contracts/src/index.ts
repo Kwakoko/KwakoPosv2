@@ -20,6 +20,7 @@ export const CommercialPermissionEnum = z.enum([
   "PURCHASE_RECEIVE",
   "SALE_VIEW",
   "SALE_CREATE",
+  "SALE_BACKDATE",
   "SALE_VOID",
   "SALE_RETURN",
   "PAYMENT_VIEW",

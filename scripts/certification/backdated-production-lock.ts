@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const LOCK_ID = "BACKDATED-INVENTORY-PRODUCTION-LOCK-2026-10-06";
+const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-07";
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "d38f90796482287564e3d9443f7e6543afee2ae4",
@@ -11,29 +11,37 @@ const LOCKED_BLOBS: Record<string, string> = {
   ".github/workflows/production-certification.yml": "103963535b668b95f4761c0476545603fb8c6eea",
   ".github/workflows/production-release-exact-main.yml": "253b4a5d57a1310d6cf62baa34489a397c55eec5",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
-  "apps/web/src/services/payloadValidationService.ts": "a95c2716f7fe86e3cb641338b3ee8b2b45949895",
-  "packages/contracts/src/index.ts": "3dfe515b0fea73a50709e04b600821a54c1b311f",
-  "packages/domain/src/index.ts": "97f7f953f918731832aa56eb957545fb0b07d3a1",
+  "apps/web/src/pages/PosPage.tsx": "c5545e04531b6c359ccea13faf04262fe3db1c07",
+  "apps/web/src/services/payloadValidationService.ts": "9c28e200a6a2175c81d9d900d168936ae3e96f7d",
+  "packages/contracts/src/index.ts": "4d9df46dee38d964d533166e78e43ecec00ab2e5",
+  "packages/domain/src/index.ts": "c1082076ac473584d61c3f108fcef819e54cadb1",
+  "packages/domain/src/financialBridge.ts": "398c6bdcacc0ac5c7c7c0b513e6ac47b7a7b4131",
   "packages/database/src/index.ts": "9f6f055ad4c1597d9620a82d1a37eb40de80afa3",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "f15ce033a7e213104ba92f6ce0be0535611db25e",
+  "packages/database/src/atomicCommercialFinance.ts": "c56efbfbcbde69c6d351ec569dfbdc82ce104bbc",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "e20e0177c41bb65a40cab11a9b52ae4fcdd77e6c",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
-  "tests/integration/prisma-stock-convergence.test.ts": "2ef66d7ce922e34c6aea3f05e5ce532e4dbfb70d",
+  "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
   ["ui-backdate-entry", "apps/web/src/pages/InventoryPage.tsx", "Backdate Stock Movement", "Post Backdated Stock"],
+  ["pos-backdate-entry", "apps/web/src/pages/PosPage.tsx", "Activate Backdated Sale", "Historical Sale Date & Time", "Complete Backdated Sale", "SALE_BACKDATE"],
   ["browser-normalization", "apps/web/src/services/payloadValidationService.ts", "NormalizedStockAdjustmentPayload", "occurredAt", "normalizeStockAdjustmentPayload"],
-  ["permission-contract", "packages/contracts/src/index.ts", "INVENTORY_BACKDATE"],
-  ["domain-threshold", "packages/domain/src/index.ts", "BACKDATING_MAX_THRESHOLD_DAYS = 730", "BACKDATING_PERMISSION", "assertBackdatingPermission"],
+  ["permission-contract", "packages/contracts/src/index.ts", "INVENTORY_BACKDATE", "SALE_BACKDATE", "occurredAt", "isBackdated"],
+  ["domain-threshold", "packages/domain/src/index.ts", "BACKDATING_MAX_THRESHOLD_DAYS = 730", "BACKDATING_PERMISSION", "assertBackdatingPermission", "SALE_BACKDATING_PERMISSION", "assertSaleBackdatingPermission"],
+  ["finance-date", "packages/domain/src/financialBridge.ts", "entryDate:", "sale.soldAt", "toISOString()"],
   ["domain-insertion-invariant", "packages/domain/src/index.ts", "runningBeforeTarget", "insertionBalance"],
   ["local-governance", "packages/database/src/index.ts", "assertBackdatingPermission(ctx)", "validateRetroactiveTimeline", "currentQuantityBefore + quantityChange", "movement point"],
   ["prisma-governance", "packages/database/src/prismaRepositories.ts", "assertBackdatingPermission(ctx)", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "historicalQuantityBefore"],
+  ["pos-finance-governance", "packages/database/src/atomicCommercialFinance.ts", "assertSaleBackdatingPermission(ctx)", "validateRetroactiveTimeline", "historicalRows", "soldAt: occurredAt"],
   ["sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "payload.occurredAt", "assertBackdatingThreshold", "assertBackdatingPermission", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "occurredAt, deviceId"],
+  ["pos-sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "assertSaleBackdatingPermission", "isBackdated", "BACKDATED_SALE_DATE_REQUIRED"],
   ["unit-regressions", "tests/unit/backdated-inventory.test.ts", "exact backdated insertion point", "INVENTORY_BACKDATE_PERMISSION_REQUIRED", "ledger.quantityBefore"],
   ["normalization-regression", "tests/unit/payload-validation-service.test.ts", "preserves occurredAt for offline historical stock movements"],
   ["integration-regressions", "tests/integration/prisma-stock-convergence.test.ts", "preserves backdated timestamps and historical lineage through authoritative sync", "ACCOUNTING_PERIOD_LOCKED"],
+  ["pos-sales-regression", "tests/integration/prisma-stock-convergence.test.ts", "first-class POS backdated sales preserve historical financial and stock dates", "SALE_BACKDATE_PERMISSION_REQUIRED"],
   ["ci-hook", ".github/workflows/ci.yml", "npm run certify:backdated-lock"],
   ["candidate-hook", ".github/workflows/production-certification.yml", "npm run certify:backdated-lock"],
   ["release-hook", ".github/workflows/production-release-exact-main.yml", "npm run certify:backdated-lock"],

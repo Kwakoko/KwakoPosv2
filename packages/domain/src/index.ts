@@ -72,6 +72,7 @@ export function assertStockLedgerImmutability(existingLedgerId?: string): void {
  */
 export const BACKDATING_MAX_THRESHOLD_DAYS = 730;
 export const BACKDATING_PERMISSION = "INVENTORY_BACKDATE";
+export const SALE_BACKDATING_PERMISSION = "SALE_BACKDATE";
 
 /**
  * Backdated inventory mutations require an explicit permission unless the
@@ -81,6 +82,14 @@ export function assertBackdatingPermission(ctx: TenantContext): void {
   const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions : [];
   if (!permissions.includes("*") && !permissions.includes(BACKDATING_PERMISSION)) {
     throw new Error("INVENTORY_BACKDATE_PERMISSION_REQUIRED: explicit INVENTORY_BACKDATE permission is required");
+  }
+}
+
+/** Explicit permission gate for POS sales recorded against a historical sale timestamp. */
+export function assertSaleBackdatingPermission(ctx: TenantContext): void {
+  const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions : [];
+  if (!permissions.includes("*") && !permissions.includes(SALE_BACKDATING_PERMISSION)) {
+    throw new Error("SALE_BACKDATE_PERMISSION_REQUIRED: explicit SALE_BACKDATE permission is required");
   }
 }
 

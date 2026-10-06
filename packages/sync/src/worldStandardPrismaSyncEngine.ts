@@ -3,7 +3,7 @@ import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
-import { ReceiptEngine, ReceiptNumberGenerator, assertBackdatingThreshold, assertBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
+import { ReceiptEngine, ReceiptNumberGenerator, assertBackdatingThreshold, assertBackdatingPermission, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import {
   buildDomainEvent,
   ensureDurableDomainEventJournal,
@@ -105,20 +105,28 @@ export class WorldStandardPrismaSyncEngine {
   private ensureInfrastructure(): Promise<void> {
     if (this.infrastructureReady) return this.infrastructureReady!;
     this.infrastructureReady = (async () => {
-      await prisma.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq`);
-      await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
-      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
-      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
-      await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
-      await ensureDurableDomainEventJournal(prisma);
-       await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, local_fingerprint TEXT, remote_fingerprint TEXT, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ, resolved_by TEXT, resolution_operation_id TEXT, resolved_server_revision BIGINT, resolved_entity_fingerprint TEXT)`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS local_fingerprint TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS remote_fingerprint TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_by TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_server_revision BIGINT`);
-       await prisma.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_entity_fingerprint TEXT`);
+      // Multiple sync engine instances can initialize against the same PostgreSQL
+      // database concurrently (especially in multi-device tests and clustered API
+      // workers). PostgreSQL's CREATE INDEX IF NOT EXISTS is not sufficient to
+      // serialize concurrent DDL, so hold a transaction-scoped advisory lock around
+      // the complete infrastructure bootstrap.
+      await prisma.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended('kwakopos:sync-infrastructure', 0))`);
+        await tx.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS sync_change_revision_seq`);
+        await tx.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_change_journal (revision BIGINT PRIMARY KEY DEFAULT nextval('sync_change_revision_seq'), tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL, record JSONB NOT NULL, source TEXT NOT NULL DEFAULT 'push', created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+        await tx.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS sync_change_journal_tenant_branch_operation_uq ON sync_change_journal (tenant_id, branch_id, operation_id)`);
+        await tx.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_scope_revision_idx ON sync_change_journal (tenant_id, branch_id, revision)`);
+        await tx.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS sync_change_journal_entity_idx ON sync_change_journal (tenant_id, branch_id, entity_type, entity_id, revision)`);
+        await ensureDurableDomainEventJournal(tx);
+        await tx.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS sync_conflict_record (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, operation_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation_type TEXT NOT NULL DEFAULT 'UPDATE', local_payload JSONB NOT NULL, remote_payload JSONB NOT NULL, local_fingerprint TEXT, remote_fingerprint TEXT, status TEXT NOT NULL DEFAULT 'OPEN', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ, resolved_by TEXT, resolution_operation_id TEXT, resolved_server_revision BIGINT, resolved_entity_fingerprint TEXT)`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS operation_type TEXT NOT NULL DEFAULT 'UPDATE'`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS local_fingerprint TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS remote_fingerprint TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_by TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolution_operation_id TEXT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_server_revision BIGINT`);
+        await tx.$executeRawUnsafe(`ALTER TABLE sync_conflict_record ADD COLUMN IF NOT EXISTS resolved_entity_fingerprint TEXT`);
+      });
     })();
     return this.infrastructureReady!;
   }
@@ -835,8 +843,23 @@ const now = new Date();
     }
 
     if (op.entityType === "Sale" && op.operationType === "CREATE") {
+      const payload: any = op.payload || {};
+      const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : null;
+      const isBackdated = Boolean(payload.isBackdated || (occurredAt && Math.abs(Date.now() - occurredAt.getTime()) > 5 * 60 * 1000));
+      if (payload.isBackdated && !occurredAt) throw new Error("BACKDATED_SALE_DATE_REQUIRED");
+      if (isBackdated) {
+        assertSaleBackdatingPermission(ctx);
+        assertBackdatingThreshold(occurredAt as Date);
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: { tenantId: ctx.tenantId, startDate: { lte: occurredAt as Date }, endDate: { gte: occurredAt as Date }, status: { in: ["CLOSED", "LOCKED"] } },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate sale into accounting period "${closedPeriod.name}".`);
+        }
+      }
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
-      await financeTx.createSale(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      await financeTx.createSale(ctx, { ...payload, id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
       return;
     }
 

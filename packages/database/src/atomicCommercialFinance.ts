@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
-import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering } from "@kwakopos2/domain";
+import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 export class PrismaAtomicCommercialFinanceService {
@@ -139,7 +139,21 @@ export class PrismaAtomicCommercialFinanceService {
         req.discountTotal || 0,
       );
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
-      const saleNumber = `SAL-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+      const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
+      const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
+      if (req.isBackdated && !req.occurredAt) throw new Error("BACKDATED_SALE_DATE_REQUIRED");
+      if (isBackdated) {
+        assertSaleBackdatingPermission(ctx);
+        assertBackdatingThreshold(occurredAt);
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: { tenantId: ctx.tenantId, startDate: { lte: occurredAt }, endDate: { gte: occurredAt }, status: { in: ["CLOSED", "LOCKED"] } },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate sale into accounting period "${closedPeriod.name}".`);
+        }
+      }
+      const saleNumber = `SAL-${occurredAt.toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const payments: any[] = [];
       for (const p of req.payments || []) {
         let customerCreditLimit: number | undefined;
@@ -163,7 +177,7 @@ export class PrismaAtomicCommercialFinanceService {
           customerCurrentBalance,
         });
         if (!r.success) throw new Error(r.error || "PAYMENT_REJECTED");
-        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
+        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: occurredAt }); }
       const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
       if (payments.some((p) => p.paymentMethod === "CASH")) {
@@ -178,7 +192,7 @@ export class PrismaAtomicCommercialFinanceService {
 
       const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
-      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: now, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
+      const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
@@ -207,13 +221,21 @@ export class PrismaAtomicCommercialFinanceService {
         }
         const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
         if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        const ledgerBefore = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId } });
-        const qtyBefore = Number(ledgerBefore._sum.quantityChange ?? 0);
+        const ledgerRows = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId }, orderBy: { occurredAt: "asc" } });
+        const currentStock = calculateAvailableStock(ledgerRows as any);
+        const historicalRows = isBackdated ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime()) : [];
+        const historicalStock = isBackdated ? calculateAvailableStock(historicalRows as any) : currentStock;
+        const qtyBefore = isBackdated ? historicalStock : currentStock;
         if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
 
-        const isOversell = qtyBefore < qtySold;
+        if (isBackdated) {
+          const validation = validateRetroactiveTimeline(ledgerRows as any, occurredAt, -qtySold);
+          if (!validation.valid) throw new Error(`INSUFFICIENT_STOCK: Backdated sale would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`);
+        }
+
+        const isOversell = !isBackdated && qtyBefore < qtySold;
         const shortfall = isOversell ? qtySold - qtyBefore : 0;
-        const qtyAfter = Math.max(0, qtyBefore - qtySold);
+        const qtyAfter = isBackdated ? qtyBefore - qtySold : Math.max(0, qtyBefore - qtySold);
 
         if (isOversell) {
           const conflictId = `conflict:oversell:${saleId}:${l.variantId}`;
@@ -277,7 +299,7 @@ export class PrismaAtomicCommercialFinanceService {
             totalCost: qtySold * (l.unitCost || 0),
             referenceType: "SALE",
             referenceId: sale.id,
-            occurredAt: now,
+            occurredAt,
             deviceId: req.deviceId,
             operationId: req.operationId,
             idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}`,
