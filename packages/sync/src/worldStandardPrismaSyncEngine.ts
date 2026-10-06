@@ -82,6 +82,28 @@ export class WorldStandardPrismaSyncEngine {
     this.finance = new PrismaAtomicCommercialFinanceService(prisma);
   }
 
+  private async assertValidCategoryParent(
+    db: any,
+    ctx: TenantContext,
+    categoryId: string,
+    parentId: string | null | undefined,
+  ): Promise<void> {
+    if (!parentId) return;
+    if (parentId === categoryId) throw new Error("Category cannot be its own parent");
+    const visited = new Set<string>();
+    let cursorId: string | null = parentId;
+    while (cursorId) {
+      if (visited.has(cursorId)) throw new Error("Category hierarchy contains an existing cycle");
+      visited.add(cursorId);
+      const parent: any = await db.category.findUnique({ where: { id: cursorId } });
+      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) {
+        throw new Error("Parent category belongs to another tenant/branch or is inactive");
+      }
+      if (parent.id === categoryId) throw new Error("Category hierarchy cannot contain a circular parent chain");
+      cursorId = parent.parentId ?? null;
+    }
+  }
+
   private ensureInfrastructure(): Promise<void> {
     if (this.infrastructureReady) return this.infrastructureReady!;
     this.infrastructureReady = (async () => {
@@ -479,10 +501,7 @@ export class WorldStandardPrismaSyncEngine {
           if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
           return;
         }
-        if (payload.parentId) {
-          const parent = await tx.category.findUnique({ where: { id: payload.parentId } });
-          if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
-        }
+        await this.assertValidCategoryParent(tx, ctx, op.entityId, payload.parentId ?? null);
         await tx.category.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, name: String(payload.name || "").trim(), code: String(payload.code || payload.name || "").trim().toUpperCase(), parentId: payload.parentId ?? null, description: payload.description?.trim() || null, color: payload.color?.trim() || null, isActive: payload.isActive !== false } });
         return;
       }
@@ -503,11 +522,7 @@ export class WorldStandardPrismaSyncEngine {
         await tx.category.update({ where: { id: op.entityId }, data: { isActive: false } });
         return;
       }
-      if (payload.parentId === op.entityId) throw new Error("Category cannot be its own parent");
-      if (payload.parentId) {
-        const parent = await tx.category.findUnique({ where: { id: payload.parentId } });
-        if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
-      }
+      if (payload.parentId !== undefined) await this.assertValidCategoryParent(tx, ctx, op.entityId, payload.parentId ?? null);
       const name = payload.name === undefined ? undefined : String(payload.name).trim();
       await tx.category.update({ where: { id: op.entityId }, data: { name, code: payload.code === undefined ? undefined : String(payload.code).trim().toUpperCase(), parentId: payload.parentId !== undefined ? payload.parentId : undefined, description: payload.description !== undefined ? (String(payload.description).trim() || null) : undefined, color: payload.color !== undefined ? (String(payload.color).trim() || null) : undefined, isActive: payload.isActive } });
       if (name !== undefined && name !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: op.entityId }, data: { category: name } });
