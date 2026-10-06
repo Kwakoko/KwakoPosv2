@@ -19,7 +19,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/clientSyncEngine.ts": "0ffa3304b334c7eba5b8578851cfc4250cf0ef22",
   "tests/unit/stock-ledger-movement.test.ts": "d24fcfb9a39a76b8d60a282ce2c4401c07e7bb2c",
   "tests/integration/prisma-stock-convergence.test.ts": "2ef66d7ce922e34c6aea3f05e5ce532e4dbfb70d",
-  "tests/integration/catalog-master-lifecycle.test.ts": "9fad6d91ab0945b7dadcd7b4c9cd4106ad642b97",
+  "tests/integration/catalog-master-lifecycle.test.ts": "3912fadfd502e9df6543b36e8742ae254d3fff7a",
   "tests/integration/tenant-clean-initial-state.test.ts": "0a115000cc032fef05df7e0e954fe46704be2c44",
 };
 
