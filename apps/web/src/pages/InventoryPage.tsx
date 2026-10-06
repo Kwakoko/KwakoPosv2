@@ -559,9 +559,20 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     });
   }, [items, categoryFilter, searchQuery]);
 
-  // ─── Production Inventory Valuation Metrics (Weighted Average Cost Basis) ────
-  const totalUniqueSkus = items.length;
-  const totalStockUnits = items.reduce((sum, i) => sum + i.stock, 0);
+  // ─── Authoritative Overview Metrics ────────────────────────────────────────
+  // Inventory truth is variant + branch scoped. Parent products are catalog
+  // definitions; sellable SKUs and quantities come from branch variants/ledger.
+  const activeVariants = useMemo(() => items.flatMap((item) => item.variants || []), [items]);
+  const totalUniqueSkus = useMemo(() => {
+    const variantSkus = new Set(activeVariants.map((v) => v.sku.trim()).filter(Boolean));
+    const parentOnlySkus = items.filter((i) => !i.variants?.length && i.sku.trim()).map((i) => i.sku.trim());
+    for (const sku of parentOnlySkus) variantSkus.add(sku);
+    return variantSkus.size;
+  }, [activeVariants, items]);
+  const totalStockUnits = useMemo(
+    () => items.reduce((sum, i) => sum + Number(i.stock || 0), 0),
+    [items],
+  );
 
   // Inventory valuation is derived from ledger purchase/receipt costs, not the
   // mutable catalog buyingPrice. This keeps the UI aligned with server WAC.
@@ -607,9 +618,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const stockSellingValue = items.reduce((sum, i) => sum + i.stock * i.sellingPrice, 0);
   const potentialProfit = stockSellingValue - stockBuyingValue;
   const avgMarginPct = stockSellingValue > 0 ? Math.round((potentialProfit / stockSellingValue) * 100) : 0;
-  const lowStockCount = items.filter((i) => i.stock > 0 && i.stock <= i.reorderLevel).length;
-  const outOfStockCount = items.filter((i) => i.stock === 0).length;
-  const overstockCount = items.filter((i) => i.stock > 100).length;
+  // Alert counts are SKU/variant based. Parent-only products remain supported.
+  const stockTrackedRows = activeVariants.length > 0
+    ? activeVariants.map((v) => ({ stock: Number(v.stock || 0), reorderLevel: Number(v.reorderLevel || 0) }))
+    : items.map((i) => ({ stock: Number(i.stock || 0), reorderLevel: Number(i.reorderLevel || 0) }));
+  const lowStockCount = stockTrackedRows.filter((r) => r.stock > 0 && r.stock <= r.reorderLevel).length;
+  const outOfStockCount = stockTrackedRows.filter((r) => r.stock === 0).length;
+  const overstockCount = stockTrackedRows.filter((r) => r.stock > 100).length;
   const expiringCount = useMemo(() => {
     const now = Date.now();
     const limit30Days = 86400000 * 30;
@@ -620,7 +635,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       return diff > 0 && diff <= limit30Days;
     }).length;
   }, [items]);
-  const healthScore = totalUniqueSkus === 0 ? 100 : Math.max(0, 100 - (outOfStockCount * 12 + lowStockCount * 5));
+  // Availability health is normalized; an empty catalog is neutral, not healthy.
+  const healthScore = stockTrackedRows.length === 0
+    ? 0
+    : Math.round(Math.max(0, 100 - ((outOfStockCount / stockTrackedRows.length) * 70) - ((lowStockCount / stockTrackedRows.length) * 30)));
 
   // Valuation Date Snapshot Filter
   const [valuationDateFilter, setValuationDateFilter] = useState("Today");
@@ -632,61 +650,55 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       ? availableBranches
       : [{ id: currentBranchId || "main", name: currentBranchName || "Main HQ" }];
 
-    // If single branch, 100% of the active inventory belongs to this branch
-    if (branches.length === 1) {
-      const b = branches[0];
-      const profit = stockSellingValue - stockBuyingValue;
-      const margin = stockSellingValue > 0 ? Math.round((profit / stockSellingValue) * 100) : 0;
-      return [{
-        id: b.id,
-        branch: b.name,
-        skus: totalUniqueSkus,
-        units: totalStockUnits,
-        buyingVal: stockBuyingValue,
-        sellingVal: stockSellingValue,
-        profit,
-        margin,
-      }];
-    }
-
-    // For multi-branch setups, allocate products by branchId or assign unallocated to primary HQ
-    const rawProducts = Array.from(db.products.values()).filter((p: any) => {
-      const tenantMatches = p.tenantId === currentTenantId || p.tenant_id === currentTenantId;
-      return tenantMatches && !p.deletedAt && !p.deleted_at && p.status !== "Inactive";
-    });
-
     return branches.map((b) => {
-      const branchProds = rawProducts.filter((p: any) => {
-        const pBranch = p.branchId || p.branch_id;
-        if (!pBranch || pBranch === "all" || pBranch === "default") {
-          return b.id === branches[0].id;
+      const projection = buildStockBalanceProjection(db, currentTenantId, b.id);
+      const branchProducts = Array.from(db.products.values()).filter((p: any) =>
+        (p.tenantId === currentTenantId || p.tenant_id === currentTenantId) &&
+        !p.deletedAt && !p.deleted_at && p.status !== "Inactive"
+      );
+
+      let skus = 0;
+      let units = 0;
+      let buyingVal = 0;
+      let sellingVal = 0;
+
+      for (const p of branchProducts) {
+        const variants = Array.from(db.productVariants.values()).filter((v: any) =>
+          v.productId === p.id && v.tenantId === currentTenantId && v.branchId === b.id
+        ) as any[];
+
+        if (variants.length > 0) {
+          for (const v of variants) {
+            skus += 1;
+            const qty = Number(projection.byVariant.get(v.id) || 0);
+            units += qty;
+            const cost = Number(authoritativeWacByVariant.get(v.id) ?? v.buyingPrice ?? v.costPrice ?? 0);
+            const price = Number(v.price ?? v.sellingPrice ?? p.sellingPrice ?? p.price ?? 0);
+            buyingVal += qty * cost;
+            sellingVal += qty * price;
+          }
+        } else {
+          const qty = Number(projection.byProduct.get(p.id) || 0);
+          if (p.sku) skus += 1;
+          units += qty;
+          buyingVal += qty * Number(p.buyingPrice ?? p.costPrice ?? 0);
+          sellingVal += qty * Number(p.sellingPrice ?? p.price ?? 0);
         }
-        return pBranch === b.id || (b.name && String(pBranch).toLowerCase().includes(b.name.toLowerCase()));
-      });
+      }
 
-      const bSkus = branchProds.length;
-      const bUnits = branchProds.reduce((sum: number, p: any) => {
-        const projected = buildStockBalanceProjection(db, currentTenantId, b.id);
-        return sum + Number(projected.byProduct.get(p.id) || 0);
-      }, 0);
-      const branchProjection = buildStockBalanceProjection(db, currentTenantId, b.id);
-      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
-      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
-      const bProfit = bSelling - bBuying;
-      const bMargin = bSelling > 0 ? Math.round((bProfit / bSelling) * 100) : 0;
-
+      const profit = sellingVal - buyingVal;
       return {
         id: b.id,
         branch: b.name,
-        skus: bSkus,
-        units: bUnits,
-        buyingVal: bBuying,
-        sellingVal: bSelling,
-        profit: bProfit,
-        margin: bMargin,
+        skus,
+        units,
+        buyingVal,
+        sellingVal,
+        profit,
+        margin: sellingVal > 0 ? Math.round((profit / sellingVal) * 100) : 0,
       };
     });
-  }, [availableBranches, currentBranchId, currentBranchName, currentTenantId, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
+  }, [availableBranches, currentBranchId, currentBranchName, currentTenantId, db, authoritativeWacByVariant]);
 
   const generateInflowCombinations = (
     opt1Name = varOption1Name,
