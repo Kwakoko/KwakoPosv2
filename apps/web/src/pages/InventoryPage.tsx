@@ -713,7 +713,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           attributes: { [opt1Name]: v1, ...(opt2Name.trim() && v2 ? { [opt2Name]: v2 } : {}) },
           buyingPrice: Number(newProd.buyingPrice) || 0,
           sellingPrice: Number(newProd.sellingPrice) || 0,
-          stock: 10,
+          stock: 0,
           reorderLevel: 5,
         });
       }
@@ -3153,7 +3153,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                   attributes: { [studioMatrixOpt1]: v1, ...(studioMatrixOpt2 && v2 ? { [studioMatrixOpt2]: v2 } : {}) },
                                   buyingPrice: variantModalProduct.buyingPrice,
                                   sellingPrice: variantModalProduct.sellingPrice,
-                                  stock: 10,
+                                  stock: 0,
                                   reorderLevel: 5,
                                 });
                               }
