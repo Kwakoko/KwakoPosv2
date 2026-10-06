@@ -104,6 +104,25 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
         /INVALID_DATE/,
       );
     });
+
+    it("should reject intentional backdating without INVENTORY_BACKDATE permission", () => {
+      const limitedCtx = { ...ctx, permissions: ["INVENTORY_ADJUST"] };
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+
+      expect(() => {
+        stockRepo.recordStockAdjustment(limitedCtx, {
+          productId: testProduct.id,
+          variantId: testVariant.id,
+          adjustmentType: "INCREASE",
+          quantityChange: 10,
+          reason: "Permission regression",
+          deviceId: "dev-permission",
+          operationId: "op-permission",
+          idempotencyKey: "KEY-PERMISSION",
+          occurredAt: thirtyDaysAgo,
+        });
+      }).toThrowError(/INVENTORY_BACKDATE_PERMISSION_REQUIRED/);
+    });
   });
 
   describe("2. Point-in-Time Historical Stock Calculation", () => {
@@ -167,6 +186,19 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
       expect(result.lowestIntermediateBalance).toBe(25);
     });
 
+    it("should reject a negative balance at the exact backdated insertion point", () => {
+      const laterIntake = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString();
+      const backdatedTime = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+      const ledgerEntries = [
+        { id: "later", variantId: testVariant.id, quantityChange: 100, movementType: "PURCHASE_RECEIVE", occurredAt: laterIntake },
+      ];
+
+      const result = validateRetroactiveTimeline(ledgerEntries as any, backdatedTime, -1);
+      expect(result.valid).toBe(false);
+      expect(result.lowestIntermediateBalance).toBe(-1);
+      expect(result.violationDate).toBe(new Date(backdatedTime).toISOString());
+    });
+
     it("should detect invalid timeline when an intermediate running balance would dip below zero", () => {
       const t0 = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString(); // +50 (balance 50)
       const t1 = new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString(); // -45 (balance 5)
@@ -224,7 +256,7 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
 
       // 3. Backdated addition 20 days ago (between intake and sale): +20 units
       const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
-      const { adjustment } = stockRepo.recordStockAdjustment(ctx, {
+      const { adjustment, ledger } = stockRepo.recordStockAdjustment(ctx, {
         productId: testProduct.id,
         variantId: testVariant.id,
         adjustmentType: "INCREASE",
@@ -238,6 +270,8 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
 
       expect(adjustment.quantityChange).toBe(20);
       expect(adjustment.occurredAt).toBe(twentyDaysAgo);
+      expect(ledger.quantityBefore).toBe(50);
+      expect(ledger.quantityAfter).toBe(70);
       // New total stock should be 40 + 20 = 60
       expect(stockRepo.getAvailableStock(ctx, testVariant.id)).toBe(60);
 
@@ -288,7 +322,7 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
       // On day 30, physical count showed 95 units (instead of book stock 100).
       // Discrepancy on day 30 was 95 - 100 = -5.
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-      const { adjustment } = stockRepo.recordStockAdjustment(ctx, {
+      const { adjustment, ledger } = stockRepo.recordStockAdjustment(ctx, {
         productId: testProduct.id,
         variantId: testVariant.id,
         adjustmentType: "SET",
@@ -302,6 +336,8 @@ describe("Backdated Inventory Function & 2-Year Threshold Suite", () => {
 
       // Delta applied must be -5
       expect(adjustment.quantityChange).toBe(-5);
+      expect(ledger.quantityBefore).toBe(100);
+      expect(ledger.quantityAfter).toBe(95);
 
       // Current stock today must be 70 + (-5) = 65, preserving the subsequent 30-unit sale!
       expect(stockRepo.getAvailableStock(ctx, testVariant.id)).toBe(65);

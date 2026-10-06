@@ -12,13 +12,13 @@ const REQUIRED_SUBITEMS = [
 const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/InventoryPage.tsx": "06e5d58d410ae4d8935fa3dae13ecc586ef2f689",
   "apps/web/src/services/inventoryStockService.ts": "b5b24e3efabb022477173419993f6c4723a483fa",
-  "packages/database/src/prismaRepositories.ts": "31fa81e9cab1fa98b21aeb33340d8d4c37cb2510",
+  "packages/database/src/prismaRepositories.ts": "d6964817209b17c3a876d256ae5de2cbda66b601",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "29f397f383793274800dfc294fbb7e54740b0f4a",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "30a0b778ed7963fe383610308275cf5de60fe3d6",
   "apps/web/src/indexedDb.ts": "e8ea0788f2ed494715ce4c4c62b8c12b3c1b5ef1",
   "apps/web/src/clientSyncEngine.ts": "0ffa3304b334c7eba5b8578851cfc4250cf0ef22",
   "tests/unit/stock-ledger-movement.test.ts": "d24fcfb9a39a76b8d60a282ce2c4401c07e7bb2c",
-  "tests/integration/prisma-stock-convergence.test.ts": "fa99d68b4ca72c39a4a986da24552a97fe73e897",
+  "tests/integration/prisma-stock-convergence.test.ts": "2ef66d7ce922e34c6aea3f05e5ce532e4dbfb70d",
   "tests/integration/catalog-master-lifecycle.test.ts": "7838c052d5a3091265e45621007dbfcd4720bbbb",
   "tests/integration/tenant-clean-initial-state.test.ts": "0a115000cc032fef05df7e0e954fe46704be2c44",
 };

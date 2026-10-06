@@ -3,7 +3,7 @@ import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
-import { ReceiptEngine, ReceiptNumberGenerator } from "@kwakopos2/domain";
+import { ReceiptEngine, ReceiptNumberGenerator, assertBackdatingThreshold, assertBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import {
   buildDomainEvent,
   ensureDurableDomainEventJournal,
@@ -679,18 +679,54 @@ export class WorldStandardPrismaSyncEngine {
       if (!variant || variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       let changeQty = Number(payload.quantityChange ?? 0);
       if (payload.adjustmentType === "DECREASE") changeQty = -Math.abs(changeQty);
+
+      const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+      const isBackdated = Boolean(payload.occurredAt) && Math.abs(Date.now() - occurredAt.getTime()) > 5 * 60 * 1000;
+      if (isBackdated) assertBackdatingPermission(ctx);
+      if (payload.occurredAt) assertBackdatingThreshold(payload.occurredAt);
+
+      const ledgerRows = await tx.stockLedger.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId },
+        orderBy: { occurredAt: "asc" },
+      });
+      const currentStock = calculateAvailableStock(ledgerRows.map(ledgerShape));
+      const historicalRows = isBackdated
+        ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime())
+        : [];
+      const historicalStock = isBackdated ? calculateAvailableStock(historicalRows.map(ledgerShape)) : currentStock;
+
       if (payload.adjustmentType === "SET") {
-        const ledger = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId } });
-        const currentStock = ledger.reduce((sum: number, row: any) => sum + Number(row.quantityChange ?? row.quantity ?? 0), 0);
-        changeQty = Number(payload.quantityChange) - currentStock;
+        changeQty = Number(payload.quantityChange) - historicalStock;
       }
-      const beforeSum = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId } });
-      const quantityBefore = Number(beforeSum._sum.quantityChange ?? 0);
+
+      if (isBackdated) {
+        const validation = validateRetroactiveTimeline(ledgerRows.map(ledgerShape), occurredAt, changeQty);
+        if (!validation.valid) {
+          throw new Error(
+            `INSUFFICIENT_STOCK: Retroactive adjustment would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
+          );
+        }
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            startDate: { lte: occurredAt },
+            endDate: { gte: occurredAt },
+            status: { in: ["CLOSED", "LOCKED"] },
+          },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate inventory adjustment into accounting period "${closedPeriod.name}".`);
+        }
+      }
+
+      const quantityBefore = isBackdated ? historicalStock : currentStock;
       const quantityAfter = quantityBefore + changeQty;
-      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const currentProjectedStock = currentStock + changeQty;
+      if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
       const unitCost = Number(payload.unitCost ?? variant.costPrice ?? 0);
       const adjustment = await tx.stockAdjustment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: payload.variantId, adjustmentType: payload.adjustmentType, quantityChange: changeQty, reason: payload.reason, referenceNote: payload.referenceNote ?? null, status: "COMPLETED", createdByUserId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
-      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt: new Date(), deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
+      await tx.stockLedger.create({ data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: payload.variantId, movementType: changeQty >= 0 ? "ADJUSTMENT_GAIN" : "ADJUSTMENT_LOSS", quantityChange: changeQty, quantity: changeQty, quantityBefore, quantityAfter, unitCost, totalCost: Math.abs(changeQty) * unitCost, referenceType: "StockAdjustment", referenceId: adjustment.id, occurredAt, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey } });
 
       await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, payload.variantId);
       await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, payload.variantId, null);
