@@ -50,7 +50,8 @@ describe("PostgreSQL multi-device stock convergence", () => {
       await prisma.branch.deleteMany({ where: { tenantId } }).catch(() => {});
       await prisma.tenant.deleteMany({ where: { id: tenantId } }).catch(() => {});
     }
-  }
+  });
+  
   it("preserves backdated timestamps and historical lineage through authoritative sync", async () => {
     const tenantId = randomUUID();
     const branchId = randomUUID();
