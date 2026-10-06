@@ -112,16 +112,23 @@ jobs:
             echo "Release PR #$OPEN_PR already exists for $RELEASE_BRANCH; leaving it untouched."
             exit 0
           fi
+          # A stale release branch without an open PR is recoverable.
+          # Recycle it onto the exact main candidate instead of blocking release automation.
           if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
-            echo "RELEASE_BLOCKED: branch $RELEASE_BRANCH exists without an open release PR"
-            exit 1
+            echo "STALE_RELEASE_BRANCH: $RELEASE_BRANCH exists without an open release PR; recycling it from $GITHUB_SHA"
+            git fetch origin "$RELEASE_BRANCH"
+            git switch -C "$RELEASE_BRANCH" "$GITHUB_SHA"
+            git add -A
+            git commit -m "chore(release): v${VERSION}"
+            git push --force-with-lease=refs/heads/"$RELEASE_BRANCH":$(git rev-parse "origin/$RELEASE_BRANCH") origin HEAD:"$RELEASE_BRANCH"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$RELEASE_BRANCH"
+            git add -A
+            git commit -m "chore(release): v${VERSION}"
+            git push origin HEAD:"$RELEASE_BRANCH"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$RELEASE_BRANCH"
-          git add -A
-          git commit -m "chore(release): v${VERSION}"
-          git push origin HEAD:"$RELEASE_BRANCH"
           RELEASE_SHA="$(git rev-parse HEAD)"
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
