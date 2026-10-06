@@ -1669,25 +1669,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             description="Completed sales value divided by completed orders" variant="hero"
             spark={dashboardSparkData.aov} />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+      </div>
+      <div className="grid grid-cols-12 lg:grid-cols-5 gap-4">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
           <ReferenceKPICard title="Stock Alerts"
             value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
             icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
             description="Low-stock plus out-of-stock variants" />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
           <ReferenceKPICard title="Customer Debts"
             value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
             icon={<Users className="h-5 w-5" />} accent="#ffad22"
             description="Current customer receivables in the branch" />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
           <ReferenceKPICard title="Inventory Value"
             value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
             icon={<Package className="h-5 w-5" />} accent="#248bff"
             description="Current branch stock valuation" />
         </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-3">
+        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
+          <ReferenceKPICard title="Active Products"
+            value={kpiCards.find((card) => card.title === 'Active Products')?.value?.toString() || '0'}
+            icon={<Package className="h-5 w-5" />} accent="#22c55e"
+            description="Active products in the current branch" />
+        </div>
+        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
           <ReferenceKPICard title="Device Sync"
             value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
             icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"

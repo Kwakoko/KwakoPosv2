@@ -46,6 +46,7 @@
   .lg\:items-end { align-items: flex-end; }
   .lg\:justify-between { justify-content: space-between; }
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .lg\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .lg\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .lg\:col-span-2 { grid-column: span 2 / span 2; }
