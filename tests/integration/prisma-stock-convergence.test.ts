@@ -101,7 +101,9 @@ describe("PostgreSQL multi-device stock convergence", () => {
       });
       expect(backdated.results[0].status).toBe("SUCCESS");
 
-      const historicalRow = await prisma.stockLedger.findUnique({ where: { id: backdatedId } });
+      const historicalRow = await prisma.stockLedger.findFirst({
+        where: { tenantId, branchId, variantId, referenceType: "StockAdjustment", referenceId: backdatedId },
+      });
       expect(historicalRow).not.toBeNull();
       expect(historicalRow?.occurredAt.toISOString()).toBe(backdatedAt.toISOString());
       expect(Number(historicalRow?.quantityBefore)).toBe(50);
@@ -142,7 +144,7 @@ describe("PostgreSQL multi-device stock convergence", () => {
         data: { id: fiscalYearId, tenantId, name: "FY-BACK-POLICY", startDate: new Date(Date.now() - 365*24*3600*1000), endDate: new Date(Date.now() + 365*24*3600*1000), status: "OPEN", isClosed: false },
       });
       await prisma.accountingPeriod.create({
-        data: { tenantId, fiscalYearId, periodNumber: 1, name: "BACK-LOCKED", startDate: new Date(Date.now() - 30*24*3600*1000), endDate: new Date(Date.now() - 1*24*3600*1000), status: "LOCKED", isClosed: true },
+        data: { tenantId, fiscalYearId, periodNumber: 1, name: "BACK-LOCKED", startDate: new Date(Date.now() - 30*24*3600*1000), endDate: new Date(Date.now() - 1*24*3600*1000), status: "LOCKED" },
       });
       await prisma.product.create({ data: { id: productId, tenantId, branchId, name: "Policy Item", sku: "POLICY-ITEM", category: "", hasVariants: true } });
       await prisma.productVariant.create({ data: { id: variantId, tenantId, branchId, productId, name: "Standard", sku: "POLICY-STD", price: 100, costPrice: 50 } });
