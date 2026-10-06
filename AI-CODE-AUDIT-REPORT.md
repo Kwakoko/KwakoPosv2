@@ -59,3 +59,6 @@ The original audit P0/P1/P2 findings are remediated or were already resolved on 
 The repository CI workflow is configured to run on pull requests to `main` and includes build, migration, lint, unit, integration, sync, strict-runtime, and production-release authority gates.
 
 **Final closure requires those gates to pass on the remediation head.**
+
+
+<!-- CI synchronization marker: 2026-10-06 -->
