@@ -1253,9 +1253,47 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       return result;
     } catch (error) {
       consecutiveFailuresRef.current += 1;
-      setSyncError(error instanceof Error ? error.message : "Synchronization failed");
+      const errorMessage = error instanceof Error ? error.message : "Synchronization failed";
+      setSyncError(errorMessage);
       syncStatusService.failSync(error);
       setSyncStatus(syncStatusService.getSnapshot(syncScope));
+
+      // A server-side catalog rejection can leave optimistic IndexedDB metadata ahead of
+      // the authoritative replica. Re-bootstrap immediately so rejected Category/Brand
+      // edits, stale writes, invalid parents, and invalid reassignment choices cannot linger
+      // in the active UI as apparently-saved state.
+      if (
+        errorMessage.startsWith("SYNC_NOT_VERIFIED:") ||
+        errorMessage.startsWith("SYNC_PARTIAL_REJECTION:")
+      ) {
+        try {
+          await syncEngine.bootstrapWithServer(
+            async (req) => {
+              const body = await apiFetch<any>("/sync/bootstrap", {
+                method: "POST",
+                headers: {
+                  "x-tenant-id": targetTenantId,
+                  "x-branch-id": targetBranchId,
+                  "x-user-id": targetUserId,
+                },
+                body: JSON.stringify(req),
+              });
+              return body.data || body;
+            },
+            targetTenantId,
+            targetBranchId,
+          );
+          db.purgeOrphanedOutbox(targetTenantId, targetBranchId);
+          await db.refreshStoresFromNative([
+            "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
+            "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+          ]);
+          setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
+          publishDataChanged({ action: "SYNC_RECONCILED_AFTER_REJECTION", tenantId: targetTenantId, branchId: targetBranchId });
+        } catch (reconcileError) {
+          console.warn("[Sync] Authoritative rejection reconciliation failed:", reconcileError);
+        }
+      }
       throw error;
     } finally {
       isSyncInProgressRef.current = false;
