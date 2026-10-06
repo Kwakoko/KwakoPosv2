@@ -250,7 +250,7 @@ const ReferenceKPICard: React.FC<ReferenceKPICardProps> = ({
         (variant === 'hero' ? '-right-8 -top-10 h-32 w-32' : '-right-6 -top-8 h-24 w-24')}
         style={{ background: accent }} />
       {variant !== 'hero' && (
-        <ChevronRight className="absolute right-4 top-5 h-5 w-5" style={{ color: accent, opacity: 0.9 }} aria-hidden="true" />
+        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5" style={{ color: accent, opacity: 0.95 }} aria-hidden="true" />
       )}
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -649,6 +649,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [chartActiveMetric, setChartActiveMetric] = useState<'all' | 'revenue' | 'profit' | 'cogs'>('all');
   const [isZReportOpen, setIsZReportOpen] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [selectedKpiAdvice, setSelectedKpiAdvice] = useState<{
+    title: string;
+    value: string;
+    accent: string;
+    problem: string;
+    recommendation: string;
+    nextStep: string;
+    action?: { label: string; onClick: () => void };
+  } | null>(null);
   const [rechartsModule, setRechartsModule] = useState<RechartsModule | null>(null);
 
   useEffect(() => {
@@ -1684,64 +1693,59 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           <button type="button" onClick={() => void refreshAuthoritativeKpis()} className="ml-2 underline">Retry</button>
         </div>
       )}
-      <div className="dashboard-hero-grid grid grid-cols-12 gap-4">
-        <div className="col-span-12 lg:col-span-4">
-          <ReferenceKPICard title="Today's Sales"
-            value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
-            icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
-            description="Completed sales recorded by Point of Sale" variant="hero"
-            spark={dashboardSparkData.sales} />
-        </div>
-        <div className="col-span-12 lg:col-span-4">
-          <ReferenceKPICard title="Gross Profit (REAL)"
-            value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
-            icon={<TrendingUp className="h-6 w-6" />} accent="#2196ff"
-            trend={revenueAnalytics.profitDeltaPct !== null
-              ? (Number(revenueAnalytics.profitDeltaPct) >= 0 ? '+' : '') + revenueAnalytics.profitDeltaPct + '% vs yesterday'
-              : undefined}
-            description="Completed-sales gross profit from PostgreSQL" variant="hero"
-            spark={dashboardSparkData.profit} />
-        </div>
-        <div className="col-span-12 lg:col-span-4">
-          <ReferenceKPICard title="Avg Order Value (AOV)"
-            value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
-            icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
-            description="Completed sales value divided by completed orders" variant="hero"
-            spark={dashboardSparkData.aov} />
-        </div>
-      </div>
-      <div className="dashboard-secondary-grid grid grid-cols-12 gap-4">
-        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
-          <ReferenceKPICard title="Stock Alerts"
-            value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
-            icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
-            description="Low-stock plus out-of-stock variants" />
-        </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
-          <ReferenceKPICard title="Customer Debts"
-            value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
-            icon={<Users className="h-5 w-5" />} accent="#ffad22"
-            description="Current customer receivables in the branch" />
-        </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
-          <ReferenceKPICard title="Inventory Value"
-            value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
-            icon={<Package className="h-5 w-5" />} accent="#248bff"
-            description="Current branch stock valuation" />
-        </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
-          <ReferenceKPICard title="Active Products"
-            value={kpiCards.find((card) => card.title === 'Active Products')?.value?.toString() || '0'}
-            icon={<Package className="h-5 w-5" />} accent="#22c55e"
-            description="Active products in the current branch" />
-        </div>
-        <div className="col-span-12 sm:col-span-6 lg:col-span-1">
-          <ReferenceKPICard title="Device Sync"
-            value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
-            icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
-            description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
-            action={kpiCards.find((card) => card.title === 'Device Sync')?.action} />
-        </div>
+      <div className="dashboard-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <ReferenceKPICard title="Today's Sales"
+          value={kpiCards.find((card) => card.title === 'Sales Today')?.value?.toString() || '--'}
+          icon={<Layers className="h-6 w-6" />} accent="#10f0c0" trend={stats.salesTrendPct}
+          description="Completed sales recorded by PostgreSQL"
+          variant="compact"
+          spark={dashboardSparkData.sales} />
+        <ReferenceKPICard title="Gross Profit (REAL)"
+          value={kpiCards.find((card) => card.title === 'Gross Profit')?.value?.toString() || '--'}
+          icon={<TrendingUp className="h-6 w-6" />} accent="#2196ff"
+          trend={revenueAnalytics.profitDeltaPct !== null
+            ? (Number(revenueAnalytics.profitDeltaPct) >= 0 ? '+' : '') + revenueAnalytics.profitDeltaPct + '% vs yesterday'
+            : undefined}
+          description="Completed-sales gross profit from PostgreSQL"
+          variant="compact"
+          spark={dashboardSparkData.profit} />
+        <ReferenceKPICard title="Avg Order Value (AOV)"
+          value={kpiCards.find((card) => card.title === 'Average Order Value')?.value?.toString() || '--'}
+          icon={<ShoppingCart className="h-6 w-6" />} accent="#c04cff" trend={stats.aovTrendPct}
+          description="Completed sales value divided by completed orders"
+          variant="compact"
+          spark={dashboardSparkData.aov} />
+        <ReferenceKPICard title="Total Products"
+          value={kpiCards.find((card) => card.title === 'Active Products')?.value?.toString() || '0'}
+          icon={<Package className="h-5 w-5" />} accent="#f59e0b"
+          description="Active products in the current branch"
+          variant="compact"
+          onClick={() => setSelectedKpiAdvice({ title: 'Total Products', value: kpiCards.find((card) => card.title === 'Active Products')?.value?.toString() || '0', accent: '#f59e0b', problem: 'Product count is a catalog-health signal. An unexpected change can indicate inactive items, missing products, duplicates, or branch-scope issues.', recommendation: 'Verify the active catalog and branch scope before making assortment, pricing, or purchasing decisions.', nextStep: 'Open Inventory and verify the current product catalog.', action: { label: 'Open Inventory', onClick: () => { setSelectedKpiAdvice(null); handleNav('Inventory'); } } })} />
+        <ReferenceKPICard title="Stock Alerts"
+          value={kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0'}
+          icon={<AlertTriangle className="h-5 w-5" />} accent="#ff2456"
+          description="Low-stock plus out-of-stock variants"
+          variant="compact"
+          onClick={() => setSelectedKpiAdvice({ title: 'Stock Alerts', value: kpiCards.find((card) => card.title === 'Stock Alerts')?.value?.toString() || '0', accent: '#ff2456', problem: 'Low-stock and out-of-stock variants can cause missed sales or emergency purchasing.', recommendation: 'Prioritize the affected variants by urgency: restore out-of-stock items first, then replenish low-stock items using recent demand and reorder levels.', nextStep: 'Open Inventory to review affected variants and replenish the highest-risk items.', action: { label: 'Open Inventory', onClick: () => { setSelectedKpiAdvice(null); handleNav('Inventory'); } } })} />
+        <ReferenceKPICard title="Customer Debts"
+          value={kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0'}
+          icon={<Users className="h-5 w-5" />} accent="#ffad22"
+          description="Current customer receivables in the branch"
+          variant="compact"
+          onClick={() => setSelectedKpiAdvice({ title: 'Customer Debts', value: kpiCards.find((card) => card.title === 'Customer Debts')?.value?.toString() || 'Tsh 0', accent: '#ffad22', problem: 'Receivables tie up working capital and increase collection risk when they age.', recommendation: 'Review outstanding balances by customer and age. Prioritize overdue or high-value balances, confirm the customer account, and follow up with a clear payment commitment.', nextStep: 'Open Customers and review outstanding receivables and their payment status.', action: { label: 'Open Customers', onClick: () => { setSelectedKpiAdvice(null); handleNav('Customers'); } } })} />
+        <ReferenceKPICard title="Inventory Value"
+          value={kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0'}
+          icon={<Package className="h-5 w-5" />} accent="#248bff"
+          description="Current branch stock valuation"
+          variant="compact"
+          onClick={() => setSelectedKpiAdvice({ title: 'Inventory Value', value: kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0', accent: '#248bff', problem: 'Inventory value shows how much cash is currently tied up in stock, but the total alone does not show whether the mix is healthy.', recommendation: 'Use the valuation as a control signal: compare high-value stock with sell-through, slow-moving items, and stock alerts before ordering more inventory.', nextStep: 'Open Inventory to review high-value and slow-moving stock before the next purchase decision.', action: { label: 'Open Inventory', onClick: () => { setSelectedKpiAdvice(null); handleNav('Inventory'); } } })} />
+        <ReferenceKPICard title="Device Sync"
+          value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
+          icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
+          description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
+          variant="compact"
+          action={kpiCards.find((card) => card.title === 'Device Sync')?.action}
+          onClick={() => setSelectedKpiAdvice({ title: 'Device Sync', value: kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0', accent: '#ff2456', problem: 'Synchronization exceptions can leave local changes pending or conflicting with the server state.', recommendation: 'Confirm the device is online, inspect retry-exhausted or conflict records, then force synchronization only after reviewing the affected mutations. Do not silently discard local changes.', nextStep: 'Review the sync status and resolve conflicts before retrying synchronization.', action: { label: 'Review Sync Status', onClick: () => { setSelectedKpiAdvice(null); void forceBootstrap(); } } })} />
       </div>
 
       {/* ── GAAP Net Turnover Ledger Strip (Gross Sales - Discounts - Refunds = Net Sales) ── */}
@@ -3897,6 +3901,38 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   <span>&rarr;</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedKpiAdvice && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={() => setSelectedKpiAdvice(null)}>
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700/80 bg-[#071426] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: selectedKpiAdvice.accent + '22', color: selectedKpiAdvice.accent }}>
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Recommended action</p>
+                  <h3 className="text-lg font-black text-white">{selectedKpiAdvice.title}</h3>
+                </div>
+              </div>
+              <button type="button" onClick={() => setSelectedKpiAdvice(null)} className="rounded-lg px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-white">×</button>
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-700/70 bg-slate-900/50 p-3">
+              <div className="text-xs text-slate-400">Current KPI</div>
+              <div className="mt-1 text-2xl font-black text-white">{selectedKpiAdvice.value}</div>
+            </div>
+            <div className="mt-4 space-y-3 text-sm">
+              <div><div className="font-bold text-slate-200">Why it matters</div><p className="mt-1 leading-relaxed text-slate-400">{selectedKpiAdvice.problem}</p></div>
+              <div><div className="font-bold text-slate-200">Recommended approach</div><p className="mt-1 leading-relaxed text-slate-400">{selectedKpiAdvice.recommendation}</p></div>
+              <div><div className="font-bold text-slate-200">Next step</div><p className="mt-1 leading-relaxed text-slate-400">{selectedKpiAdvice.nextStep}</p></div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setSelectedKpiAdvice(null)} className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-white/5">Close</button>
+              {selectedKpiAdvice.action && <button type="button" onClick={selectedKpiAdvice.action.onClick} className="rounded-xl px-4 py-2 text-xs font-bold text-white" style={{ background: selectedKpiAdvice.accent }}><span>{selectedKpiAdvice.action.label}</span><ArrowRight className="ml-1 inline h-3.5 w-3.5" /></button>}
             </div>
           </div>
         </div>
