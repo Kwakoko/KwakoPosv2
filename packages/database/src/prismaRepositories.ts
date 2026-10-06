@@ -504,7 +504,31 @@ export class PrismaStockRepository {
       const quantityChange = Number(req.quantityChange ?? req.quantity ?? 0);
       const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
       const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - movementTime.getTime()) > 5 * 60 * 1000;
-      if (isBackdated) assertBackdatingPermission(ctx);
+      if (isBackdated) {
+        assertBackdatingPermission(ctx);
+        const timelineRows = await tx.stockLedger.findMany({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId },
+          orderBy: { occurredAt: "asc" },
+        });
+        const validation = validateRetroactiveTimeline(timelineRows.map(ledgerShape), movementTime, quantityChange);
+        if (!validation.valid) {
+          throw new Error(
+            `INSUFFICIENT_STOCK: Retroactive movement would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
+          );
+        }
+        const closedPeriod = await tx.accountingPeriod.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            startDate: { lte: movementTime },
+            endDate: { gte: movementTime },
+            status: { in: ["CLOSED", "LOCKED"] },
+          },
+        });
+        if (closedPeriod) {
+          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
+          throw new Error(`${code}: Cannot backdate inventory movement into accounting period "${closedPeriod.name}".`);
+        }
+      }
       const historicalRows = isBackdated
         ? (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId, occurredAt: { lt: movementTime } }, orderBy: { occurredAt: "asc" } })).map(ledgerShape)
         : [];
