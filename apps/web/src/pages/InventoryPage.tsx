@@ -38,6 +38,7 @@ import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockA
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
 import { InventoryOperationalWorkspace } from "../components/InventoryOperationalWorkspace.js";
+import { InventoryBundleWorkspace } from "../components/InventoryBundleWorkspace.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -1790,7 +1791,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         </div>
       )}
 
-      {activeTab === "transfers" && <InventoryOperationalWorkspace mode="transfers" />}
+      {activeTab === "recipes" && <InventoryBundleWorkspace />}\n      {activeTab === "transfers" && <InventoryOperationalWorkspace mode="transfers" />}
       {activeTab === "count" && <InventoryOperationalWorkspace mode="count" />}
       {activeTab === "wastage" && <InventoryOperationalWorkspace mode="wastage" />}
       {activeTab === "alerts" && <InventoryOperationalWorkspace mode="alerts" />}
