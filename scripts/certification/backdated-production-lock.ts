@@ -27,7 +27,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["domain-insertion-invariant", "packages/domain/src/index.ts", "runningBeforeTarget", "insertionBalance"],
   ["local-governance", "packages/database/src/index.ts", "assertBackdatingPermission(ctx)", "validateRetroactiveTimeline", "currentProjectedStock"],
   ["prisma-governance", "packages/database/src/prismaRepositories.ts", "assertBackdatingPermission(ctx)", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "historicalQuantityBefore"],
-  ["sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "payload.occurredAt", "assertBackdatingThreshold", "assertBackdatingPermission", "ACCOUNTING_PERIOD_LOCKED", "occurredAt, deviceId"],
+  ["sync-governance", "packages/sync/src/worldStandardPrismaSyncEngine.ts", "payload.occurredAt", "assertBackdatingThreshold", "assertBackdatingPermission", "ACCOUNTING_PERIOD_LOCKED", "ACCOUNTING_PERIOD_CLOSED", "occurredAt, deviceId"],
   ["unit-regressions", "tests/unit/backdated-inventory.test.ts", "exact backdated insertion point", "INVENTORY_BACKDATE_PERMISSION_REQUIRED", "ledger.quantityBefore"],
   ["integration-regressions", "tests/integration/prisma-stock-convergence.test.ts", "preserves backdated timestamps and historical lineage through authoritative sync", "ACCOUNTING_PERIOD_LOCKED"],
   ["ci-hook", ".github/workflows/ci.yml", "npm run certify:backdated-lock"],
