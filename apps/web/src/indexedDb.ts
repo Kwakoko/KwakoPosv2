@@ -2070,7 +2070,8 @@ export class LocalIndexedDbStore {
     for (const [id, item] of this.syncOutbox.entries()) {
       if (item.status === "SYNCED" || item.status === "CONFLICT_RESOLVED") continue; // preserve resolved conflict history
       const isWrongScope =
-        item.tenantId && item.tenantId !== activeTenantId;
+        (item.tenantId && item.tenantId !== activeTenantId) ||
+        (item.branchId && item.branchId !== activeBranchId);
       const isAbandonedStale =
         item.abandonedAt && Date.parse(item.abandonedAt) < cutoff;
       if (isWrongScope || isAbandonedStale) {
