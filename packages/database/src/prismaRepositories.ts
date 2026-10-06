@@ -537,6 +537,7 @@ export class PrismaStockRepository {
       const quantityAfter = quantityBefore + quantityChange;
       const currentProjectedStock = currentQuantityBefore + quantityChange;
       if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
       const row = await tx.stockLedger.create({
         data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, warehouseId: req.warehouseId ?? null, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
