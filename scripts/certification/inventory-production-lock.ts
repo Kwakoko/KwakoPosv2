@@ -37,7 +37,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["ledger-unit-tests", "tests/unit/stock-ledger-movement.test.ts", "opening stock movement", "Weighted Average Cost"],
   ["prisma-convergence-tests", "tests/integration/prisma-stock-convergence.test.ts", "tenantId", "branchId"],
   ["catalog-lifecycle-tests", "tests/integration/catalog-master-lifecycle.test.ts", "Category", "Brand"],
-  ["clean-state-tests", "tests/integration/tenant-clean-initial-state.test.ts", "Product", "Category", "Brand"],
+  ["clean-state-tests", "tests/integration/tenant-clean-initial-state.test.ts", "Product", "Categories", "Brands"],
 ];
 
 function read(p: string): string {
