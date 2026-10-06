@@ -235,7 +235,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [newVarAttrKey, setNewVarAttrKey] = useState("Size");
   const [newVarAttrVal, setNewVarAttrVal] = useState("");
   const [newVarPrice, setNewVarPrice] = useState(0);
-  const [newVarStock, setNewVarStock] = useState(10);
+  const [newVarStock, setNewVarStock] = useState(0);
 
   // In-Flow Variant Builder State (for Add Product Modal)
   const [hasVariantsToggle, setHasVariantsToggle] = useState(false);
@@ -252,7 +252,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [singleVarBarcode, setSingleVarBarcode] = useState("");
   const [singleVarBuying, setSingleVarBuying] = useState<number | "">("");
   const [singleVarSelling, setSingleVarSelling] = useState<number | "">("");
-  const [singleVarStock, setSingleVarStock] = useState<number | "">(10);
+  const [singleVarStock, setSingleVarStock] = useState<number | "">(0);
   const [singleVarReorder, setSingleVarReorder] = useState<number | "">(5);
   const [studioMatrixOpt1, setStudioMatrixOpt1] = useState("Size");
   const [studioMatrixVals1, setStudioMatrixVals1] = useState("Small, Medium, Large");
@@ -332,8 +332,12 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         variantsByProduct.set(variant.productId, list);
       }
 
-      const categoryById = new Map(categoriesMeta.map((c) => [c.id, c.name]));
-      const brandById = new Map(brandsMeta.map((b) => [b.id, b.name]));
+      const persistedCategories = db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId });
+      const persistedBrands = db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId });
+      const effectiveCategories = Array.isArray(persistedCategories) ? persistedCategories as CategoryRecord[] : categoriesMeta;
+      const effectiveBrands = Array.isArray(persistedBrands) ? persistedBrands as BrandRecord[] : brandsMeta;
+      const categoryById = new Map(effectiveCategories.map((c) => [c.id, c.name]));
+      const brandById = new Map(effectiveBrands.map((b) => [b.id, b.name]));
       const loaded: InventoryItem[] = [];
       for (const prod of db.products.values()) {
         if (prod.tenantId !== currentTenantId || prod.branchId !== currentBranchId) continue;
@@ -646,7 +650,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     }
 
     // For multi-branch setups, allocate products by branchId or assign unallocated to primary HQ
-    const rawProducts = Array.from(db.products.values()).filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive");
+    const rawProducts = Array.from(db.products.values()).filter((p: any) => {
+      const tenantMatches = p.tenantId === currentTenantId || p.tenant_id === currentTenantId;
+      return tenantMatches && !p.deletedAt && !p.deleted_at && p.status !== "Inactive";
+    });
 
     return branches.map((b) => {
       const branchProds = rawProducts.filter((p: any) => {
@@ -658,9 +665,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       });
 
       const bSkus = branchProds.length;
-      const bUnits = branchProds.reduce((sum: number, p: any) => sum + Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0), 0);
-      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
-      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
+      const bUnits = branchProds.reduce((sum: number, p: any) => {
+        const projected = buildStockBalanceProjection(db, currentTenantId, b.id);
+        return sum + Number(projected.byProduct.get(p.id) || 0);
+      }, 0);
+      const branchProjection = buildStockBalanceProjection(db, currentTenantId, b.id);
+      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
+      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(branchProjection.byProduct.get(p.id) || 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
       const bProfit = bSelling - bBuying;
       const bMargin = bSelling > 0 ? Math.round((bProfit / bSelling) * 100) : 0;
 
@@ -675,7 +686,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         margin: bMargin,
       };
     });
-  }, [availableBranches, currentBranchId, currentBranchName, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
+  }, [availableBranches, currentBranchId, currentBranchName, currentTenantId, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
 
   const generateInflowCombinations = (
     opt1Name = varOption1Name,
@@ -691,7 +702,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
     const baseName = newProd.name.trim() || "Item";
     const prefix = baseName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "SKU";
-    const baseSku = `SKU-${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const baseSku = `SKU-${prefix}-${safeUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
 
     const generated: ProductVariantData[] = [];
     for (const v1 of list1) {
@@ -702,11 +713,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: safeUUID(),
           name: `${baseName} (${label})`,
           sku: `${baseSku}-${suffix}`,
-          barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+          barcode: `890${safeUUID().replace(/-/g, "").slice(0, 9)}`,
           attributes: { [opt1Name]: v1, ...(opt2Name.trim() && v2 ? { [opt2Name]: v2 } : {}) },
           buyingPrice: Number(newProd.buyingPrice) || 0,
           sellingPrice: Number(newProd.sellingPrice) || 0,
-          stock: 10,
+          stock: 0,
           reorderLevel: 5,
         });
       }
@@ -714,276 +725,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setInflowVariants(generated);
   };
 
-  const handleCreateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing inventory."); return; }
-    if (!newProd.name.trim()) return;
-
-    const autoSku = `SKU-${newProd.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const prodId = safeUUID();
-
-    const pendingOutboxes: any[] = [];
-
-    const isVariantProduct = hasVariantsToggle && inflowVariants.length > 0;
-    const computedStock = isVariantProduct
-      ? inflowVariants.reduce((sum, v) => sum + Number(v.stock || 0), 0)
-      : Number(newProd.stock);
-    const computedSelling = isVariantProduct
-      ? (inflowVariants[0]?.sellingPrice || Number(newProd.sellingPrice))
-      : Number(newProd.sellingPrice);
-    const computedBuying = isVariantProduct
-      ? (inflowVariants[0]?.buyingPrice || Number(newProd.buyingPrice))
-      : Number(newProd.buyingPrice);
-
-    const status: InventoryItem["status"] = computedStock === 0 ? "Out of Stock" : computedStock <= Number(newProd.reorderLevel) ? "Low Stock" : "Active";
-
-    const selectedCategory = categoriesMeta.find((c) => c.name.toLowerCase() === newProd.category.toLowerCase());
-    const selectedBrand = brandsMeta.find((b) => b.name.toLowerCase() === newProd.brand.trim().toLowerCase());
-    const newProductRecord = {
-      id: prodId,
-      name: newProd.name.trim(),
-      sku: autoSku,
-      category: newProd.category,
-      categoryId: selectedCategory && isUuid(selectedCategory.id) ? selectedCategory.id : undefined,
-      brand: newProd.brand.trim(),
-      brandId: selectedBrand && isUuid(selectedBrand.id) ? selectedBrand.id : undefined,
-      sellingPrice: computedSelling,
-      costPrice: computedBuying,
-      buyingPrice: computedBuying,
-      stock: 0,
-      totalStock: 0,
-      availableStock: 0,
-      reorderLevel: Number(newProd.reorderLevel),
-      status,
-      hasVariants: isVariantProduct,
-      batchNumber: newProd.batchNumber ? newProd.batchNumber.trim() : undefined,
-      expiryDate: newProd.expiryDate ? newProd.expiryDate : undefined,
-      tenantId: currentTenantId || undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (isVariantProduct) {
-      const variantsToSave = inflowVariants.map((v) => ({
-        id: v.id,
-        productId: prodId,
-        name: v.name,
-        sku: v.sku,
-        barcode: v.barcode || "",
-        attributes: v.attributes || {},
-        buyingPrice: Number(v.buyingPrice || 0),
-        costPrice: Number(v.buyingPrice || 0),
-        sellingPrice: Number(v.sellingPrice || 0),
-        price: Number(v.sellingPrice || 0),
-        inventoryQuantity: 0,
-        stock: 0,
-        reorderLevel: Number(v.reorderLevel || 5),
-        isActive: true,
-        tenantId: currentTenantId || undefined,
-      }));
-
-      db.saveProductWithVariantsLocal(newProductRecord as any, variantsToSave as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      pendingOutboxes.push({
-        entityType: "Product",
-        entityId: prodId,
-        operationType: "CREATE",
-        payload: {
-          id: prodId,
-          name: newProductRecord.name,
-          sku: autoSku,
-          category: newProductRecord.category,
-          categoryId: (newProductRecord as any).categoryId,
-          brand: newProductRecord.brand,
-          brandId: (newProductRecord as any).brandId,
-          buyingPrice: Number(newProd.buyingPrice),
-          sellingPrice: Number(newProd.sellingPrice),
-          hasVariants: true,
-          variants: variantsToSave.map((v) => ({
-            id: v.id,
-            name: v.name,
-            sku: v.sku,
-            barcode: v.barcode || undefined,
-            price: Number(v.sellingPrice || 0),
-            costPrice: Number(v.buyingPrice || 0),
-            inventoryQuantity: 0,
-            stock: 0,
-            reorderLevel: Number(v.reorderLevel || 5),
-            attributes: v.attributes || {},
-            isActive: true,
-          })),
-        },
-        idempotencyKey: `PROD-CREATE-${prodId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      for (const v of variantsToSave) {
-        pendingOutboxes.push({
-          entityType: "ProductVariant",
-          entityId: v.id,
-          operationType: "CREATE",
-          payload: {
-            id: v.id,
-            productId: prodId,
-            name: v.name,
-            sku: v.sku,
-            barcode: v.barcode || undefined,
-            price: Number(v.sellingPrice || 0),
-            costPrice: Number(v.buyingPrice || 0),
-            inventoryQuantity: 0,
-            stock: 0,
-            reorderLevel: Number(v.reorderLevel || 5),
-            attributes: v.attributes || {},
-            isActive: true,
-          },
-          idempotencyKey: `VAR-CREATE-${v.id}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
-        });
-
-        if (Number(v.stock) > 0) {
-          db.saveStockLedgerLocal({
-            id: `led-${v.id}`,
-            productId: prodId,
-            variantId: v.id,
-            sku: v.sku,
-            name: v.name,
-            quantity: Number(v.stock),
-            balanceAfter: Number(v.stock),
-            reason: "MANUAL_VARIANT_CREATION",
-            movementType: "OPENING_STOCK",
-            timestamp: new Date().toISOString(),
-            tenantId: currentTenantId || "default",
-          } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-          pendingOutboxes.push({
-            entityType: "StockAdjustment",
-            entityId: `adj-${v.id}`,
-            operationType: "CREATE",
-            payload: {
-              productId: prodId,
-              variantId: v.id,
-              sku: v.sku,
-              adjustmentType: "INCREASE",
-              movementType: "OPENING_STOCK",
-              quantityChange: Number(v.stock),
-              reason: "MANUAL_VARIANT_CREATION",
-              deviceId: "web-client",
-              operationId: `adj-${v.id}`,
-              idempotencyKey: `ADJ-${v.id}`,
-            },
-            idempotencyKey: `ADJ-${v.id}`,
-            tenantId: currentTenantId || undefined,
-            branchId: currentBranchId || undefined,
-          });
-        }
-      }
-    } else {
-      const defaultVarId = safeUUID();
-      const defaultVariant = {
-        id: defaultVarId,
-        productId: prodId,
-        name: "Standard",
-        sku: `${autoSku}-STD`,
-        barcode: "",
-        price: Number(newProd.sellingPrice),
-        costPrice: Number(newProd.buyingPrice),
-        buyingPrice: Number(newProd.buyingPrice),
-        sellingPrice: Number(newProd.sellingPrice),
-        inventoryQuantity: 0,
-        stock: 0,
-        reorderLevel: Number(newProd.reorderLevel || 5),
-        isActive: true,
-        tenantId: currentTenantId || undefined,
-      };
-
-      db.saveProductLocal(newProductRecord as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-      db.saveVariantLocal(defaultVariant as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      pendingOutboxes.push({
-        entityType: "Product",
-        entityId: prodId,
-        operationType: "CREATE",
-        payload: {
-          id: prodId,
-          name: newProductRecord.name,
-          sku: autoSku,
-          category: newProductRecord.category,
-          categoryId: (newProductRecord as any).categoryId,
-          brand: newProductRecord.brand,
-          brandId: (newProductRecord as any).brandId,
-          buyingPrice: Number(newProd.buyingPrice),
-          sellingPrice: Number(newProd.sellingPrice),
-          hasVariants: false,
-          variants: [{ ...defaultVariant, inventoryQuantity: 0, stock: 0 }],
-        },
-        idempotencyKey: `PROD-CREATE-${prodId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      pendingOutboxes.push({
-        entityType: "ProductVariant",
-        entityId: defaultVarId,
-        operationType: "CREATE",
-        payload: { ...defaultVariant, inventoryQuantity: 0, stock: 0 },
-        idempotencyKey: `VAR-CREATE-${defaultVarId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      if (Number(newProd.stock) > 0) {
-        db.saveStockLedgerLocal({
-          id: `led-${defaultVarId}`,
-          productId: prodId,
-          variantId: defaultVarId,
-          sku: `${autoSku}-STD`,
-          name: newProductRecord.name,
-          quantity: Number(newProd.stock),
-          balanceAfter: Number(newProd.stock),
-          reason: "MANUAL_PRODUCT_CREATION",
-          movementType: "OPENING_STOCK",
-          timestamp: new Date().toISOString(),
-          tenantId: currentTenantId || "default",
-        } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-        pendingOutboxes.push({
-          entityType: "StockAdjustment",
-          entityId: `adj-${defaultVarId}`,
-          operationType: "CREATE",
-          payload: {
-            productId: prodId,
-            variantId: defaultVarId,
-            sku: `${autoSku}-STD`,
-            adjustmentType: "INCREASE",
-            movementType: "OPENING_STOCK",
-            quantityChange: Number(newProd.stock),
-            reason: "MANUAL_PRODUCT_CREATION",
-            deviceId: "web-client",
-            operationId: `adj-${defaultVarId}`,
-            idempotencyKey: `ADJ-${defaultVarId}`,
-          },
-          idempotencyKey: `ADJ-${defaultVarId}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
-        });
-      }
-    }
-
-    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    void loadInventory();
-    setNewProd({ name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
-    setHasVariantsToggle(false);
-    setInflowVariants([]);
-    setAddProductModal(false);
-    toast.success("Product Created", isVariantProduct ? `Product "${newProductRecord.name}" created with ${inflowVariants.length} variants.` : `Product "${newProductRecord.name}" added to inventory.`);
-    playSuccessChime();
-    publishDataChanged({ action: "INVENTORY_CHANGED" });
-    void syncOutbox?.().catch(() => {});
-  };
-
-  // ─── Product Edit Handlers ───────────────────────────────────────────────────
+  // Product creation is intentionally owned by ProductRegistrationWizardModal.
+  // Keeping a second registration implementation here would bypass the canonical
+  // atomic Product + Variant + StockLedger + Outbox transaction.
+  
   const handleOpenEditModal = (item: InventoryItem) => {
     setEditingItem(item);
     setEditProd({
@@ -3412,7 +3157,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                   attributes: { [studioMatrixOpt1]: v1, ...(studioMatrixOpt2 && v2 ? { [studioMatrixOpt2]: v2 } : {}) },
                                   buyingPrice: variantModalProduct.buyingPrice,
                                   sellingPrice: variantModalProduct.sellingPrice,
-                                  stock: 10,
+                                  stock: 0,
                                   reorderLevel: 5,
                                 });
                               }
@@ -3769,15 +3514,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 />
                               </td>
                               <td>
-                                <NumberStepper
-                                  size="xs"
-                                  min={0}
-                                  step={1}
-                                  width="80px"
-                                  value={inlineVariantEdit.stock}
-                                  ariaLabel="Stock quantity"
-                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, stock: val })}
-                                />
+                                <span className="v2-mono v2-text-xs v2-font-bold" title="Stock is ledger-controlled; use Add Stock / Physical Count">
+                                  {Number(inlineVariantEdit.stock || 0).toLocaleString()}
+                                </span>
                               </td>
                               <td>
                                 <NumberStepper
@@ -3852,20 +3591,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                         attributes: existingVariant?.attributes || v.attributes || {}, isActive: true,
                                         _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt,
                                       }, idempotencyKey: `VAR-UPDATE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      const stockDiff = Number(inlineVariantEdit.stock) - Number(v.stock || 0);
-                                      if (stockDiff !== 0) {
-                                        const adjOpId = `adj-variant-edit-${Date.now()}-${v.id}`;
-                                        db.saveStockLedgerLocal({ id: adjOpId, productId: variantModalProduct.id, variantId: v.id,
-                                          sku: inlineVariantEdit.sku.trim(), name: inlineVariantEdit.name.trim(), quantity: stockDiff, quantityChange: stockDiff,
-                                          balanceAfter: Number(inlineVariantEdit.stock), reason: "VARIANT_INLINE_EDIT", movementType: "ADJUSTMENT",
-                                          timestamp: new Date().toISOString(), tenantId: currentTenantId || "default", branchId: currentBranchId || "default" } as any,
-                                          { tenantId: currentTenantId || "default", branchId: currentBranchId || "default" });
-                                        pendingOutboxes.push({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
-                                          payload: { productId: variantModalProduct.id, variantId: v.id, sku: inlineVariantEdit.sku.trim(),
-                                            adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE", movementType: "ADJUSTMENT", quantityChange: stockDiff,
-                                            reason: "VARIANT_INLINE_EDIT", deviceId: "web-client", operationId: adjOpId },
-                                          idempotencyKey: adjOpId, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      }
                                       if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                       setEditingVariantRowId(null);
                                       playSuccessChime();
