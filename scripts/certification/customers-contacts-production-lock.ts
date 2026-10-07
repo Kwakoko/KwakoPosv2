@@ -22,7 +22,7 @@ const REQUIRED_SURFACES = [
 
 const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/CustomersPage.tsx": "4a7e27f271b8911f0385b1aeeff71fbd8e01bb4d",
-  "apps/web/src/indexedDb.ts": "245cf822def2edf7dcc27741b708efb1c6c6276b",
+  "apps/web/src/indexedDb.ts": "48ba5664741a32ad22a22e478d36d1d04a1891cc",
   "apps/web/src/persistence/migrationEngine.ts": "5b6ac2bb41b7747289b54ae8507201e50614b099",
   "apps/web/src/clientSyncEngine.ts": "6bbd64c387fdc6ea16a0fa0e46e283c92e0ad65e",
   "apps/api/src/server.ts": "ae89266a23967e40432763b43fe583e61827c530",
