@@ -168,9 +168,9 @@ describe("Cash Management Production Lock v1 — authoritative lifecycle", () =>
     const otherSession = await repository.openCashSession(otherCtx, { openingCash: 50000, registerCode: "OTHER-REG", deviceId: "OTHER" });
     const seedSession = await repository.openCashSession(managerCtx, { openingCash: 1000, registerCode: "REG-X", deviceId: "DEVICE-M" });
     const key = "cash-lock-cross-tenant-key";
-    await repository.createCashMovement(cashierCtx, {
+    await repository.createCashMovement(managerCtx, {
       id: randomUUID(), cashSessionId: seedSession.id, type: "CASH_IN", amount: 10,
-      reason: "Cross tenant seed", deviceId: "DEVICE-A", idempotencyKey: key,
+      reason: "Cross tenant seed", deviceId: "DEVICE-M", idempotencyKey: key,
     });
     await expect(
       repository.createCashMovement(otherCtx, {
