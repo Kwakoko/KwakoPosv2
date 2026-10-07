@@ -1308,27 +1308,34 @@ Manager Sign-off:  _____________________
                       <button
                         className="v2-btn v2-btn-outline v2-btn-sm"
                         style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem" }}
-                        onClick={() => {
-                          setActiveReportSlip({
-                            type: "Z_REPORT",
-                            title: `Z-REPORT SETTLEMENT (${s.shiftNumber})`,
-                            timestamp: s.closedAt || s.openedAt,
-                            shiftNumber: s.shiftNumber,
-                            cashier: s.cashier,
-                            openingFloat: s.openingFloat,
-                            cashSales: s.cashSales,
-                            mpesaSales: s.mpesaSales,
-                            airtelSales: s.airtelSales,
-                            cardSales: s.cardSales,
-                            cashIn: s.cashIn,
-                            cashOut: s.cashOut,
-                            safeDrops: s.safeDrops,
-                            expectedCash: s.expectedCash,
-                            declaredCash: s.declaredCash || s.expectedCash,
-                            variance: s.variance || 0,
-                            denominations,
-                            managerSignOff: s.managerSignOff || "Manager Verified",
-                          });
+                        onClick={async () => {
+                          try {
+                            const recon = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(s.id)}/payment-channel-reconciliation`);
+                            const channels = recon?.success && Array.isArray(recon.data?.channels) ? recon.data.channels : [];
+                            const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+                            setActiveReportSlip({
+                              type: "Z_REPORT",
+                              title: `Z-REPORT SETTLEMENT (${s.shiftNumber})`,
+                              timestamp: s.closedAt || s.openedAt,
+                              shiftNumber: s.shiftNumber,
+                              cashier: s.cashier,
+                              openingFloat: s.openingFloat,
+                              cashSales: s.cashSales,
+                              mpesaSales: completedBy("MOBILE_MONEY") || completedBy("MPESA"),
+                              airtelSales: completedBy("AIRTEL_MONEY"),
+                              cardSales: completedBy("CARD"),
+                              cashIn: s.cashIn,
+                              cashOut: s.cashOut,
+                              safeDrops: s.safeDrops,
+                              expectedCash: s.expectedCash,
+                              declaredCash: s.declaredCash || s.expectedCash,
+                              variance: s.variance || 0,
+                              denominations,
+                              managerSignOff: s.managerSignOff || (Math.abs(s.variance || 0) > toleranceThreshold ? "Manager Authorized" : "Within Policy Tolerance"),
+                            });
+                          } catch (error) {
+                            toast.error("Z-Report Reprint Failed", error instanceof Error ? error.message : "Unable to load authoritative payment-channel data.");
+                          }
                         }}
                         type="button"
                       >
