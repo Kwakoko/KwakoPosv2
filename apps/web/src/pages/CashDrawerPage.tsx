@@ -1466,7 +1466,6 @@ Manager Sign-off:  _____________________
             </tbody>
           </table>
         </div>
-        {activeTab === "ledger" && (
           <div className="v2-card v2-mt-4">
             <div className="v2-card-header"><div className="v2-card-title">Authoritative Cash Audit Trail ({cashAuditTrail.length} events)</div></div>
             <table className="v2-table">
@@ -1485,6 +1484,7 @@ Manager Sign-off:  _____________________
             </table>
           </div>
         )}
+        </div>
       )}
 
       {/* ─── TAB 9: SHIFT RECORDS HISTORY ──────────────────────────────────────── */}
