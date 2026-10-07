@@ -1424,59 +1424,55 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return () => { active = false; };
   }, [currentTenantId, currentBranchId, user?.id]);
 
-  const executeReturn = () => {
+  const executeReturn = async () => {
     if (!selectedOrderToReturn) return;
-    const totalReturnedQty = Object.values(returnItems).reduce((a, b) => a + b, 0);
-    if (totalReturnedQty === 0) return;
-
-    const totalRefund = Object.entries(returnItems)
-      .filter(([_, qty]) => qty > 0)
-      .reduce((sum, [key, qty]) => {
-        const item = selectedOrderToReturn.items.find(
-          (i: any) => (i.variantId || i.product?.id || i.productId) === key
-        );
-        return sum + (item?.price || 0) * qty;
-      }, 0);
-
-    // Restock inventory in local catalog & IndexedDB via unified stock service
-    const refundItemsList = Object.entries(returnItems)
-      .filter(([_, qty]) => (qty as number) > 0)
-      .map(([key, qty]) => {
-        const found = selectedOrderToReturn.items.find(
-          (i: any) => (i.variantId || i.product?.id || i.productId) === key
+    if (!isOnline) {
+      toast.warning("Return Requires Connection", "Customer refunds are fail-closed offline until the authoritative server can commit the return.");
+      return;
+    }
+    const items = Object.entries(returnItems)
+      .filter(([, qty]) => Number(qty) > 0)
+      .map(([variantId, quantityReturned]) => {
+        const source = selectedOrderToReturn.items.find((i: any) =>
+          String(i.variantId || i.product?.id || i.productId) === String(variantId)
         );
         return {
-          productId: found?.product?.id || found?.productId || key,
-          variantId: found?.variantId,
-          qty: qty as number,
-          unitCost: found?.costPrice || found?.unitCost || 0,
+          variantId,
+          quantityReturned: Number(quantityReturned),
+          refundUnitPrice: Number(source?.price || 0),
+          condition: "GOOD",
         };
       });
-
-    if (refundItemsList.length > 0) {
-      recordPosSaleRefundRestock(db, {
-        saleId: selectedOrderToReturn.id,
-        items: refundItemsList,
-        tenantId: currentTenantId || "tenant-default",
-        branchId: currentBranchId || "branch-default",
-        userId: user?.id,
-        deviceId: "pos-terminal",
+    if (!items.length) return;
+    try {
+      const returnId = safeUUID();
+      const response = await apiFetch<{ success: boolean; data?: any }>("/api/v1/returns", {
+        method: "POST",
+        body: JSON.stringify({
+          id: returnId,
+          originalSaleId: selectedOrderToReturn.id,
+          customerId: selectedOrderToReturn.customerId || undefined,
+          reason: "POS customer return",
+          refundType: "CASH",
+          deviceId: getOrCreatePersistentDeviceId("pos"),
+          operationId: returnId,
+          idempotencyKey: returnId,
+          items,
+        }),
       });
+      if (!response?.success || !response.data) throw new Error("RETURN_COMMIT_FAILED");
+      await syncOutbox?.().catch(() => {});
+      playSuccessChime();
+      toast.success("Refund Processed", `Return ${response.data.returnNumber || returnId} committed authoritatively.`);
+      setSelectedOrderToReturn(null);
+      setReturnItems({});
+      setReturnOrderId("");
+      setIsReturnsModalOpen(false);
+      publishDataChanged({ action: "SALE_RETURNED", return: response.data });
+    } catch (error: any) {
+      console.error("[POS] Authoritative return failed", error);
+      toast.error("Refund Blocked", String(error?.message || "The authoritative return could not be committed."));
     }
-
-    setProducts((prev) =>
-      prev.map((p) => {
-        const returnedQty = returnItems[p.id] || 0;
-        return returnedQty > 0 ? { ...p, stock: p.stock + returnedQty } : p;
-      })
-    );
-
-    playSuccessChime();
-    toast.success("Refund Processed", `Tsh ${Math.round(totalRefund).toLocaleString()} returned to customer. Restocked inventory.`);
-    setSelectedOrderToReturn(null);
-    setReturnItems({});
-    setIsReturnsModalOpen(false);
-    publishDataChanged({ action: "SALE_RETURNED" });
   };
 
   // Keyboard Function Keys Listener (F1 - F9, Esc, Enter)
@@ -3242,7 +3238,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
                 onClick={() => {
-                  const found = pastOrders.find((o) => (o.id || o.saleNumber || "").toLowerCase() === returnOrderId.trim().toLowerCase());
+                  const lookup = returnOrderId.trim();
+                  const found = pastOrders.find((o) => (o.id || o.saleNumber || "").toLowerCase() === lookup.toLowerCase());
                   if (found) {
                     setSelectedOrderToReturn(found);
                     const initialQtys: Record<string, number> = {};
@@ -3251,6 +3248,24 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                       initialQtys[key] = 0;
                     });
                     setReturnItems(initialQtys);
+                  } else if (isOnline && lookup) {
+                    try {
+                      const remote = await apiFetch<{ success: boolean; data?: any }>(`/api/v1/pos/sales/${encodeURIComponent(lookup)}`);
+                      const sale = remote?.data;
+                      if (!sale) throw new Error("SALE_NOT_FOUND");
+                      const hydrated = {
+                        ...sale,
+                        items: sale.lines || sale.items || [],
+                        customer: sale.customer?.name || sale.customerName || "Walk-In Customer",
+                      };
+                      setSelectedOrderToReturn(hydrated);
+                      const initialQtys: Record<string, number> = {};
+                      hydrated.items?.forEach((item: any) => { initialQtys[item.variantId || item.productId] = 0; });
+                      setReturnItems(initialQtys);
+                    } catch {
+                      playWarningTone();
+                      toast.warning("Order Not Found", "Please check the order ID or receipt number.");
+                    }
                   } else {
                     playWarningTone();
                     toast.warning("Order Not Found", "Please check the order ID.");
