@@ -673,28 +673,6 @@ export class WorldStandardPrismaSyncEngine {
       return;
     }
 
-    if (op.entityType === "Customer" && ["UPDATE", "DELETE"].includes(op.operationType)) {
-      const current = await tx.customer.findUnique({ where: { id: op.entityId } });
-      if (!current) { if (op.operationType === "DELETE") return; throw new Error("Customer not found"); }
-      if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
-      const base = getBaseUpdatedAt(op.payload);
-      if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer changed on server");
-      const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.customer.update({ where: { id: op.entityId }, data: op.operationType === "DELETE" ? { status: "INACTIVE" } : { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } });
-      return;
-    }
-
-    if (op.entityType === "Supplier" && ["UPDATE", "DELETE"].includes(op.operationType)) {
-      const current = await tx.supplier.findUnique({ where: { id: op.entityId } });
-      if (!current) { if (op.operationType === "DELETE") return; throw new Error("Supplier not found"); }
-      if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
-      const base = getBaseUpdatedAt(op.payload);
-      if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: supplier changed on server");
-      const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.supplier.update({ where: { id: op.entityId }, data: op.operationType === "DELETE" ? { status: "INACTIVE" } : { supplierCode: payload.supplierCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } });
-      return;
-    }
-
     if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") {
       const payload = op.payload as any;
       const existing = await tx.stockAdjustment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: op.idempotencyKey } });
