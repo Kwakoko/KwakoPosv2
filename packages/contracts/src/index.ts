@@ -306,6 +306,7 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
+  walletBalance: z.number().nonnegative().default(0),
   status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
@@ -333,6 +334,108 @@ export const UpdateCustomerRequestSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
 });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequestSchema>;
+
+export const CustomerContactRecordSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  customerId: z.string().uuid(),
+  contactCode: z.string().min(1),
+  firstName: z.string().min(1),
+  lastName: z.string().default(""),
+  roleTitle: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  isPrimary: z.boolean().default(false),
+  notes: z.string().nullable().optional(),
+  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type CustomerContactRecord = z.infer<typeof CustomerContactRecordSchema>;
+
+export const CreateCustomerContactRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  contactCode: z.string().min(1).optional(),
+  customerId: z.string().uuid(),
+  firstName: z.string().min(1),
+  lastName: z.string().optional(),
+  roleTitle: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  isPrimary: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+export type CreateCustomerContactRequest = z.infer<typeof CreateCustomerContactRequestSchema>;
+
+export const UpdateCustomerContactRequestSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().optional(),
+  roleTitle: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  isPrimary: z.boolean().optional(),
+  notes: z.string().optional(),
+  status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
+});
+export type UpdateCustomerContactRequest = z.infer<typeof UpdateCustomerContactRequestSchema>;
+
+export const RecordCustomerPaymentRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  amount: z.number().positive(),
+  paymentMethod: z.string().min(1).default("CASH"),
+  provider: z.string().optional(),
+  providerReference: z.string().optional(),
+  payUsingWallet: z.boolean().default(false),
+});
+export type RecordCustomerPaymentRequest = z.infer<typeof RecordCustomerPaymentRequestSchema>;
+
+export const RecordCustomerWalletDepositRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  amount: z.number().positive(),
+  paymentMethod: z.string().min(1).default("CASH"),
+  provider: z.string().optional(),
+  providerReference: z.string().optional(),
+});
+export type RecordCustomerWalletDepositRequest = z.infer<typeof RecordCustomerWalletDepositRequestSchema>;
+
+export const SupplierSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  supplierCode: z.string().min(1),
+  name: z.string().min(1),
+  phone: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+  address: z.string().nullable().optional(),
+  taxPin: z.string().nullable().optional(),
+  outstandingBalance: z.number().default(0),
+  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  createdAt: z.string().or(z.date()),
+  updatedAt: z.string().or(z.date()),
+});
+export type Supplier = z.infer<typeof SupplierSchema>;
+
+export const CreateSupplierRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  supplierCode: z.string().min(1).optional(),
+  name: z.string().min(1),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  address: z.string().optional(),
+  taxPin: z.string().optional(),
+});
+export type CreateSupplierRequest = z.infer<typeof CreateSupplierRequestSchema>;
+
+export const UpdateSupplierRequestSchema = z.object({
+  name: z.string().min(1).optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  address: z.string().optional(),
+  taxPin: z.string().optional(),
+  status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
+});
+export type UpdateSupplierRequest = z.infer<typeof UpdateSupplierRequestSchema>;
 
 export const SupplierSchema = z.object({
   id: z.string().uuid(),
@@ -1277,6 +1380,7 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
+  contacts: z.array(CustomerContactRecordSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1320,6 +1424,7 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
+  contacts: z.array(CustomerContactRecordSchema).optional(),
   expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
