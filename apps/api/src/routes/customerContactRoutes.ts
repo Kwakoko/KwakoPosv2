@@ -96,7 +96,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       prisma.payment.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
       prisma.return.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, returnNumber: true, refundType: true, reason: true, createdAt: true } }),
       prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "Customer", entityId: customerId }, orderBy: { createdAt: "desc" }, take: 200 }),
-      prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "CustomerContact", metadata: { path: ["customerId"], equals: customerId } }, orderBy: { createdAt: "desc" }, take: 200 }).catch(() => []),
+      prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "CustomerContact" }, orderBy: { createdAt: "desc" }, take: 500 }).then((rows: any[]) => rows.filter((row) => String((row.metadata as any)?.customerId || "") === customerId).slice(0, 200)).catch(() => []),
     ]);
     return { success: true, data: { customer, sales, payments, returns, audits, contactAudits } };
   });
