@@ -122,6 +122,7 @@ describe("Cash Management Production Lock v1 — authoritative lifecycle", () =>
     })).rejects.toThrow("CASH_COUNT_ALREADY_SEALED");
 
     await expect(repository.closeCashSession(cashierCtx, source.id, {})).rejects.toThrow("CASH_VARIANCE_MANAGER_APPROVAL_REQUIRED");
+    await expect(repository.closeCashSession(managerCtx, source.id, {})).rejects.toThrow("CASH_VARIANCE_MANAGER_APPROVAL_REQUIRED");
     const closed = await repository.closeCashSession(managerCtx, source.id, {
       managerApprovalReference: "MANAGER-AUTH-CASH-LOCK-001",
       notes: "Approved test variance",
