@@ -22,7 +22,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/CashDrawerPage.tsx": "0a9cc4863a61600c620953e05484eab3d284421b",
   "apps/api/src/server.ts": "eea27046ac454a0899e9b8252dc1fea018c7ec58",
   "packages/contracts/src/index.ts": "2808a8a3b9b1ce7f37593cebb2fc4a5ca989d105",
-  "packages/database/src/prismaProductionRepositories.ts": "3da2cada5e7be112a9039dda9a05657309a90160",
+  "packages/database/src/prismaProductionRepositories.ts": "15d1fc2862a66f26e4f26543c950f91dd0cb1690",
   "packages/database/src/commercialRepositories.ts": "c188b7d11db34e5740d754ed7113af635838b7d6",
   "packages/database/prisma/schema.prisma": "8e8e49418d07d1b2899f89908ffcc7ba73afcf16",
   "packages/database/prisma/migrations/202610070001_cash_register_control/migration.sql": "8dcb1fa1c5b2ea4615122beb05b5befa966ee7e3",
