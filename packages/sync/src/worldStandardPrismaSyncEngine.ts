@@ -1835,7 +1835,7 @@ const now = new Date();
         if (minRev > 1n && afterRevision < minRev) {
           return {
             serverTimestamp: new Date().toISOString(),
-            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch,
+            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], contacts: [], syncEpoch,
             serverRevision: String(afterRevision),
             changes: [],
             requiresBootstrap: true,
@@ -1856,6 +1856,10 @@ const now = new Date();
       adjustments: await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       customers: await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      contacts: await prisma.$queryRawUnsafe<any[]>(
+        'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE "tenantId"=$1 AND "branchId"=$2 AND "updatedAt">=$3 AND "updatedAt"<=$4 ORDER BY "updatedAt" ASC',
+        ctx.tenantId, ctx.branchId, since, anchor,
+      ),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
