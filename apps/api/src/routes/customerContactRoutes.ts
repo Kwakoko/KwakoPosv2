@@ -187,17 +187,24 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const payment = await prisma.$transaction(async (tx: any) => {
       const customer = await tx.customer.findFirst({ where: { id: customerId, tenantId: c.tenantId, branchId: c.branchId, status: "ACTIVE" } });
       if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+      if (payload.idempotencyKey) {
+        const prior = await tx.payment.findFirst({
+          where: {
+            tenantId: c.tenantId,
+            branchId: c.branchId,
+            customerId,
+            paymentNumber: "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase(),
+          },
+        });
+        if (prior) return prior;
+      }
       const balance = Number(customer.currentBalance);
       if (payload.amount > balance + 0.005) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
       if (payload.paymentMethod === "CASH") {
         const session = await tx.cashSession.findFirst({ where: { id: payload.cashSessionId, tenantId: c.tenantId, branchId: c.branchId, cashierId: c.userId, status: "OPEN" } });
         if (!session) throw new Error("CASH_SESSION_INVALID");
       }
-      const paymentId = payload.idempotencyKey ? randomUUID() : randomUUID();
-      if (payload.idempotencyKey) {
-        const prior = await tx.payment.findFirst({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId, paymentNumber: "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase() } });
-        if (prior) return prior;
-      }
+      const paymentId = randomUUID();
       const paymentNumber = payload.idempotencyKey
         ? "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase()
         : "PAY-CUST-" + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
@@ -228,6 +235,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     requirePermission(req, "CUSTOMER_VIEW", "customers.read", "REPORT_EXPORT");
     const c = ctx(req);
     const rows = await prisma.customer.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId }, orderBy: { customerCode: "asc" } });
+    await audit(c as any, "CUSTOMER_EXPORT", "CustomerDirectory", c.tenantId + ":" + c.branchId, { rowCount: rows.length });
     const header = ["customerCode","name","phone","email","address","creditLimit","currentBalance","status"];
     const csv = [header.join(","), ...rows.map((r: any) => [r.customerCode,r.name,r.phone,r.email,r.address,r.creditLimit,r.currentBalance,r.status].map(csvCell).join(","))].join("\n") + "\n";
     reply.header("content-type", "text/csv; charset=utf-8");
@@ -244,7 +252,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       for (const item of parsed.records) {
         const existing = item.customerCode ? await tx.customer.findFirst({ where: { tenantId: c.tenantId, branchId: c.branchId, customerCode: item.customerCode } }) : null;
         if (existing) {
-          await tx.customer.update({ where: { id: existing.id }, data: { name: item.name, phone: item.phone || null, email: item.email || null, address: item.address || null, creditLimit: item.creditLimit, openingBalance: item.openingBalance } });
+          await tx.customer.update({ where: { id: existing.id }, data: { name: item.name, phone: item.phone || null, email: item.email || null, address: item.address || null, creditLimit: item.creditLimit } });
           await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, userId: c.userId, deviceId: "customer-contacts-api", action: "CUSTOMER_IMPORTED_UPDATED", entityType: "Customer", entityId: existing.id, metadata: { customerCode: existing.customerCode } } });
           results.push({ id: existing.id, action: "UPDATED" });
         } else {
