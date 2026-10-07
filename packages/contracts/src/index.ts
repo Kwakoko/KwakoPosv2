@@ -1191,6 +1191,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "Customer",
   "CustomerContact",
   "Supplier",
+  "CustomerContact",
   "Sale",
   "Return",
   "SaleReturn",
