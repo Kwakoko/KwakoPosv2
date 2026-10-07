@@ -72,7 +72,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["customer-route", "apps/web/src/modules/moduleRegistry.ts",
     "Customer Directory", "Contacts", "Customer Transactions", "Import / Export"],
   ["customer-route-app", "apps/web/src/App.tsx",
-    "/customers", "case \"/customers":"],
+    "/customers", 'case "/customers":'],
   ["supplier-ui", "apps/web/src/pages/PurchasingPage.tsx",
     "Supplier Directory", "Supplier Profile & Ledger", "/api/v1/suppliers/",
     "View supplier profile and transaction history"],
