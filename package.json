@@ -154,7 +154,8 @@
     "certify:conflicts": "tsx scripts/certify-sync-conflict-resolution.ts",
     "certify:campaign": "tsx scripts/certification/runKwakoPosCertificationProgram.ts",
     "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
-    "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts"
+    "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
+    "certify:customers-contacts": "tsx scripts/certification/customers-contacts-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
