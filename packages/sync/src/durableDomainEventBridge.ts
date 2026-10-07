@@ -23,6 +23,7 @@ const ENGINE_BY_ENTITY: Record<string, string> = {
   Sale: "core.sales_processing",
   Payment: "core.universal_payment",
   Customer: "core.party_contact",
+  CustomerContact: "core.party_contact",
   Supplier: "core.party_contact",
 };
 
@@ -48,6 +49,9 @@ export function domainEventTypeForOperation(entityType: string, operationType: s
     "Customer:CREATE": "CUSTOMER_CREATED",
     "Customer:UPDATE": "CUSTOMER_UPDATED",
     "Customer:DELETE": "CUSTOMER_DELETED",
+    "CustomerContact:CREATE": "CUSTOMER_CONTACT_CREATED",
+    "CustomerContact:UPDATE": "CUSTOMER_CONTACT_UPDATED",
+    "CustomerContact:DELETE": "CUSTOMER_CONTACT_DELETED",
     "Supplier:CREATE": "SUPPLIER_CREATED",
     "Supplier:UPDATE": "SUPPLIER_UPDATED",
     "Supplier:DELETE": "SUPPLIER_DELETED",
