@@ -2607,6 +2607,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.post("/api/v1/customers", async (req, reply) => {
     const ctx = requireCommercialPermission(req, "CUSTOMER_CREATE", "customers.write");
     const validated = CreateCustomerRequestSchema.parse(req.body);
+    if (!productionPersistence) {
+      const customer = await commercialRepository.createCustomer(ctx, validated);
+      return reply.status(201).send({ success: true, data: customer });
+    }
     const createdId = validated.id || randomUUID();
     const customer = await prisma.$transaction(async (tx: any) => {
       const existing = validated.id
@@ -2639,7 +2643,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const id = (req.params as any).id;
     const before = await commercialRepository.getCustomerById(ctx, id);
     const updated = await commercialRepository.updateCustomer(ctx, id, validated);
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+    }
     return { success: true, data: updated };
   });
 
@@ -2665,7 +2671,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireCommercialPermission(req, "SUPPLIER_CREATE", "suppliers.write");
     const validated = CreateSupplierRequestSchema.parse(req.body);
     const supplier = await commercialRepository.createSupplier(ctx, validated);
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: supplier.id, metadata: { supplierCode: supplier.supplierCode } } });
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: supplier.id, metadata: { supplierCode: supplier.supplierCode } } });
+    }
     return reply.status(201).send({ success: true, data: supplier });
   });
 
@@ -2682,7 +2690,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const id = String((req.params as any).id);
     const before = await commercialRepository.getSupplierById(ctx, id);
     const updated = await commercialRepository.updateSupplier(ctx, id, validated);
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    }
     return { success: true, data: updated };
   });
 
