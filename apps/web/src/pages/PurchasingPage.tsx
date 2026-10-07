@@ -292,6 +292,7 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
 
   // Inspect PO Details Modal State
   const [inspectingPo, setInspectingPo] = useState<PurchaseOrderRecord | null>(null);
+  const [supplierHistory, setSupplierHistory] = useState<any | null>(null);
 
   // KPIs
   const totalOutstanding = useMemo(() => suppliers.reduce((sum, s) => sum + (s.balance || 0), 0), [suppliers]);
@@ -299,6 +300,16 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const creditUtil = totalCreditLimit > 0 ? Math.round((totalOutstanding / totalCreditLimit) * 100) : 0;
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
+  const openSupplierHistory = async (supplier: any) => {
+    try {
+      const res = await apiFetch<{ success: boolean; data: any }>(`/api/v1/suppliers/${encodeURIComponent(supplier.id)}/transactions`);
+      if (!res.success) throw new Error("SUPPLIER_HISTORY_FAILED");
+      setSupplierHistory({ ...res.data, supplier });
+    } catch (error: any) {
+      toast.error("Supplier history unavailable", error?.message || "Unable to load authoritative supplier transactions.");
+    }
+  };
+
   const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierForm.name || !currentTenantId || !currentBranchId) return;
@@ -777,6 +788,14 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                                   Pay Debt
                                 </button>
                               )}
+                              <button
+                                className="v2-btn v2-btn-ghost v2-btn-sm"
+                                onClick={() => void openSupplierHistory(s)}
+                                type="button"
+                                title="View supplier profile and transaction history"
+                              >
+                                <Eye size={13} /> History
+                              </button>
                               <button
                                 className="v2-btn v2-btn-ghost v2-btn-sm"
                                 onClick={() => {
@@ -1448,6 +1467,31 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       )}
 
       {/* ─── MODAL: INSPECT PO ────────────────────────────────────────────────── */}
+      {supplierHistory && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 900, maxWidth: "96vw", maxHeight: "85vh", overflow: "auto", padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-center v2-justify-between">
+              <div>
+                <h2 className="v2-text-lg v2-font-black">{supplierHistory.supplier?.name || supplierHistory.supplier?.id} — Supplier Profile & Ledger</h2>
+                <div className="v2-text-xs v2-text-muted">Outstanding payable: {fmt(Number(supplierHistory.supplier?.outstandingBalance ?? supplierHistory.supplier?.balance ?? supplierHistory.supplier?.outstandingBalance ?? 0))}</div>
+              </div>
+              <button aria-label="Close supplier history" title="Close" className="v2-btn v2-btn-ghost" onClick={() => setSupplierHistory(null)} type="button">✕</button>
+            </div>
+            <div className="v2-grid v2-grid-3 v2-gap-2 v2-mt-4">
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">Phone</div><div className="v2-text-sm v2-font-bold">{supplierHistory.supplier?.phone || "—"}</div></div>
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">TIN</div><div className="v2-text-sm v2-font-bold">{supplierHistory.supplier?.taxPin || supplierHistory.supplier?.tin || "—"}</div></div>
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">Status</div><div className="v2-text-sm v2-font-bold">{supplierHistory.supplier?.status || "—"}</div></div>
+            </div>
+            <h3 className="v2-text-sm v2-font-bold v2-mt-4">Purchase Orders</h3>
+            <div className="v2-space-y-1">{(supplierHistory.orders || []).map((o: any) => <div key={o.id} className="v2-flex v2-justify-between v2-text-xs v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}><span>{o.orderNumber}</span><span>{fmt(Number(o.totalAmount))} · {o.status}</span></div>)}</div>
+            <h3 className="v2-text-sm v2-font-bold v2-mt-4">Goods Receipts</h3>
+            <div className="v2-space-y-1">{(supplierHistory.receipts || []).map((o: any) => <div key={o.id} className="v2-flex v2-justify-between v2-text-xs v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}><span>{o.receiptNumber}</span><span>{fmt(Number(o.totalAmount))} · {o.status}</span></div>)}</div>
+            <h3 className="v2-text-sm v2-font-bold v2-mt-4">Payments</h3>
+            <div className="v2-space-y-1">{(supplierHistory.payments || []).map((p: any) => <div key={p.id} className="v2-flex v2-justify-between v2-text-xs v2-p-2" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}><span>{p.paymentNumber}</span><span>{fmt(Number(p.amount))} · {p.paymentMethod} · {p.status}</span></div>)}</div>
+          </div>
+        </div>
+      )}
+
       {inspectingPo && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 520, maxWidth: "95vw", padding: "1.5rem" }}>
