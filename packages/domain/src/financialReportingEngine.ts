@@ -236,4 +236,61 @@ export class FinancialReportingEngine {
       balanceCheckDifference: Math.round(diff * 100) / 100,
     };
   }
+  /**
+   * Generates a cash-flow statement from posted cash/bank ledger movements.
+   * Transfers between liquid accounts are excluded from net external cash flow.
+   */
+  static generateCashFlow(
+    ctx: TenantContext,
+    accounts: Account[],
+    journals: JournalEntry[],
+    lines: JournalLine[],
+    startDate: string | Date,
+    endDate: string | Date,
+  ) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const liquid = new Set(accounts.filter((a) => ["1110","1120","1210"].includes(a.accountCode)).map((a) => a.id));
+    const posted = journals.filter((j) => j.status === "POSTED" && new Date(j.entryDate) >= start && new Date(j.entryDate) <= end);
+    let operatingCashFlow = 0, investingCashFlow = 0, financingCashFlow = 0;
+    for (const journal of posted) {
+      const cashEffect = lines.filter((l) => l.journalEntryId === journal.id && liquid.has(l.accountId))
+        .reduce((s, l) => s + Number(l.debit || 0) - Number(l.credit || 0), 0);
+      if (Math.abs(cashEffect) <= 0.01) continue;
+      if (journal.sourceType === "TRANSFER") continue;
+      if (journal.sourceType === "MANUAL") {
+        const nonLiquid = lines.filter((l) => l.journalEntryId === journal.id && !liquid.has(l.accountId));
+        const hasEquityOrLongTermLiability = nonLiquid.some((l) => {
+          const a = accounts.find((x) => x.id === l.accountId);
+          return a && (a.accountClass === "EQUITY" || (a.accountClass === "LIABILITY" && ["2110","2210","2310","2410","2420"].indexOf(a.accountCode) < 0));
+        });
+        const hasLongTermAsset = nonLiquid.some((l) => {
+          const a = accounts.find((x) => x.id === l.accountId);
+          return a && a.accountClass === "ASSET" && !["1310","1410","2220"].includes(a.accountCode);
+        });
+        if (hasLongTermAsset) investingCashFlow += cashEffect;
+        else if (hasEquityOrLongTermLiability) financingCashFlow += cashEffect;
+        else operatingCashFlow += cashEffect;
+      } else {
+        operatingCashFlow += cashEffect;
+      }
+    }
+    const allPosted = journals.filter((j) => j.status === "POSTED" && new Date(j.entryDate) <= end);
+    const endingCash = lines.filter((l) => allPosted.some((j) => j.id === l.journalEntryId) && liquid.has(l.accountId))
+      .reduce((s, l) => s + Number(l.debit || 0) - Number(l.credit || 0), 0);
+    const netChangeInCash = operatingCashFlow + investingCashFlow + financingCashFlow;
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      beginningCash: Math.round((endingCash - netChangeInCash) * 100) / 100,
+      operatingCashFlow: Math.round(operatingCashFlow * 100) / 100,
+      investingCashFlow: Math.round(investingCashFlow * 100) / 100,
+      financingCashFlow: Math.round(financingCashFlow * 100) / 100,
+      netChangeInCash: Math.round(netChangeInCash * 100) / 100,
+      endingCash: Math.round(endingCash * 100) / 100,
+    };
+  }
+
 }
