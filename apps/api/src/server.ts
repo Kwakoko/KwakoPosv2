@@ -2657,31 +2657,78 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // POS Sales Engine
+  const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
+    const ctx = requireTenantContext(req);
+    const raw = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+    const permissions = new Set(raw.map((p) => p.toUpperCase()));
+    const permissionsLower = new Set(raw.map((p) => p.toLowerCase()));
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const manager = roles.some((r: string) => ["MANAGER", "BRANCH_MANAGER"].includes(r));
+    const wildcard = permissions.has("*") || permissionsLower.has("*") || permissionsLower.has("sales.*");
+    const allowedByAction: Record<string, boolean> = {
+      view: permissions.has("SALE_VIEW") || permissions.has("SALE_CREATE") || permissionsLower.has("sales.view") || permissionsLower.has("sales.create"),
+      create: permissions.has("SALE_CREATE") || permissionsLower.has("sales.create"),
+      void: permissions.has("SALE_VOID") || permissionsLower.has("sales.void") || permissionsLower.has("sales.cancel"),
+      return: permissions.has("SALE_RETURN") || permissions.has("PAYMENT_REFUND") || permissionsLower.has("sales.return") || permissionsLower.has("sales.refund"),
+    };
+    if (!(admin || manager || wildcard || allowedByAction[action])) throw new Error(`FORBIDDEN: SALE_${action.toUpperCase()} required`);
+    return ctx;
+  };
+
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = await commercialRepository.getSales(req.tenantContext!);
+    const ctx = assertSalesAuthority(req, "view");
+    const sales = await commercialRepository.getSales(ctx);
     return { success: true, data: sales };
   });
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+      const upperPermissions = new Set(permissions.map((p) => p.toUpperCase()));
+      const lowerPermissions = new Set(permissions.map((p) => p.toLowerCase()));
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+      if (!(manager || upperPermissions.has("*") || lowerPermissions.has("*") || upperPermissions.has("DISCOUNT_MANAGE") || lowerPermissions.has("discount.manage") || lowerPermissions.has("sales.discount"))) {
+        throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      }
+    }
     const result = atomicCommercialFinance
-      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : await commercialRepository.createPosSale(req.tenantContext!, validated);
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    const ctx = assertSalesAuthority(req, "view");
+    const sale = await commercialRepository.getSaleById(ctx, (req.params as any).id);
     if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
     return { success: true, data: sale };
   });
 
+  server.post("/api/v1/pos/sales/:id/void", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "void");
+    if (!atomicCommercialFinance) throw new Error("SALE_VOID_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), operationId: z.string().min(1).max(200).optional(), idempotencyKey: z.string().min(1).max(200).optional(), deviceId: z.string().min(1).max(128).optional() }).parse(req.body);
+    const result = await atomicCommercialFinance.voidSale(ctx, String((req.params as any).id), body.reason, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
+    const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const refundAuthority = rawPermissions.includes("payment_refund") || rawPermissions.includes("sales.refund") || rawPermissions.includes("sales.return") ||
+      roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+    if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
+    const result = await commercialRepository.createSaleReturn(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 

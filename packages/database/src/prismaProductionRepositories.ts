@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
-import { assertTenantIsolation, EmployeeEngine } from "@kwakopos2/domain";
+import { assertTenantIsolation, EmployeeEngine, FinancialBridge, calculateAvailableStock } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 const db: any = prisma;
@@ -350,43 +350,216 @@ export class PrismaCommercialRepository {
 
   async createSaleReturn(ctx: TenantContext, req: any) {
     return normalize(await db.$transaction(async (tx: any) => {
-      const original = req.originalSaleId ? await tx.sale.findFirst({ where: { id: req.originalSaleId, ...tenantWhere(ctx) }, include: { lines: true } }) : null;
-      const count = await tx.return.count({ where: tenantWhere(ctx) });
-      const returnNumber = req.returnNumber || `RET-MAIN-${String(count + 1).padStart(6, "0")}`;
-      const lines = (req.items || req.lines || []).map((x: any) => ({
-        id: x.id || randomUUID(), variantId: x.variantId, quantityReturned: Math.abs(x.quantityReturned ?? x.quantity ?? 0),
-        refundUnitPrice: x.refundUnitPrice ?? x.unitPrice ?? 0,
-        refundLineTotal: x.refundLineTotal ?? ((x.refundUnitPrice ?? x.unitPrice ?? 0) * Math.abs(x.quantityReturned ?? x.quantity ?? 0)),
-        condition: x.condition || "GOOD",
-      }));
-      const total = lines.reduce((s: number, x: any) => s + Number(x.refundLineTotal || 0), 0);
-      const record = await tx.return.create({ data: {
-        id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId, returnNumber,
-        originalSaleId: original?.id ?? req.originalSaleId ?? null, customerId: req.customerId ?? original?.customerId ?? null,
-        reason: req.reason || "Customer return", refundType: req.refundType || "CASH",
-        totalRefundAmount: req.totalRefundAmount ?? total, status: "COMPLETED",
-        authorizedById: ctx.userId, lines: { create: lines },
-      }, include: { lines: true } });
-      for (const line of lines) {
-        const variant = await tx.productVariant.findFirst({ where: { id: line.variantId, ...tenantWhere(ctx) } });
-        if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
-        const beforeRow = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: variant.id } });
-        const before = Number(beforeRow._sum.quantityChange ?? 0);
-        const change = Number(line.quantityReturned);
-        const after = before + change;
-        if (after < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
+      if (!req.originalSaleId) throw new Error("RETURN_ORIGINAL_SALE_REQUIRED");
+      const original = await tx.sale.findFirst({
+        where: { id: req.originalSaleId, ...tenantWhere(ctx) },
+        include: { lines: true, payments: true },
+      });
+      if (!original) throw new Error("ORIGINAL_SALE_NOT_FOUND");
+      if (original.status === "CANCELLED") throw new Error("CANNOT_RETURN_VOIDED_SALE");
 
-        await tx.stockLedger.create({ data: {
-          tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: variant.id,
-          movementType: "RETURN", quantityChange: change, quantity: change,
-          quantityBefore: before, quantityAfter: after, unitCost: 0, totalCost: 0, referenceType: "RETURN",
-          referenceId: record.id, occurredAt: new Date(), deviceId: req.deviceId || "web",
-          operationId: req.operationId || record.id, idempotencyKey: `${req.idempotencyKey || record.id}-${variant.id}`,
-        }});
+      const returnId = req.id || randomUUID();
+      const existing = await tx.return.findFirst({
+        where: { id: returnId, ...tenantWhere(ctx) },
+        include: { lines: true },
+      });
+      if (existing) return existing;
+
+      const items = Array.isArray(req.items) ? req.items : [];
+      if (!items.length) throw new Error("RETURN_ITEMS_REQUIRED");
+
+      const priorReturns = await tx.return.findMany({
+        where: { ...tenantWhere(ctx), originalSaleId: original.id, status: "COMPLETED" },
+        include: { lines: true },
+      });
+      const priorQty = new Map<string, number>();
+      for (const ret of priorReturns) for (const line of ret.lines) {
+        priorQty.set(line.variantId, (priorQty.get(line.variantId) || 0) + Number(line.quantityReturned));
+      }
+
+      const originalLines = new Map<string, any>();
+      for (const line of original.lines) originalLines.set(line.variantId, line);
+
+      const lines: any[] = [];
+      let total = 0;
+      let returnedCost = 0;
+      for (const item of items) {
+        const source = originalLines.get(item.variantId);
+        if (!source) throw new Error("RETURN_VARIANT_NOT_IN_ORIGINAL_SALE");
+        const quantity = Number(item.quantityReturned);
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("INVALID_RETURN_QUANTITY");
+        const remaining = Number(source.quantity) - (priorQty.get(item.variantId) || 0);
+        if (quantity > remaining + 0.000001) throw new Error("RETURN_QUANTITY_EXCEEDS_REMAINING");
+        const refundUnitPrice = Number(item.refundUnitPrice ?? source.unitPrice);
+        const refundLineTotal = Math.round(quantity * refundUnitPrice * 100) / 100;
+        total += refundLineTotal;
+        returnedCost += quantity * Number(source.unitCost || 0);
+        lines.push({
+          id: randomUUID(),
+          variantId: item.variantId,
+          quantityReturned: quantity,
+          refundUnitPrice,
+          refundLineTotal,
+          condition: item.condition || "GOOD",
+        });
+      }
+      if (total <= 0) throw new Error("RETURN_TOTAL_INVALID");
+
+      const returnNumber = req.returnNumber ||
+        `RET-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${returnId.slice(0, 8).toUpperCase()}`;
+      const record = await tx.return.create({
+        data: {
+          id: returnId,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          returnNumber,
+          originalSaleId: original.id,
+          customerId: req.customerId || original.customerId || null,
+          reason: req.reason,
+          refundType: req.refundType || "CASH",
+          totalRefundAmount: total,
+          status: "COMPLETED",
+          authorizedById: ctx.userId,
+          lines: { create: lines },
+        },
+        include: { lines: true },
+      });
+
+      for (const line of lines) {
+        const variant = await tx.productVariant.findFirst({
+          where: { id: line.variantId, ...tenantWhere(ctx) },
+        });
+        if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
+        const ledgerRows = await tx.stockLedger.findMany({
+          where: { ...tenantWhere(ctx), variantId: variant.id },
+          orderBy: { occurredAt: "asc" },
+        });
+        const before = calculateAvailableStock(ledgerRows as any);
+        const change = Number(line.quantityReturned);
+        if (before < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
+        const ledgerKey = `RETURN-STOCK-${record.id}-${variant.id}`;
+        const duplicateLedger = await tx.stockLedger.findFirst({
+          where: { ...tenantWhere(ctx), idempotencyKey: ledgerKey },
+        });
+        if (!duplicateLedger) {
+          await tx.stockLedger.create({
+            data: {
+              id: randomUUID(),
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              productId: variant.productId,
+              variantId: variant.id,
+              movementType: "SALE_RETURN",
+              quantityChange: change,
+              quantity: change,
+              quantityBefore: before,
+              quantityAfter: before + change,
+              unitCost: Number(originalLines.get(variant.id)?.unitCost || 0),
+              totalCost: change * Number(originalLines.get(variant.id)?.unitCost || 0),
+              referenceType: "RETURN",
+              referenceId: record.id,
+              occurredAt: new Date(),
+              deviceId: req.deviceId || "web",
+              operationId: req.operationId || record.id,
+              idempotencyKey: ledgerKey,
+            },
+          });
+        }
         await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, variant.id);
         await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
         await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       }
+
+      const refundPaymentId = `refund:${record.id}`;
+      const refundPayment = await tx.payment.findUnique({ where: { id: refundPaymentId } }).catch(() => null);
+      if (!refundPayment) {
+        await tx.payment.create({
+          data: {
+            id: refundPaymentId,
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            paymentNumber: `REF-${returnNumber}`,
+            saleId: original.id,
+            customerId: record.customerId,
+            amount: total,
+            paymentMethod: record.refundType === "STORE_CREDIT" ? "CREDIT" : record.refundType,
+            provider: original.payments[0]?.provider || null,
+            providerReference: null,
+            status: "REFUNDED",
+            paidAt: new Date(),
+          },
+        });
+      }
+
+      if (record.customerId && record.refundType === "STORE_CREDIT") {
+        await tx.customer.update({
+          where: { id: record.customerId },
+          data: { currentBalance: { decrement: total } },
+        });
+      }
+      if (record.refundType === "CASH") {
+        if (!original.cashSessionId) throw new Error("CASH_REFUND_SESSION_REQUIRED");
+        const session = await tx.cashSession.findFirst({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE"] } },
+          orderBy: { openedAt: "desc" },
+        });
+        if (!session) throw new Error("CASH_REFUND_SESSION_REQUIRED");
+        const cashId = `refund-cash-${record.id}`;
+        const existingCash = await tx.cashMovement.findFirst({
+          where: { ...tenantWhere(ctx), idempotencyKey: cashId },
+        });
+        if (!existingCash) {
+          await tx.cashMovement.create({
+            data: {
+              id: randomUUID(),
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              cashSessionId: session.id,
+              type: "CASH_OUT",
+              amount: total,
+              reason: `Refund ${returnNumber}`,
+              deviceId: req.deviceId || "web",
+              actorId: ctx.userId,
+              approvalStatus: "APPROVED",
+              idempotencyKey: cashId,
+              occurredAt: new Date(),
+            },
+          });
+          await tx.cashSession.update({
+            where: { id: session.id },
+            data: { cashRefundsTotal: { increment: total } },
+          });
+        }
+      }
+
+      const lookup = await new PrismaAtomicCommercialFinanceService(tx).accounts(tx, ctx);
+      const journal = FinancialBridge.mapReturnToJournal(
+        ctx, record as any, lookup as any, returnedCost,
+        (await tx.journalEntry.count({ where: tenantWhere(ctx) })) + 1
+      );
+      await new PrismaAtomicCommercialFinanceService(tx).writeJournal(tx, ctx, journal);
+
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: req.deviceId || "web",
+          action: "SALE_RETURNED",
+          entityType: "Return",
+          entityId: record.id,
+          metadata: {
+            originalSaleId: original.id,
+            returnNumber,
+            totalRefund: total,
+            refundType: record.refundType,
+            reason: record.reason,
+            operationId: req.operationId,
+            idempotencyKey: req.idempotencyKey,
+          },
+        },
+      });
       return record;
     }));
   }

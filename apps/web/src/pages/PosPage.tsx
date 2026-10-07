@@ -30,7 +30,7 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
-import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
@@ -221,6 +221,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return 0; // Default VAT = 0%
   }, [db]);
 
+  const [taxInclusivePricing, setTaxInclusivePricing] = useState<boolean>(() => {
+    try {
+      const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
+      return cfg?.taxInclusivePricing !== false;
+    } catch {}
+    return true;
+  });
+
   const [selectedTaxRate, setSelectedTaxRate] = useState<number>(() => {
     try {
       const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
@@ -243,6 +251,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           } else {
             setSelectedTaxRate(0);
           }
+          setTaxInclusivePricing(cfg.taxInclusivePricing !== false);
         }
       } catch {}
     };
@@ -251,10 +260,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   }, [db]);
 
   const [selectedCustomer, setSelectedCustomer] = useState("Walk-In Customer");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [showQuickKeys, setShowQuickKeys] = useState(true);
   const [lineDiscountModal, setLineDiscountModal] = useState<{ index: number; itemName: string; currentPercent: number } | null>(null);
   const [customLineDiscountInput, setCustomLineDiscountInput] = useState("");
-  const [customerOptions, setCustomerOptions] = useState<string[]>(["Walk-In Customer"]);
+  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; name: string; phone?: string }>>([]);
 
   useEffect(() => {
     let active = true;
@@ -263,8 +273,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         await db.ready;
         const custs = Array.from(db.customers.values());
         if (active && custs.length > 0) {
-          const names = custs.map((c: any) => c.name).filter(Boolean);
-          setCustomerOptions((prev) => Array.from(new Set(["Walk-In Customer", ...names, ...prev])));
+          const records = custs
+            .filter((c: any) => c.id && c.name)
+            .map((c: any) => ({ id: String(c.id), name: String(c.name), phone: c.phone ? String(c.phone) : undefined }));
+          setCustomerOptions(records);
         }
       } catch {}
     };
@@ -300,8 +312,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
     const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
     await commitLocalMutation({ db, tenantContext, entityType: "Customer", entityId: customerId, operationType: "CREATE", payload: newCust, idempotencyKey: customerId, writes: [{ store: "customers", key: customerId, value: newCust }] });
-    setCustomerOptions((prev) => Array.from(new Set([...prev, trimmed])));
+    setCustomerOptions((prev) => prev.some((c) => c.id === customerId) ? prev : [...prev, { id: customerId, name: trimmed, phone: newCustomerPhone.trim() || undefined }]);
     setSelectedCustomer(trimmed);
+    setSelectedCustomerId(customerId);
     setNewCustomerName("");
     setNewCustomerPhone("");
     setQuickCustomerModal(false);
@@ -402,6 +415,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [returnOrderId, setReturnOrderId] = useState("");
   const [selectedOrderToReturn, setSelectedOrderToReturn] = useState<any | null>(null);
   const [returnItems, setReturnItems] = useState<Record<string, number>>({});
+  const [selectedOrderToVoid, setSelectedOrderToVoid] = useState<any | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
 
   const toggleDayCollapse = (dateKey: string) => {
     setCollapsedDays((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
@@ -413,13 +429,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const loadOrders = async () => {
       try {
         await db.ready;
-        const salesArr = Array.from(db.sales.values());
-        if (active && salesArr.length > 0) {
-          setPastOrders(
+        if (isOnline) {
+          const response = await apiFetch<{ success: boolean; data?: any[] }>("/api/v1/pos/sales", { method: "GET" });
+          const remote = Array.isArray(response?.data) ? response.data : [];
+          if (active) {
+            setPastOrders(remote.map((sale: any) => ({
+              ...sale,
+              customer: sale.customer?.name || sale.customerName || "Walk-In Customer",
+              items: sale.lines || sale.items || [],
+            })).sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime()));
+          }
+        } else {
+          const salesArr = Array.from(db.sales.values());
+          if (active) setPastOrders(
             salesArr.sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime())
           );
         }
-      } catch {}
+      } catch {
+        if (active && !isOnline) setPastOrders(Array.from(db.sales.values()));
+      }
     };
     void loadOrders();
     window.addEventListener(DATA_CHANGED_EVENT, loadOrders);
@@ -427,7 +455,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       active = false;
       window.removeEventListener(DATA_CHANGED_EVENT, loadOrders);
     };
-  }, [db]);
+  }, [db, isOnline]);
 
   // Sidebar Sub-item listener (New Sale, Sales History, Returns)
   useEffect(() => {
@@ -436,6 +464,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       setCart([]);
       setDiscountPercent(0);
       setSelectedCustomer("Walk-In Customer");
+      setSelectedCustomerId(null);
       setIsBackdatedSale(false);
       setBackdatedSaleAt("");
       setIsHistoryModalOpen(false);
@@ -469,9 +498,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return sum + linePrice * i.qty;
   }, 0);
   const discountAmount = (cartSubtotal * discountPercent) / 100;
-  const taxableTotal = cartSubtotal - discountAmount;
-  const taxAmount = taxableTotal * selectedTaxRate;
-  const cartGrandTotal = taxableTotal + taxAmount;
+  const taxableTotal = Math.max(0, cartSubtotal - discountAmount);
+  const taxAmount = selectedTaxRate > 0
+    ? taxInclusivePricing
+      ? taxableTotal - (taxableTotal / (1 + selectedTaxRate))
+      : taxableTotal * selectedTaxRate
+    : 0;
+  const cartGrandTotal = taxInclusivePricing ? taxableTotal : taxableTotal + taxAmount;
 
   const changeDue = Math.max(0, cashReceived - cartGrandTotal);
 
@@ -884,7 +917,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const handleResumeCart = (held: HeldCartRecord) => {
     setCart(held.items);
-    if (held.customer) setSelectedCustomer(held.customer);
+    if (held.customer) {
+      setSelectedCustomer(held.customer);
+      setSelectedCustomerId(customerOptions.find((c) => c.name === held.customer)?.id || null);
+    }
     if (typeof held.discountPercent === "number") setDiscountPercent(held.discountPercent);
     if (typeof held.selectedTaxRate === "number") setSelectedTaxRate(held.selectedTaxRate);
     const updated = heldCarts.filter((h) => h.id !== held.id);
@@ -1012,7 +1048,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }
 
     const mappedItems = cart.map((i) => {
-      const unitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
+      const baseUnitPrice = i.price;
+      const displayUnitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
       if (!i.variantId && !i.isCustom) throw new Error(`POS_VARIANT_REQUIRED:${i.product.id}`);
       const variantId = i.variantId || `${i.product.id}-custom`;
       const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
@@ -1021,8 +1058,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         variantId,
         name: i.variantName ? `${i.product.name} (${i.variantName})` : i.product.name,
         originalPrice: i.price,
-        price: unitPrice,
-        unitPrice,
+        price: displayUnitPrice,
+        unitPrice: baseUnitPrice,
         unitCost,
         discountPercent: i.discountPercent || 0,
         discountAmount: i.discountPercent ? (i.price * (i.discountPercent / 100)) * i.qty : 0,
@@ -1031,7 +1068,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         qty: i.qty,
         product: i.product,
         sku: i.product.sku,
-        lineTotal: unitPrice * i.qty,
+        lineTotal: displayUnitPrice * i.qty,
         notes: i.notes,
         isCustom: i.isCustom,
       };
@@ -1089,13 +1126,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const paymentDeviceId = getOrCreatePersistentDeviceId("pos");
 
     const tenantContext = { tenantId: currentTenantId!, branchId: currentBranchId! };
-    const selectedCustomerId = selectedCustomer === "Walk-In Customer"
-      ? null
-      : Array.from(db.customers.values()).find((customer: any) =>
-          customer.tenantId === currentTenantId &&
-          customer.branchId === currentBranchId &&
-          customer.name === selectedCustomer
-        )?.id ?? null;
+    const authoritativeCustomerId = selectedCustomer === "Walk-In Customer" ? null : (
+      selectedCustomerId ||
+      (Array.from(db.customers.values()).find((customer: any) =>
+        customer.tenantId === currentTenantId &&
+        customer.branchId === currentBranchId &&
+        customer.name === selectedCustomer
+      )?.id ?? null)
+    );
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
 
     const saleRecord = {
@@ -1108,7 +1146,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       cashSessionId: activeCashSession.id,
       operationId: saleId,
       idempotencyKey: `${paymentDeviceId}/${saleId}`,
-      customerId: selectedCustomerId,
+      customerId: authoritativeCustomerId,
       customer: selectedCustomer,
       customerName: selectedCustomer,
       cashierId: user?.id || "",
@@ -1180,16 +1218,82 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       { store: "sales", key: saleId, value: saleRecord },
       { store: "receipts", key: saleId, value: receiptRecord },
     ];
-    if (paymentMethod === "Credit" && selectedCustomer && selectedCustomer !== "Walk-In Customer") {
-      for (const cust of db.customers.values()) {
-        if (cust.name !== selectedCustomer) continue;
-        const currentDebt = Number(cust.outstandingBalance || cust.currentBalance || cust.debt || 0);
-        const newDebt = currentDebt + cartGrandTotal;
+    if (paymentMethod === "Credit" && selectedCustomerId) {
+      const cust = db.customers.get(selectedCustomerId) as any;
+      if (cust) {
+        const newDebt = Number(cust.outstandingBalance || cust.currentBalance || 0) + cartGrandTotal;
         localWrites.push({ store: "customers", key: cust.id, value: { ...cust, outstandingBalance: newDebt, currentBalance: newDebt, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId } });
-        break;
       }
     }
-    const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, drawerOutboxItems, tenantContext });
+
+    const stockOutboxItems: any[] = [];
+    const stockByVariant = new Map<string, { qty: number; product: any; unitCost: number }>();
+    for (const item of mappedItems.filter((i: any) => !i.isCustom)) {
+      const variantId = String(item.variantId);
+      const prior = stockByVariant.get(variantId);
+      stockByVariant.set(variantId, {
+        qty: (prior?.qty || 0) + Number(item.quantity || 0),
+        product: item.product,
+        unitCost: Number(item.unitCost || 0),
+      });
+    }
+    for (const [variantId, info] of stockByVariant.entries()) {
+      const variant = db.productVariants.get(variantId) as any;
+      if (!variant || variant.tenantId !== tenantContext.tenantId || variant.branchId !== tenantContext.branchId) {
+        throw new Error(`POS_VARIANT_REQUIRED:${variantId}`);
+      }
+      const ledgerRows = [...db.stockLedger.values()].filter((entry: any) =>
+        entry.tenantId === tenantContext.tenantId &&
+        entry.branchId === tenantContext.branchId &&
+        entry.variantId === variantId
+      );
+      const quantityBefore = ledgerRows.reduce((sum: number, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
+      const quantityAfter = quantityBefore - info.qty;
+      if (quantityBefore < info.qty) throw new Error(`INSUFFICIENT_LOCAL_STOCK:${variantId}`);
+      const occurredAt = saleRecord.occurredAt;
+      const ledgerId = `led-${saleId}-${variantId}`;
+      const operationId = `sale-stock-${saleId}-${variantId}`;
+      const idempotencyKey = `SALE-STOCK-${saleId}-${variantId}`;
+      const ledgerRecord: any = {
+        id: ledgerId, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+        productId: info.product.id, variantId, movementType: "SALE", referenceType: "SALE", referenceId: saleId,
+        quantityBefore, quantityChange: -info.qty, quantity: -info.qty, quantityAfter,
+        unitCost: info.unitCost, totalCost: info.qty * info.unitCost, userId: user?.id,
+        deviceId: paymentDeviceId, operationId, idempotencyKey, notes: `POS Sale ${saleId}`,
+        synced: false, occurredAt, createdAt: occurredAt,
+      };
+      const updatedVariant = { ...variant, inventoryQuantity: quantityAfter, stock: quantityAfter, updatedAt: occurredAt };
+      const siblingVariants = [...db.productVariants.values()].filter((v: any) =>
+        v.productId === info.product.id && v.tenantId === tenantContext.tenantId && v.branchId === tenantContext.branchId
+      );
+      const productAfter = siblingVariants.reduce((sum: number, v: any) =>
+        sum + (v.id === variantId ? quantityAfter : Number(v.inventoryQuantity ?? v.stock ?? 0)), 0);
+      const product = db.products.get(info.product.id) as any;
+      const updatedProduct = product ? { ...product, availableStock: productAfter, totalStock: productAfter, stock: productAfter, updatedAt: occurredAt } : product;
+      localWrites.push({ store: "stockLedger", key: ledgerId, value: ledgerRecord });
+      localWrites.push({ store: "productVariants", key: variantId, value: updatedVariant });
+      if (updatedProduct) localWrites.push({ store: "products", key: info.product.id, value: updatedProduct });
+      stockOutboxItems.push({
+        id: operationId, entityType: "StockAdjustment", entityId: `adj-sale-${saleId}-${variantId}`,
+        operationType: "CREATE",
+        payload: {
+          id: `adj-sale-${saleId}-${variantId}`, productId: info.product.id, variantId,
+          adjustmentType: "DECREASE", movementType: "SALE", quantityChange: -info.qty, quantity: info.qty,
+          reason: `POS Sale ${saleId}`, deviceId: paymentDeviceId, operationId, idempotencyKey,
+          referenceType: "SALE", referenceId: saleId, ledgerId, unitCost: info.unitCost,
+          quantityBefore, quantityAfter, occurredAt,
+        },
+        clientCreatedAt: occurredAt, idempotencyKey, status: "PENDING",
+        tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+      });
+    }
+
+    const atomicResult = await db.executeAtomicMutation({
+      writes: localWrites,
+      outboxItems: [localSaleOutbox, ...stockOutboxItems],
+      drawerOutboxItems,
+      tenantContext,
+    });
     const outboxItem = atomicResult.outbox;
     if (drawerOutboxItems.length) void dispatchDrawerOutbox(db, tenantContext).catch(() => {});
     const traVfdItem = await enqueueTraVfdOutbox(db, tenantContext, {
@@ -1201,11 +1305,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     if (traVfdItem && isOnline) {
       void processTraVfdOutbox(db, tenantContext).catch(() => {});
     }
-    await recordPosSaleDeductions(db, {
-      saleId,
-      items: cart.filter((item) => !item.isCustom).map((item) => ({ productId: item.product.id, variantId: item.variantId, qty: item.qty, unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0), name: item.product.name, sku: item.product.sku })),
-      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, userId: user?.id, deviceId: "pos-terminal",
-    });
     // 4. Update local products state so POS counter stock displays decrease immediately
     setProducts((prev) =>
       prev.map((p) => {
@@ -1350,59 +1449,85 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return () => { active = false; };
   }, [currentTenantId, currentBranchId, user?.id]);
 
-  const executeReturn = () => {
+  const executeReturn = async () => {
     if (!selectedOrderToReturn) return;
-    const totalReturnedQty = Object.values(returnItems).reduce((a, b) => a + b, 0);
-    if (totalReturnedQty === 0) return;
-
-    const totalRefund = Object.entries(returnItems)
-      .filter(([_, qty]) => qty > 0)
-      .reduce((sum, [key, qty]) => {
-        const item = selectedOrderToReturn.items.find(
-          (i: any) => (i.variantId || i.product?.id || i.productId) === key
-        );
-        return sum + (item?.price || 0) * qty;
-      }, 0);
-
-    // Restock inventory in local catalog & IndexedDB via unified stock service
-    const refundItemsList = Object.entries(returnItems)
-      .filter(([_, qty]) => (qty as number) > 0)
-      .map(([key, qty]) => {
-        const found = selectedOrderToReturn.items.find(
-          (i: any) => (i.variantId || i.product?.id || i.productId) === key
+    if (!isOnline) {
+      toast.warning("Return Requires Connection", "Customer refunds are fail-closed offline until the authoritative server can commit the return.");
+      return;
+    }
+    const items = Object.entries(returnItems)
+      .filter(([, qty]) => Number(qty) > 0)
+      .map(([variantId, quantityReturned]) => {
+        const source = selectedOrderToReturn.items.find((i: any) =>
+          String(i.variantId || i.product?.id || i.productId) === String(variantId)
         );
         return {
-          productId: found?.product?.id || found?.productId || key,
-          variantId: found?.variantId,
-          qty: qty as number,
-          unitCost: found?.costPrice || found?.unitCost || 0,
+          variantId,
+          quantityReturned: Number(quantityReturned),
+          refundUnitPrice: Number(source?.price || 0),
+          condition: "GOOD",
         };
       });
-
-    if (refundItemsList.length > 0) {
-      recordPosSaleRefundRestock(db, {
-        saleId: selectedOrderToReturn.id,
-        items: refundItemsList,
-        tenantId: currentTenantId || "tenant-default",
-        branchId: currentBranchId || "branch-default",
-        userId: user?.id,
-        deviceId: "pos-terminal",
+    if (!items.length) return;
+    try {
+      const returnId = safeUUID();
+      const response = await apiFetch<{ success: boolean; data?: any }>("/api/v1/returns", {
+        method: "POST",
+        body: JSON.stringify({
+          id: returnId,
+          originalSaleId: selectedOrderToReturn.id,
+          customerId: selectedOrderToReturn.customerId || undefined,
+          reason: "POS customer return",
+          refundType: "CASH",
+          deviceId: getOrCreatePersistentDeviceId("pos"),
+          operationId: returnId,
+          idempotencyKey: returnId,
+          items,
+        }),
       });
+      if (!response?.success || !response.data) throw new Error("RETURN_COMMIT_FAILED");
+      await syncOutbox?.().catch(() => {});
+      playSuccessChime();
+      toast.success("Refund Processed", `Return ${response.data.returnNumber || returnId} committed authoritatively.`);
+      setSelectedOrderToReturn(null);
+      setReturnItems({});
+      setReturnOrderId("");
+      setIsReturnsModalOpen(false);
+      publishDataChanged({ action: "SALE_RETURNED", return: response.data });
+    } catch (error: any) {
+      console.error("[POS] Authoritative return failed", error);
+      toast.error("Refund Blocked", String(error?.message || "The authoritative return could not be committed."));
     }
+  };
 
-    setProducts((prev) =>
-      prev.map((p) => {
-        const returnedQty = returnItems[p.id] || 0;
-        return returnedQty > 0 ? { ...p, stock: p.stock + returnedQty } : p;
-      })
-    );
-
-    playSuccessChime();
-    toast.success("Refund Processed", `Tsh ${Math.round(totalRefund).toLocaleString()} returned to customer. Restocked inventory.`);
-    setSelectedOrderToReturn(null);
-    setReturnItems({});
-    setIsReturnsModalOpen(false);
-    publishDataChanged({ action: "SALE_RETURNED" });
+  const executeVoidSale = async () => {
+    if (!selectedOrderToVoid) return;
+    if (!isOnline) {
+      toast.warning("Void Requires Connection", "Finalized sale voids are fail-closed offline until the authoritative server can commit the reversal.");
+      return;
+    }
+    const reason = voidReason.trim();
+    if (reason.length < 3) {
+      toast.warning("Void Reason Required", "Enter a reason of at least 3 characters.");
+      return;
+    }
+    try {
+      const operationId = safeUUID();
+      const response = await apiFetch<{ success: boolean; data?: any }>(`/api/v1/pos/sales/${encodeURIComponent(selectedOrderToVoid.id)}/void`, {
+        method: "POST",
+        body: JSON.stringify({ reason, operationId, idempotencyKey: operationId, deviceId: getOrCreatePersistentDeviceId("pos") }),
+      });
+      if (!response?.success || !response.data) throw new Error("SALE_VOID_COMMIT_FAILED");
+      setIsVoidModalOpen(false);
+      setSelectedOrderToVoid(null);
+      setVoidReason("");
+      await syncOutbox?.().catch(() => {});
+      playSuccessChime();
+      toast.success("Sale Voided", `${selectedOrderToVoid.saleNumber || selectedOrderToVoid.id} was voided with an authoritative reversal.`);
+      publishDataChanged({ action: "SALE_VOIDED", sale: response.data.sale || response.data });
+    } catch (error: any) {
+      toast.error("Void Blocked", String(error?.message || "The authoritative sale void could not be committed."));
+    }
   };
 
   // Keyboard Function Keys Listener (F1 - F9, Esc, Enter)
@@ -1961,11 +2086,17 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             <select
               className="v2-input v2-input-sm"
               style={{ flex: 1 }}
-              value={selectedCustomer}
-              onChange={(e) => setSelectedCustomer(e.target.value)}
+              value={selectedCustomerId || ""}
+              onChange={(e) => {
+                const id = e.target.value || null;
+                const record = customerOptions.find((c) => c.id === id);
+                setSelectedCustomerId(id);
+                setSelectedCustomer(record?.name || "Walk-In Customer");
+              }}
             >
+              <option value="">Walk-In Customer</option>
               {customerOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
+                <option key={opt.id} value={opt.id}>{opt.name}{opt.phone ? ` · ${opt.phone}` : ""}</option>
               ))}
             </select>
             <button
@@ -2520,6 +2651,34 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             <button className="v2-btn v2-btn-primary" style={{ width: "100%", marginTop: "1rem" }} onClick={() => setReceiptModal(false)} type="button">
               {t("pos.newSale")}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- Governed Sale Void Modal --- */}
+      {isVoidModalOpen && selectedOrderToVoid && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 440, maxWidth: "94vw", padding: "1.5rem" }}>
+            <h2 className="v2-text-base v2-font-black v2-mb-2">Void Completed Sale</h2>
+            <div className="v2-text-xs v2-text-muted v2-mb-3">
+              {selectedOrderToVoid.saleNumber || selectedOrderToVoid.id} · {money(selectedOrderToVoid.grandTotal || selectedOrderToVoid.total || 0)}
+            </div>
+            <p className="v2-text-xs v2-text-muted v2-mb-3">
+              This creates an immutable reversal. The original sale remains in history while stock, payment, cash and journal effects are reversed.
+            </p>
+            <textarea
+              className="v2-input"
+              rows={3}
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Reason for voiding this completed sale"
+            />
+            <div className="v2-flex v2-justify-end v2-gap-2 v2-mt-3">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => { setIsVoidModalOpen(false); setSelectedOrderToVoid(null); }} type="button">Cancel</button>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void executeVoidSale()} type="button">
+                <X size={12} /> Confirm Void
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3116,6 +3275,20 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                                     >
                                       <Printer size={12} /> Reprint
                                     </button>
+                                    {String(o.status || "COMPLETED").toUpperCase() === "COMPLETED" && (
+                                      <button
+                                        className="v2-btn v2-btn-ghost v2-btn-sm"
+                                        onClick={() => {
+                                          setSelectedOrderToVoid(o);
+                                          setVoidReason("");
+                                          setIsVoidModalOpen(true);
+                                        }}
+                                        type="button"
+                                        style={{ padding: ".25rem .6rem", color: "var(--danger)" }}
+                                      >
+                                        <X size={12} /> Void
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -3167,8 +3340,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               />
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
-                onClick={() => {
-                  const found = pastOrders.find((o) => (o.id || o.saleNumber || "").toLowerCase() === returnOrderId.trim().toLowerCase());
+                onClick={async () => {
+                  const lookup = returnOrderId.trim();
+                  const found = pastOrders.find((o) => (o.id || o.saleNumber || "").toLowerCase() === lookup.toLowerCase());
                   if (found) {
                     setSelectedOrderToReturn(found);
                     const initialQtys: Record<string, number> = {};
@@ -3177,6 +3351,24 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                       initialQtys[key] = 0;
                     });
                     setReturnItems(initialQtys);
+                  } else if (isOnline && lookup) {
+                    try {
+                      const remote = await apiFetch<{ success: boolean; data?: any }>(`/api/v1/pos/sales/${encodeURIComponent(lookup)}`);
+                      const sale = remote?.data;
+                      if (!sale) throw new Error("SALE_NOT_FOUND");
+                      const hydrated = {
+                        ...sale,
+                        items: sale.lines || sale.items || [],
+                        customer: sale.customer?.name || sale.customerName || "Walk-In Customer",
+                      };
+                      setSelectedOrderToReturn(hydrated);
+                      const initialQtys: Record<string, number> = {};
+                      hydrated.items?.forEach((item: any) => { initialQtys[item.variantId || item.productId] = 0; });
+                      setReturnItems(initialQtys);
+                    } catch {
+                      playWarningTone();
+                      toast.warning("Order Not Found", "Please check the order ID or receipt number.");
+                    }
                   } else {
                     playWarningTone();
                     toast.warning("Order Not Found", "Please check the order ID.");

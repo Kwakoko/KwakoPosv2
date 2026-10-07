@@ -128,6 +128,7 @@ export async function applyRevisionedChanges(
       case "Sale": return "sales";
       case "Payment": return "payments";
       case "PurchaseReceipt": return "receipts";
+      case "Receipt": return "receipts";
       case "Category": return "configuration";
       case "Brand": return "configuration";
       case "Setting": return "configuration";
