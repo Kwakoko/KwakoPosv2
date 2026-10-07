@@ -42,8 +42,8 @@ const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 const buildNumber = `${dateStr}.${rawBuildNumber}`;
 const releaseId = `kwakopos-rel-${version}-${gitSha.slice(0, 7)}`;
 const cacheName = `kwakopos-runtime-v${version}`;
-const pwaSchemaVersion = Number(releaseManifest.compatibility?.pwaSchemaVersion || 6);
-if (pwaSchemaVersion !== 6) throw new Error(`RELEASE_MANIFEST_INVALID: expected PWA schema version 6, got ${pwaSchemaVersion}`);
+const pwaSchemaVersion = Number(releaseManifest.compatibility?.pwaSchemaVersion || 7);
+if (pwaSchemaVersion !== 7) throw new Error(`RELEASE_MANIFEST_INVALID: expected PWA schema version 7, got ${pwaSchemaVersion}`);
 
 // 1. Write public/release-manifest.json
 safeWriteFileSync(path.join(publicDir, "release-manifest.json"), JSON.stringify({
