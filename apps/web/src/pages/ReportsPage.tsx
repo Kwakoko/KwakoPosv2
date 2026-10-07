@@ -302,7 +302,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
       : discountedSales;
     const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
-    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r))));
+    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r)))) as string[];
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [headers.map(esc).join(","), ...flat.map((r: any) => headers.map((h) => esc(r[h])).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
