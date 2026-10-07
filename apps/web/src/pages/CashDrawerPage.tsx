@@ -371,10 +371,10 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
           if (reconResponse?.success) {
             const channels = Array.isArray(reconResponse.data?.channels) ? reconResponse.data.channels : [];
             const by = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.net || 0);
-            setCashSales(by("CASH") + Number(reconResponse.data?.refundTotal || 0) * 0);
-            setMpesaSales(by("MOBILE_MONEY") || by("MPESA"));
-            setAirtelSales(by("AIRTEL_MONEY") || 0);
-            setCardSales(by("CARD"));
+            const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+            setMpesaSales(completedBy("MOBILE_MONEY") || completedBy("MPESA"));
+            setAirtelSales(completedBy("AIRTEL_MONEY"));
+            setCardSales(completedBy("CARD"));
           }
         } catch {
           setChannelReconciliation(null);
@@ -595,10 +595,11 @@ Manager Sign-off:  _____________________
         const response = await apiFetch<{ success: boolean; data: any }>("/api/v1/cash-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ openingCash: flt }),
+          body: JSON.stringify({ openingCash: flt, registerCode: terminalId, deviceId: terminalId }),
         });
         const session = response?.data;
         if (!response?.success || !session?.id) throw new Error("Cash session was not created by PostgreSQL authority");
+        if (session.registerCode) setTerminalId(String(session.registerCode));
         setCashSessionId(String(session.id));
         setShiftId(String(session.sessionNumber || session.id));
         setOpeningFloat(Number(session.openingCash || flt));
@@ -640,13 +641,38 @@ Manager Sign-off:  _____________________
         const closed = response?.data;
         if (!response?.success || closed?.status !== "CLOSED") throw new Error("Cash session was not closed by PostgreSQL authority");
         setShiftStatus("CLOSED");
+        const authoritativeClosedCash = Number(closed.actualCash || 0);
+        const authoritativeExpectedCash = Number(closed.expectedCash || 0);
+        const authoritativeVariance = Number(closed.variance || 0);
+        const reportRecon = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(String(closed.id))}/payment-channel-reconciliation`).catch(() => null);
+        const reportChannels = reportRecon?.success && Array.isArray(reportRecon.data?.channels) ? reportRecon.data.channels : [];
+        const reportAmount = (channel: string) => Number(reportChannels.find((c: any) => String(c.channel).toUpperCase() === channel)?.completed || 0);
         setCashSessionId("");
+        setActiveReportSlip({
+          type: "Z_REPORT",
+          title: `Z-REPORT SETTLEMENT (${String(closed.sessionNumber || closed.id)})`,
+          timestamp: closed.closedAt ? new Date(closed.closedAt).toISOString().replace("T"," ").slice(0,19) : new Date().toISOString().replace("T"," ").slice(0,19),
+          shiftNumber: String(closed.sessionNumber || closed.id),
+          cashier: String(closed.cashierId || currentUser?.name || "Cashier"),
+          openingFloat: Number(closed.openingCash || 0),
+          cashSales: Number(closed.cashSalesTotal || 0),
+          mpesaSales: reportAmount("MOBILE_MONEY") || reportAmount("MPESA"),
+          airtelSales: reportAmount("AIRTEL_MONEY"),
+          cardSales: reportAmount("CARD"),
+          cashIn: Number(closed.cashInTotal || 0),
+          cashOut: Number(closed.cashOutTotal || 0),
+          safeDrops: Number(closed.safeDropTotal || 0),
+          expectedCash: authoritativeExpectedCash,
+          declaredCash: authoritativeClosedCash,
+          variance: authoritativeVariance,
+          denominations,
+          managerSignOff: Math.abs(authoritativeVariance) > toleranceThreshold ? "Manager Authorized" : "Within Policy Tolerance",
+        });
+        setBlindCountDone(false);
+        setBlindCountSealedAt(null);
+        setBlindDeclaredCash(0);
+        setModalType(null);
         await loadDrawerData();
-      setBlindCountDone(false);
-      setBlindCountSealedAt(null);
-      setBlindDeclaredCash(0);
-      setModalType(null);
-      handleGenerateZReport();
       toast.info("Shift Closed", "Register reconciled and Z-Report compiled.");
       playBeep(440, 120);
       } catch (error) {
@@ -1482,6 +1508,7 @@ Manager Sign-off:  _____________________
             </table>
           </div>
         )}
+      )}
 
       {/* ─── TAB 9: SHIFT RECORDS HISTORY ──────────────────────────────────────── */}
       {activeTab === "history" && (
