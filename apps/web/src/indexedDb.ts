@@ -146,7 +146,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 ];
 
 const DB_NAME = "kwakopos-v2";
-export const AUTHORITATIVE_SCHEMA_VERSION = 6;
+export const AUTHORITATIVE_SCHEMA_VERSION = 7;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
