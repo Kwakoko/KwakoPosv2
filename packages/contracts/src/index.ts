@@ -437,44 +437,6 @@ export const UpdateSupplierRequestSchema = z.object({
 });
 export type UpdateSupplierRequest = z.infer<typeof UpdateSupplierRequestSchema>;
 
-export const SupplierSchema = z.object({
-  id: z.string().uuid(),
-  tenantId: z.string().uuid(),
-  branchId: z.string().uuid(),
-  supplierCode: z.string().min(1),
-  name: z.string().min(1),
-  phone: z.string().nullable().optional(),
-  email: z.string().email().nullable().optional(),
-  address: z.string().nullable().optional(),
-  taxPin: z.string().nullable().optional(),
-  outstandingBalance: z.number().default(0),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
-  createdAt: z.string().or(z.date()),
-  updatedAt: z.string().or(z.date()),
-});
-export type Supplier = z.infer<typeof SupplierSchema>;
-
-export const CreateSupplierRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  supplierCode: z.string().min(1).optional(),
-  name: z.string().min(1),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  address: z.string().optional(),
-  taxPin: z.string().optional(),
-});
-export type CreateSupplierRequest = z.infer<typeof CreateSupplierRequestSchema>;
-
-export const UpdateSupplierRequestSchema = z.object({
-  name: z.string().min(1).optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  address: z.string().optional(),
-  taxPin: z.string().optional(),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
-});
-export type UpdateSupplierRequest = z.infer<typeof UpdateSupplierRequestSchema>;
-
 // ==========================================
 // Product & ProductVariant Contracts
 // ==========================================
