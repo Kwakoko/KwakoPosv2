@@ -126,6 +126,14 @@ export class CrmEngine {
     const now = new Date().toISOString();
     const contact: CustomerContact = {
       ...params,
+      branchId: params.branchId ?? "",
+      title: params.title ?? "",
+      role: params.role ?? "",
+      department: params.department ?? "",
+      notes: params.notes ?? "",
+      status: params.status ?? "ACTIVE",
+      email: params.email ?? "",
+      phone: params.phone ?? "",
       isPrimary: params.isPrimary ?? false,
       decisionInfluence: params.decisionInfluence ?? "INFLUENCER",
       createdAt: now,
