@@ -73,7 +73,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportMetrics, setReportMetrics] = useState<any>(null);
   const [dateRange, setDateRange] = useState("this_month");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState("current");
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
   const isProductionLocked = productionCleanupService.isProductionLocked();
 
@@ -134,13 +134,15 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     setReportLoading(true); setReportError(null);
     try {
       let branchId: string | null = null;
+      const params = new URLSearchParams({ range: dateRange });
       if (branchFilter === "hq") {
         const main = reportBranches.find((b: any) => b.isMain);
         branchId = main?.id || null;
         if (!branchId) throw new Error("REPORT_MAIN_BRANCH_NOT_FOUND");
+        params.set("branchId", branchId);
+      } else if (branchFilter === "all") {
+        params.set("allBranches", "true");
       }
-      const params = new URLSearchParams({ range: dateRange });
-      if (branchId) params.set("branchId", branchId);
       const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/reports/data?${params.toString()}`);
       if (!response?.success || !response.data) throw new Error("REPORT_DATA_UNAVAILABLE");
       const data = response.data;
@@ -350,6 +352,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             value={branchFilter}
             onChange={(e) => setBranchFilter(e.target.value)}
           >
+            <option value="current">Current Branch</option>
             <option value="all">All Branches</option>
             <option value="hq">HQ Main Branch</option>
           </select>
