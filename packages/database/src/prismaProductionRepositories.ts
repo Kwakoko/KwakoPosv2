@@ -500,9 +500,10 @@ export class PrismaCommercialRepository {
       if (record.refundType === "CASH") {
         if (!original.cashSessionId) throw new Error("CASH_REFUND_SESSION_REQUIRED");
         const session = await tx.cashSession.findFirst({
-          where: { id: original.cashSessionId, ...tenantWhere(ctx) },
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE"] } },
+          orderBy: { openedAt: "desc" },
         });
-        if (!session || session.status === "CLOSED") throw new Error("CASH_REFUND_SESSION_INVALID");
+        if (!session) throw new Error("CASH_REFUND_SESSION_REQUIRED");
         const cashId = `refund-cash-${record.id}`;
         const existingCash = await tx.cashMovement.findFirst({
           where: { ...tenantWhere(ctx), idempotencyKey: cashId },
