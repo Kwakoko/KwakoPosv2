@@ -1189,6 +1189,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "StockAdjustment",
   "StockLedger",
   "Customer",
+  "CustomerContact",
   "Supplier",
   "Sale",
   "Return",
