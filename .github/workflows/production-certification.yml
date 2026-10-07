@@ -64,6 +64,8 @@ jobs:
         run: npm run certify:inventory-lock
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
       - name: Cash Management Production Lock v1
         run: npm run certify:cash-lock
       - name: Finance / Accounting Production Lock v1

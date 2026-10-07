@@ -2889,7 +2889,7 @@ model ReceiptShareLog {
   channel   String
   recipient String
   sharedBy  String
-  status    String   @default("SENT")
+  status    String   @default("OPENED")
   timestamp DateTime @default(now())
 
   receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
