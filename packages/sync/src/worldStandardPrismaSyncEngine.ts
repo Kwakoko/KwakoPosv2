@@ -1066,8 +1066,21 @@ const now = new Date();
         if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
 
         const isWalletDeposit = payload.walletDepositAmount !== undefined || payload.kind === "WALLET_DEPOSIT";
-        if (!isWalletDeposit && amount > Number(customer.currentBalance)) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
-        if (!isWalletDeposit && payload.payUsingWallet && amount > Number(customer.walletBalance)) throw new Error("INSUFFICIENT_CUSTOMER_WALLET");
+        const updateResult = isWalletDeposit
+          ? await tx.customer.updateMany({ where: { id: customer.id, tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { walletBalance: { increment: amount } } })
+          : await tx.customer.updateMany({
+              where: {
+                id: customer.id, tenantId: ctx.tenantId, branchId: ctx.branchId,
+                currentBalance: { gte: amount },
+                ...(payload.payUsingWallet ? { walletBalance: { gte: amount } } : {}),
+              },
+              data: payload.payUsingWallet
+                ? { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } }
+                : { currentBalance: { decrement: amount } },
+            });
+        if (updateResult.count !== 1) {
+          throw new Error(isWalletDeposit ? "CUSTOMER_WALLET_UPDATE_FAILED" : (payload.payUsingWallet ? "INSUFFICIENT_CUSTOMER_BALANCE_OR_WALLET" : "PAYMENT_EXCEEDS_CUSTOMER_BALANCE"));
+        }
 
         const payment = await tx.payment.create({ data: {
           id: op.entityId,
@@ -1082,14 +1095,6 @@ const now = new Date();
           status: "COMPLETED",
           paidAt: new Date(),
         }});
-
-        if (isWalletDeposit) {
-          await tx.customer.update({ where: { id: customer.id }, data: { walletBalance: { increment: amount } } });
-        } else if (payload.payUsingWallet) {
-          await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } } });
-        } else {
-          await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount } } });
-        }
 
         await tx.auditEvent.create({ data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
