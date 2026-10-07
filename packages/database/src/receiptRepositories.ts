@@ -258,6 +258,29 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     return this.recordPrint(ctx, receiptId, printedBy, { printType: "REPRINT", reason });
   }
 
+  async recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean> {
+    const rcpt = await this.getReceiptById(ctx, receiptId);
+    if (!rcpt) throw new Error("RECEIPT_NOT_FOUND");
+    this.shareLogs.push({
+      id: `SHARE-${Date.now()}`,
+      receiptId: rcpt.id,
+      channel,
+      recipient,
+      sharedBy,
+      status: "OPENED",
+      timestamp: new Date().toISOString(),
+    });
+    this.auditLogs.push({
+      id: `AUDIT-${Date.now()}`,
+      receiptId: rcpt.id,
+      action: `SHARED_${channel}`,
+      actorId: ctx.userId,
+      details: recipient,
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
   async updateReceiptStatus(ctx: TenantContext, receiptId: string, status: string, reason?: string, actorId?: string): Promise<ReceiptDTO> {
     if (!["CANCELLED", "REFUNDED"].includes(status)) throw new Error("RECEIPT_STATUS_TRANSITION_NOT_ALLOWED");
     const receipt = await this.getReceiptById(ctx, receiptId);
