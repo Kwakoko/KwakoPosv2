@@ -1420,6 +1420,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
         return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
 
+      // Customer / contact / financial business rules → 400.
+      if ([
+        "CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE",
+        "PAYMENT_EXCEEDS_CUSTOMER_BALANCE",
+        "CASH_SESSION_REQUIRED",
+        "CASH_SESSION_INVALID",
+        "CUSTOMER_NOT_FOUND",
+        "CONTACT_NOT_FOUND",
+        "CONTACT_CUSTOMER_REQUIRED",
+        "SUPPLIER_NOT_FOUND",
+        "PAYMENT_AMOUNT_REQUIRED",
+        "PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED",
+        "PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE",
+      ].includes(code) || msg.toLowerCase().includes("customer_delete_blocked") || msg.toLowerCase().includes("payment_exceeds_customer_balance"))
+        return [400, "BAD_REQUEST", "A customer, contact, or financial business rule was violated."];
+
       // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
       if (
         code.match(/^INVARIANT_/) ||
