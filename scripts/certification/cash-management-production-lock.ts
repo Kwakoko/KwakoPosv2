@@ -28,7 +28,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/database/prisma/migrations/202610070001_cash_register_control/migration.sql": "8dcb1fa1c5b2ea4615122beb05b5befa966ee7e3",
   "packages/domain/src/cashSessionEngine.ts": "dba62875d6293e50e38feeb4abbf977ff7b922ae",
   "packages/domain/src/financialBridge.ts": "398c6bdcacc0ac5c7c7c0b513e6ac47b7a7b4131",
-  "packages/domain/src/financeInvariants.ts": "98670edd0783bce69211f79289a6abf48e0b9413",
+  "packages/domain/src/financeInvariants.ts": "24c87b01c5f9b05168961ff4702c98c60f55cfdb",
   "tests/integration/cash-management-production-lock.test.ts": "203c4f5fb29548a9cafa189cf898f9bfbd199aa1",
 };
 
