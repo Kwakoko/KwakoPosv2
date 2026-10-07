@@ -156,7 +156,8 @@
     "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
     "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
     "certify:sales-lock": "tsx scripts/certification/sales-production-lock.ts",
-    "certify:cash-lock": "tsx scripts/certification/cash-management-production-lock.ts"
+    "certify:cash-lock": "tsx scripts/certification/cash-management-production-lock.ts",
+    "certify:finance-lock": "tsx scripts/certification/finance-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
