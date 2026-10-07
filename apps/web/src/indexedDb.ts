@@ -1727,7 +1727,7 @@ export class LocalIndexedDbStore {
     await Promise.all(hydrateStores.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
     const txStores = [...replaceStores, "configuration", "syncMetadata"].filter((store) => this.nativeDb!.objectStoreNames.contains(store));
     const tx = this.nativeDb.transaction(txStores, "readwrite");
-    for (const store of replaceStores) {
+    for (const store of hydrateStores) {
       const os = tx.objectStore(store);
       const target = this.getTargetMap(store);
       if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
