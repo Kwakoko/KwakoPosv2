@@ -38,8 +38,8 @@ import { productionCleanupService } from "../services/productionCleanupService.j
 
 type ReportTab =
   | "sales" | "profit" | "cashier" | "payment" | "inventory"
-  | "customers" | "returns" | "branch" | "tax" | "discount"
-  | "expenses" | "movements" | "purchasing" | "aging";
+  | "customers" | "suppliers" | "returns" | "branch" | "tax" | "discount"
+  | "expenses" | "movements" | "purchasing" | "aging" | "payables";
 
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(2)}M`
@@ -60,9 +60,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [expenses, setExpenses] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [stockMovements, setStockMovements] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
+  const [inventoryValuation, setInventoryValuation] = useState<any[]>([]);
+  const [receivablesAgingReport, setReceivablesAgingReport] = useState<any>(null);
+  const [payablesAgingReport, setPayablesAgingReport] = useState<any>(null);
   const [reportBranches, setReportBranches] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -81,6 +86,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "payment": "Payment Methods",
       "inventory": "Inventory Valuation",
       "customers": "Customers Report",
+      "suppliers": "Suppliers Report",
       "returns": "Returns & Refunds",
       "branch": "Branch Comparison",
       "tax": "Tax",
@@ -89,6 +95,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "movements": "Stock Movement",
       "purchasing": "Purchasing Report",
       "aging": "Receivables Aging",
+      "payables": "Payables Aging",
     };
     setGlobalActiveTab(globalTab[tab]);
   }, [setGlobalActiveTab]);
@@ -103,6 +110,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "Payment Methods": "payment",
       "Inventory Valuation": "inventory",
       "Customers Report": "customers",
+      "Suppliers Report": "suppliers",
       "Returns & Refunds": "returns",
       "Branch Comparison": "branch",
       "Tax": "tax",
@@ -113,6 +121,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "Stock Movement": "movements",
       "Purchasing Report": "purchasing",
       "Receivables Aging": "aging",
+      "Payables Aging": "payables",
     };
     if (map[propActiveTab]) {
       setActiveTab(map[propActiveTab]);
@@ -140,16 +149,22 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
       setProducts(Array.isArray(data.products) ? data.products : []);
       setCustomers(Array.isArray(data.customers) ? data.customers : []);
+      setSuppliers(Array.isArray(data.suppliers) ? data.suppliers : []);
       setPurchaseOrders(Array.isArray(data.purchaseOrders) ? data.purchaseOrders : []);
       setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : []);
       setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setSupplierInvoices(Array.isArray(data.supplierInvoices) ? data.supplierInvoices : []);
+      setInventoryValuation(Array.isArray(data.inventoryValuation) ? data.inventoryValuation : []);
+      setReceivablesAgingReport(data.receivablesAging || null);
+      setPayablesAgingReport(data.payablesAging || null);
       setReportBranches(Array.isArray(data.branches) ? data.branches : []);
       setReportMetrics(data.metrics || null);
     } catch (e: any) {
       console.error("[Reports] Authoritative report load failed", e);
       setReportError(String(e?.message || e || "REPORT_DATA_UNAVAILABLE"));
-      setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]);
-      setPurchaseOrders([]); setStockMovements([]); setInvoices([]); setReportMetrics(null);
+      setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]); setSuppliers([]);
+      setPurchaseOrders([]); setStockMovements([]); setInvoices([]); setSupplierInvoices([]);
+      setInventoryValuation([]); setReceivablesAgingReport(null); setPayablesAgingReport(null); setReportMetrics(null);
     } finally { setReportLoading(false); }
   }, [dateRange, branchFilter]);
 
@@ -190,18 +205,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   }, [validSales]);
 
   const arAgingCustomers = useMemo(() => {
-    const customerMap = new Map(customers.map((c: any) => [c.id, c]));
-    const grouped = new Map<string, any>();
-    for (const inv of invoices.filter((i) => !["PAID", "CANCELLED"].includes(String(i.status).toUpperCase()))) {
-      const balance = Math.max(0, Number(inv.balanceDue || 0));
-      if (!balance) continue;
-      const days = Math.max(0, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / 86400000));
-      const existing = grouped.get(inv.customerId) || { ...(customerMap.get(inv.customerId) || {}), balance: 0, days: 0 };
-      existing.balance += balance; existing.days = Math.max(existing.days, days);
-      grouped.set(inv.customerId, existing);
-    }
-    return Array.from(grouped.values());
-  }, [customers, invoices]);
+    const items = Array.isArray(receivablesAgingReport?.items) ? receivablesAgingReport.items : [];
+    return items.map((item: any) => ({
+      ...item,
+      name: item.entityName || item.name,
+      balance: Number(item.totalOutstanding ?? item.balanceDue ?? item.balance ?? 0),
+      days: Number(item.daysOutstanding ?? item.maxDaysOutstanding ?? 0),
+    }));
+  }, [receivablesAgingReport]);
 
   const salesChartData = useMemo(() => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -350,6 +361,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
           { id: "payment", label: "Payments", icon: PieChart },
           { id: "inventory", label: "Stock Valuation", icon: Package },
           { id: "customers", label: "Customer Credit", icon: Users },
+          { id: "suppliers", label: "Suppliers", icon: Truck },
           { id: "returns", label: "Returns & Refunds", icon: RefreshCw },
           { id: "branch", label: "Branch Comparison", icon: Building },
           { id: "tax", label: "Tax & TRA EFD", icon: Scale },
@@ -358,6 +370,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
           { id: "movements", label: "Stock Lineage", icon: BarChart2 },
           { id: "purchasing", label: "Purchasing", icon: ShoppingBag },
           { id: "aging", label: "AR Aging", icon: AlertCircle },
+          { id: "payables", label: "AP Aging", icon: AlertTriangle },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -521,11 +534,11 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             <table className="v2-table">
               <thead><tr><th>SKU / Code</th><th>Product Name</th><th>Qty in Stock</th><th>Cost Price</th><th>Retail Price</th><th>Stock Value</th></tr></thead>
               <tbody>
-                {products.slice(0, 100).map((p: any, i: number) => {
-                  const stocks = Array.isArray(p.branchStocks) ? p.branchStocks : [];
-                  const qty = stocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0);
-                  const stockValue = stocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0);
-                  const cost = qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0);
+                {(inventoryValuation.length ? inventoryValuation : products).slice(0, 200).map((p: any, i: number) => {
+                  const isHistorical = inventoryValuation.length > 0;
+                  const qty = isHistorical ? Number(p.quantity || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0) : Number(p.availableStock || p.totalStock || 0));
+                  const stockValue = isHistorical ? Number(p.stockValue || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0) : 0);
+                  const cost = isHistorical ? Number(p.averageCost || 0) : (qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0));
                   const retail = Number(p.sellingPrice || p.price || 0);
                   return (
                     <tr key={p.id || p.sku || i}>
