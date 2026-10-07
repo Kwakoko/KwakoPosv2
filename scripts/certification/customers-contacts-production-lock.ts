@@ -26,7 +26,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/persistence/migrationEngine.ts": "5b6ac2bb41b7747289b54ae8507201e50614b099",
   "apps/web/src/clientSyncEngine.ts": "6bbd64c387fdc6ea16a0fa0e46e283c92e0ad65e",
   "apps/api/src/server.ts": "ae89266a23967e40432763b43fe583e61827c530",
-  "packages/contracts/src/index.ts": "cc04c1115f5b4b145c524629606cca3ac827ab59",
+  "packages/contracts/src/index.ts": "02142d8fa4b6ab7d91b27955aac39d426ad78df0",
   "packages/database/prisma/schema.prisma": "4bf880ef5fe0f012f270706bdc6bf93c032547dc",
   "packages/database/prisma/migrations/202610070001_customers_contacts_authority/migration.sql": "b108a95e9732350bc4291859307758ab974e80c6",
   "packages/database/src/prismaProductionRepositories.ts": "cf5d1d6fc648e0f28d752254e61fe05fbd50b52b",
