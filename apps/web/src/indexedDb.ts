@@ -2000,6 +2000,32 @@ export class LocalIndexedDbStore {
         sale.syncStatus = "Synced";
         this.persist("sales", saleId, sale);
       }
+      // Remove provisional client StockLedger rows after the authoritative Sale has committed.
+      for (const [ledgerId, ledger] of Array.from(this.stockLedger.entries())) {
+        if (
+          ledger.tenantId === item.tenantId &&
+          ledger.branchId === item.branchId &&
+          ledger.referenceType === "SALE" &&
+          ledger.referenceId === saleId &&
+          ledger.synced === false
+        ) {
+          this.stockLedger.delete(ledgerId);
+          if (this.nativeDb) this.persistDelete("stockLedger", ledgerId);
+        }
+      }
+      for (const [outboxId, outbox] of Array.from(this.syncOutbox.entries())) {
+        if (
+          outboxId !== operationId &&
+          outbox.tenantId === item.tenantId &&
+          outbox.branchId === item.branchId &&
+          outbox.entityType === "StockAdjustment" &&
+          String(outbox.payload?.referenceType || "").toUpperCase() === "SALE" &&
+          String(outbox.payload?.referenceId || "") === saleId
+        ) {
+          this.syncOutbox.delete(outboxId);
+          if (this.nativeDb) this.persistDelete("syncOutbox", outboxId);
+        }
+      }
     }
   }
 
