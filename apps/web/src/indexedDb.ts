@@ -1660,6 +1660,7 @@ export class LocalIndexedDbStore {
     const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
