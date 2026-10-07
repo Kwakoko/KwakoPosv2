@@ -31,6 +31,48 @@ const repoFiles = [
 
 for (const file of repoFiles) read(file);
 
+const requestedScope = process.argv.find((arg) => arg.startsWith("--scope="))?.slice("--scope=".length) || "all";
+const scopeMarkers: Record<string, Array<[string, string]>> = {
+  receivables: [
+    ["packages/database/src/prismaFinanceRepository.ts", "getReceivablesAging"],
+    ["packages/database/src/prismaFinanceRepository.ts", "createCustomerInvoice"],
+    ["packages/database/src/prismaFinanceRepository.ts", "allocatePayment"],
+    ["apps/api/src/server.ts", "/api/v1/finance/receivables/aging"],
+    ["apps/api/src/server.ts", "/api/v1/finance/receivables/invoices"],
+  ],
+  payables: [
+    ["packages/database/src/prismaFinanceRepository.ts", "getPayablesAging"],
+    ["packages/database/src/prismaFinanceRepository.ts", "createSupplierInvoice"],
+    ["packages/database/src/prismaFinanceRepository.ts", "allocatePayment"],
+    ["apps/api/src/server.ts", "/api/v1/finance/payables/aging"],
+    ["apps/api/src/server.ts", "/api/v1/finance/payables/invoices"],
+  ],
+  expenses: [
+    ["packages/database/src/atomicCommercialFinance.ts", "recordExpense"],
+    ["packages/database/src/atomicCommercialFinance.ts", "payExpense"],
+    ["packages/database/src/atomicCommercialFinance.ts", "voidExpense"],
+    ["packages/database/src/prismaProductionRepositories.ts", "recordExpense"],
+    ["apps/api/src/server.ts", "CreateExpenseRequestSchema"],
+    ["apps/api/src/server.ts", "PayExpenseRequestSchema"],
+    ["apps/api/src/server.ts", "VoidExpenseRequestSchema"],
+  ],
+  payments: [
+    ["packages/domain/src/business/universalPaymentEngine.ts", "ProcessPayment"],
+    ["packages/domain/src/business/universalPaymentEngine.ts", "ProcessSplitPayment"],
+    ["packages/domain/src/business/universalPaymentEngine.ts", "RefundPayment"],
+    ["packages/database/src/prismaProductionRepositories.ts", "refundPaymentId"],
+    ["apps/web/src/pages/ReportsPage.tsx", "Payment Channel Share"],
+  ],
+};
+
+if (requestedScope !== "all") {
+  const checks = scopeMarkers[requestedScope];
+  if (!checks) throw new Error("LOCK_BLOCKED: unknown finance audit scope -> " + requestedScope);
+  for (const [file, marker] of checks) {
+    must(read(file), marker, requestedScope + " audit control");
+  }
+}
+
 const accounting = read("packages/domain/src/accountingEngine.ts");
 must(accounting, 'accountCode: "2220"', "VAT input account");
 must(accounting, "assertJournalLineAmounts(lines)", "journal amount enforcement");
@@ -97,5 +139,6 @@ const closed = { id: "P", tenantId: ctx.tenantId, fiscalYearId: "FY", periodNumb
 try { assertPeriodAllowsPosting(closed as any); throw new Error("closed-period invariant did not fail"); } catch (e: any) { if (!String(e.message).includes("INVARIANT_F010_VIOLATION")) throw e; }
 
 console.log(LOCK_ID);
+console.log("Finance audit scope: " + requestedScope);
 console.log("FINANCE / ACCOUNTING PRODUCTION LOCK: PASS");
 console.log("Scope: Chart of Accounts, GL, Journals, Double Entry, AR, AP, Cash, Bank, Taxes, Trial Balance, P&L, Balance Sheet, Cash Flow, Period Closing, Financial Reports, Audit Trail");
