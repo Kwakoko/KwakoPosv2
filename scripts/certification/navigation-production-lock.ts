@@ -21,8 +21,8 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/SettingsPage.tsx": "ce3542534d5b4f7db09ad5b29aa75483cbb28975",
   "apps/web/src/pages/CashDrawerPage.tsx": "71439a29b8c2ae894f3fe6a7ca97c44f2c1795a2",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/production-certification.yml": "94d4e190679770f9e5006f8f378a1324bac81c02",
-  ".github/workflows/production-release-exact-main.yml": "2b471027460eb60cc31901911df8ccfdd0590567",
+  ".github/workflows/production-certification.yml": "57aaaf7dbd7bf32e3b0d67a82e2eb40280ef5111",
+  ".github/workflows/production-release-exact-main.yml": "6e13f452332fe16893b68cda724f71145e5f7aa5",
 };
 
 const MARKERS: Array<[string, string, string]> = [
