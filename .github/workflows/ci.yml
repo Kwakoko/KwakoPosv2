@@ -62,6 +62,14 @@ jobs:
         run: npm run lint
       - name: Finance / Accounting Production Lock v1
         run: npm run certify:finance-lock
+      - name: Receivables Audit Production Lock
+        run: npm run certify:receivables-lock
+      - name: Accounts Payable Audit Production Lock
+        run: npm run certify:payables-lock
+      - name: Expenses Production Lock
+        run: npm run certify:expenses-lock
+      - name: Payments Audit Controls Production Lock
+        run: npm run certify:payments-lock
       - name: Build
         run: npm run build
       - name: Synchronize test database schema
