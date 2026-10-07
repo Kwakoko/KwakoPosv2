@@ -693,7 +693,19 @@ export class WorldStandardPrismaSyncEngine {
       const base = getBaseUpdatedAt(op.payload);
       if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer changed on server");
       const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.customer.update({ where: { id: op.entityId }, data: op.operationType === "DELETE" ? { status: "INACTIVE" } : { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } });
+      if (op.operationType === "DELETE") {
+        if (Number(current.currentBalance || 0) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+        await tx.customer.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: op.entityId, metadata: { operationId: op.operationId, previousStatus: current.status } } });
+      } else {
+        await tx.customer.update({ where: { id: op.entityId }, data: {
+          customerCode: payload.customerCode ?? undefined,
+          name: payload.name ?? current.name,
+          phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null,
+          creditLimit: payload.creditLimit ?? undefined, status: payload.status ?? "ACTIVE",
+        }});
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: op.entityId, metadata: { changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() } } });
+      }
       return;
     }
 
