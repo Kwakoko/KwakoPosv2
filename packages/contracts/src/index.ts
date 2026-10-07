@@ -1850,6 +1850,8 @@ export const CreateBankTransactionRequestSchema = z.object({
   amount: z.number(),
   reference: z.string().min(1),
   description: z.string().optional(),
+  offsetAccountId: z.string().uuid().optional(),
+  offsetAccountCode: z.string().min(1).optional(),
 });
 export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
 
@@ -2015,6 +2017,20 @@ export const TrialBalanceReportSchema = z.object({
   items: z.array(TrialBalanceReportItemSchema),
 });
 export type TrialBalanceReport = z.infer<typeof TrialBalanceReportSchema>;
+
+export const CashFlowReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  beginningCash: z.number(),
+  operatingCashFlow: z.number(),
+  investingCashFlow: z.number(),
+  financingCashFlow: z.number(),
+  netChangeInCash: z.number(),
+  endingCash: z.number(),
+});
+export type CashFlowReport = z.infer<typeof CashFlowReportSchema>;
 
 export const ExecutiveFinancialDashboardSchema = z.object({
   revenue: z.number(),
