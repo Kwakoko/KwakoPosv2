@@ -55,7 +55,6 @@ export interface OutboxItem {
     | "ProductPriceHistory"
     | "Sale"
     | "Customer"
-    | "CustomerContact"
     | "Supplier"
     | "Category"
     | "Brand"
@@ -160,7 +159,6 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
   if (item.entityType === "StockAdjustment") return 60;
   if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
-  if (item.entityType === "CustomerContact") return 75;
   if (item.entityType === "PurchaseOrder") return 80;
   if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
   if (item.entityType === "Expense") return 95;
@@ -413,7 +411,7 @@ export class LocalIndexedDbStore {
       if (this.nativeDb) {
         const startupStores: NativeStore[] = [
           "products", "productVariants", "stockBalance", "stockLedger", "stockAdjustments",
-          "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers", "contacts",
+          "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers",
           "syncOutbox", "traVfdOutbox", "drawerOutbox", "syncMetadata", "configuration",
         ];
         const activeStores = startupStores.filter((store) => this.nativeDb!.objectStoreNames.contains(store));
@@ -655,7 +653,6 @@ export class LocalIndexedDbStore {
     this.receipts.clear();
     this.customers.clear();
     this.suppliers.clear();
-    this.contacts.clear();
     this.syncOutbox.clear();
     this.traVfdOutbox.clear();
     this.drawerOutbox.clear();
@@ -709,7 +706,6 @@ export class LocalIndexedDbStore {
     filterTenant(this.receipts, "receipts");
     filterTenant(this.customers, "customers");
     filterTenant(this.suppliers, "suppliers");
-    filterTenant(this.contacts, "contacts");
     filterTenant(this.syncOutbox, "syncOutbox");
     filterTenant(this.traVfdOutbox, "traVfdOutbox");
     filterTenant(this.drawerOutbox, "drawerOutbox");
@@ -1427,7 +1423,7 @@ export class LocalIndexedDbStore {
         appliedCount += 1;
       }
       for (const supplier of suppliers) {
-      if (this.protectServerRecord("Supplier", supplier.id)) continue;
+        if (this.protectServerRecord("Supplier", supplier.id)) continue;
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
       }
@@ -1473,7 +1469,7 @@ export class LocalIndexedDbStore {
       return appliedCount;
     }
 
-    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "syncMetadata", "configuration"].filter(
+    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "configuration"].filter(
       (s) => this.nativeDb!.objectStoreNames.contains(s),
     );
     const tx = this.nativeDb.transaction(txStores, "readwrite");
@@ -1640,7 +1636,6 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
-    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
@@ -1660,7 +1655,7 @@ export class LocalIndexedDbStore {
     const pendingCatalogTypes = new Set<string>();
     const protect = (store: NativeStore, id: string) => { const set = protectedKeys.get(store) || new Set<string>(); set.add(id); protectedKeys.set(store, set); };
     for (const item of pending) {
-      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "Supplier" ? "suppliers" : item.entityType === "CustomerContact" ? "contacts" : null;
+      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "Supplier" ? "suppliers" : null;
       if (store) protect(store, item.entityId);
       if (item.entityType === "Category" || item.entityType === "Brand") pendingCatalogTypes.add(item.entityType);
       const payload: any = item.payload || {};
@@ -1767,7 +1762,6 @@ export class LocalIndexedDbStore {
     const adjustments = this.getStockAdjustmentsLocal(tenantId, branchId);
     const customers = this.getCustomersLocal(tenantId, branchId);
     const suppliers = this.getSuppliersLocal(tenantId, branchId);
-    const contacts = Array.from(this.contacts.values()).filter((row: any) => !tenantId || row?.tenantId === tenantId).filter((row: any) => !branchId || row?.branchId === branchId);
     const expenses = (Array.isArray(this.getConfigurationLocal("expenses", tenantId && branchId ? { tenantId, branchId } : undefined))
       ? this.getConfigurationLocal("expenses", { tenantId: tenantId || "", branchId: branchId || "" })
       : []) as any[];
@@ -1795,7 +1789,6 @@ export class LocalIndexedDbStore {
         stockAdjustments: adjustments.length,
         customers: customers.length,
         suppliers: suppliers.length,
-        contacts: contacts.length,
         expenses: expenses.length,
         syncOutbox: this.getPendingOutbox(tenantId, branchId).length,
       },
@@ -2016,6 +2009,32 @@ export class LocalIndexedDbStore {
       if (sale) {
         sale.syncStatus = "Synced";
         this.persist("sales", saleId, sale);
+      }
+      // Remove provisional client StockLedger rows after the authoritative Sale has committed.
+      for (const [ledgerId, ledger] of Array.from(this.stockLedger.entries())) {
+        if (
+          ledger.tenantId === item.tenantId &&
+          ledger.branchId === item.branchId &&
+          ledger.referenceType === "SALE" &&
+          ledger.referenceId === saleId &&
+          ledger.synced === false
+        ) {
+          this.stockLedger.delete(ledgerId);
+          if (this.nativeDb) this.persistDelete("stockLedger", ledgerId);
+        }
+      }
+      for (const [outboxId, outbox] of Array.from(this.syncOutbox.entries())) {
+        if (
+          outboxId !== operationId &&
+          outbox.tenantId === item.tenantId &&
+          outbox.branchId === item.branchId &&
+          outbox.entityType === "StockAdjustment" &&
+          String(outbox.payload?.referenceType || "").toUpperCase() === "SALE" &&
+          String(outbox.payload?.referenceId || "") === saleId
+        ) {
+          this.syncOutbox.delete(outboxId);
+          if (this.nativeDb) this.persistDelete("syncOutbox", outboxId);
+        }
       }
     }
   }
