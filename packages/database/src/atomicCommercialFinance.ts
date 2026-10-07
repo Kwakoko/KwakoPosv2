@@ -346,6 +346,16 @@ export class PrismaAtomicCommercialFinanceService {
       const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
       const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       await this.writeJournal(tx, ctx, built);
+      if (typeof tx.$executeRawUnsafe === "function") {
+        await tx.$executeRawUnsafe(
+          "INSERT INTO sync_change_journal (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source) VALUES ($1,$2,$3,'Sale',$4,'CREATE',$5::jsonb,'sale-service') ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING",
+          ctx.tenantId,
+          ctx.branchId,
+          req.operationId,
+          sale.id,
+          JSON.stringify(sale),
+        );
+      }
       return { sale, lines: sale.lines, ledgers, drawerOperations };
     });
   }
