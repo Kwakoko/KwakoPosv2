@@ -3093,6 +3093,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   });
 
+  const assertFinanceAuthority = (req: any, action: "view" | "create" | "reverse" | "close" | "admin" = "view") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = new Set((ctx.permissions || []).map((p: any) => String(p).toLowerCase()));
+    const privileged = roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const wildcard = permissions.has("*") || permissions.has("admin:*");
+    const rules: Record<string,string[]> = {
+      view: ["finance.view","finance.create","financial_reports.view"],
+      create: ["finance.create","finance.manage","journal.create"],
+      reverse: ["finance.manage","journal.reverse"],
+      close: ["finance.manage","finance.period.close"],
+      admin: ["finance.manage"],
+    };
+    if (!(privileged || wildcard || rules[action].some((p) => permissions.has(p)))) throw new Error("FORBIDDEN: Finance permission required");
+    return ctx;
+  };
+
   // ==========================================
   // PHASE 2: Finance & Operational Control REST Routes
   // ==========================================
@@ -3104,12 +3121,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/accounts", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateAccountRequestSchema.parse(req.body);
     const account = await financeRepository.createAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: account });
   });
 
   server.put("/api/v1/finance/accounts/:id", async (req) => {
+    assertFinanceAuthority(req, "admin");
     const validated = UpdateAccountRequestSchema.parse(req.body);
     const updated = await financeRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
@@ -3122,17 +3141,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/periods", async (req, reply) => {
+    assertFinanceAuthority(req, "admin");
     const validated = CreateAccountingPeriodRequestSchema.parse(req.body);
     const period = await financeRepository.createAccountingPeriod(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: period });
   });
 
   server.post("/api/v1/finance/periods/:id/close", async (req) => {
+    assertFinanceAuthority(req, "close");
     const closed = await financeRepository.closePeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: closed };
   });
 
   server.post("/api/v1/finance/periods/:id/reopen", async (req) => {
+    assertFinanceAuthority(req, "close");
     const reopened = await financeRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: reopened };
   });
@@ -3144,6 +3166,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.createJournalEntry(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -3158,6 +3181,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals/:id/reverse", async (req, reply) => {
+    assertFinanceAuthority(req, "reverse");
     const validated = ReverseJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -3170,6 +3194,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/receivables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateCustomerInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createCustomerInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -3187,6 +3212,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/payables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateSupplierInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createSupplierInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -3199,9 +3225,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Payment Allocation
   server.post("/api/v1/finance/payments/allocate", async (req) => {
+    assertFinanceAuthority(req, "create");
     const validated = AllocatePaymentRequestSchema.parse(req.body);
     const result = await financeRepository.allocatePayment(req.tenantContext!, validated);
     return { success: true, data: result };
+  });
+
+  // Tax configuration
+  server.get("/api/v1/finance/taxes", async (req) => {
+    assertFinanceAuthority(req, "view");
+    return { success: true, data: await financeRepository.getTaxes(req.tenantContext!) };
+  });
+  server.post("/api/v1/finance/taxes", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
+    const validated = CreateTaxRequestSchema.parse(req.body);
+    const tax = await financeRepository.createTax(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: tax });
   });
 
   // Bank Accounts & Transactions
@@ -3211,12 +3250,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/banks", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankAccountRequestSchema.parse(req.body);
     const bank = await financeRepository.createBankAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: bank });
   });
 
   server.post("/api/v1/finance/banks/:id/transactions", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankTransactionRequestSchema.parse(req.body);
     const tx = await financeRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: tx });
@@ -3241,26 +3282,43 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Financial Reports
   server.get("/api/v1/finance/reports/trial-balance", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getTrialBalance(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/profit-loss", async (req) => {
+    assertFinanceAuthority(req, "view");
     const { startDate, endDate } = (req.query as any) || {};
     const report = await financeRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
     return { success: true, data: report };
   });
 
+  server.get("/api/v1/finance/reports/cash-flow", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const { startDate, endDate } = (req.query as any) || {};
+    const report = await financeRepository.getCashFlow(req.tenantContext!, startDate, endDate);
+    return { success: true, data: report };
+  });
+
   server.get("/api/v1/finance/reports/balance-sheet", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getBalanceSheet(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/dashboard/executive", async (req) => {
+    assertFinanceAuthority(req, "view");
     const dashboard = await financeRepository.getExecutiveDashboard(req.tenantContext!);
     return { success: true, data: dashboard };
+  });
+
+  server.get("/api/v1/finance/audit-trail", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const events = await financeRepository.getFinancialAuditTrail(req.tenantContext!);
+    return { success: true, data: events };
   });
 
   server.get("/api/v1/finance/anomalies", async (req) => {
