@@ -1370,6 +1370,7 @@ const now = new Date();
       Brand: "brands",
       Expense: "expenses",
       CustomerContact: "customer_contacts",
+      CustomerContact: "customer_contacts",
     };
     const table = tableByType[entityType];
     if (!table) return;
@@ -1455,7 +1456,8 @@ const now = new Date();
           ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
           Customer: ["name", "phone", "email", "address"],
           CustomerContact: ["firstName", "lastName", "title", "role", "department", "email", "phone", "isPrimary", "decisionInfluence", "notes", "status"],
-          Supplier: ["name", "phone", "email", "address", "taxPin"],
+          CustomerContact: ["firstName", "lastName", "title", "role", "department", "email", "phone", "isPrimary", "decisionInfluence", "notes", "status"],
+      Supplier: ["name", "phone", "email", "address", "taxPin"],
           Category: ["name", "code", "parentId", "description", "color", "isActive"],
           Brand: ["name", "code", "origin", "notes", "isActive"],
         };
