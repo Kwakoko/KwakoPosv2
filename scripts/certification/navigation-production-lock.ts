@@ -17,12 +17,12 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/DashboardPage.tsx": "2adcdd19e046a098e6fd8f37c8c4d6871ef11bf4",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
   "apps/web/src/pages/PurchasingPage.tsx": "ab0650f3cbd59906f8286a2ca11e2b46898933e2",
-  "apps/web/src/pages/ReportsPage.tsx": "4c66a81a465479ddd35cad56005002d73b99772b",
+  "apps/web/src/pages/ReportsPage.tsx": "2c4606475833e740ea9dbb8a535b7fdeddd940bc",
   "apps/web/src/pages/SettingsPage.tsx": "ce3542534d5b4f7db09ad5b29aa75483cbb28975",
   "apps/web/src/pages/CashDrawerPage.tsx": "8f57d8586a833d37aee9f37d99efad869fcb607e",
   "apps/web/src/pages/ReceiptsPage.tsx": "406a4daffd312c1a418dec0cb9f35e6bda88be52",
-  ".github/workflows/production-certification.yml": "04fd3f74b23569ceedd39feaa3e3635505105145",
-  ".github/workflows/production-release-exact-main.yml": "2830e101a4d3ac65f80256b6e055de13f45c53ab",
+  "".github/workflows/production-certification.yml": "2170a7a0b7569adc276adb1eea8322449969f885",
+  "".github/workflows/production-release-exact-main.yml": "4f9e01ec1691d17d8699868d0b6059bfe6767a24",
 };
 
 const MARKERS: Array<[string, string, string]> = [
