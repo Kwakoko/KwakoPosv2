@@ -237,6 +237,7 @@ export class WorldStandardPrismaSyncEngine {
       case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
+      case "CustomerContact": record = await tx.customerContact.findUnique({ where: { id: entityId } }); break;
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
@@ -275,6 +276,7 @@ export class WorldStandardPrismaSyncEngine {
         case "StockAdjustment": return await db.stockAdjustment.findUnique({ where: { id: op.entityId } });
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
+        case "CustomerContact": return await db.customerContact.findUnique({ where: { id: op.entityId } });
         case "Supplier": return await db.supplier.findUnique({ where: { id: op.entityId } });
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
@@ -1440,6 +1442,7 @@ const now = new Date();
           Product: ["name", "description", "categoryId", "brandId", "supplierId", "taxId", "category", "isActive"],
           ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
           Customer: ["name", "phone", "email", "address"],
+          CustomerContact: ["firstName", "lastName", "roleTitle", "phone", "email", "isPrimary", "notes", "status"],
           Supplier: ["name", "phone", "email", "address", "taxPin"],
           Category: ["name", "code", "parentId", "description", "color", "isActive"],
           Brand: ["name", "code", "origin", "notes", "isActive"],
@@ -1706,6 +1709,7 @@ const now = new Date();
       const stockLedger = (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { occurredAt: "asc" } })).map(ledgerShape);
       const adjustments = await tx.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const customers = await tx.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const contacts = await tx.customerContact.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const suppliers = await tx.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const categories = await tx.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const brands = await tx.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
@@ -1715,7 +1719,7 @@ const now = new Date();
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
       const settings = await tx.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } });
       const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses };
+      const payload = { products, variants, stockLedger, adjustments, customers, contacts, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1748,7 +1752,7 @@ const now = new Date();
         if (minRev > 1n && afterRevision < minRev) {
           return {
             serverTimestamp: new Date().toISOString(),
-            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch,
+            products: [], variants: [], stockLedger: [], adjustments: [], customers: [], contacts: [], suppliers: [], syncEpoch,
             serverRevision: String(afterRevision),
             changes: [],
             requiresBootstrap: true,
@@ -1756,7 +1760,7 @@ const now = new Date();
           } as any;
         }
       }
-      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
+      return { serverTimestamp: new Date().toISOString(), products: [], variants: [], stockLedger: [], adjustments: [], customers: [], contacts: [], suppliers: [], syncEpoch, ...( { serverRevision: String(lastDeliveredRevision), changes: normalizedChanges } as any ) } as any;
     }
     const since = new Date(rawSince);
     if (Number.isNaN(since.getTime())) throw new Error("SYNC_PROTOCOL_INVALID: invalid sync cursor");
@@ -1768,6 +1772,7 @@ const now = new Date();
       stockLedger: (await this.stockRepo.getLedger(ctx)).filter((x: any) => new Date(x.createdAt).getTime() >= since.getTime() && new Date(x.createdAt).getTime() <= anchor.getTime()),
       adjustments: await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       customers: await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
+      contacts: await prisma.customerContact.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
