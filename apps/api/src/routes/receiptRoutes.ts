@@ -137,10 +137,32 @@ export function receiptRoutes(server: FastifyInstance) {
         const html = await globalReceiptService.renderA4Html(ctx, id);
         return reply.send({ success: true, format: "a4", content: html });
       }
-      const result = await globalReceiptService.recordReprint(ctx, id, ctx.userId, "Initial Print");
-      return reply.send({ success: true, result });
+      const text = await globalReceiptService.renderThermal80mm(ctx, id);
+      return reply.send({ success: true, format: "80mm", content: text });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/v2/receipts/:id/print/audit - Record a successful print dispatch
+  server.post("/api/v2/receipts/:id/print/audit", async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const ctx = extractTenantContext(req);
+      const id = (req.params as any).id;
+      const body = (req.body as any) || {};
+      const printType = body.printType === "REPRINT" ? "REPRINT" : "INITIAL";
+      if (printType === "REPRINT" && !String(body.reason || "").trim()) {
+        return reply.status(400).send({ success: false, error: "Reprint reason is required" });
+      }
+      const result = await globalReceiptService.recordPrint(ctx, id, ctx.userId, {
+        printType,
+        printerName: body.printerName,
+        paperWidth: body.paperWidth,
+        reason: body.reason || (printType === "INITIAL" ? "Initial print" : undefined),
+      });
+      return reply.send({ success: true, result });
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
     }
   });
 
@@ -163,8 +185,9 @@ export function receiptRoutes(server: FastifyInstance) {
       const ctx = extractTenantContext(req);
       const id = (req.params as any).id;
       const { email } = (req.body as any) || {};
+      if (!String(email || "").trim()) return reply.status(400).send({ success: false, error: "Email is required" });
       const ok = await globalReceiptService.recordShare(ctx, id, "EMAIL", email, ctx.userId);
-      return reply.send({ success: ok, message: `Receipt sent to ${email}` });
+      return reply.send({ success: ok, message: "Receipt share recorded" });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }
@@ -176,8 +199,11 @@ export function receiptRoutes(server: FastifyInstance) {
       const ctx = extractTenantContext(req);
       const id = (req.params as any).id;
       const { channel, recipient } = (req.body as any) || {};
-      const ok = await globalReceiptService.recordShare(ctx, id, channel || "WHATSAPP", recipient, ctx.userId);
-      return reply.send({ success: ok, channel, recipient });
+      const normalizedChannel = String(channel || "WHATSAPP").toUpperCase();
+      if (!["EMAIL", "SMS", "WHATSAPP"].includes(normalizedChannel)) return reply.status(400).send({ success: false, error: "Unsupported share channel" });
+      if (!String(recipient || "").trim()) return reply.status(400).send({ success: false, error: "Recipient is required" });
+      const ok = await globalReceiptService.recordShare(ctx, id, normalizedChannel as any, recipient, ctx.userId);
+      return reply.send({ success: ok, channel: normalizedChannel, recipient, message: "Receipt share recorded" });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }
