@@ -1045,7 +1045,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }
 
     const mappedItems = cart.map((i) => {
-      const unitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
+      const baseUnitPrice = i.price;
+      const displayUnitPrice = i.discountPercent ? Math.max(0, i.price * (1 - i.discountPercent / 100)) : i.price;
       if (!i.variantId && !i.isCustom) throw new Error(`POS_VARIANT_REQUIRED:${i.product.id}`);
       const variantId = i.variantId || `${i.product.id}-custom`;
       const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
@@ -1054,8 +1055,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         variantId,
         name: i.variantName ? `${i.product.name} (${i.variantName})` : i.product.name,
         originalPrice: i.price,
-        price: unitPrice,
-        unitPrice,
+        price: displayUnitPrice,
+        unitPrice: baseUnitPrice,
         unitCost,
         discountPercent: i.discountPercent || 0,
         discountAmount: i.discountPercent ? (i.price * (i.discountPercent / 100)) * i.qty : 0,
