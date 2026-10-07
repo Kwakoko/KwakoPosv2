@@ -52,6 +52,23 @@ const CustomerPaymentSchema = z.object({
   cashSessionId: z.string().uuid().optional(),
 });
 
+const ContactImportSchema = z.object({
+  records: z.array(z.object({
+    id: z.string().uuid().optional(),
+    customerId: z.string().uuid(),
+    firstName: z.string().trim().min(1),
+    lastName: z.string().trim().optional().default(""),
+    title: z.string().trim().optional().default(""),
+    role: z.string().trim().optional().default(""),
+    department: z.string().trim().optional().default(""),
+    phone: z.string().trim().optional().default(""),
+    email: z.string().email().optional().or(z.literal("")).default(""),
+    isPrimary: z.boolean().optional().default(false),
+    decisionInfluence: z.enum(["DECISION_MAKER","INFLUENCER","USER","CHAMPION","BLOCKER"]).optional().default("INFLUENCER"),
+    notes: z.string().optional().default(""),
+  })).min(1).max(5000),
+});
+
 const ImportSchema = z.object({
   records: z.array(z.object({
     id: z.string().uuid().optional(),
@@ -273,6 +290,42 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     reply.header("content-type","text/csv; charset=utf-8");
     reply.header("content-disposition",'attachment; filename="customer-contacts.csv"');
     return reply.send(csv);
+  });
+
+  server.post("/api/v1/contacts/import", async (req) => {
+    requirePermission(req, "CUSTOMER_EDIT", "customers.write");
+    const c = ctx(req);
+    const parsed = ContactImportSchema.parse(req.body);
+    const results: any[] = [];
+    await prisma.$transaction(async (tx: any) => {
+      for (const item of parsed.records) {
+        const customer = await tx.customer.findFirst({ where: { id: item.customerId, tenantId: c.tenantId, branchId: c.branchId, status: "ACTIVE" } });
+        if (!customer) throw new Error("CUSTOMER_NOT_FOUND:" + item.customerId);
+        const id = item.id || randomUUID();
+        const existing = item.id
+          ? (await tx.$queryRawUnsafe<any[]>('SELECT id FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1', id, c.tenantId, c.branchId))[0]
+          : null;
+        if (item.isPrimary) {
+          await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', item.customerId, c.tenantId, c.branchId);
+        }
+        if (existing) {
+          await tx.$executeRawUnsafe(
+            'UPDATE customer_contacts SET "customerId"=$1,"firstName"=$2,"lastName"=$3,"title"=$4,role=$5,department=$6,"phone"=$7,"email"=$8,"isPrimary"=$9,"notes"=$10,"decisionInfluence"=$11,"status"=\'ACTIVE\',"updatedAt"=now() WHERE id=$12 AND "tenantId"=$13 AND "branchId"=$14',
+            item.customerId, item.firstName, item.lastName, item.title, item.role, item.department, item.phone, item.email, item.isPrimary, item.notes, item.decisionInfluence, id, c.tenantId, c.branchId,
+          );
+          await audit(tx, c, "CONTACT_IMPORTED_UPDATED", "CustomerContact", id, { customerId: item.customerId });
+          results.push({ id, action: "UPDATED" });
+        } else {
+          await tx.$executeRawUnsafe(
+            'INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
+            id, item.customerId, c.tenantId, c.branchId, item.firstName, item.lastName, item.title, item.role, item.department, item.phone, item.email, item.isPrimary, item.notes, item.decisionInfluence,
+          );
+          await audit(tx, c, "CONTACT_IMPORTED_CREATED", "CustomerContact", id, { customerId: item.customerId });
+          results.push({ id, action: "CREATED" });
+        }
+      }
+    });
+    return { success: true, data: { imported: results.length, results } };
   });
 
   server.post("/api/v1/customers/import", async (req) => {
