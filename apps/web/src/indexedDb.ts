@@ -158,7 +158,7 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "ProductVariant" && item.operationType === "UPDATE") return 40;
   if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
   if (item.entityType === "StockAdjustment") return 60;
-  if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
+  if (item.entityType === "Customer" || item.entityType === "Supplier" || item.entityType === "CustomerContact") return 70;
   if (item.entityType === "PurchaseOrder") return 80;
   if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
   if (item.entityType === "Expense") return 95;
@@ -1427,6 +1427,12 @@ export class LocalIndexedDbStore {
         this.saveSupplierLocal(supplier);
         appliedCount += 1;
       }
+      for (const contact of contacts) {
+        if (this.protectServerRecord("CustomerContact", String(contact.id))) continue;
+        this.contacts.set(String(contact.id), contact);
+        this.persist("contacts", String(contact.id), contact);
+        appliedCount += 1;
+      }
       if (settings.length) {
         for (const setting of settings as any[]) {
           const tenantId = String(setting.tenantId || "");
@@ -1636,6 +1642,7 @@ export class LocalIndexedDbStore {
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
@@ -1655,7 +1662,7 @@ export class LocalIndexedDbStore {
     const pendingCatalogTypes = new Set<string>();
     const protect = (store: NativeStore, id: string) => { const set = protectedKeys.get(store) || new Set<string>(); set.add(id); protectedKeys.set(store, set); };
     for (const item of pending) {
-      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "Supplier" ? "suppliers" : null;
+      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "CustomerContact" ? "contacts" : item.entityType === "Supplier" ? "suppliers" : null;
       if (store) protect(store, item.entityId);
       if (item.entityType === "Category" || item.entityType === "Brand") pendingCatalogTypes.add(item.entityType);
       const payload: any = item.payload || {};
