@@ -493,6 +493,8 @@ export const CreatePriceChangeRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  occurredAt: z.string().datetime().optional(),
+  isBackdated: z.boolean().optional().default(false),
 });
 export type CreatePriceChangeRequest = z.infer<typeof CreatePriceChangeRequestSchema>;
 
@@ -966,13 +968,14 @@ export const ReturnSchema = z.object({
 export type Return = z.infer<typeof ReturnSchema>;
 
 export const CreateSaleReturnRequestSchema = z.object({
-  originalSaleId: z.string().optional(),
-  customerId: z.string().optional(),
-  reason: z.string().min(1),
+  id: z.string().uuid().optional(),
+  originalSaleId: z.string().uuid(),
+  customerId: z.string().uuid().optional(),
+  reason: z.string().trim().min(3).max(500),
   refundType: z.enum(["CASH", "STORE_CREDIT", "BANK", "MOBILE_MONEY"]).default("CASH"),
-  deviceId: z.string().min(1),
-  operationId: z.string().min(1),
-  idempotencyKey: z.string().min(1),
+  deviceId: z.string().min(1).max(128),
+  operationId: z.string().min(1).max(200),
+  idempotencyKey: z.string().min(1).max(200),
   items: z.array(
     z.object({
       variantId: z.string().uuid(),
