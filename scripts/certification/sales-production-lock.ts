@@ -13,7 +13,7 @@ const LOCKED_BLOBS: Record<string,string> = {
   "packages/database/src/prismaProductionRepositories.ts": "eb2269ba2e049805f0be12595ee93a949f0c3668",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "eaa90d0051fd5726a14890c99c814127feee6056",
   "apps/web/src/indexedDb.ts": "9a45a5e7e95a0e5072fd39a75adb4979169ce588",
-  "apps/web/src/clientSyncEngine.ts": "34d99c6466a4e88359157b473fdffb319dd84c46"
+  "apps/web/src/clientSyncEngine.ts": "b254c984696801324d4224bf49bd08e6a9683ee2"
 };
 
 const MARKERS: Array<[string,string,string[]]> = [
