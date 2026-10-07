@@ -128,31 +128,231 @@ export class PrismaCommercialRepository {
   }
 
   async getCustomers(ctx: TenantContext) {
-    return normalize(await db.customer.findMany({ where: tenantWhere(ctx), orderBy: { createdAt: "asc" } }));
+    return normalize(await db.customer.findMany({ where: tenantWhere(ctx), include: { contacts: true }, orderBy: { createdAt: "asc" } }));
   }
 
   async getCustomerById(ctx: TenantContext, id: string) {
-    return findOne("customer", id, ctx);
+    return normalize(await db.customer.findFirst({ where: { id, ...tenantWhere(ctx) }, include: { contacts: true } }));
   }
 
   async createCustomer(ctx: TenantContext, req: any) {
-    const count = await db.customer.count({ where: tenantWhere(ctx) });
-    const row = await db.customer.create({ data: {
-      id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId,
-      customerCode: req.customerCode || `CUST-${String(count + 1).padStart(4, "0")}`,
-      name: req.name, phone: req.phone ?? null, email: req.email ?? null,
-      address: req.address ?? null, creditLimit: req.creditLimit ?? 0,
-      currentBalance: req.openingBalance ?? 0, openingBalance: req.openingBalance ?? 0,
-      status: req.status || "ACTIVE",
-    }});
-    return normalize(row);
+    const id = req.id || undefined;
+    return normalize(await db.$transaction(async (tx: any) => {
+      if (id) {
+        const existing = await tx.customer.findFirst({ where: { id, ...tenantWhere(ctx) }, include: { contacts: true } });
+        if (existing) return existing;
+      }
+      const count = await tx.customer.count({ where: tenantWhere(ctx) });
+      const row = await tx.customer.create({ data: {
+        id, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: req.customerCode || `CUST-${String(count + 1).padStart(4, "0")}`,
+        name: req.name, phone: req.phone ?? null, email: req.email ?? null,
+        address: req.address ?? null, creditLimit: req.creditLimit ?? 0,
+        currentBalance: req.openingBalance ?? 0, openingBalance: req.openingBalance ?? 0,
+        walletBalance: 0, status: "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-service", action: "CUSTOMER_CREATED", entityType: "Customer", entityId: row.id,
+        metadata: { customerCode: row.customerCode },
+      }});
+      return row;
+    }));
   }
 
   async updateCustomer(ctx: TenantContext, id: string, req: any) {
-    await this.requireEntity("customer", ctx, id);
-    return normalize(await db.customer.update({ where: { id }, data: pick(req, [
-      "name","phone","email","address","creditLimit","status","currentBalance","openingBalance"
-    ]) }));
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.customer.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!existing) throw new Error(`Customer ${id} not found`);
+      const data = pick(req, ["name","phone","email","address","creditLimit","status"]);
+      const updated = await tx.customer.update({ where: { id }, data });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-service", action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id,
+        metadata: { changedFields: Object.keys(data).sort(), before: { name: existing.name, phone: existing.phone, email: existing.email, creditLimit: Number(existing.creditLimit), status: existing.status }, after: { name: updated.name, phone: updated.phone, email: updated.email, creditLimit: Number(updated.creditLimit), status: updated.status } },
+      }});
+      return updated;
+    }));
+  }
+
+  async deleteCustomer(ctx: TenantContext, id: string) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.customer.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!existing) throw new Error(`Customer ${id} not found`);
+      if (Number(existing.currentBalance) !== 0) throw new Error("CUSTOMER_HAS_OUTSTANDING_BALANCE");
+      if (Number(existing.walletBalance) !== 0) throw new Error("CUSTOMER_HAS_WALLET_BALANCE");
+      const updated = await tx.customer.update({ where: { id }, data: { status: "SUSPENDED" } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-service", action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id,
+        metadata: { previousStatus: existing.status },
+      }});
+      return updated;
+    }));
+  }
+
+  async getCustomerTransactions(ctx: TenantContext, id: string) {
+    const customer = await db.customer.findFirst({ where: { id, ...tenantWhere(ctx) }, select: { id: true, name: true, currentBalance: true, creditLimit: true, walletBalance: true } });
+    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+    const [sales, payments, returns] = await Promise.all([
+      db.sale.findMany({ where: { customerId: id, ...tenantWhere(ctx) }, orderBy: { soldAt: "desc" }, take: 200, select: { id: true, saleNumber: true, soldAt: true, grandTotal: true, status: true } }),
+      db.payment.findMany({ where: { customerId: id, ...tenantWhere(ctx) }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
+      db.return.findMany({ where: { customerId: id, ...tenantWhere(ctx) }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, returnNumber: true, totalRefundAmount: true, refundType: true, status: true, createdAt: true } }),
+    ]);
+    return normalize({ customer, sales, payments, returns });
+  }
+
+  async recordCustomerPayment(ctx: TenantContext, id: string, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+      const amount = Number(req.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
+      if (amount > Number(customer.currentBalance)) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
+      const paymentId = req.id || randomUUID();
+      const paymentNumber = `PAY-CUST-${paymentId.slice(0, 24)}`;
+      const existing = await tx.payment.findFirst({ where: { id: paymentId, ...tenantWhere(ctx) } });
+      if (existing) return existing;
+      const payment = await tx.payment.create({ data: {
+        id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
+        customerId: id, amount, paymentMethod: req.payUsingWallet ? "WALLET" : (req.paymentMethod || "CASH"),
+        provider: req.provider || null, providerReference: req.providerReference || null,
+        status: "COMPLETED", paidAt: new Date(),
+      }});
+      if (req.payUsingWallet) {
+        if (amount > Number(customer.walletBalance)) throw new Error("INSUFFICIENT_CUSTOMER_WALLET");
+        await tx.customer.update({ where: { id }, data: { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } } });
+      } else {
+        await tx.customer.update({ where: { id }, data: { currentBalance: { decrement: amount } } });
+      }
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-service", action: "CUSTOMER_PAYMENT_RECORDED", entityType: "Payment", entityId: payment.id,
+        metadata: { customerId: id, amount, payUsingWallet: Boolean(req.payUsingWallet) },
+      }});
+      return payment;
+    }));
+  }
+
+  async depositCustomerWallet(ctx: TenantContext, id: string, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+      const amount = Number(req.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_WALLET_DEPOSIT");
+      const paymentId = req.id || randomUUID();
+      const paymentNumber = `WALLET-${paymentId.slice(0, 24)}`;
+      const existing = await tx.payment.findFirst({ where: { id: paymentId, ...tenantWhere(ctx) } });
+      if (existing) return existing;
+      const payment = await tx.payment.create({ data: {
+        id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
+        customerId: id, amount, paymentMethod: req.paymentMethod || "CASH",
+        provider: req.provider || null, providerReference: req.providerReference || null,
+        status: "COMPLETED", paidAt: new Date(),
+      }});
+      await tx.customer.update({ where: { id }, data: { walletBalance: { increment: amount } } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-service", action: "CUSTOMER_WALLET_DEPOSIT", entityType: "Payment", entityId: payment.id,
+        metadata: { customerId: id, amount },
+      }});
+      return payment;
+    }));
+  }
+
+  async getCustomerContacts(ctx: TenantContext, customerId?: string) {
+    const where = customerId ? { ...tenantWhere(ctx), customerId } : tenantWhere(ctx);
+    return normalize(await db.customerContact.findMany({ where, orderBy: [{ isPrimary: "desc" }, { firstName: "asc" }] }));
+  }
+
+  async getCustomerContactById(ctx: TenantContext, id: string) {
+    return normalize(await db.customerContact.findFirst({ where: { id, ...tenantWhere(ctx) } }));
+  }
+
+  async createCustomerContact(ctx: TenantContext, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id: req.customerId, ...tenantWhere(ctx) } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+      const id = req.id || randomUUID();
+      const existing = await tx.customerContact.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (existing) return existing;
+      const count = await tx.customerContact.count({ where: tenantWhere(ctx) });
+      if (req.isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: req.customerId, isPrimary: true }, data: { isPrimary: false } });
+      const row = await tx.customerContact.create({ data: {
+        id, tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: req.customerId,
+        contactCode: req.contactCode || `CNT-${String(count + 1).padStart(4, "0")}`,
+        firstName: req.firstName, lastName: req.lastName || "", roleTitle: req.roleTitle || null,
+        phone: req.phone || null, email: req.email || null, isPrimary: Boolean(req.isPrimary), notes: req.notes || null, status: "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-contact-service", action: "CUSTOMER_CONTACT_CREATED", entityType: "CustomerContact", entityId: row.id,
+        metadata: { customerId: row.customerId, contactCode: row.contactCode },
+      }});
+      return row;
+    }));
+  }
+
+  async updateCustomerContact(ctx: TenantContext, id: string, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.customerContact.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!existing) throw new Error("CONTACT_NOT_FOUND");
+      const data = pick(req, ["firstName","lastName","roleTitle","phone","email","isPrimary","notes","status"]);
+      if (req.isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: existing.customerId, isPrimary: true, id: { not: id } }, data: { isPrimary: false } });
+      const updated = await tx.customerContact.update({ where: { id }, data });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "customer-contact-service", action: "CUSTOMER_CONTACT_UPDATED", entityType: "CustomerContact", entityId: id,
+        metadata: { changedFields: Object.keys(data).sort() },
+      }});
+      return updated;
+    }));
+  }
+
+  async deleteCustomerContact(ctx: TenantContext, id: string) {
+    return this.updateCustomerContact(ctx, id, { status: "SUSPENDED" });
+  }
+
+  async getCustomerContactHistory(ctx: TenantContext, id: string) {
+    const contact = await db.customerContact.findFirst({ where: { id, ...tenantWhere(ctx) } });
+    if (!contact) throw new Error("CONTACT_NOT_FOUND");
+    return normalize(await db.auditEvent.findMany({ where: { ...tenantWhere(ctx), entityType: "CustomerContact", entityId: id }, orderBy: { createdAt: "desc" }, take: 200 }));
+  }
+
+  async importCustomers(ctx: TenantContext, rows: any[]) {
+    if (!Array.isArray(rows) || rows.length === 0) throw new Error("IMPORT_ROWS_REQUIRED");
+    if (rows.length > 2000) throw new Error("IMPORT_LIMIT_EXCEEDED");
+    return normalize(await db.$transaction(async (tx: any) => {
+      const results: any[] = [];
+      for (const raw of rows) {
+        const name = String(raw.name || "").trim();
+        const phone = String(raw.phone || "").trim();
+        if (!name || !phone) throw new Error("IMPORT_CUSTOMER_NAME_PHONE_REQUIRED");
+        const count = await tx.customer.count({ where: tenantWhere(ctx) });
+        const existing = await tx.customer.findFirst({ where: { ...tenantWhere(ctx), OR: [{ phone }, ...(raw.email ? [{ email: String(raw.email).trim() }] : [])] } });
+        if (existing) { results.push({ ...normalize(existing), imported: false, duplicate: true }); continue; }
+        const row = await tx.customer.create({ data: {
+          id: raw.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+          customerCode: raw.customerCode || `CUST-${String(count + 1).padStart(4, "0")}`,
+          name, phone, email: raw.email ? String(raw.email).trim() : null, address: raw.address ? String(raw.address).trim() : null,
+          creditLimit: Number(raw.creditLimit || 0), currentBalance: Number(raw.openingBalance || 0), openingBalance: Number(raw.openingBalance || 0), walletBalance: 0, status: "ACTIVE",
+        }});
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "customer-import", action: "CUSTOMER_IMPORTED", entityType: "Customer", entityId: row.id, metadata: { source: "CSV", duplicate: false } } });
+        results.push({ ...normalize(row), imported: true, duplicate: false });
+      }
+      return results;
+    }));
+  }
+
+  async getSupplierTransactions(ctx: TenantContext, id: string) {
+    const supplier = await db.supplier.findFirst({ where: { id, ...tenantWhere(ctx) }, select: { id: true, name: true, outstandingBalance: true } });
+    if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+    const [orders, receipts, payments] = await Promise.all([
+      db.purchaseOrder.findMany({ where: { supplierId: id, ...tenantWhere(ctx) }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, orderNumber: true, status: true, totalAmount: true, createdAt: true } }),
+      db.purchaseReceipt.findMany({ where: { supplierId: id, ...tenantWhere(ctx) }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, status: true, receivedAt: true, totalAmount: true } }),
+      db.payment.findMany({ where: { supplierId: id, ...tenantWhere(ctx) }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, status: true, paidAt: true } }),
+    ]);
+    return normalize({ supplier, orders, receipts, payments });
   }
 
   async getSuppliers(ctx: TenantContext) {
@@ -162,21 +362,34 @@ export class PrismaCommercialRepository {
   async getSupplierById(ctx: TenantContext, id: string) { return findOne("supplier", id, ctx); }
 
   async createSupplier(ctx: TenantContext, req: any) {
-    const count = await db.supplier.count({ where: tenantWhere(ctx) });
-    return normalize(await db.supplier.create({ data: {
-      id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId,
-      supplierCode: req.supplierCode || `SUP-${String(count + 1).padStart(4, "0")}`,
-      name: req.name, phone: req.phone ?? null, email: req.email ?? null,
-      address: req.address ?? null, taxPin: req.taxPin ?? null,
-      outstandingBalance: req.outstandingBalance ?? 0, status: req.status || "ACTIVE",
-    }}));
+    const id = req.id || undefined;
+    return normalize(await db.$transaction(async (tx: any) => {
+      if (id) {
+        const existing = await tx.supplier.findFirst({ where: { id, ...tenantWhere(ctx) } });
+        if (existing) return existing;
+      }
+      const count = await tx.supplier.count({ where: tenantWhere(ctx) });
+      const row = await tx.supplier.create({ data: {
+        id, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        supplierCode: req.supplierCode || `SUP-${String(count + 1).padStart(4, "0")}`,
+        name: req.name, phone: req.phone ?? null, email: req.email ?? null,
+        address: req.address ?? null, taxPin: req.taxPin ?? null,
+        outstandingBalance: req.outstandingBalance ?? 0, status: "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "supplier-service", action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: row.id, metadata: { supplierCode: row.supplierCode } } });
+      return row;
+    }));
   }
 
   async updateSupplier(ctx: TenantContext, id: string, req: any) {
-    await this.requireEntity("supplier", ctx, id);
-    return normalize(await db.supplier.update({ where: { id }, data: pick(req, [
-      "name","phone","email","address","taxPin","outstandingBalance","status"
-    ]) }));
+    return normalize(await db.$transaction(async (tx: any) => {
+      const existing = await tx.supplier.findFirst({ where: { id, ...tenantWhere(ctx) } });
+      if (!existing) throw new Error(`Supplier ${id} not found`);
+      const data = pick(req, ["name","phone","email","address","taxPin","status"]);
+      const updated = await tx.supplier.update({ where: { id }, data });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "supplier-service", action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(data).sort() } } });
+      return updated;
+    }));
   }
 
   async getPurchaseOrders(ctx: TenantContext) {
