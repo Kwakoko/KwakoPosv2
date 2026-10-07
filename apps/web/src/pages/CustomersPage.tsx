@@ -84,7 +84,7 @@ function parseCsv(text: string): Record<string, string>[] {
   ));
 }
 
-function downloadCsv(rows: Record<string, unknown>[], filename: string, headers = ["customerCode", "name", "phone", "email", "address", "creditLimit", "currentBalance", "walletBalance", "status"]) {
+function downloadCsv(rows: any[], filename: string, headers = ["customerCode", "name", "phone", "email", "address", "creditLimit", "currentBalance", "walletBalance", "status"]) {
   const esc = (v: unknown) => `"${String(v ?? "").replaceAll('"', '""')}"`;
   const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => esc(r[h])).join(","))].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
