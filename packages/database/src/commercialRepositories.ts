@@ -98,6 +98,7 @@ export class ScopedCommercialRepository {
       creditLimit: req.creditLimit || 0,
       currentBalance: req.openingBalance || 0,
       openingBalance: req.openingBalance || 0,
+      walletBalance: 0,
       status: "ACTIVE",
       createdAt: now,
       updatedAt: now,
