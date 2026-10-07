@@ -7,7 +7,7 @@ import { projectProductBranchStock, projectProductStockSummary, projectVariantIn
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
 
-  private async accounts(tx: any, ctx: TenantContext) {
+  async accounts(tx: any, ctx: TenantContext) {
     const codes = [
       ["1110", "Cash", "ASSET", "CASH"], ["1210", "Bank", "ASSET", "BANK"],
       ["1310", "Accounts Receivable", "ASSET", "ACCOUNTS_RECEIVABLE"], ["1410", "Inventory", "ASSET", "INVENTORY"],
@@ -24,7 +24,7 @@ export class PrismaAtomicCommercialFinanceService {
     return { cashAccountId: result["1110"], bankAccountId: result["1210"], receivableAccountId: result["1310"], inventoryAccountId: result["1410"], payableAccountId: result["2110"], taxPayableAccountId: result["2210"], salesRevenueAccountId: result["4100"], salesDiscountAccountId: result["4900"], cogsAccountId: result["5100"], expenseDefaultAccountId: result["6900"], cashVarianceAccountId: result["8100"] };
   }
 
-  private async writeJournal(tx: any, ctx: TenantContext, built: any) {
+  async writeJournal(tx: any, ctx: TenantContext, built: any) {
     const existing = await tx.journalEntry.findUnique({ where: { idempotencyKey: built.journal.idempotencyKey } }).catch(() => null);
     if (existing) {
       const lines = await tx.journalLine.findMany({ where: { journalEntryId: existing.id } });
