@@ -84,6 +84,7 @@ export function syncDependencyRank(op: SyncOperationEnvelope): number {
   if (op.entityType === "ProductVariant" && op.operationType === "DELETE") return 50;
   if (op.entityType === "StockAdjustment" && op.operationType === "CREATE") return 60;
   if (op.entityType === "Customer" || op.entityType === "Supplier") return 70;
+  if (op.entityType === "CustomerContact") return 72;
   if (op.entityType === "PurchaseOrder") return 80;
   if (op.entityType === "Sale") return 90;
   if (op.entityType === "Receipt") return 92;
