@@ -177,6 +177,7 @@ export class PrismaFinanceRepository {
   async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
 
   async createCustomerInvoice(ctx: TenantContext, req: any) {
+    await this.ensureDefaultAccounts(ctx);
     const c = await this.db.customer.findFirst({ where: { id: req.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
     if (!c) throw new Error("CUSTOMER_NOT_FOUND");
     const subtotal = req.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
@@ -199,6 +200,7 @@ export class PrismaFinanceRepository {
   }
 
   async createSupplierInvoice(ctx: TenantContext, req: any) {
+    await this.ensureDefaultAccounts(ctx);
     const s = await this.db.supplier.findFirst({ where: { id: req.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
     if (!s) throw new Error("SUPPLIER_NOT_FOUND");
     const subtotal = req.items.reduce((x: number, i: any) => x + i.quantity * i.unitCost, 0);
@@ -223,6 +225,7 @@ export class PrismaFinanceRepository {
   async getBankAccounts(ctx: TenantContext) { return this.db.bankAccount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { transactions: true } }); }
   async createBankAccount(ctx: TenantContext, req: any) { const dup = await this.db.bankAccount.findFirst({ where: { tenantId: ctx.tenantId, accountNumber: req.accountNumber } }); if (dup) throw new Error("FINANCE_BANK_ACCOUNT_EXISTS"); return this.db.bankAccount.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, accountName: req.accountName, bankName: req.bankName, accountNumber: req.accountNumber, currency: req.currency ?? "TZS", openingBalance: req.openingBalance ?? 0, currentBalance: req.openingBalance ?? 0, isActive: true } }); }
   async recordBankTransaction(ctx: TenantContext, bankAccountId: string, req: any) {
+    await this.ensureDefaultAccounts(ctx);
     return this.db.$transaction(async (tx: any) => {
       const bank = await tx.bankAccount.findFirst({ where: { id: bankAccountId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
       if (!bank) throw new Error("FINANCE_BANK_ACCOUNT_NOT_FOUND");
@@ -249,6 +252,7 @@ export class PrismaFinanceRepository {
   }
 
   async allocatePayment(ctx: TenantContext, req: any) {
+    await this.ensureDefaultAccounts(ctx);
     return this.db.$transaction(async (tx: any) => {
       const payment = await tx.payment.findFirst({ where: { id: req.paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: { not: "FAILED" } } });
       if (!payment) throw new Error("FINANCE_PAYMENT_NOT_FOUND");
@@ -270,7 +274,7 @@ export class PrismaFinanceRepository {
       const cashAccount = await this.requireFinanceAccount(tx, ctx, payment.paymentMethod === "BANK" ? "1210" : "1110");
       const arAp = await this.requireFinanceAccount(tx, ctx, req.customerInvoiceId ? "1310" : "2110");
       await this.persistFinancialJournal(tx, ctx, req.customerInvoiceId
-        ? { sourceType: "PAYMENT", sourceId: payment.id, description: `AR payment allocation ${payment.paymentNumber}`, entryDate: payment.paidAt, lines: [{ accountId: cashAccount.id, debit: amount, credit: 0 }, { accountId: arAp.id, debit: 0, credit: amount }], idempotencyKey: `payment-${payment.id}` }
+        ? { sourceType: "PAYMENT", sourceId: payment.id, description: `AR payment allocation ${payment.paymentNumber}`, entryDate: payment.paidAt, lines: [{ accountId: cashAccount.id, debit: amount, credit: 0 }, { accountId: arAp.id, debit: 0, credit: amount }], idempotencyKey: `payment-allocation-${allocation.id}` }
         : { sourceType: "PAYMENT", sourceId: payment.id, description: `AP settlement ${payment.paymentNumber}`, entryDate: payment.paidAt, lines: [{ accountId: arAp.id, debit: amount, credit: 0 }, { accountId: cashAccount.id, debit: 0, credit: amount }], idempotencyKey: `payment-${payment.id}` }
       );
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "finance-api", action: "PAYMENT_ALLOCATED", entityType: "PaymentAllocation", entityId: allocation.id, metadata: { paymentId: payment.id, invoiceId, amount } } });
