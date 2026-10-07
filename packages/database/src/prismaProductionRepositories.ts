@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
-import { assertTenantIsolation, EmployeeEngine, FinancialBridge, calculateAvailableStock } from "@kwakopos2/domain";
+import { assertTenantIsolation, EmployeeEngine, FinancialBridge, calculateAvailableStock, ReceivablesPayablesEngine } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 const db: any = prisma;
@@ -58,6 +58,76 @@ function employeeCanAccessBranch(ctx: TenantContext, branchId: string): boolean 
   return roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.has("*") || permissions.has("branch.switch");
 }
 
+function canViewAllBranches(ctx: TenantContext): boolean {
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((p) => String(p).trim().toLowerCase()));
+  return roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r))
+    || permissions.has("*")
+    || permissions.has("branch.switch")
+    || permissions.has("reports.all_branches")
+    || permissions.has("reports.*");
+}
+
+export interface HistoricalInventoryMovement {
+  productId: string;
+  variantId: string;
+  branchId: string;
+  quantityChange: number;
+  unitCost?: number | null;
+  occurredAt?: string | Date | null;
+}
+
+export function calculateHistoricalInventoryValuation(movements: HistoricalInventoryMovement[]) {
+  const byVariant = new Map<string, { productId: string; variantId: string; branchId: string; quantity: number; totalValue: number }>();
+  const ordered = [...movements].sort((a, b) =>
+    new Date(a.occurredAt || 0).getTime() - new Date(b.occurredAt || 0).getTime()
+  );
+  for (const movement of ordered) {
+    const key = `${movement.branchId}:${movement.variantId}`;
+    const row = byVariant.get(key) || {
+      productId: movement.productId,
+      variantId: movement.variantId,
+      branchId: movement.branchId,
+      quantity: 0,
+      totalValue: 0,
+    };
+    const qty = num(movement.quantityChange);
+    const unitCost = num(movement.unitCost);
+    if (qty > 0 && unitCost > 0) {
+      row.totalValue += qty * unitCost;
+    } else if (qty < 0 && row.quantity > 0) {
+      const wac = row.totalValue / row.quantity;
+      row.totalValue += qty * wac;
+    }
+    row.quantity += qty;
+    if (row.quantity <= 0) {
+      row.quantity = 0;
+      row.totalValue = 0;
+    }
+    byVariant.set(key, row);
+  }
+  return Array.from(byVariant.values()).map((row) => {
+    const averageCost = row.quantity > 0 ? row.totalValue / row.quantity : 0;
+    return {
+      ...row,
+      quantity: Number(row.quantity.toFixed(4)),
+      averageCost: Number(averageCost.toFixed(2)),
+      stockValue: Number((row.quantity * averageCost).toFixed(2)),
+    };
+  });
+}
+
+export function calculateHistoricalInvoiceBalance(invoice: any, asOf: Date): number {
+  const invoiceDate = new Date(invoice?.invoiceDate || invoice?.createdAt || 0);
+  if (!Number.isFinite(invoiceDate.getTime()) || invoiceDate > asOf) return 0;
+  const allocated = Array.isArray(invoice?.allocations)
+    ? invoice.allocations
+        .filter((a: any) => new Date(a?.allocatedAt || a?.createdAt || 0) <= asOf)
+        .reduce((sum: number, a: any) => sum + num(a?.allocatedAmount), 0)
+    : 0;
+  return Math.max(0, Number(invoice?.grandTotal || 0) - allocated);
+}
+
 export class PrismaCommercialRepository {
   constructor(private readonly atomic = new PrismaAtomicCommercialFinanceService()) {}
 
@@ -66,6 +136,9 @@ export class PrismaCommercialRepository {
     if (branchId) {
       const branch = await db.branch.findFirst({ where: { id: branchId, tenantId: ctx.tenantId } });
       if (!branch) throw new Error("REPORT_BRANCH_BOUNDARY_VIOLATION");
+      if (!employeeCanAccessBranch(ctx, branchId)) throw new Error("REPORT_BRANCH_AUTHORIZATION_VIOLATION");
+    } else if (!canViewAllBranches(ctx)) {
+      throw new Error("REPORT_ALL_BRANCHES_AUTHORIZATION_REQUIRED");
     }
     const scope = branchId ? { tenantId: ctx.tenantId, branchId } : { tenantId: ctx.tenantId };
     const saleScope = { ...scope, soldAt: { gte: options.from, lt: options.to } };
@@ -74,8 +147,9 @@ export class PrismaCommercialRepository {
     const returnScope = { ...scope, createdAt: { gte: options.from, lt: options.to } };
     const purchaseScope = { ...scope, createdAt: { gte: options.from, lt: options.to } };
     const movementScope = { ...scope, occurredAt: { gte: options.from, lt: options.to } };
+    const historicalMovementScope = { ...scope, occurredAt: { lt: options.to } };
 
-    const [sales, expenses, payments, returns, purchaseOrders, stockMovements, customers, products, branches, invoices] =
+    const [sales, expenses, payments, returns, purchaseOrders, stockMovements, historicalStockMovements, customers, suppliers, products, branches, invoices, supplierInvoices] =
       await Promise.all([
         db.sale.findMany({ where: saleScope, include: { lines: true, payments: true }, orderBy: { soldAt: "desc" } }),
         db.expense.findMany({ where: expenseScope, orderBy: { incurredAt: "desc" } }),
@@ -83,13 +157,44 @@ export class PrismaCommercialRepository {
         db.return.findMany({ where: returnScope, include: { lines: true }, orderBy: { createdAt: "desc" } }),
         db.purchaseOrder.findMany({ where: purchaseScope, include: { items: true, supplier: true }, orderBy: { createdAt: "desc" } }),
         db.stockLedger.findMany({ where: movementScope, include: { product: true, variant: true }, orderBy: { occurredAt: "desc" } }),
+        db.stockLedger.findMany({ where: historicalMovementScope, orderBy: { occurredAt: "asc" } }),
         db.customer.findMany({ where: scope, orderBy: { createdAt: "asc" } }),
+        db.supplier.findMany({ where: scope, orderBy: { createdAt: "asc" } }),
         db.product.findMany({ where: scope, include: { variants: true, branchStocks: true }, orderBy: { name: "asc" } }),
         branchId ? db.branch.findMany({ where: { tenantId: ctx.tenantId, id: branchId } }) : db.branch.findMany({ where: { tenantId: ctx.tenantId }, orderBy: { name: "asc" } }),
         db.customerInvoice.findMany({ where: scope, include: { allocations: true }, orderBy: { dueDate: "asc" } }),
+        db.supplierInvoice.findMany({ where: scope, include: { allocations: true, supplier: true }, orderBy: { dueDate: "asc" } }),
       ]);
 
     const activeSales = sales.filter((s: any) => !["CANCELLED", "VOIDED", "REFUNDED"].includes(String(s.status).toUpperCase()));
+    const inventoryValuation = calculateHistoricalInventoryValuation(historicalStockMovements.map((m: any) => ({
+      productId: m.productId,
+      variantId: m.variantId,
+      branchId: m.branchId,
+      quantityChange: num(m.quantityChange),
+      unitCost: num(m.unitCost),
+      occurredAt: m.occurredAt,
+    })));
+    const inventoryByProduct = inventoryValuation.map((row: any) => {
+      const product = products.find((p: any) => p.id === row.productId);
+      const variant = product?.variants?.find((v: any) => v.id === row.variantId);
+      const branch = branches.find((b: any) => b.id === row.branchId);
+      return {
+        ...row,
+        productName: product?.name || row.productId,
+        sku: variant?.sku || variant?.barcode || product?.sku || product?.barcode || row.variantId,
+        variantName: variant?.name || row.variantId,
+        branchName: branch?.name || row.branchId,
+      };
+    });
+    const historicalReceivables = invoices
+      .map((invoice: any) => ({ ...invoice, balanceDue: calculateHistoricalInvoiceBalance(invoice, options.to) }))
+      .filter((invoice: any) => invoice.balanceDue > 0);
+    const historicalPayables = supplierInvoices
+      .map((invoice: any) => ({ ...invoice, balanceDue: calculateHistoricalInvoiceBalance(invoice, options.to) }))
+      .filter((invoice: any) => invoice.balanceDue > 0);
+    const receivablesAging = ReceivablesPayablesEngine.generateReceivablesAgingReport(ctx, customers, historicalReceivables as any, options.to);
+    const payablesAging = ReceivablesPayablesEngine.generatePayablesAgingReport(ctx, suppliers, historicalPayables as any, options.to);
     const totalGrossSales = activeSales.reduce((n: number, s: any) => n + num(s.grandTotal), 0);
     const totalTaxCollected = activeSales.reduce((n: number, s: any) => n + num(s.taxTotal), 0);
     const totalDiscounts = activeSales.reduce((n: number, s: any) => n + num(s.discountTotal), 0);
@@ -112,6 +217,8 @@ export class PrismaCommercialRepository {
         grossProfit, netOperatingProfit,
         marginPct: totalGrossSales ? (netOperatingProfit / totalGrossSales) * 100 : 0,
         totalTransactions: activeSales.length,
+        totalInventoryValue: inventoryByProduct.reduce((n: number, r: any) => n + num(r.stockValue), 0),
+        reportAsOf: options.to.toISOString(),
         paymentTotals,
       },
       sales: activeSales,
@@ -121,9 +228,14 @@ export class PrismaCommercialRepository {
       payments,
       stockMovements,
       customers,
+      suppliers,
       products,
       branches,
       invoices,
+      supplierInvoices,
+      inventoryValuation: inventoryByProduct,
+      receivablesAging,
+      payablesAging,
     });
   }
 
