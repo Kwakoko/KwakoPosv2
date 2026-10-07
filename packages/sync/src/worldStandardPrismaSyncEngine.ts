@@ -1060,7 +1060,7 @@ const now = new Date();
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
 
       if (payload.customerId) {
-        const customer = await tx.customer.findFirst({ where: { id: String(payload.customerId), ...tenantWhere(ctx) } });
+        const customer = await tx.customer.findFirst({ where: { id: String(payload.customerId), tenantId: ctx.tenantId, branchId: ctx.branchId } });
         if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
 
         const isWalletDeposit = payload.walletDepositAmount !== undefined || payload.kind === "WALLET_DEPOSIT";
@@ -1099,7 +1099,7 @@ const now = new Date();
       }
 
       if (!payload.supplierId) throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
-      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, ...tenantWhere(ctx) } });
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
       if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
       if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
       const payment = await tx.payment.create({ data: {
@@ -1193,11 +1193,11 @@ const now = new Date();
       if (existing && (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
       if (op.operationType === "CREATE") {
         if (!payload.customerId) throw new Error("CONTACT_CUSTOMER_REQUIRED");
-        const customer = await tx.customer.findFirst({ where: { id: payload.customerId, ...tenantWhere(ctx) } });
+        const customer = await tx.customer.findFirst({ where: { id: payload.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
         if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
         if (!existing) {
           const isPrimary = Boolean(payload.isPrimary);
-          if (isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: customer.id, isPrimary: true }, data: { isPrimary: false } });
+          if (isPrimary) await tx.customerContact.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id, isPrimary: true }, data: { isPrimary: false } });
           const row = await tx.customerContact.create({ data: {
             id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id,
             contactCode: payload.contactCode || `CNT-${op.entityId.slice(0, 8)}`, firstName: payload.firstName,
@@ -1218,7 +1218,7 @@ const now = new Date();
       }
       const data: any = {};
       for (const key of ["firstName","lastName","roleTitle","phone","email","isPrimary","notes","status"]) if (payload[key] !== undefined) data[key] = payload[key];
-      if (data.isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: existing.customerId, isPrimary: true, id: { not: op.entityId } }, data: { isPrimary: false } });
+      if (data.isPrimary) await tx.customerContact.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: existing.customerId, isPrimary: true, id: { not: op.entityId } }, data: { isPrimary: false } });
       const row = await tx.customerContact.update({ where: { id: op.entityId }, data });
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_CONTACT_UPDATED", entityType: "CustomerContact", entityId: row.id, metadata: { customerId: row.customerId, changedFields: Object.keys(data).sort() } } });
       return;
