@@ -1232,6 +1232,11 @@ const now = new Date();
         String(next.notes || ""), String(next.decisionInfluence || "INFLUENCER"), String(next.status || "ACTIVE"),
         op.entityId, ctx.tenantId, ctx.branchId, customerId,
       );
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CONTACT_UPDATED", entityType: "CustomerContact", entityId: op.entityId,
+        metadata: { customerId, operationId: op.operationId, changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+      }});
       return;
     }
 
@@ -1248,7 +1253,7 @@ const now = new Date();
         return;
       }
       const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.customer.create({ data: {
+      const created = await tx.customer.create({ data: {
         id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
         customerCode: payload.customerCode || `CUST-${op.operationId.slice(0, 10)}`,
         name: String(payload.name || "").trim(),
@@ -1256,12 +1261,32 @@ const now = new Date();
         creditLimit: Number(payload.creditLimit || 0), currentBalance: Number(payload.openingBalance || 0), openingBalance: Number(payload.openingBalance || 0),
         status: payload.status || "ACTIVE",
       }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id,
+        metadata: { customerCode: created.customerCode, operationId: op.operationId },
+      }});
       return;
     }
 
     if (op.entityType === "Supplier" && op.operationType === "CREATE") {
       const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.supplier.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const created = await tx.supplier.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        supplierCode: payload.supplierCode || `SUP-${op.operationId.slice(0, 10)}`,
+        name: String(payload.name || "").trim(), phone: payload.phone || null, email: payload.email || null,
+        address: payload.address || null, taxPin: payload.taxPin || null, outstandingBalance: 0, status: payload.status || "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: created.id,
+        metadata: { supplierCode: created.supplierCode, operationId: op.operationId },
+      }});
       return;
     }
 
