@@ -2657,31 +2657,63 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // POS Sales Engine
+  const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
+    const ctx = requireTenantContext(req);
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const wildcard = permissions.includes("*");
+    const map: Record<string, string> = { view: "SALE_VIEW", create: "SALE_CREATE", void: "SALE_VOID", return: "SALE_RETURN" };
+    if (!(admin || wildcard || permissions.includes(map[action]))) throw new Error(`FORBIDDEN: ${map[action]} required`);
+    return ctx;
+  };
+
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = await commercialRepository.getSales(req.tenantContext!);
+    const ctx = assertSalesAuthority(req, "view");
+    const sales = await commercialRepository.getSales(ctx);
     return { success: true, data: sales };
   });
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER"].includes(r));
+      if (!(manager || permissions.includes("*") || permissions.includes("DISCOUNT_MANAGE"))) {
+        throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      }
+    }
     const result = atomicCommercialFinance
-      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : await commercialRepository.createPosSale(req.tenantContext!, validated);
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    const ctx = assertSalesAuthority(req, "view");
+    const sale = await commercialRepository.getSaleById(ctx, (req.params as any).id);
     if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
     return { success: true, data: sale };
   });
 
+  server.post("/api/v1/pos/sales/:id/void", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "void");
+    if (!atomicCommercialFinance) throw new Error("SALE_VOID_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), operationId: z.string().min(1).max(200).optional(), idempotencyKey: z.string().min(1).max(200).optional(), deviceId: z.string().min(1).max(128).optional() }).parse(req.body);
+    const result = await atomicCommercialFinance.voidSale(ctx, String((req.params as any).id), body.reason, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
+    const result = await commercialRepository.createSaleReturn(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
