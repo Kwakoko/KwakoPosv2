@@ -33,6 +33,7 @@ const REQUIRED: Array<[string, string, string[]]> = [
     "paymentPosting",
   ]],
   ["customer-api", "apps/api/src/server.ts", [
+    "customerContactRoutes(server)",
     'server.get("/api/v1/customers"',
     'server.post("/api/v1/customers"',
     'server.put("/api/v1/customers/:id"',
@@ -56,6 +57,7 @@ const REQUIRED: Array<[string, string, string[]]> = [
     "CONTACT_UPDATED",
     "CONTACT_ARCHIVED",
     "CUSTOMER_PAYMENT_POSTED",
+    "CUSTOMER_EXPORT",
   ]],
   ["contact-storage", "packages/database/prisma/migrations/202610070001_customers_contacts_production_lock/migration.sql", [
     "CREATE TABLE IF NOT EXISTS customer_contacts",
