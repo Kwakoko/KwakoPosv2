@@ -81,12 +81,26 @@ export class PrismaAtomicCommercialFinanceService {
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
       const variantProductIds = new Map<string, string>();
+      let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
         if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
+        const authoritativePrice = Number(v.price);
+        const requestedPrice = Number(item.unitPrice);
+        if (authoritativePrice > 0 && Math.abs(requestedPrice - authoritativePrice) > 0.005) {
+          throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
+        }
+        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         variantProductIds.set(item.variantId, v.productId);
+      }
+      if (saleDiscountRequested) {
+        const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+        const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+        const canDiscount = rawPermissions.includes("*") || rawPermissions.includes("discount.manage") || rawPermissions.includes("sales.discount") ||
+          roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+        if (!canDiscount) throw new Error("DISCOUNT_MANAGE_REQUIRED");
       }
       // Resolve tax from the authoritative tenant/branch Settings row. Client tax values are
       // informational only; production financial fields must be derived server-side.
@@ -111,7 +125,7 @@ export class PrismaAtomicCommercialFinanceService {
 
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
-          unitPrice: item.unitPrice,
+          unitPrice: Number((await tx.productVariant.findUnique({ where: { id: item.variantId } }))?.price ?? item.unitPrice),
           unitCost: item.unitCost || 0,
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
