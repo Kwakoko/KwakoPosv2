@@ -324,9 +324,18 @@ function requireCommercialPermission(req: FastifyRequest, permission: string): T
   const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
   const owner = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
   const normalized = permission.trim().toLowerCase();
-  if (!owner && !permissions.has("*") && !permissions.has("admin:*") && !permissions.has(normalized)) {
-    throw new Error(`FORBIDDEN: ${permission} permission required`);
-  }
+  const aliases: Record<string, string[]> = {
+    "customer.view": ["customer.view", "customers.read", "customer_view"],
+    "customer.create": ["customer.create", "customers.create", "customer_create"],
+    "customer.edit": ["customer.edit", "customers.edit", "customer_edit"],
+    "supplier.view": ["supplier.view", "suppliers.read", "supplier_view"],
+    "supplier.create": ["supplier.create", "suppliers.create", "supplier_create"],
+    "supplier.edit": ["supplier.edit", "suppliers.edit", "supplier_edit"],
+    "report.export": ["report.export", "reports.export", "report_export"],
+  };
+  const accepted = aliases[normalized] || [normalized];
+  const allowed = owner || permissions.has("*") || permissions.has("admin:*") || accepted.some((value) => permissions.has(value));
+  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
   return ctx;
 }
 
