@@ -8,15 +8,15 @@ const MARKERS = [
   ["routes","apps/api/src/routes/receiptRoutes.ts",["/api/v2/receipts/:id/print/audit","/api/v2/receipts/:id/reprint","/api/v2/receipts/:id/share","Receipt share recorded"]],
   ["repository","packages/database/src/receiptRepositories.ts",["class PrismaReceiptRepository","pg_advisory_xact_lock","recordPrint","status: \"OPENED\"","auditLogs"]],
   ["client","apps/web/src/pages/ReceiptsPage.tsx",["db.receipts","db.syncOutbox","apiFetch","printReceiptToThermal","/print/audit","/share"]],
-  ["sync-engine","apps/web/src/clientSyncEngine.ts",["case "Receipt": return "receipts";","applyRevisionedChanges"]],
+  ["sync-engine","apps/web/src/clientSyncEngine.ts",['case "Receipt": return "receipts";',"applyRevisionedChanges"]],
   ["printer","apps/web/src/services/receiptPrinterService.ts",["navigator.serial","buildEscPosPayload","getWriter"]],
   ["tests","tests/unit/receipt-production-lock.test.ts",["Receipt production lock","buildEscPosPayload","status: \"OPENED\""]],
   ["package","package.json",["certify:receipts-lock"]],
   ["ci",".github/workflows/ci.yml",["npm run certify:receipts-lock"]],
   ["candidate",".github/workflows/production-certification.yml",["npm run certify:receipts-lock"]],
   ["exact-main",".github/workflows/production-release-exact-main.yml",["npm run certify:receipts-lock"]],
-  ["schema","packages/database/prisma/schema.prisma",["model Receipt {","model ReceiptShareLog {","@default("OPENED")"]],
-  ["migration","packages/database/prisma/migrations/202610080001_receipt_share_status_honesty/migration.sql",["ALTER COLUMN "status" SET DEFAULT 'OPENED'"]],
+  ["schema","packages/database/prisma/schema.prisma",["model Receipt {","model ReceiptShareLog {",'@default("OPENED")']],
+  ["migration","packages/database/prisma/migrations/202610080001_receipt_share_status_honesty/migration.sql",['ALTER COLUMN "status" SET DEFAULT \'OPENED\'']],
 ];
 function read(p:string){ const f=path.resolve(process.cwd(),p); if(!fs.existsSync(f)) throw new Error("MISSING_FILE:"+p); return fs.readFileSync(f,"utf8"); }
 const failures:string[]=[];
