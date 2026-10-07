@@ -324,6 +324,48 @@ export class PrismaCommercialRepository {
     return normalize(await db.auditEvent.findMany({ where: { ...tenantWhere(ctx), entityType: "CustomerContact", entityId: id }, orderBy: { createdAt: "desc" }, take: 200 }));
   }
 
+  async importCustomerContacts(ctx: TenantContext, rows: any[]) {
+    if (!Array.isArray(rows) || rows.length === 0) throw new Error("CONTACT_IMPORT_ROWS_REQUIRED");
+    if (rows.length > 2000) throw new Error("CONTACT_IMPORT_LIMIT_EXCEEDED");
+    return normalize(await db.$transaction(async (tx: any) => {
+      const results: any[] = [];
+      for (const raw of rows) {
+        const customerId = String(raw.customerId || "").trim();
+        const firstName = String(raw.firstName || raw.firstname || "").trim();
+        if (!customerId || !firstName) throw new Error("CONTACT_IMPORT_CUSTOMER_FIRSTNAME_REQUIRED");
+        const customer = await tx.customer.findFirst({ where: { id: customerId, ...tenantWhere(ctx) } });
+        if (!customer) throw new Error("CONTACT_IMPORT_CUSTOMER_NOT_FOUND");
+        const phone = String(raw.phone || "").trim();
+        const email = String(raw.email || "").trim();
+        const duplicate = await tx.customerContact.findFirst({
+          where: { ...tenantWhere(ctx), customerId, OR: [phone ? { phone } : undefined, email ? { email } : undefined].filter(Boolean) },
+        });
+        if (duplicate) {
+          results.push({ ...normalize(duplicate), imported: false, duplicate: true });
+          continue;
+        }
+        const id = raw.id || randomUUID();
+        const count = await tx.customerContact.count({ where: tenantWhere(ctx) });
+        const row = await tx.customerContact.create({ data: {
+          id, tenantId: ctx.tenantId, branchId: ctx.branchId, customerId,
+          contactCode: raw.contactCode || `CNT-${String(count + 1).padStart(4, "0")}`,
+          firstName, lastName: String(raw.lastName || raw.lastname || "").trim(),
+          roleTitle: String(raw.roleTitle || raw.role || "").trim() || null,
+          phone: phone || null, email: email || null,
+          isPrimary: Boolean(raw.isPrimary === true || String(raw.isPrimary).toLowerCase() === "true"),
+          notes: String(raw.notes || "").trim() || null, status: "ACTIVE",
+        }});
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: "customer-contact-import", action: "CUSTOMER_CONTACT_IMPORTED", entityType: "CustomerContact", entityId: row.id,
+          metadata: { customerId, source: "CSV", duplicate: false },
+        }});
+        results.push({ ...normalize(row), imported: true, duplicate: false });
+      }
+      return results;
+    }));
+  }
+
   async importCustomers(ctx: TenantContext, rows: any[]) {
     if (!Array.isArray(rows) || rows.length === 0) throw new Error("IMPORT_ROWS_REQUIRED");
     if (rows.length > 2000) throw new Error("IMPORT_LIMIT_EXCEEDED");
