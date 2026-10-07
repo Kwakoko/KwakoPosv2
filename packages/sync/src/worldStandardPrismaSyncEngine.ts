@@ -1398,7 +1398,6 @@ const now = new Date();
       Brand: "brands",
       Expense: "expenses",
       CustomerContact: "customer_contacts",
-      CustomerContact: "customer_contacts",
     };
     const table = tableByType[entityType];
     if (!table) return;
