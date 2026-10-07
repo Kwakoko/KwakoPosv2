@@ -1814,7 +1814,9 @@ export class LocalIndexedDbStore {
             ? this.customers.get(entityId)
             : entityType === "Supplier"
               ? this.suppliers.get(entityId)
-              : null;
+              : entityType === "CustomerContact"
+                ? this.contacts.get(entityId)
+                : null;
     const value = row?.updatedAt;
     return typeof value === "string" ? value : value instanceof Date ? value.toISOString() : null;
   }
