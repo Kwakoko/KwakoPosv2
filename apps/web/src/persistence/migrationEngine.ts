@@ -156,6 +156,7 @@ export class MigrationEngine {
       }
     }
 
+
     // V6 -> V7: Authoritative customer contact replica.
     if (toVersion >= 7 && fromVersion < 7) {
       if (!db.objectStoreNames.contains("contacts")) db.createObjectStore("contacts");
