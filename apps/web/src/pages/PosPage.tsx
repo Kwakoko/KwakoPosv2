@@ -1128,11 +1128,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const tenantContext = { tenantId: currentTenantId!, branchId: currentBranchId! };
     const authoritativeCustomerId = selectedCustomer === "Walk-In Customer" ? null : (
       selectedCustomerId ||
-      Array.from(db.customers.values()).find((customer: any) =>
+      (Array.from(db.customers.values()).find((customer: any) =>
         customer.tenantId === currentTenantId &&
         customer.branchId === currentBranchId &&
         customer.name === selectedCustomer
-      )?.id ?? null
+      )?.id ?? null)
     );
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
 
