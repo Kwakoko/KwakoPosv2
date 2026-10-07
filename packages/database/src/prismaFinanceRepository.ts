@@ -129,8 +129,6 @@ export class PrismaFinanceRepository {
   }
 
 
-  async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
-  async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
   private async requireFinanceAccount(tx: any, ctx: TenantContext, code: string) {
     const account = await tx.account.findFirst({ where: { tenantId: ctx.tenantId, accountCode: code, OR: [{ branchId: ctx.branchId }, { branchId: null }], isActive: true } });
     if (!account) throw new Error(`FINANCE_ACCOUNT_REQUIRED:${code}`);
@@ -173,6 +171,26 @@ export class PrismaFinanceRepository {
     return { journal, lines };
   }
 
+  async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
+  async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
+
+  async getReceivablesAging(ctx: TenantContext) {
+    const [customers, invoices] = await Promise.all([
+      this.db.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, name: true, customerCode: true } }),
+      this.getCustomerInvoices(ctx),
+    ]);
+    const { ReceivablesPayablesEngine } = await import("@kwakopos2/domain");
+    return ReceivablesPayablesEngine.generateReceivablesAgingReport(ctx, customers, invoices as any, new Date());
+  }
+
+  async getPayablesAging(ctx: TenantContext) {
+    const [suppliers, invoices] = await Promise.all([
+      this.db.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, name: true, supplierCode: true } }),
+      this.getSupplierInvoices(ctx),
+    ]);
+    const { ReceivablesPayablesEngine } = await import("@kwakopos2/domain");
+    return ReceivablesPayablesEngine.generatePayablesAgingReport(ctx, suppliers, invoices as any, new Date());
+  }
   async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
   async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
 
