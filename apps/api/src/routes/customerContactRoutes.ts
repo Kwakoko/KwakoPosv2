@@ -104,7 +104,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const c = ctx(req);
     const customerId = String((req.params as any).id);
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title","phone","email","isPrimary","notes","status","createdAt","updatedAt" FROM customer_contacts WHERE id IS NOT NULL AND "customerId" = $1 AND "tenantId" = $2 AND "branchId" = $3 ORDER BY "isPrimary" DESC,"firstName" ASC,"lastName" ASC',
+      'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id IS NOT NULL AND "customerId" = $1 AND "tenantId" = $2 AND "branchId" = $3 ORDER BY "isPrimary" DESC,"firstName" ASC,"lastName" ASC',
       customerId, c.tenantId, c.branchId
     );
     return { success: true, data: rows };
@@ -117,7 +117,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     if (q.length < 2) return { success: true, data: [] };
     const like = "%" + q + "%";
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT cc.id,cc."customerId",cc."firstName",cc."lastName",cc.title,cc.phone,cc.email,cc."isPrimary",c.name AS "customerName" FROM customer_contacts cc JOIN customers c ON c.id=cc."customerId" AND c."tenantId"=$1 AND c."branchId"=$2 WHERE cc."tenantId"=$1 AND cc."branchId"=$2 AND (LOWER(cc."firstName") LIKE $3 OR LOWER(cc."lastName") LIKE $3 OR LOWER(cc.phone) LIKE $3 OR LOWER(cc.email) LIKE $3 OR LOWER(cc.title) LIKE $3 OR LOWER(c.name) LIKE $3) ORDER BY cc."isPrimary" DESC,cc."firstName" ASC LIMIT 100',
+      'SELECT cc.id,cc."customerId",cc."firstName",cc."lastName",cc.title,cc.role,cc.department,cc.phone,cc.email,cc."isPrimary",cc."decisionInfluence",c.name AS "customerName" FROM customer_contacts cc JOIN customers c ON c.id=cc."customerId" AND c."tenantId"=$1 AND c."branchId"=$2 WHERE cc."tenantId"=$1 AND cc."branchId"=$2 AND (LOWER(cc."firstName") LIKE $3 OR LOWER(cc."lastName") LIKE $3 OR LOWER(cc.phone) LIKE $3 OR LOWER(cc.email) LIKE $3 OR LOWER(cc.title) LIKE $3 OR LOWER(c.name) LIKE $3) ORDER BY cc."isPrimary" DESC,cc."firstName" ASC LIMIT 100',
       c.tenantId, c.branchId, like
     );
     return { success: true, data: rows };
