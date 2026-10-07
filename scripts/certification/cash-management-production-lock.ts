@@ -19,16 +19,17 @@ const REQUIRED_SUBITEMS = [
 ];
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/pages/CashDrawerPage.tsx": "18295857056f15d59a8c022916417a70b04c4de1",
+  "apps/web/src/pages/CashDrawerPage.tsx": "759e8092595cacd90b0602ef1919255349e153a9",
   "apps/api/src/server.ts": "eea27046ac454a0899e9b8252dc1fea018c7ec58",
   "packages/contracts/src/index.ts": "2808a8a3b9b1ce7f37593cebb2fc4a5ca989d105",
-  "packages/database/src/prismaProductionRepositories.ts": "52d08a460abea44dcdd7fe79ff13cbcff2a5d8d6",
+  "packages/database/src/prismaProductionRepositories.ts": "3da2cada5e7be112a9039dda9a05657309a90160",
+  "packages/database/src/commercialRepositories.ts": "c188b7d11db34e5740d754ed7113af635838b7d6",
   "packages/database/prisma/schema.prisma": "8e8e49418d07d1b2899f89908ffcc7ba73afcf16",
   "packages/database/prisma/migrations/202610070001_cash_register_control/migration.sql": "8dcb1fa1c5b2ea4615122beb05b5befa966ee7e3",
   "packages/domain/src/cashSessionEngine.ts": "dba62875d6293e50e38feeb4abbf977ff7b922ae",
   "packages/domain/src/financialBridge.ts": "398c6bdcacc0ac5c7c7c0b513e6ac47b7a7b4131",
   "packages/domain/src/financeInvariants.ts": "98670edd0783bce69211f79289a6abf48e0b9413",
-  "tests/integration/cash-management-production-lock.test.ts": "88175849bab68b4e4890d2e1bf806b376f05d834",
+  "tests/integration/cash-management-production-lock.test.ts": "e4c10255c4f7be84af8d37bc60643b335784ddc8",
 };
 
 const MARKERS: Array<[string, string, string[]]> = [
