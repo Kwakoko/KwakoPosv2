@@ -467,26 +467,48 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
     });
   };
 
-  const handleGenerateXReport = () => {
-    setActiveReportSlip({
-      type: "X_REPORT",
-      title: "MID-SHIFT X-READING AUDIT",
-      timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
-      shiftNumber: shiftId,
-      cashier: currentUser?.name || "Cashier",
-      openingFloat,
-      cashSales,
-      mpesaSales,
-      airtelSales,
-      cardSales,
-      cashIn,
-      cashOut,
-      safeDrops,
-      expectedCash,
-      declaredCash,
-      variance: discrepancy,
-      denominations,
-    });
+  const handleGenerateXReport = async () => {
+    if (!isOnline || !cashSessionId) {
+      toast.error("X-Reading Unavailable", "A live PostgreSQL cash session is required for an authoritative mid-shift report.");
+      return;
+    }
+    try {
+      const [sessionResponse, reconResponse] = await Promise.all([
+        apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/active?registerCode=${encodeURIComponent(terminalId)}`),
+        apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/payment-channel-reconciliation`),
+      ]);
+      const active = sessionResponse?.success ? sessionResponse.data : null;
+      if (!active || String(active.id) !== String(cashSessionId)) throw new Error("The live register session could not be verified.");
+      const channels = reconResponse?.success && Array.isArray(reconResponse.data?.channels) ? reconResponse.data.channels : [];
+      const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+      const cashChannel = channels.find((c: any) => String(c.channel).toUpperCase() === "CASH");
+      const authoritativeCashSales = Number(cashChannel?.completed || active.cashSalesTotal || 0);
+      const authoritativeCashIn = Number(active.cashInTotal || 0);
+      const authoritativeCashOut = Number(active.cashOutTotal || 0);
+      const authoritativeSafeDrops = Number(active.safeDropTotal || 0);
+      const authoritativeExpected = Number(active.expectedCash || 0);
+      setActiveReportSlip({
+        type: "X_REPORT",
+        title: "MID-SHIFT X-READING AUDIT",
+        timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
+        shiftNumber: String(active.sessionNumber || shiftId),
+        cashier: String(active.cashierId || currentUser?.name || "Cashier"),
+        openingFloat: Number(active.openingCash || 0),
+        cashSales: authoritativeCashSales,
+        mpesaSales: completedBy("MOBILE_MONEY") || completedBy("MPESA"),
+        airtelSales: completedBy("AIRTEL_MONEY"),
+        cardSales: completedBy("CARD"),
+        cashIn: authoritativeCashIn,
+        cashOut: authoritativeCashOut,
+        safeDrops: authoritativeSafeDrops,
+        expectedCash: authoritativeExpected,
+        declaredCash: active.actualCash === null || active.actualCash === undefined ? 0 : Number(active.actualCash),
+        variance: active.actualCash === null || active.actualCash === undefined ? 0 : Number(active.actualCash) - authoritativeExpected,
+        denominations,
+      });
+    } catch (error) {
+      toast.error("X-Reading Failed", error instanceof Error ? error.message : "Unable to load authoritative cash report data.");
+    }
   };
 
   const handleGenerateZReport = () => {
