@@ -189,10 +189,18 @@ export class PrismaCommercialRepository {
       };
     });
     const historicalReceivables = invoices
-      .map((invoice: any) => ({ ...invoice, balanceDue: calculateHistoricalInvoiceBalance(invoice, options.to) }))
+      .filter((invoice: any) => !["CANCELLED"].includes(String(invoice.status).toUpperCase()))
+      .map((invoice: any) => {
+        const balanceDue = calculateHistoricalInvoiceBalance(invoice, options.to);
+        return { ...invoice, balanceDue, status: balanceDue > 0 ? "ISSUED" : "PAID" };
+      })
       .filter((invoice: any) => invoice.balanceDue > 0);
     const historicalPayables = supplierInvoices
-      .map((invoice: any) => ({ ...invoice, balanceDue: calculateHistoricalInvoiceBalance(invoice, options.to) }))
+      .filter((invoice: any) => !["REJECTED"].includes(String(invoice.status).toUpperCase()))
+      .map((invoice: any) => {
+        const balanceDue = calculateHistoricalInvoiceBalance(invoice, options.to);
+        return { ...invoice, balanceDue, status: balanceDue > 0 ? "RECEIVED" : "PAID" };
+      })
       .filter((invoice: any) => invoice.balanceDue > 0);
     const receivablesAging = ReceivablesPayablesEngine.generateReceivablesAgingReport(ctx, customers, historicalReceivables as any, options.to);
     const payablesAging = ReceivablesPayablesEngine.generatePayablesAgingReport(ctx, suppliers, historicalPayables as any, options.to);
