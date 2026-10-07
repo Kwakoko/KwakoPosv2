@@ -104,7 +104,7 @@ export class MigrationEngine {
     }
 
     // V1 -> V2: Add balance, price history, receipts, customers, suppliers
-    if (toVersion === 2) {
+    if (toVersion >= 2 && fromVersion < 2) {
       const v2Stores = ["stockBalance", "productPriceHistory", "receipts", "customers", "suppliers"];
       for (const name of v2Stores) {
         if (!db.objectStoreNames.contains(name)) {
@@ -114,7 +114,7 @@ export class MigrationEngine {
     }
 
     // V2 -> V3: Add sales, payments, configuration, auditState
-    if (toVersion === 3) {
+    if (toVersion >= 3 && fromVersion < 3) {
       const v3Stores = ["sales", "payments", "configuration", "auditState"];
       for (const name of v3Stores) {
         if (!db.objectStoreNames.contains(name)) {
@@ -124,7 +124,7 @@ export class MigrationEngine {
     }
 
     // V3 -> V4: Add migrationJournal, recoverySnapshots, updateState + compound indices
-    if (toVersion === 4) {
+    if (toVersion >= 4 && fromVersion < 4) {
       const v4Stores = ["migrationJournal", "recoverySnapshots", "updateState"];
       for (const name of v4Stores) {
         if (!db.objectStoreNames.contains(name)) {
@@ -139,7 +139,7 @@ export class MigrationEngine {
     // V4 -> V5: Dedicated TRA VFD fiscal transport. This store is intentionally
     // outside syncOutbox so fiscal retries/lifecycle can never be mistaken for
     // ordinary business-data synchronization.
-    if (toVersion === 5) {
+    if (toVersion >= 5 && fromVersion < 5) {
       if (!db.objectStoreNames.contains("traVfdOutbox")) {
         db.createObjectStore("traVfdOutbox");
       }
@@ -157,7 +157,7 @@ export class MigrationEngine {
     }
 
     // V6 -> V7: Authoritative customer contact replica.
-    if (toVersion === 7) {
+    if (toVersion >= 7 && fromVersion < 7) {
       if (!db.objectStoreNames.contains("contacts")) db.createObjectStore("contacts");
       try {
         const store = transaction.objectStore("contacts");
@@ -169,7 +169,7 @@ export class MigrationEngine {
 
     // V5 -> V6: Dedicated high-priority cash drawer hardware queue.
     // Independent from syncOutbox and traVfdOutbox.
-    if (toVersion === 6) {
+    if (toVersion >= 6 && fromVersion < 6) {
       if (!db.objectStoreNames.contains("drawerOutbox")) db.createObjectStore("drawerOutbox");
       try {
         const store = transaction.objectStore("drawerOutbox");
