@@ -213,18 +213,23 @@ export class PrismaCommercialRepository {
       const paymentNumber = `PAY-CUST-${paymentId.slice(0, 24)}`;
       const existing = await tx.payment.findFirst({ where: { id: paymentId, ...tenantWhere(ctx) } });
       if (existing) return existing;
+      const updateWhere: any = { id, tenantId: ctx.tenantId, branchId: ctx.branchId, currentBalance: { gte: amount } };
+      if (req.payUsingWallet) updateWhere.walletBalance = { gte: amount };
+      const balanceUpdate = await tx.customer.updateMany({
+        where: updateWhere,
+        data: req.payUsingWallet
+          ? { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } }
+          : { currentBalance: { decrement: amount } },
+      });
+      if (balanceUpdate.count !== 1) {
+        throw new Error(req.payUsingWallet ? "INSUFFICIENT_CUSTOMER_BALANCE_OR_WALLET" : "PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
+      }
       const payment = await tx.payment.create({ data: {
         id: paymentId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
         customerId: id, amount, paymentMethod: req.payUsingWallet ? "WALLET" : (req.paymentMethod || "CASH"),
         provider: req.provider || null, providerReference: req.providerReference || null,
         status: "COMPLETED", paidAt: new Date(),
       }});
-      if (req.payUsingWallet) {
-        if (amount > Number(customer.walletBalance)) throw new Error("INSUFFICIENT_CUSTOMER_WALLET");
-        await tx.customer.update({ where: { id }, data: { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } } });
-      } else {
-        await tx.customer.update({ where: { id }, data: { currentBalance: { decrement: amount } } });
-      }
       await tx.auditEvent.create({ data: {
         id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
         deviceId: "customer-service", action: "CUSTOMER_PAYMENT_RECORDED", entityType: "Payment", entityId: payment.id,
