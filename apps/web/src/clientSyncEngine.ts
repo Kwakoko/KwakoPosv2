@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope } from "./indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope, AUTHORITATIVE_SCHEMA_VERSION } from "./indexedDb.js";
 import type {
   SyncPushRequest,
   SyncPushResponse,
