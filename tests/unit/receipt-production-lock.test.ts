@@ -36,6 +36,15 @@ describe("Receipt production lock", () => {
     expect(payload[payload.length - 4]).toBe(0x1d);
   });
 
+  it("covers receipt offline convergence contracts", () => {
+    const page = read("apps/web/src/pages/ReceiptsPage.tsx");
+    const sync = read("apps/web/src/clientSyncEngine.ts");
+    expect(page).toContain("db.syncOutbox");
+    expect(page).toContain('item.entityType !== "Receipt"');
+    expect(sync).toContain('case "Receipt": return "receipts";');
+    expect(sync).toContain("applyRevisionedChanges");
+  });
+
   it("keeps share status honest", () => {
     const route = read("apps/api/src/routes/receiptRoutes.ts");
     const repo = read("packages/database/src/receiptRepositories.ts");
