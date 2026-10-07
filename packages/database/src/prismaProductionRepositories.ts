@@ -184,6 +184,7 @@ export class PrismaCommercialRepository {
         productName: product?.name || row.productId,
         sku: variant?.sku || variant?.barcode || product?.sku || product?.barcode || row.variantId,
         variantName: variant?.name || row.variantId,
+        retailPrice: num(variant?.price ?? product?.sellingPrice ?? 0),
         branchName: branch?.name || row.branchId,
       };
     });
