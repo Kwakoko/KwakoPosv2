@@ -46,6 +46,7 @@ const CustomerPaymentSchema = z.object({
   paymentMethod: z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD", "OTHER"]).default("BANK"),
   provider: z.string().trim().optional(),
   providerReference: z.string().trim().optional(),
+  idempotencyKey: z.string().trim().min(1).optional(),
   cashSessionId: z.string().uuid().optional(),
 });
 
@@ -133,7 +134,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const id = payload.id || randomUUID();
     await prisma.$transaction(async (tx: any) => {
       if (payload.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
-      await tx.$executeRawUnsafe('INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title","phone","email","isPrimary","notes","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,\'ACTIVE\')',
+      await tx.$executeRawUnsafe('INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
         id, customerId, c.tenantId, c.branchId, payload.firstName, payload.lastName, payload.title, payload.role, payload.department, payload.phone, payload.email, payload.isPrimary, payload.notes, payload.decisionInfluence);
       await audit(tx, c, "CONTACT_CREATED", "CustomerContact", id, { customerId });
     });
@@ -191,10 +192,15 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
         const session = await tx.cashSession.findFirst({ where: { id: payload.cashSessionId, tenantId: c.tenantId, branchId: c.branchId, cashierId: c.userId, status: "OPEN" } });
         if (!session) throw new Error("CASH_SESSION_INVALID");
       }
-      const existing = await tx.payment.findFirst({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId, providerReference: payload.providerReference || undefined, status: "COMPLETED" } });
-      if (existing && payload.providerReference) return existing;
-      const paymentNumber = "PAY-CUST-" + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const created = await tx.payment.create({ data: { id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      const paymentId = payload.idempotencyKey ? randomUUID() : randomUUID();
+      if (payload.idempotencyKey) {
+        const prior = await tx.payment.findFirst({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId, paymentNumber: "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase() } });
+        if (prior) return prior;
+      }
+      const paymentNumber = payload.idempotencyKey
+        ? "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase()
+        : "PAY-CUST-" + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+      const created = await tx.payment.create({ data: { id: paymentId, tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
       await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: payload.amount } } });
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, userId: c.userId, deviceId: "customer-contacts-api", action: "CUSTOMER_PAYMENT_POSTED", entityType: "Customer", entityId: customer.id, metadata: { paymentId: created.id, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null } } });
       return created;
@@ -202,7 +208,22 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     return { success: true, data: payment };
   });
 
-  server.get("/api/v1/customers/export.csv", async (req, reply) => {
+  server.get("/api/v1/suppliers/:id/history", async (req) => {
+    requirePermission(req, "SUPPLIER_VIEW", "suppliers.read");
+    const c = ctx(req);
+    const supplierId = String((req.params as any).id);
+    const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, tenantId: c.tenantId, branchId: c.branchId } });
+    if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+    const [purchaseOrders, purchaseReceipts, payments, audits] = await Promise.all([
+      prisma.purchaseOrder.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, orderNumber: true, status: true, totalAmount: true, orderedAt: true } }),
+      prisma.purchaseReceipt.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, receivedAt: true, status: true } }),
+      prisma.payment.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
+      prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "Supplier", entityId: supplierId }, orderBy: { createdAt: "desc" }, take: 200 }),
+    ]);
+    return { success: true, data: { supplier, purchaseOrders, purchaseReceipts, payments, audits } };
+  });
+
+  server.get("/api/v1/customers/export.csv", async (req, reply) =>
     requirePermission(req, "CUSTOMER_VIEW", "customers.read", "REPORT_EXPORT");
     const c = ctx(req);
     const rows = await prisma.customer.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId }, orderBy: { customerCode: "asc" } });
