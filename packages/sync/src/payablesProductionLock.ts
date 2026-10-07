@@ -66,6 +66,10 @@ export async function applyPayablesProductionLockOperation(
         where: { tenantId: ctx.tenantId, branchId: ctx.branchId, invoiceNumber },
       });
       if (duplicate) throw new Error("SUPPLIER_INVOICE_DUPLICATE_NUMBER");
+      if (payload.purchaseReceiptId) {
+        const linked = await tx.supplierInvoice.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, purchaseReceiptId: payload.purchaseReceiptId } });
+        if (linked) throw new Error("SUPPLIER_INVOICE_RECEIPT_ALREADY_INVOICED");
+      }
 
       const items = Array.isArray(payload.lines ?? payload.items) ? (payload.lines ?? payload.items) : [];
       if (!items.length) throw new Error("AP_INVOICE_LINES_REQUIRED");
@@ -115,10 +119,16 @@ export async function applyPayablesProductionLockOperation(
           lines: { create: lines },
         },
       });
-      await tx.supplier.update({
-        where: { id: supplier.id },
-        data: { outstandingBalance: { increment: grandTotal } },
-      });
+      if (payload.purchaseReceiptId) {
+        const receipt = await tx.purchaseReceipt.findFirst({ where: { id: payload.purchaseReceiptId, tenantId: ctx.tenantId, branchId: ctx.branchId, supplierId: supplier.id }, include: { items: true } });
+        if (!receipt) throw new Error("SUPPLIER_INVOICE_RECEIPT_NOT_FOUND");
+        const accrued = receipt.items.reduce((sum: number, item: any) => sum + Number(item.totalCost), 0);
+        const delta = grandTotal - accrued;
+        if (delta > 0) await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { increment: delta } } });
+        if (delta < 0) await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: Math.abs(delta) } } });
+      } else {
+        await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { increment: grandTotal } } });
+      }
       await writeAudit(tx, ctx, req, "AP_INVOICE_SYNCED", "SupplierInvoice", op.entityId, {
         supplierId: supplier.id,
         invoiceNumber,

@@ -244,6 +244,86 @@ export class PrismaCommercialRepository {
     return normalize(await db.purchaseReceipt.findMany({ where: tenantWhere(ctx), include: { items: true }, orderBy: { receivedAt: "desc" } }));
   }
 
+  async getPurchaseReturns(ctx: TenantContext) {
+    return normalize(await db.return.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, originalSaleId: null },
+      include: { lines: true },
+      orderBy: { createdAt: "desc" },
+    }));
+  }
+
+  async createPurchaseReturn(ctx: TenantContext, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const supplier = await tx.supplier.findFirst({ where: { id: req.supplierId, ...tenantWhere(ctx) } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+      if (supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_ACTIVE");
+      const receipt = await tx.purchaseReceipt.findFirst({
+        where: { id: req.purchaseReceiptId, ...tenantWhere(ctx) },
+        include: { items: true },
+      });
+      if (!receipt) throw new Error("PURCHASE_RECEIPT_NOT_FOUND");
+      if (receipt.supplierId !== supplier.id) throw new Error("PURCHASE_RETURN_SUPPLIER_MISMATCH");
+      const existing = await tx.return.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, returnNumber: req.returnNumber || "__IDEMPOTENCY__" },
+        include: { lines: true },
+      });
+      if (existing) return existing;
+      const receiptItems = new Map(receipt.items.map((i: any) => [i.variantId, i]));
+      const requested = Array.isArray(req.items) ? req.items : [];
+      if (!requested.length) throw new Error("PURCHASE_RETURN_LINES_REQUIRED");
+      const lines = [];
+      let total = 0;
+      for (const item of requested) {
+        const source = receiptItems.get(item.variantId);
+        const qty = Number(item.quantityReturned);
+        const unitCost = Number(item.unitCost ?? source?.unitCost ?? 0);
+        if (!source || !(qty > 0) || qty > Number(source.quantityReceived) || unitCost < 0) throw new Error("PURCHASE_RETURN_LINE_INVALID");
+        const lineTotal = qty * unitCost;
+        total += lineTotal;
+        lines.push({ id: randomUUID(), variantId: item.variantId, quantityReturned: qty, refundUnitPrice: unitCost, refundLineTotal: lineTotal, condition: item.condition || "GOOD" });
+      }
+      if (total > Number(supplier.outstandingBalance) + 0.01) throw new Error("PURCHASE_RETURN_EXCEEDS_SUPPLIER_BALANCE");
+      const count = await tx.return.count({ where: tenantWhere(ctx) });
+      const returnNumber = req.returnNumber || `PUR-MAIN-RET-${String(count + 1).padStart(6, "0")}`;
+      const now = new Date();
+      const ret = await tx.return.create({ data: {
+        id: req.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+        returnNumber, originalSaleId: null, customerId: null, reason: String(req.reason || "SUPPLIER_RETURN"),
+        refundType: "SUPPLIER_CREDIT", totalRefundAmount: total, status: "COMPLETED", authorizedById: ctx.userId || null,
+        createdAt: now, updatedAt: now, lines: { create: lines },
+      }, include: { lines: true } });
+      const impacted = new Set<string>();
+      for (const line of lines) {
+        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, line.variantId, ctx.tenantId, ctx.branchId);
+        const v = await tx.productVariant.findUnique({ where: { id: line.variantId } });
+        if (!v) throw new Error("PURCHASE_RETURN_VARIANT_NOT_FOUND");
+        const agg = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId } });
+        const before = Number(agg._sum.quantityChange ?? 0);
+        if (before < line.quantityReturned) throw new Error("INSUFFICIENT_STOCK_FOR_PURCHASE_RETURN");
+        const after = before - line.quantityReturned;
+        await tx.stockLedger.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: v.productId, variantId: line.variantId,
+          movementType: "SUPPLIER_RETURN", referenceType: "PURCHASE_RETURN", referenceId: ret.id,
+          quantityBefore: before, quantityChange: -line.quantityReturned, quantity: -line.quantityReturned, quantityAfter: after,
+          unitCost: line.refundUnitPrice, totalCost: -line.refundLineTotal, userId: ctx.userId || null,
+          deviceId: req.deviceId || `api:${ctx.userId}`, operationId: req.operationId || ret.id,
+          idempotencyKey: `${req.idempotencyKey || ret.id}-${line.variantId}`, occurredAt: now, notes: req.reason || "SUPPLIER_RETURN",
+        } });
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
+        impacted.add(v.productId);
+      }
+      for (const productId of impacted) await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, productId);
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: total } } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId || `api:${ctx.userId}`, action: "PURCHASE_RETURN_POSTED", entityType: "PurchaseReturn", entityId: ret.id,
+        metadata: { supplierId: supplier.id, purchaseReceiptId: receipt.id, total, returnNumber },
+      } });
+      return ret;
+    }));
+  }
+
   async settleSupplierPayable(ctx: TenantContext, req: { supplierId: string; amount: number; paymentMethod: string; provider?: string; providerReference?: string; purchaseReceiptId?: string; idempotencyKey: string }) {
     const supplier = await db.supplier.findFirst({ where: { id: req.supplierId, ...tenantWhere(ctx) } });
     if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");

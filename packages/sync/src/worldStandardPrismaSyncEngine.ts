@@ -286,6 +286,7 @@ export class WorldStandardPrismaSyncEngine {
         case "Sale": return await db.sale.findUnique({ where: { id: op.entityId }, include: { lines: true, payments: true } });
         case "PurchaseOrder": return await db.purchaseOrder.findUnique({ where: { id: op.entityId }, include: { items: true } });
         case "PurchaseReceipt": return await db.purchaseReceipt.findUnique({ where: { id: op.entityId }, include: { items: true } });
+        case "PurchaseReturn": return await db.return.findUnique({ where: { id: op.entityId }, include: { lines: true } });
         case "Payment": return await db.payment.findUnique({ where: { id: op.entityId } });
         case "Expense": return await db.expense.findUnique({ where: { id: op.entityId } });
         case "Setting": {
@@ -1108,6 +1109,60 @@ const now = new Date();
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
       const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
       await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
+      return;
+    }
+
+    if (op.entityType === "PurchaseReturn" && op.operationType === "CREATE") {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const existing = await tx.return.findUnique({ where: { id: op.entityId }, include: { lines: true } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId || existing.originalSaleId !== null) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!supplier || supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_FOUND_OR_INACTIVE");
+      const receipt = await tx.purchaseReceipt.findFirst({ where: { id: payload.purchaseReceiptId, tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true } });
+      if (!receipt || receipt.supplierId !== supplier.id) throw new Error("PURCHASE_RETURN_RECEIPT_INVALID");
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (!items.length) throw new Error("PURCHASE_RETURN_LINES_REQUIRED");
+      const source = new Map(receipt.items.map((i: any) => [i.variantId, i]));
+      let total = 0;
+      const lines = items.map((i: any) => {
+        const r: any = source.get(i.variantId);
+        const qty = Number(i.quantityReturned);
+        const unitCost = Number(i.unitCost ?? r?.unitCost ?? 0);
+        if (!r || !(qty > 0) || qty > Number(r.quantityReceived) || unitCost < 0) throw new Error("PURCHASE_RETURN_LINE_INVALID");
+        const lineTotal = qty * unitCost; total += lineTotal;
+        return { id: i.id || randomUUID(), variantId: i.variantId, quantityReturned: qty, refundUnitPrice: unitCost, refundLineTotal: lineTotal, condition: i.condition || "GOOD" };
+      });
+      if (total > Number(supplier.outstandingBalance) + 0.01) throw new Error("PURCHASE_RETURN_EXCEEDS_SUPPLIER_BALANCE");
+      const returnNumber = payload.returnNumber || `PUR-MAIN-RET-${op.operationId.slice(0, 10).toUpperCase()}`;
+      const ret = await tx.return.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, returnNumber, originalSaleId: null, customerId: null,
+        reason: String(payload.reason || "SUPPLIER_RETURN"), refundType: "SUPPLIER_CREDIT", totalRefundAmount: total, status: "COMPLETED", authorizedById: ctx.userId,
+        lines: { create: lines },
+      } });
+      const impacted = new Set<string>();
+      for (const line of lines) {
+        await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, line.variantId, ctx.tenantId, ctx.branchId);
+        const variant = await tx.productVariant.findUnique({ where: { id: line.variantId } });
+        const agg = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId } });
+        const before = Number(agg._sum.quantityChange ?? 0);
+        if (!variant || before < line.quantityReturned) throw new Error("INSUFFICIENT_STOCK_FOR_PURCHASE_RETURN");
+        await tx.stockLedger.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: line.variantId,
+          movementType: "SUPPLIER_RETURN", referenceType: "PURCHASE_RETURN", referenceId: ret.id,
+          quantityBefore: before, quantityChange: -line.quantityReturned, quantity: -line.quantityReturned, quantityAfter: before - line.quantityReturned,
+          unitCost: line.refundUnitPrice, totalCost: -line.refundLineTotal, userId: ctx.userId, deviceId: req.deviceId, operationId: op.operationId,
+          idempotencyKey: `${op.idempotencyKey}-${line.variantId}`, occurredAt: new Date(), notes: payload.reason || "SUPPLIER_RETURN",
+        } });
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
+        impacted.add(variant.productId);
+      }
+      for (const productId of impacted) await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, productId);
+      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: total } } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "PURCHASE_RETURN_SYNCED", entityType: "PurchaseReturn", entityId: ret.id, metadata: { supplierId: supplier.id, purchaseReceiptId: receipt.id, total } } });
       return;
     }
 

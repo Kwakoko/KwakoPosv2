@@ -23,7 +23,7 @@ import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
 import { productionCleanupService } from "../services/productionCleanupService.js";
 import { apiFetch, safeUUID } from "../services/applicationApiService.js";
 
-type PurchTab = "suppliers" | "orders" | "grn" | "invoices";
+type PurchTab = "suppliers" | "orders" | "grn" | "invoices" | "returns" | "history" | "reports";
 
 const fmt = (n: number) => `Tsh ${Math.round(n).toLocaleString()}`;
 const fmtDate = (d: string) =>
@@ -146,6 +146,9 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       "orders": "Purchase Orders",
       "grn": "Goods Received",
       "invoices": "Supplier Ledgers",
+      "returns": "Purchase Returns",
+      "history": "Purchase History",
+      "reports": "Purchase Reports",
     };
     setGlobalActiveTab(globalTab[tab]);
   }, [setGlobalActiveTab]);
@@ -157,6 +160,9 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       "Purchase Orders": "orders",
       "Goods Received": "grn",
       "Supplier Ledgers": "invoices",
+      "Purchase Returns": "returns",
+      "Purchase History": "history",
+      "Purchase Reports": "reports",
       "Warehouses": "grn",
     };
     if (map[propActiveTab]) {
@@ -171,6 +177,9 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [orders, setOrders] = useState<PurchaseOrderRecord[]>([]);
   const [grns, setGrns] = useState<GrnRecord[]>([]);
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<any[]>([]);
+  const [purchaseReport, setPurchaseReport] = useState<any | null>(null);
   const [catalogProducts, setCatalogProducts] = useState<Array<{ id: string; name: string; sku: string; buyingPrice: number }>>([]);
   const [isCleaning, setIsCleaning] = useState(false);
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
@@ -183,10 +192,13 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const loadProcurement = useCallback(async () => {
     try {
       await db.ready;
-      const [supplierRes, orderRes, receiptRes] = await Promise.all([
+      const [supplierRes, orderRes, receiptRes, invoiceRes, returnRes, reportRes] = await Promise.all([
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/suppliers"),
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases"),
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/finance/payables/invoices"),
+        apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/returns"),
+        apiFetch<{ success: boolean; data: any }>("/api/v1/purchases/reports"),
       ]);
 
       const productsById = new Map(Array.from(db.products.values()).map((p: any) => [p.id, p]));
@@ -227,6 +239,9 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         itemsCount: Array.isArray(r.items) ? r.items.length : 0,
         totalValue: (r.items || []).reduce((s: number, i: any) => s + Number(i.totalCost || 0), 0), status: "VERIFIED",
       })));
+      setSupplierInvoices(Array.isArray(invoiceRes.data) ? invoiceRes.data : []);
+      setPurchaseReturns(Array.isArray(returnRes.data) ? returnRes.data : []);
+      setPurchaseReport(reportRes.data || null);
     } catch (e) {
       // Offline: never resurrect configuration snapshots. Show only authoritative local entities and pending outbox mutations.
       const tenantId = currentTenantId;
@@ -285,6 +300,11 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const [grnReceivedQtys, setGrnReceivedQtys] = useState<Record<string, number>>({});
 
   // Supplier Debt Settlement Modal State
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnReceiptId, setReturnReceiptId] = useState("");
+  const [returnVariantId, setReturnVariantId] = useState("");
+  const [returnQty, setReturnQty] = useState(0);
+  const [returnReason, setReturnReason] = useState("Supplier return");
   const [payingSupplier, setPayingSupplier] = useState<any | null>(null);
   const [debtPayAmount, setDebtPayAmount] = useState<number>(0);
   const [debtPayMethod, setDebtPayMethod] = useState("Bank Transfer (CRDB/NMB)");
@@ -417,6 +437,25 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
         toast.error("Payment Not Posted", err?.message || "Supplier payment could not be committed.");
       }
     }
+  };
+
+  const handleCreatePurchaseReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const receipt = (await apiFetch<{ success: boolean; data: any[] }>("/api/v1/purchases/receipts")).data?.find((r: any) => r.id === returnReceiptId);
+    const item = receipt?.items?.find((i: any) => i.variantId === returnVariantId);
+    const supplierId = receipt?.supplierId;
+    if (!receipt || !item || !supplierId || !(returnQty > 0) || returnQty > Number(item.quantityReceived)) {
+      return toast.warning("Invalid Return", "Select a receipt/line and return a quantity within the received quantity.");
+    }
+    try {
+      await apiFetch("/api/v1/purchases/returns", { method: "POST", body: JSON.stringify({
+        id: safeUUID(), supplierId, purchaseReceiptId: receipt.id, reason: returnReason.trim() || "Supplier return",
+        deviceId: safeUUID(), operationId: safeUUID(), idempotencyKey: safeUUID(),
+        items: [{ variantId: item.variantId, quantityReturned: returnQty, unitCost: Number(item.unitCost), condition: "GOOD" }],
+      }) });
+      setShowReturnModal(false); setReturnReceiptId(""); setReturnVariantId(""); setReturnQty(0);
+      await loadProcurement(); playSuccessChime(); toast.success("Purchase Return Posted", "Inventory and supplier payable were adjusted atomically.");
+    } catch (err: any) { toast.error("Return Not Posted", err?.message || "Purchase return could not be committed."); }
   };
 
   return (
@@ -668,7 +707,10 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
           { id: "suppliers", label: "Supplier Directory", icon: Truck },
           { id: "orders", label: "Purchase Orders (PO)", icon: ShoppingBag },
           { id: "grn", label: "Goods Receipt Notes (GRN)", icon: PackageCheck },
-          { id: "invoices", label: "3-Way Invoice Matching", icon: Scale },
+          { id: "invoices", label: "Supplier Invoices", icon: Scale },
+          { id: "returns", label: "Purchase Returns", icon: ArrowDownRight },
+          { id: "history", label: "History", icon: Clock },
+          { id: "reports", label: "Reports", icon: TrendingUp },
         ].map((t) => (
           <button
             key={t.id}
@@ -1059,6 +1101,40 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
       )}
 
       {/* ─── MODAL: ADD SUPPLIER ──────────────────────────────────────────────── */}
+      {activeTab === "returns" && (
+        <div className="v2-space-y-3">
+          <div className="v2-flex v2-justify-between v2-items-center"><div><h3 className="v2-font-bold">Purchase Returns</h3><p className="v2-text-xs v2-text-muted">Supplier returns reverse stock and reduce supplier payable.</p></div><button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => setShowReturnModal(true)} type="button"><Plus size={14}/> New Return</button></div>
+          <div className="v2-card"><table className="v2-table"><thead><tr><th>Return</th><th>Reason</th><th>Amount</th><th>Date</th></tr></thead><tbody>{purchaseReturns.map((r:any)=><tr key={r.id}><td className="v2-mono">{r.returnNumber}</td><td>{r.reason}</td><td className="v2-mono">{fmt(Number(r.totalRefundAmount||0))}</td><td>{fmtDate(r.createdAt)}</td></tr>)}</tbody></table>{purchaseReturns.length===0 && <div className="v2-p-6 v2-text-center v2-text-muted">No purchase returns.</div>}</div>
+        </div>
+      )}
+
+      {activeTab === "history" && (
+        <div className="v2-card v2-p-4"><h3 className="v2-font-bold v2-mb-3">Purchase History</h3><div className="v2-grid v2-grid-4 v2-gap-3"><div><div className="v2-text-xs v2-text-muted">Orders</div><div className="v2-text-lg v2-font-black">{orders.length}</div></div><div><div className="v2-text-xs v2-text-muted">Receipts</div><div className="v2-text-lg v2-font-black">{grns.length}</div></div><div><div className="v2-text-xs v2-text-muted">Invoices</div><div className="v2-text-lg v2-font-black">{supplierInvoices.length}</div></div><div><div className="v2-text-xs v2-text-muted">Returns</div><div className="v2-text-lg v2-font-black">{purchaseReturns.length}</div></div></div></div>
+      )}
+
+      {activeTab === "reports" && (
+        <div className="v2-card v2-p-4"><h3 className="v2-font-bold v2-mb-3">Purchase Reports — Last 30 Days</h3><div className="v2-grid v2-grid-4 v2-gap-3">{[["Ordered", purchaseReport?.purchaseValue],["Received", purchaseReport?.receivedValue],["Invoiced", purchaseReport?.invoicedValue],["Returned", purchaseReport?.returnValue]].map(([label,value])=><div key={String(label)}><div className="v2-text-xs v2-text-muted">{label}</div><div className="v2-text-lg v2-font-black">{fmt(Number(value||0))}</div></div>)}</div><div className="v2-text-xs v2-text-muted v2-mt-3">Outstanding supplier payable: <strong>{fmt(Number(purchaseReport?.outstandingPayable||0))}</strong></div></div>
+      )}
+
+      {activeTab === "invoices" && supplierInvoices.length > 0 && (
+        <div className="v2-card v2-mt-3"><div className="v2-p-3 v2-font-bold">Authoritative Supplier Invoices</div><table className="v2-table"><thead><tr><th>Invoice</th><th>Supplier</th><th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{supplierInvoices.map((i:any)=><tr key={i.id}><td className="v2-mono">{i.invoiceNumber}</td><td>{suppliers.find((s:any)=>s.id===i.supplierId)?.name || i.supplierId}</td><td className="v2-mono">{fmt(Number(i.grandTotal||0))}</td><td className="v2-mono">{fmt(Number(i.balanceDue||0))}</td><td><span className="badge v2-badge-muted">{i.status}</span></td></tr>)}</tbody></table></div>
+      )}
+
+      {showReturnModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <form className="v2-card" style={{ width: 480, padding: "1.5rem" }} onSubmit={handleCreatePurchaseReturn}>
+            <h2 className="v2-text-lg v2-font-black v2-mb-4">Post Purchase Return</h2>
+            <div className="v2-space-y-3">
+              <select className="v2-input v2-input-sm" value={returnReceiptId} onChange={e => { setReturnReceiptId(e.target.value); setReturnVariantId(""); }} required><option value="">Select receipt</option>{grns.map(g => <option key={g.id} value={g.id}>{g.id} — {g.supplier}</option>)}</select>
+              <select className="v2-input v2-input-sm" value={returnVariantId} onChange={e => setReturnVariantId(e.target.value)} required><option value="">Select received item</option>{catalogProducts.map(p=><option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}</select>
+              <input className="v2-input v2-input-sm" type="number" min="0.0001" step="0.0001" value={returnQty || ""} onChange={e=>setReturnQty(Number(e.target.value))} placeholder="Quantity" required />
+              <input className="v2-input v2-input-sm" value={returnReason} onChange={e=>setReturnReason(e.target.value)} placeholder="Reason" required />
+              <div className="v2-flex v2-justify-end v2-gap-2"><button className="v2-btn v2-btn-ghost v2-btn-sm" type="button" onClick={()=>setShowReturnModal(false)}>Cancel</button><button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">Post Return</button></div>
+            </div>
+          </form>
+        </div>
+      )}
+
       {showSupplierModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>

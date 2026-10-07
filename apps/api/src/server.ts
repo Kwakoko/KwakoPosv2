@@ -2648,6 +2648,59 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: result });
   });
 
+  server.get("/api/v1/purchases/returns", async (req) => {
+    return { success: true, data: await commercialRepository.getPurchaseReturns(req.tenantContext!) };
+  });
+
+  server.post("/api/v1/purchases/returns", async (req, reply) => {
+    const body = z.object({
+      id: z.string().uuid().optional(),
+      supplierId: z.string().uuid(),
+      purchaseReceiptId: z.string().uuid(),
+      returnNumber: z.string().min(1).optional(),
+      reason: z.string().min(1),
+      deviceId: z.string().min(1).optional(),
+      operationId: z.string().min(1).optional(),
+      idempotencyKey: z.string().min(1).optional(),
+      items: z.array(z.object({
+        id: z.string().uuid().optional(), variantId: z.string().uuid(), quantityReturned: z.number().positive(),
+        unitCost: z.number().nonnegative().optional(), condition: z.enum(["GOOD", "DAMAGED", "DEFECTIVE"]).optional(),
+      })).min(1),
+    }).parse(req.body);
+    const result = await commercialRepository.createPurchaseReturn(req.tenantContext!, body);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/purchases/history", async (req) => {
+    const [orders, receipts, returns, invoices] = await Promise.all([
+      commercialRepository.getPurchaseOrders(req.tenantContext!),
+      commercialRepository.getPurchaseReceipts(req.tenantContext!),
+      commercialRepository.getPurchaseReturns(req.tenantContext!),
+      financeRepository.getSupplierInvoices(req.tenantContext!),
+    ]);
+    return { success: true, data: { orders, receipts, returns, invoices } };
+  });
+
+  server.get("/api/v1/purchases/reports", async (req) => {
+    const query = (req.query as any) || {};
+    const to = query.to ? new Date(query.to) : new Date();
+    const from = query.from ? new Date(query.from) : new Date(to.getTime() - 30 * 86400000);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) throw new Error("PURCHASE_REPORT_DATE_RANGE_INVALID");
+    const [orders, receipts, returns, invoices, suppliers] = await Promise.all([
+      commercialRepository.getPurchaseOrders(req.tenantContext!),
+      commercialRepository.getPurchaseReceipts(req.tenantContext!),
+      commercialRepository.getPurchaseReturns(req.tenantContext!),
+      financeRepository.getSupplierInvoices(req.tenantContext!),
+      commercialRepository.getSuppliers(req.tenantContext!),
+    ]);
+    const inRange = (value: any) => { const d = new Date(value); return d >= from && d <= to; };
+    const purchaseValue = orders.filter((x:any) => inRange(x.createdAt)).reduce((s:number,x:any)=>s+Number(x.totalAmount||0),0);
+    const receivedValue = receipts.filter((x:any) => inRange(x.receivedAt)).reduce((s:number,x:any)=>s+(x.items||[]).reduce((n:number,i:any)=>n+Number(i.totalCost||0),0),0);
+    const returnValue = returns.filter((x:any) => inRange(x.createdAt)).reduce((s:number,x:any)=>s+Number(x.totalRefundAmount||0),0);
+    const invoicedValue = invoices.filter((x:any) => inRange(x.invoiceDate)).reduce((s:number,x:any)=>s+Number(x.grandTotal||0),0);
+    return { success: true, data: { from: from.toISOString(), to: to.toISOString(), purchaseValue, receivedValue, returnValue, invoicedValue, outstandingPayable: suppliers.reduce((s:number,x:any)=>s+Number(x.outstandingBalance||0),0), orderCount: orders.length, receiptCount: receipts.length, returnCount: returns.length, invoiceCount: invoices.length } };
+  });
+
   server.post("/api/v1/finance/payables/settle-supplier", async (req, reply) => {
     const body = z.object({
       supplierId: z.string().uuid(), amount: z.number().positive(),

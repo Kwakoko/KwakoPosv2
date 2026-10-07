@@ -240,6 +240,12 @@ export class PrismaFinanceRepository {
         where: { tenantId: ctx.tenantId, branchId: ctx.branchId, invoiceNumber },
       });
       if (duplicate) throw new Error("SUPPLIER_INVOICE_DUPLICATE_NUMBER");
+      if (req.purchaseReceiptId) {
+        const linked = await tx.supplierInvoice.findFirst({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, purchaseReceiptId: req.purchaseReceiptId },
+        });
+        if (linked) throw new Error("SUPPLIER_INVOICE_RECEIPT_ALREADY_INVOICED");
+      }
 
       const lines = (req.items || []).map((i: any) => {
         const quantity = Number(i.quantity);
@@ -284,10 +290,19 @@ export class PrismaFinanceRepository {
         include: { lines: true, allocations: true },
       });
 
-      await tx.supplier.update({
-        where: { id: supplier.id },
-        data: { outstandingBalance: { increment: total } },
-      });
+      if (req.purchaseReceiptId) {
+        const receipt = await tx.purchaseReceipt.findFirst({
+          where: { id: req.purchaseReceiptId, tenantId: ctx.tenantId, branchId: ctx.branchId, supplierId: supplier.id },
+          include: { items: true },
+        });
+        if (!receipt) throw new Error("SUPPLIER_INVOICE_RECEIPT_NOT_FOUND");
+        const accrued = receipt.items.reduce((sum: number, item: any) => sum + Number(item.totalCost), 0);
+        const delta = total - accrued;
+        if (delta > 0) await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { increment: delta } } });
+        if (delta < 0) await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: Math.abs(delta) } } });
+      } else {
+        await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { increment: total } } });
+      }
       await tx.auditEvent.create({
         data: {
           id: randomUUID(),
