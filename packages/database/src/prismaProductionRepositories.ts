@@ -865,7 +865,7 @@ export class PrismaCommercialRepository {
     const session = await db.cashSession.findFirst({ where: { id: cashSessionId, ...tenantWhere(ctx) } });
     if (!session) throw new Error("CASH_SESSION_NOT_FOUND");
     if (session.cashierId !== ctx.userId && !this.isCashDrawerApprover(ctx)) throw new Error("CASH_SESSION_AUTHORIZATION_REQUIRED");
-    return normalize(await db.cashMovement.findMany({ where: tenantWhere(ctx), orderBy: { occurredAt: "desc" }, take: 500 }));
+    return normalize(await db.cashMovement.findMany({ where: { ...tenantWhere(ctx), cashSessionId }, orderBy: { occurredAt: "desc" }, take: 500 }));
   }
 
   async getPaymentChannelReconciliation(ctx: TenantContext, cashSessionId: string) {
