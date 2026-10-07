@@ -1767,6 +1767,7 @@ export class LocalIndexedDbStore {
     const adjustments = this.getStockAdjustmentsLocal(tenantId, branchId);
     const customers = this.getCustomersLocal(tenantId, branchId);
     const suppliers = this.getSuppliersLocal(tenantId, branchId);
+    const contacts = Array.from(this.contacts.values()).filter((row: any) => !tenantId || row?.tenantId === tenantId).filter((row: any) => !branchId || row?.branchId === branchId);
     const expenses = (Array.isArray(this.getConfigurationLocal("expenses", tenantId && branchId ? { tenantId, branchId } : undefined))
       ? this.getConfigurationLocal("expenses", { tenantId: tenantId || "", branchId: branchId || "" })
       : []) as any[];
