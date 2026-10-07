@@ -994,7 +994,7 @@ Manager Sign-off:  _____________________
                       <td className={`v2-mono v2-font-bold ${m.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
                         {m.amount > 0 ? `+${money(m.amount)}` : money(m.amount)}
                       </td>
-                      <td className="v2-mono">{money(m.balance)}</td>
+                      <td className="v2-mono">{m.balance === null ? "—" : money(m.balance)}</td>
                       <td className="v2-text-xs">{m.reason}</td>
                       <td className="v2-text-xs v2-text-muted">{m.user}</td>
                     </tr>
