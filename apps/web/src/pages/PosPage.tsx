@@ -3237,7 +3237,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               />
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   const lookup = returnOrderId.trim();
                   const found = pastOrders.find((o) => (o.id || o.saleNumber || "").toLowerCase() === lookup.toLowerCase());
                   if (found) {
