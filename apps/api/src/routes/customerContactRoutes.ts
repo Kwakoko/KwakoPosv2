@@ -169,7 +169,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const customerId = String((req.params as any).id);
     const contactId = String((req.params as any).contactId);
     const result = await prisma.$transaction(async (tx: any) => {
-      const rows = await tx.$queryRawUnsafe<any[]>('SELECT id,"isPrimary" FROM customer_contacts WHERE id=$1 AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1', contactId, customerId, c.tenantId, c.branchId);
+      const rows = await tx.$queryRawUnsafe('SELECT id,"isPrimary" FROM customer_contacts WHERE id=$1 AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1', contactId, customerId, c.tenantId, c.branchId);
       if (!rows[0]) throw new Error("CONTACT_NOT_FOUND");
       await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4', contactId, customerId, c.tenantId, c.branchId);
       await audit(tx, c, "CONTACT_ARCHIVED", "CustomerContact", contactId, { customerId, wasPrimary: Boolean(rows[0].isPrimary) });
@@ -224,7 +224,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
     const [purchaseOrders, purchaseReceipts, payments, audits] = await Promise.all([
       prisma.purchaseOrder.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, orderNumber: true, status: true, totalAmount: true, orderedAt: true } }),
-      prisma.purchaseReceipt.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, receivedAt: true, status: true } }),
+      prisma.purchaseReceipt.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, receivedAt: true } }),
       prisma.payment.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
       prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "Supplier", entityId: supplierId }, orderBy: { createdAt: "desc" }, take: 200 }),
     ]);
