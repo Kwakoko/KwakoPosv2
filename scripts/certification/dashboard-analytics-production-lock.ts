@@ -10,11 +10,11 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/DashboardPage.tsx": "2adcdd19e046a098e6fd8f37c8c4d6871ef11bf4",
   "apps/api/src/services/dashboardKpiService.ts": "86f8ee60dde1074f08818e33ab5dc36ebd3779ff",
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
-  "packages/database/src/prismaProductionRepositories.ts": "15d1fc2862a66f26e4f26543c950f91dd0cb1690",
+  "packages/database/src/prismaProductionRepositories.ts": "19be308366d07d0af829ed0dd2052c0447f7fa77",
   "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
-  ".github/workflows/ci.yml": "136d361a2f73e11d6ed4ce1aab6ded501b8b82c7",
-  ".github/workflows/production-certification.yml": "04fd3f74b23569ceedd39feaa3e3635505105145",
-  ".github/workflows/production-release-exact-main.yml": "2830e101a4d3ac65f80256b6e055de13f45c53ab"
+  ".github/workflows/ci.yml": "ea8806ba4c4e40d60aa6e71c76300a53a36d975c",
+  ".github/workflows/production-certification.yml": "2170a7a0b7569adc276adb1eea8322449969f885",
+  ".github/workflows/production-release-exact-main.yml": "4f9e01ec1691d17d8699868d0b6059bfe6767a24"
 };
 
 const REQUIRED_MARKERS: Array<[string,string,string]> = [
