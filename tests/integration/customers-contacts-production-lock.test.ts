@@ -122,7 +122,7 @@ describe("Customers / Contacts Production Lock closed loop", () => {
     expect(history.json().data.contactAudits.some((row: any) => row.entityId === contactId)).toBe(true);
 
     const scoped = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT id,"customerId","tenantId","branchId","role" FROM customer_contacts WHERE id=$1',
+      'SELECT id,"customerId","tenantId","branchId","role" FROM customer_contacts WHERE id=$1::uuid',
       contactId,
     );
     expect(scoped[0].tenantId).toBe(tenantId);
@@ -187,7 +187,7 @@ describe("Customers / Contacts Production Lock closed loop", () => {
     expect(pushed.results[0].status).toBe("SUCCESS");
 
     const row = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT id,"customerId","tenantId","branchId","status" FROM customer_contacts WHERE id=$1',
+      'SELECT id,"customerId","tenantId","branchId","status" FROM customer_contacts WHERE id=$1::uuid',
       syncContactId,
     );
     expect(row[0]?.customerId).toBe(customerId);
