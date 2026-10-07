@@ -237,6 +237,14 @@ export class WorldStandardPrismaSyncEngine {
       case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
+      case "CustomerContact": {
+        const rows = await tx.$queryRawUnsafe<any[]>(
+          'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+          entityId, ctx.tenantId, ctx.branchId,
+        );
+        record = rows[0] || null;
+        break;
+      }
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
@@ -1499,7 +1507,26 @@ const now = new Date();
             await tx.productVariant.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { name: effective.name, sku: effective.sku, barcode: effective.barcode ?? null, price: effective.price ?? current.price, costPrice: effective.costPrice ?? current.costPrice, reservedQuantity: effective.reservedQuantity ?? current.reservedQuantity, reorderLevel: effective.reorderLevel ?? current.reorderLevel, attributes: effective.attributes ?? current.attributes, isActive: deleting ? false : (effective.isActive ?? true) } });
             break;
           case "Customer":
-            await tx.customer.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { customerCode: effective.customerCode ?? current.customerCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, creditLimit: effective.creditLimit ?? current.creditLimit, openingBalance: effective.openingBalance ?? current.openingBalance, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            if (deleting && Number(current.currentBalance || 0) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+            await tx.customer.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { customerCode: effective.customerCode ?? current.customerCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, creditLimit: effective.creditLimit ?? current.creditLimit, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
+            break;
+          case "CustomerContact":
+            if (deleting) {
+              await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3', String(conflict.entity_id), ctx.tenantId, ctx.branchId);
+            } else {
+              const nextContact: any = { ...current, ...effective };
+              if (nextContact.isPrimary) {
+                await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3 AND id <> $4', String(nextContact.customerId), ctx.tenantId, ctx.branchId, String(conflict.entity_id));
+              }
+              await tx.$executeRawUnsafe(
+                'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12 AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15',
+                String(nextContact.firstName || "").trim(), String(nextContact.lastName || "").trim(), String(nextContact.title || "").trim(),
+                String(nextContact.role || "").trim(), String(nextContact.department || "").trim(), String(nextContact.phone || "").trim(),
+                String(nextContact.email || "").trim(), Boolean(nextContact.isPrimary), String(nextContact.notes || ""),
+                String(nextContact.decisionInfluence || "INFLUENCER"), String(nextContact.status || "ACTIVE"),
+                String(conflict.entity_id), ctx.tenantId, ctx.branchId, String(nextContact.customerId),
+              );
+            }
             break;
           case "Supplier":
             await tx.supplier.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { supplierCode: effective.supplierCode ?? current.supplierCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, taxPin: effective.taxPin ?? null, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
