@@ -156,6 +156,17 @@ export class MigrationEngine {
       }
     }
 
+    // V6 -> V7: Authoritative customer contact replica.
+    if (toVersion === 7) {
+      if (!db.objectStoreNames.contains("contacts")) db.createObjectStore("contacts");
+      try {
+        const store = transaction.objectStore("contacts");
+        if (!store.indexNames.contains("by_tenant")) store.createIndex("by_tenant", "tenantId", { unique: false });
+        if (!store.indexNames.contains("by_customer")) store.createIndex("by_customer", "customerId", { unique: false });
+        if (!store.indexNames.contains("by_status")) store.createIndex("by_status", "status", { unique: false });
+      } catch {}
+    }
+
     // V5 -> V6: Dedicated high-priority cash drawer hardware queue.
     // Independent from syncOutbox and traVfdOutbox.
     if (toVersion === 6) {
