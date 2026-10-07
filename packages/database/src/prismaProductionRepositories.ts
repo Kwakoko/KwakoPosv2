@@ -247,20 +247,113 @@ export class PrismaCommercialRepository {
   async settleSupplierPayable(ctx: TenantContext, req: { supplierId: string; amount: number; paymentMethod: string; provider?: string; providerReference?: string; purchaseReceiptId?: string; idempotencyKey: string }) {
     const supplier = await db.supplier.findFirst({ where: { id: req.supplierId, ...tenantWhere(ctx) } });
     if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+    if (supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_ACTIVE");
     if (req.amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
-    if (req.amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
     const paymentNumber = `PAY-SUP-${String(req.idempotencyKey).replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
+
     return normalize(await db.$transaction(async (tx: any) => {
-      const existing = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber } });
+      const existing = await tx.payment.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber },
+      });
       if (existing) return existing;
-      const payment = await tx.payment.create({ data: {
-        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber,
-        purchaseReceiptId: req.purchaseReceiptId || null, supplierId: req.supplierId, amount: req.amount,
-        paymentMethod: req.paymentMethod, provider: req.provider || null, providerReference: req.providerReference || null,
-        status: "COMPLETED", paidAt: new Date(),
-      } });
-      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: req.amount } } });
-      return payment;
+
+      const invoices = await tx.supplierInvoice.findMany({
+        where: {
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          supplierId: req.supplierId,
+          balanceDue: { gt: 0 },
+          status: { notIn: ["PAID", "REJECTED"] },
+        },
+        orderBy: [{ dueDate: "asc" }, { invoiceDate: "asc" }, { invoiceNumber: "asc" }],
+      });
+      const invoiceBalance = invoices.reduce((sum: number, invoice: any) => sum + Number(invoice.balanceDue), 0);
+      if (req.amount > invoiceBalance + 0.01) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+
+      const payment = await tx.payment.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentNumber,
+          purchaseReceiptId: req.purchaseReceiptId || null,
+          supplierId: req.supplierId,
+          amount: req.amount,
+          paymentMethod: req.paymentMethod,
+          provider: req.provider || null,
+          providerReference: req.providerReference || null,
+          status: "COMPLETED",
+          paidAt: new Date(),
+        },
+      });
+
+      let remaining = Number(req.amount);
+      const allocations: any[] = [];
+      for (const invoice of invoices) {
+        if (remaining <= 0.01) break;
+        const amount = Math.min(remaining, Number(invoice.balanceDue));
+        if (!(amount > 0)) continue;
+        const balanceDue = Math.max(0, Number(invoice.balanceDue) - amount);
+        const amountPaid = Number(invoice.amountPaid) + amount;
+        const status = balanceDue <= 0.01 ? "PAID" : "PARTIALLY_PAID";
+
+        await tx.supplierInvoice.update({
+          where: { id: invoice.id },
+          data: { amountPaid, balanceDue, status },
+        });
+        const allocation = await tx.paymentAllocation.create({
+          data: {
+            id: randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            paymentId: payment.id,
+            supplierInvoiceId: invoice.id,
+            customerInvoiceId: null,
+            allocatedAmount: amount,
+            createdById: ctx.userId,
+          },
+        });
+        allocations.push(allocation);
+        await tx.supplier.update({
+          where: { id: supplier.id },
+          data: { outstandingBalance: { decrement: amount } },
+        });
+        await tx.auditEvent.create({
+          data: {
+            id: randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            userId: ctx.userId,
+            deviceId: `finance-api:${ctx.userId}`,
+            action: "AP_PAYMENT_ALLOCATED",
+            entityType: "SupplierInvoice",
+            entityId: invoice.id,
+            metadata: { paymentId: payment.id, allocationId: allocation.id, amount, status },
+          },
+        });
+        remaining -= amount;
+      }
+
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: `finance-api:${ctx.userId}`,
+          action: "AP_PAYMENT_CREATED",
+          entityType: "Payment",
+          entityId: payment.id,
+          metadata: {
+            supplierId: supplier.id,
+            amount: Number(req.amount),
+            paymentNumber,
+            allocatedAmount: Number(req.amount) - remaining,
+          },
+        },
+      });
+
+      return { ...payment, allocations, remainingUnallocated: Math.round(remaining * 100) / 100 };
     }));
   }
 

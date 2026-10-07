@@ -1765,6 +1765,7 @@ export const AllocatePaymentRequestSchema = z.object({
   customerInvoiceId: z.string().uuid().optional(),
   supplierInvoiceId: z.string().uuid().optional(),
   amount: z.number().positive(),
+  allocationId: z.string().uuid().optional(),
 });
 export type AllocatePaymentRequest = z.infer<typeof AllocatePaymentRequestSchema>;
 

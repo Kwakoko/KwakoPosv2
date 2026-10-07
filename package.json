@@ -135,6 +135,7 @@
     "design:verify": "tsx scripts/release/verify-design-system.ts",
     "certify:ui-action-parity": "tsx scripts/certification/ui-action-parity-gate.ts",
     "certify:receivables-lock": "tsx scripts/certification/receivables-production-lock.ts",
+    "certify:payables-lock": "tsx scripts/certification/payables-production-lock.ts",
     "workflow:verify": "tsx scripts/release/verify-workflow-integrity.ts",
     "certify:action-service": "tsx scripts/certification/action-service-parity-gate.ts",
     "ai-governance:verify": "tsx scripts/release/verify-ai-agent-governance.ts",

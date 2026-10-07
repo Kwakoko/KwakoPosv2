@@ -3046,8 +3046,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/finance/payables/aging", async (req) => {
-    const report = await financeRepository.getPayablesAging(req.tenantContext!);
+    const query = (req.query as any) || {};
+    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
+    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AP_AS_OF_DATE");
+    const report = await financeRepository.getPayablesAging(req.tenantContext!, asOfDate);
     return { success: true, data: report };
+  });
+
+  server.get("/api/v1/finance/payables/statements/:supplierId", async (req) => {
+    const query = (req.query as any) || {};
+    const statement = await financeRepository.getSupplierStatement(
+      req.tenantContext!,
+      (req.params as any).supplierId,
+      query.from,
+      query.to,
+    );
+    return { success: true, data: statement };
+  });
+
+  server.get("/api/v1/finance/payables/ledger", async (req) => {
+    const query = (req.query as any) || {};
+    const ledger = await financeRepository.getPayablesLedger(req.tenantContext!, query.supplierId);
+    return { success: true, data: ledger };
+  });
+
+  server.get("/api/v1/finance/payables/reports", async (req) => {
+    const query = (req.query as any) || {};
+    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
+    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AP_AS_OF_DATE");
+    const [aging, ledger] = await Promise.all([
+      financeRepository.getPayablesAging(req.tenantContext!, asOfDate),
+      financeRepository.getPayablesLedger(req.tenantContext!, query.supplierId),
+    ]);
+    return { success: true, data: { aging, ledger } };
   });
 
   // Payment Allocation

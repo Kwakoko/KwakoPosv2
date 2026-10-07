@@ -11,6 +11,7 @@ import {
   publishPendingDomainEvents,
 } from "./durableDomainEventBridge.js";
 import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
+import { applyPayablesProductionLockOperation } from "./payablesProductionLock.js";
 import { applyReceivablesProductionLockOperation } from "./receivablesProductionLock.js";
 
 const MAX_DELTA = 500;
@@ -234,6 +235,8 @@ export class WorldStandardPrismaSyncEngine {
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
       case "CustomerInvoice": record = await tx.customerInvoice.findUnique({ where: { id: entityId }, include: { lines: true, allocations: true } }); break;
+      case "SupplierInvoice": record = await tx.supplierInvoice.findUnique({ where: { id: entityId }, include: { lines: true, allocations: true } }); break;
+      case "Payment": record = await tx.payment.findUnique({ where: { id: entityId } }); break;
       case "PaymentAllocation": record = await tx.paymentAllocation.findUnique({ where: { id: entityId } }); break;
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
@@ -274,6 +277,7 @@ export class WorldStandardPrismaSyncEngine {
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
         case "CustomerInvoice": return await db.customerInvoice.findUnique({ where: { id: op.entityId }, include: { lines: true, allocations: true } });
+        case "SupplierInvoice": return await db.supplierInvoice.findUnique({ where: { id: op.entityId }, include: { lines: true, allocations: true } });
         case "PaymentAllocation": return await db.paymentAllocation.findUnique({ where: { id: op.entityId } });
         case "Supplier": return await db.supplier.findUnique({ where: { id: op.entityId } });
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
@@ -425,7 +429,7 @@ export class WorldStandardPrismaSyncEngine {
 
   private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
     const preconditionedEntities = new Set([
-      "Product", "ProductVariant", "Customer", "CustomerInvoice", "Supplier", "Category", "Brand", "Expense",
+      "Product", "ProductVariant", "Customer", "CustomerInvoice", "SupplierInvoice", "Supplier", "Category", "Brand", "Expense",
     ]);
     if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
       // Preserve the domain-specific ledger-only error for forbidden absolute inventory writes.
@@ -436,6 +440,7 @@ export class WorldStandardPrismaSyncEngine {
     }
 
     if (await applyInventoryProductionLockOperation(ctx, req, op, tx, (priceCtx, priceReq, priceDb) => this.productRepo.recordPriceChange(priceCtx, priceReq, priceDb))) return;
+    if (await applyPayablesProductionLockOperation(ctx, req, op, tx)) return;
     if (await applyReceivablesProductionLockOperation(ctx, req, op, tx)) return;
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
@@ -1051,7 +1056,6 @@ const now = new Date();
             paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
           },
         });
-        await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
         return;
       }
       throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
