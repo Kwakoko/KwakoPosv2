@@ -237,6 +237,14 @@ export class WorldStandardPrismaSyncEngine {
       case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
+      case "CustomerContact": {
+        const rows = await tx.$queryRawUnsafe<any[]>(
+          'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+          entityId, ctx.tenantId, ctx.branchId,
+        );
+        record = rows[0] || null;
+        break;
+      }
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
@@ -275,6 +283,13 @@ export class WorldStandardPrismaSyncEngine {
         case "StockAdjustment": return await db.stockAdjustment.findUnique({ where: { id: op.entityId } });
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
+        case "CustomerContact": {
+          const rows = await db.$queryRawUnsafe<any[]>(
+            'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+            op.entityId, ctx.tenantId, ctx.branchId,
+          );
+          return rows[0] || null;
+        }
         case "Supplier": return await db.supplier.findUnique({ where: { id: op.entityId } });
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
@@ -678,7 +693,69 @@ export class WorldStandardPrismaSyncEngine {
       const base = getBaseUpdatedAt(op.payload);
       if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer changed on server");
       const payload: any = stripSyncControlFields(op.payload as any);
-      await tx.customer.update({ where: { id: op.entityId }, data: op.operationType === "DELETE" ? { status: "INACTIVE" } : { customerCode: payload.customerCode, name: payload.name, phone: payload.phone ?? null, email: payload.email ?? null, address: payload.address ?? null, creditLimit: payload.creditLimit ?? undefined, openingBalance: payload.openingBalance ?? undefined, status: payload.status ?? "ACTIVE" } });
+      if (op.operationType === "DELETE") {
+        if (Number(current.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+        await tx.customer.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
+      } else {
+        await tx.customer.update({
+          where: { id: op.entityId },
+          data: {
+            customerCode: payload.customerCode ?? undefined,
+            name: payload.name ?? current.name,
+            phone: payload.phone ?? null,
+            email: payload.email ?? null,
+            address: payload.address ?? null,
+            creditLimit: payload.creditLimit ?? undefined,
+            status: payload.status ?? "ACTIVE",
+          },
+        });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: op.entityId,
+          metadata: { changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+        }});
+      }
+      return;
+    }
+
+    if (op.entityType === "Supplier" && ["UPDATE", "DELETE"].includes(op.operationType)) {
+      const current = await tx.supplier.findUnique({ where: { id: op.entityId } });
+      if (!current) { if (op.operationType === "DELETE") return; throw new Error("Supplier not found"); }
+      if (current.tenantId !== ctx.tenantId || current.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && current.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: supplier changed on server");
+      const payload: any = stripSyncControlFields(op.payload as any);
+      if (op.operationType === "DELETE") {
+        await tx.supplier.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "SUPPLIER_ARCHIVED", entityType: "Supplier", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
+      } else {
+        await tx.supplier.update({
+          where: { id: op.entityId },
+          data: {
+            supplierCode: payload.supplierCode ?? undefined,
+            name: payload.name ?? current.name,
+            phone: payload.phone ?? null,
+            email: payload.email ?? null,
+            address: payload.address ?? null,
+            taxPin: payload.taxPin ?? null,
+            status: payload.status ?? "ACTIVE",
+          },
+        });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: op.entityId,
+          metadata: { changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+        }});
+      }
       return;
     }
 
@@ -1055,15 +1132,126 @@ const now = new Date();
 
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
-      if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
-      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
-      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
-      if (existing) return;
       const amount = Number(payload.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("PAYMENT_AMOUNT_REQUIRED");
+      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+
+      if (payload.customerId) {
+        const customer = await tx.customer.findFirst({ where: { id: String(payload.customerId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+        if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+        const currentBalance = Number(customer.currentBalance || 0);
+        if (amount > currentBalance + 0.005) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
+        const created = await tx.payment.create({ data: {
+          id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+          paymentNumber: payload.paymentNumber || `PAY-CUST-${op.operationId.slice(0, 24)}`,
+          customerId: customer.id, amount, paymentMethod: payload.paymentMethod || "BANK",
+          provider: payload.provider || null, providerReference: payload.providerReference || null,
+          status: "COMPLETED", paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+        } });
+        await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount } } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_PAYMENT_POSTED", entityType: "Customer", entityId: customer.id,
+          metadata: { paymentId: created.id, amount, paymentMethod: created.paymentMethod, provider: created.provider, providerReference: created.providerReference },
+        }});
+        return;
+      }
+
+      if (!payload.supplierId) throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
+      const supplier = await tx.supplier.findFirst({ where: { id: String(payload.supplierId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
       if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
-      await tx.payment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`, purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount, paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      await tx.payment.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`,
+        purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount,
+        paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null,
+        providerReference: payload.providerReference || null, status: "COMPLETED",
+        paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+      }});
       await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_PAYMENT_POSTED", entityType: "Supplier", entityId: supplier.id,
+        metadata: { paymentId: op.entityId, amount, paymentMethod: payload.paymentMethod || "BANK" },
+      }});
+      return;
+    }
+
+    if (op.entityType === "CustomerContact" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const customerId = String(payload.customerId || "");
+      if (!customerId) throw new Error("CONTACT_CUSTOMER_REQUIRED");
+      const customer = await tx.customer.findFirst({ where: { id: customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+
+      const currentRows = await tx.$queryRawUnsafe<any[]>(
+        'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+        op.entityId, ctx.tenantId, ctx.branchId,
+      );
+      const current = currentRows[0];
+
+      if (op.operationType === "CREATE") {
+        if (current) {
+          if (current.customerId !== customerId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+          return;
+        }
+        if (payload.isPrimary) {
+          await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, ctx.tenantId, ctx.branchId);
+        }
+        await tx.$executeRawUnsafe(
+          'INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
+          op.entityId, customerId, ctx.tenantId, ctx.branchId, String(payload.firstName || "").trim(), String(payload.lastName || "").trim(),
+          String(payload.title || "").trim(), String(payload.role || "").trim(), String(payload.department || "").trim(),
+          String(payload.phone || "").trim(), String(payload.email || "").trim(), Boolean(payload.isPrimary), String(payload.notes || ""),
+          String(payload.decisionInfluence || "INFLUENCER"),
+        );
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_CREATED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
+        return;
+      }
+
+      if (!current) {
+        if (op.operationType === "DELETE") return;
+        throw new Error("CONTACT_NOT_FOUND");
+      }
+      if (current.customerId !== customerId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && new Date(current.updatedAt).getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer contact changed on server");
+
+      if (op.operationType === "DELETE") {
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3', op.entityId, ctx.tenantId, ctx.branchId);
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_ARCHIVED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
+        return;
+      }
+
+      const next = { ...current, ...payload };
+      if (next.isPrimary) {
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3 AND id <> $4', customerId, ctx.tenantId, ctx.branchId, op.entityId);
+      }
+      await tx.$executeRawUnsafe(
+        'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12 AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15',
+        String(next.firstName || "").trim(), String(next.lastName || "").trim(), String(next.title || "").trim(), String(next.role || "").trim(),
+        String(next.department || "").trim(), String(next.phone || "").trim(), String(next.email || "").trim(), Boolean(next.isPrimary),
+        String(next.notes || ""), String(next.decisionInfluence || "INFLUENCER"), String(next.status || "ACTIVE"),
+        op.entityId, ctx.tenantId, ctx.branchId, customerId,
+      );
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CONTACT_UPDATED", entityType: "CustomerContact", entityId: op.entityId,
+        metadata: { customerId, operationId: op.operationId, changedFields: Object.keys(payload).filter((k) => k !== "_baseUpdatedAt").sort() },
+      }});
       return;
     }
 
@@ -1075,13 +1263,45 @@ const now = new Date();
 
     if (op.entityType === "Customer" && op.operationType === "CREATE") {
       const existing = await tx.customer.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.customer.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const created = await tx.customer.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: payload.customerCode || `CUST-${op.operationId.slice(0, 10)}`,
+        name: String(payload.name || "").trim(),
+        phone: payload.phone || null, email: payload.email || null, address: payload.address || null,
+        creditLimit: Number(payload.creditLimit || 0), currentBalance: Number(payload.openingBalance || 0), openingBalance: Number(payload.openingBalance || 0),
+        status: payload.status || "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id,
+        metadata: { customerCode: created.customerCode, operationId: op.operationId },
+      }});
       return;
     }
 
     if (op.entityType === "Supplier" && op.operationType === "CREATE") {
       const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.supplier.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const payload: any = stripSyncControlFields(op.payload as any);
+      const created = await tx.supplier.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        supplierCode: payload.supplierCode || `SUP-${op.operationId.slice(0, 10)}`,
+        name: String(payload.name || "").trim(), phone: payload.phone || null, email: payload.email || null,
+        address: payload.address || null, taxPin: payload.taxPin || null, outstandingBalance: 0, status: payload.status || "ACTIVE",
+      }});
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: created.id,
+        metadata: { supplierCode: created.supplierCode, operationId: op.operationId },
+      }});
       return;
     }
 
@@ -1217,6 +1437,7 @@ const now = new Date();
       Category: "categories",
       Brand: "brands",
       Expense: "expenses",
+      CustomerContact: "customer_contacts",
     };
     const table = tableByType[entityType];
     if (!table) return;
@@ -1301,6 +1522,7 @@ const now = new Date();
           Product: ["name", "description", "categoryId", "brandId", "supplierId", "taxId", "category", "isActive"],
           ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
           Customer: ["name", "phone", "email", "address"],
+          CustomerContact: ["firstName", "lastName", "title", "role", "department", "email", "phone", "isPrimary", "decisionInfluence", "notes", "status"],
           Supplier: ["name", "phone", "email", "address", "taxPin"],
           Category: ["name", "code", "parentId", "description", "color", "isActive"],
           Brand: ["name", "code", "origin", "notes", "isActive"],
