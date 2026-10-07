@@ -239,7 +239,7 @@ export class WorldStandardPrismaSyncEngine {
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
       case "CustomerContact": {
         const rows = await tx.$queryRawUnsafe(
-          'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+          'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
           entityId, ctx.tenantId, ctx.branchId,
         );
         record = rows[0] || null;
@@ -285,7 +285,7 @@ export class WorldStandardPrismaSyncEngine {
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
         case "CustomerContact": {
           const rows = await db.$queryRawUnsafe(
-            'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+            'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
             op.entityId, ctx.tenantId, ctx.branchId,
           );
           return rows[0] || null;
@@ -1190,7 +1190,7 @@ const now = new Date();
       if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
 
       const currentRows = await tx.$queryRawUnsafe(
-        'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
+        'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
         op.entityId, ctx.tenantId, ctx.branchId,
       );
       const current = currentRows[0];
@@ -1201,10 +1201,10 @@ const now = new Date();
           return;
         }
         if (payload.isPrimary) {
-          await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, ctx.tenantId, ctx.branchId);
+          await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1::uuid AND "tenantId"=$2 AND "branchId"=$3', customerId, ctx.tenantId, ctx.branchId);
         }
         await tx.$executeRawUnsafe(
-          'INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
+          'INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
           op.entityId, customerId, ctx.tenantId, ctx.branchId, String(payload.firstName || "").trim(), String(payload.lastName || "").trim(),
           String(payload.title || "").trim(), String(payload.role || "").trim(), String(payload.department || "").trim(),
           String(payload.phone || "").trim(), String(payload.email || "").trim(), Boolean(payload.isPrimary), String(payload.notes || ""),
@@ -1227,7 +1227,7 @@ const now = new Date();
       if (base && new Date(current.updatedAt).getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer contact changed on server");
 
       if (op.operationType === "DELETE") {
-        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3', op.entityId, ctx.tenantId, ctx.branchId);
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1::uuid AND "tenantId"=$2 AND "branchId"=$3', op.entityId, ctx.tenantId, ctx.branchId);
         await tx.auditEvent.create({ data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
           deviceId: req.deviceId, action: "CONTACT_ARCHIVED", entityType: "CustomerContact", entityId: op.entityId,
@@ -1238,10 +1238,10 @@ const now = new Date();
 
       const next = { ...current, ...payload };
       if (next.isPrimary) {
-        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3 AND id <> $4', customerId, ctx.tenantId, ctx.branchId, op.entityId);
+        await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1::uuid AND "tenantId"=$2 AND "branchId"=$3 AND id <> $4', customerId, ctx.tenantId, ctx.branchId, op.entityId);
       }
       await tx.$executeRawUnsafe(
-        'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12 AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15',
+        'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12::uuid AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15::uuid',
         String(next.firstName || "").trim(), String(next.lastName || "").trim(), String(next.title || "").trim(), String(next.role || "").trim(),
         String(next.department || "").trim(), String(next.phone || "").trim(), String(next.email || "").trim(), Boolean(next.isPrimary),
         String(next.notes || ""), String(next.decisionInfluence || "INFLUENCER"), String(next.status || "ACTIVE"),
