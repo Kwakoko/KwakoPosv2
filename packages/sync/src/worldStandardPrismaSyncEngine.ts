@@ -238,7 +238,7 @@ export class WorldStandardPrismaSyncEngine {
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
       case "CustomerContact": {
-        const rows = await tx.$queryRawUnsafe<any[]>(
+        const rows = await tx.$queryRawUnsafe(
           'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
           entityId, ctx.tenantId, ctx.branchId,
         );
@@ -284,7 +284,7 @@ export class WorldStandardPrismaSyncEngine {
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
         case "CustomerContact": {
-          const rows = await db.$queryRawUnsafe<any[]>(
+          const rows = await db.$queryRawUnsafe(
             'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
             op.entityId, ctx.tenantId, ctx.branchId,
           );
