@@ -64,6 +64,8 @@ jobs:
         run: npm run certify:inventory-lock
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
+      - name: Customers Contacts Production Lock v1
+        run: npm run certify:customers-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
       - name: Validate commit contract
