@@ -1234,7 +1234,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       stockByVariant.set(variantId, {
         qty: (prior?.qty || 0) + Number(item.quantity || 0),
         product: item.product,
-        unitCost: Number(item.unitCost || item.product?.costPrice || item.product?.buyingPrice || 0),
+        unitCost: Number(item.unitCost || 0),
       });
     }
     for (const [variantId, info] of stockByVariant.entries()) {
