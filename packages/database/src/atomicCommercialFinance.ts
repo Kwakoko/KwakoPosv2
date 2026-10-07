@@ -194,6 +194,15 @@ export class PrismaAtomicCommercialFinanceService {
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
+      if (payments.some((p: any) => p.paymentMethod === "CREDIT") && req.customerId) {
+        await tx.customer.update({ where: { id: req.customerId }, data: { currentBalance: { increment: Number(sale.grandTotal) } } });
+      }
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
+        metadata: { operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldAt: occurredAt.toISOString(), isBackdated }
+      } });
+
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
       const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;
