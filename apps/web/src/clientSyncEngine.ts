@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope } from "./indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope, AUTHORITATIVE_SCHEMA_VERSION } from "./indexedDb.js";
 import type {
   SyncPushRequest,
   SyncPushResponse,
@@ -23,10 +23,11 @@ import {
 } from "./persistence/persistenceStatus.js";
 import { normalizeSyncPayload } from "./services/payloadValidationService.js";
 import { countUniqueLocalConflictIds } from "./services/syncConflictPresentationService.js";
+import { globalMigrationEngine } from "./persistence/migrationEngine.js";
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
-const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
+const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
 type KnownStore = typeof KNOWN_STORES[number];
 
 function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
@@ -84,7 +85,20 @@ export async function applyRevisionedChanges(
 ): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(dbName);
+    const request = indexedDB.open(dbName, AUTHORITATIVE_SCHEMA_VERSION);
+    request.onupgradeneeded = (event) => {
+      const tx = request.transaction;
+      if (!tx) {
+        reject(new Error("SYNC_LOCAL_SCHEMA_UPGRADE_TRANSACTION_MISSING"));
+        return;
+      }
+      globalMigrationEngine.applySchemaUpgrade(
+        request.result,
+        tx,
+        event.oldVersion || 0,
+        event.newVersion || AUTHORITATIVE_SCHEMA_VERSION,
+      );
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
   });
@@ -124,6 +138,7 @@ export async function applyRevisionedChanges(
       case "StockAdjustment": return "stockAdjustments";
       case "Customer": return "customers";
       case "Supplier": return "suppliers";
+      case "CustomerContact": return "contacts";
       case "ProductPriceHistory": return "productPriceHistory";
       case "Sale": return "sales";
       case "Payment": return "payments";
@@ -662,7 +677,7 @@ export class ClientSyncEngine {
         totalPulled = bootstrapRes.applied;
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
-          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+          "sales", "payments", "receipts", "customers", "suppliers", "contacts", "configuration", "syncOutbox", "syncMetadata",
         ]);
       } else if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
         totalPulled = await applyRevisionedChanges(

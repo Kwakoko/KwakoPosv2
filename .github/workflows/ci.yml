@@ -86,6 +86,8 @@ jobs:
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock
+      - name: Customers / Contacts Production Lock v1
+        run: npx tsx scripts/certification/customers-contacts-production-lock.ts
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
       - name: Backdated Inventory Production Lock

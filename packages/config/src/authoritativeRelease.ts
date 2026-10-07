@@ -58,7 +58,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   releasedAt: "2026-09-15T20:10:00.000Z",
   releaseTimestamp: "2026-09-15T20:10:00.000Z",
   pwaVersion: "2.13.0",
-  pwaSchemaVersion: 6,
+  pwaSchemaVersion: 7,
   syncProtocolVersion: 2,
   databaseSchemaVersion: 4,
   minimumSupportedClientVersion: "2.0.0",
@@ -67,7 +67,7 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   compatibility: {
     databaseSchemaVersion: 4,
     syncProtocolVersion: 2,
-    pwaSchemaVersion: 6,
+    pwaSchemaVersion: 7,
     minSupportedClientVersion: "2.0.0",
     recommendedClientVersion: "2.13.0",
     maximumSupportedClientVersion: "3.0.0",

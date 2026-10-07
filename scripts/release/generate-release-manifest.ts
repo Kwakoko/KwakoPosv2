@@ -73,7 +73,7 @@ export function generateReleaseManifest(options?: {
     compatibility: {
       databaseSchemaVersion: 4,
       syncProtocolVersion: 2,
-      pwaSchemaVersion: 6,
+      pwaSchemaVersion: 7,
       minSupportedClientVersion: "2.0.0",
       recommendedClientVersion: targetVersion,
     },
