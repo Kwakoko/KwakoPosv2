@@ -19,7 +19,7 @@ const REQUIRED_SUBITEMS = [
 ];
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/pages/CashDrawerPage.tsx": "3add76c81039c85c5ebd62707e09499b43ce3d16",
+  "apps/web/src/pages/CashDrawerPage.tsx": "8f57d8586a833d37aee9f37d99efad869fcb607e",
   "apps/api/src/server.ts": "eea27046ac454a0899e9b8252dc1fea018c7ec58",
   "packages/contracts/src/index.ts": "2808a8a3b9b1ce7f37593cebb2fc4a5ca989d105",
   "packages/database/src/prismaProductionRepositories.ts": "15d1fc2862a66f26e4f26543c950f91dd0cb1690",
