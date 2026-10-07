@@ -100,7 +100,7 @@ export interface CustomersPageProps {
 }
 
 export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
-  const { activeModule } = useModule();
+  const { activeModule, setActiveTab: setGlobalActiveTab } = useModule();
   const { isOnline, pendingOutboxCount, db } = useSync();
   const { currentTenantId } = useTenant();
   const { currentBranchId } = useBranch();
@@ -655,9 +655,9 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
             className={`v2-btn v2-btn-sm ${((label === "Contacts" && showingContacts) || (label === "Transaction History" && showingTransactions) || (label === "Customers" && !showingContacts && !showingTransactions)) ? "v2-btn-primary" : "v2-btn-ghost"}`}
             type="button"
             onClick={() => {
-              if (label === "Contacts") window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { activeTab: "Contacts" } }));
-              else if (label === "Transaction History") window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { activeTab: "Transaction History" } }));
-              else window.dispatchEvent(new CustomEvent(DATA_CHANGED_EVENT, { detail: { activeTab: "Customers" } }));
+              if (label === "Contacts") setGlobalActiveTab("Contacts");
+              else if (label === "Transaction History") setGlobalActiveTab("Customer Transactions");
+              else setGlobalActiveTab("Customer Directory");
             }}
           >
             {label}
@@ -748,7 +748,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {formOpen && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 520, maxWidth: "95vw", padding: "1.5rem" }}>
             <h2 className="v2-text-lg v2-font-black v2-mb-4">{formMode === "CREATE" ? `Register New ${targetType}` : `Edit ${targetType} Profile`}</h2>
             <form onSubmit={saveCustomer} className="v2-space-y-3">
@@ -764,7 +764,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {paymentOpen && selectedCust && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 440, maxWidth: "95vw", padding: "1.5rem" }}>
             <h2 className="v2-text-lg v2-font-black">Record Customer Repayment</h2>
             <div className="v2-text-xs v2-text-muted v2-mb-4">{selectedCust.name} · balance {fmtCcy(selectedCust.outstandingBalance)}</div>
@@ -775,7 +775,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {walletOpen && selectedCust && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 420, maxWidth: "95vw", padding: "1.5rem" }}>
             <h2 className="v2-text-lg v2-font-black">Deposit to Customer Wallet</h2>
             <div className="v2-text-xs v2-text-muted v2-mb-4">{selectedCust.name} · wallet {fmtCcy(selectedCust.walletBalance)}</div>
@@ -785,7 +785,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {contactFormOpen && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 560, maxWidth: "95vw", padding: "1.5rem" }}>
             <h2 className="v2-text-lg v2-font-black">{contactFormMode === "CREATE" ? "Add Customer Contact" : "Edit Customer Contact"}</h2>
             <form onSubmit={saveContact} className="v2-space-y-3 v2-mt-4">
@@ -805,7 +805,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {transactionsOpen && customerTransactions && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 900, maxWidth: "96vw", maxHeight: "85vh", overflow: "auto", padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between"><div><h2 className="v2-text-lg v2-font-black">{customerTransactions.customer?.name || selectedCust?.name} — Transactions</h2><div className="v2-text-xs v2-text-muted">Balance {fmtCcy(customerTransactions.customer?.currentBalance ?? selectedCust?.outstandingBalance)} · Wallet {fmtCcy(customerTransactions.customer?.walletBalance ?? selectedCust?.walletBalance)}</div></div><button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setTransactionsOpen(false)} type="button">✕</button></div>
             <h3 className="v2-text-sm v2-font-bold v2-mt-4">Sales</h3>
@@ -819,7 +819,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       )}
 
       {historyOpen && selectedContact && (
-        <div className="v2-modal-backdrop">
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 760, maxWidth: "96vw", maxHeight: "85vh", overflow: "auto", padding: "1.5rem" }}>
             <div className="v2-flex v2-items-center v2-justify-between"><div><h2 className="v2-text-lg v2-font-black">{selectedContact.firstName} {selectedContact.lastName} — History</h2><div className="v2-text-xs v2-text-muted">{selectedContact.roleTitle || "Contact"}</div></div><button className="v2-btn v2-btn-ghost" onClick={() => setHistoryOpen(false)} type="button">✕</button></div>
             <div className="v2-space-y-2 v2-mt-4">{contactHistory.length === 0 ? <div className="v2-empty">No history yet.</div> : contactHistory.map((h: any) => <div key={h.id} className="v2-card" style={{ padding: ".75rem" }}><div className="v2-flex v2-justify-between"><strong className="v2-text-xs">{h.action}</strong><span className="v2-text-xs v2-text-muted">{String(h.createdAt || h.timestamp || "")}</span></div><pre className="v2-text-xs v2-text-muted" style={{ whiteSpace: "pre-wrap", margin: ".4rem 0 0" }}>{JSON.stringify(h.metadata || {}, null, 2)}</pre></div>)}</div>
