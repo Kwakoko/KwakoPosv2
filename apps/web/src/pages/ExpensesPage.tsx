@@ -25,6 +25,7 @@ import {
 import { useAuth, useBranch, useModule, useRbac, useSync, useTenant, useTranslation, useFormatters } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/applicationApiService.js";
 import { DATA_CHANGED_EVENT } from "../services/dataChangeEvent.js";
+import { ExpenseControlsPanel } from "../components/ExpenseControlsPanel.js";
 
 export interface ExpenseRecord {
   id: string;
@@ -34,6 +35,9 @@ export interface ExpenseRecord {
   date: string;
   description: string;
   payee: string;
+  categoryId?: string;
+  vendorId?: string;
+  approvalStatus?: string;
   paymentMethod: string;
   paymentRef?: string;
   status: "PAID" | "PENDING" | "VOIDED";
@@ -110,9 +114,16 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
   const [payMethod, setPayMethod] = useState("M-Pesa");
   const [payRef, setPayRef] = useState("");
   const [viewItem, setViewItem] = useState<ExpenseRecord | null>(null);
+  const [viewAttachments, setViewAttachments] = useState<Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }>>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
 
   // New Expense form state
   const [newCategory, setNewCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [newCategoryId, setNewCategoryId] = useState("");
+  const [newVendorId, setNewVendorId] = useState("");
+  const [expenseCategoryOptions, setExpenseCategoryOptions] = useState<Array<{ id: string; code: string; name: string }>>([]);
+  const [expenseVendorOptions, setExpenseVendorOptions] = useState<Array<{ id: string; supplierCode: string; name: string }>>([]);
   const [newAmount, setNewAmount] = useState("");
   const [newDate, setNewDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [newDescription, setNewDescription] = useState("");
@@ -174,6 +185,45 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       window.removeEventListener(DATA_CHANGED_EVENT, handleDataChange);
     };
   }, [db, isOnline, currentTenantId, currentBranchId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadExpenseMasters = async () => {
+      if (!isOnline || !currentTenantId || !currentBranchId) return;
+      try {
+        const [categoriesRes, vendorsRes] = await Promise.all([
+          apiFetch<{ success: boolean; data: { categories: Array<{ id: string; code: string; name: string }> } }>("/api/v1/expenses/categories"),
+          apiFetch<{ success: boolean; data: { vendors: Array<{ id: string; supplierCode: string; name: string }> } }>("/api/v1/expenses/vendors"),
+        ]);
+        if (!active) return;
+        if (categoriesRes.success) setExpenseCategoryOptions(categoriesRes.data.categories || []);
+        if (vendorsRes.success) setExpenseVendorOptions(vendorsRes.data.vendors || []);
+      } catch {
+        // The existing hard-coded category list remains a safe offline fallback.
+      }
+    };
+    void loadExpenseMasters();
+    return () => { active = false; };
+  }, [isOnline, currentTenantId, currentBranchId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadAttachments = async () => {
+      if (!viewItem || !currentTenantId || !currentBranchId) {
+        setViewAttachments([]);
+        return;
+      }
+      setAttachmentError("");
+      try {
+        const res = await apiFetch<{ success: boolean; data: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }> }>(`/api/v1/expenses/${viewItem.id}/attachments`);
+        if (active && res.success) setViewAttachments(res.data || []);
+      } catch (error: any) {
+        if (active) setAttachmentError(error?.message || "Unable to load attachments");
+      }
+    };
+    void loadAttachments();
+    return () => { active = false; };
+  }, [viewItem, currentTenantId, currentBranchId]);
 
   // Date Range Bounds
   const { fromTs, toTs } = useMemo(() => {
@@ -305,6 +355,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
       date: newDate,
       description: newDescription.trim(),
       payee: newPayee.trim(),
+      categoryId: newCategoryId || undefined,
+      vendorId: newVendorId || undefined,
       paymentMethod: fromCanonicalPaymentMethod(canonicalPaymentMethod),
       paymentRef: newPaymentRef.trim() || undefined,
       status: newStatus,
@@ -314,6 +366,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     const payload = {
       id: expenseId,
       category: record.category,
+      categoryId: record.categoryId,
+      vendorId: record.vendorId,
       amount: record.amount,
       reason: record.description,
       description: record.description,
@@ -374,7 +428,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
         setExpenses(next);
       }
       setIsAddModalOpen(false);
-      setNewAmount(""); setNewDescription(""); setNewPayee(""); setNewPaymentRef(""); setNewStatus("PAID");
+      setNewAmount(""); setNewDescription(""); setNewPayee(""); setNewPaymentRef(""); setNewStatus("PAID"); setNewCategoryId(""); setNewVendorId("");
     } catch (error: any) {
       setFormError(error?.message || "Expense could not be recorded.");
     }
@@ -496,6 +550,84 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
     }
   };
 
+  const handleAttachmentDownload = async (attachment: { id: string; fileName: string; mimeType: string }) => {
+    if (!viewItem) return;
+    try {
+      const res = await apiFetch<{ success: boolean; data: { fileName: string; mimeType: string; contentBase64: string } }>(`/api/v1/expenses/${viewItem.id}/attachments/${attachment.id}/content`);
+      if (!res.success) throw new Error("Attachment download failed");
+      const raw = atob(res.data.contentBase64);
+      const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: res.data.mimeType || attachment.mimeType }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = res.data.fileName || attachment.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setAttachmentError(error?.message || "Attachment download failed");
+    }
+  };
+
+  const handleAttachmentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !viewItem || !currentTenantId || !currentBranchId) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setAttachmentError("Attachments must be 5 MB or smaller.");
+      return;
+    }
+    setAttachmentBusy(true);
+    setAttachmentError("");
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Unable to read attachment"));
+        reader.onload = () => {
+          const value = String(reader.result || "");
+          const comma = value.indexOf(",");
+          resolve(comma >= 0 ? value.slice(comma + 1) : value);
+        };
+        reader.readAsDataURL(file);
+      });
+      if (isOnline) {
+        await apiFetch(`/api/v1/expenses/${viewItem.id}/attachments`, {
+          method: "POST",
+          body: JSON.stringify({ fileName: file.name, mimeType: file.type || "application/octet-stream", contentBase64 }),
+        });
+      } else {
+        const mutationId = crypto.randomUUID();
+        const next = expenses.map((e) => e.id === viewItem.id ? { ...e, updatedAt: new Date().toISOString() } : e);
+        await commitOfflineExpenseMutation(next, {
+          id: mutationId,
+          entityType: "Expense" as never,
+          entityId: viewItem.id,
+          operationType: "UPDATE" as const,
+          payload: {
+            id: viewItem.id,
+            tenantId: currentTenantId,
+            branchId: currentBranchId,
+            _baseUpdatedAt: (viewItem as any).updatedAt,
+            attachments: [{ id: crypto.randomUUID(), fileName: file.name, mimeType: file.type || "application/octet-stream", contentBase64 }],
+          } as Record<string, unknown>,
+          clientCreatedAt: new Date().toISOString(),
+          idempotencyKey: mutationId,
+          status: "PENDING" as const,
+          tenantId: currentTenantId,
+          branchId: currentBranchId,
+        });
+        setExpenses(next);
+      }
+      const refreshed = await apiFetch<{ success: boolean; data: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }> }>(`/api/v1/expenses/${viewItem.id}/attachments`).catch(() => null);
+      if (refreshed?.success) setViewAttachments(refreshed.data || []);
+    } catch (error: any) {
+      setAttachmentError(error?.message || "Attachment upload failed");
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
   // Export CSV
   const handleExportCsv = () => {
     const headers = ["Voucher ID", "Date", "Category", "Description", "Payee", "Amount (TZS)", "Payment Method", "Reference", "Status", "Tax Deductible"];
@@ -590,6 +722,8 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
           <div className="v2-text-xs v2-text-muted v2-mt-1">Eligible corporate deductions</div>
         </div>
       </div>
+
+      <ExpenseControlsPanel tenantId={currentTenantId || undefined} branchId={currentBranchId || undefined} canManage={canCreateExpense} canApprove={canCreateExpense} />
 
       {/* Filter Control Bar */}
       <div className="v2-card" style={{ padding: "1rem" }}>
@@ -810,12 +944,26 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                   </label>
                   <select
                     className="v2-input v2-input-sm"
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
+                    value={newCategoryId ? `master:${newCategoryId}` : newCategory}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value.startsWith("master:")) {
+                        const id = value.slice(7);
+                        const option = expenseCategoryOptions.find((x) => x.id === id);
+                        setNewCategoryId(id);
+                        if (option) setNewCategory(option.name);
+                      } else {
+                        setNewCategoryId("");
+                        setNewCategory(value);
+                      }
+                    }}
                   >
-                    {EXPENSE_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {expenseCategoryOptions.length > 0 && <optgroup label="Managed Categories">
+                      {expenseCategoryOptions.map((c) => <option key={c.id} value={`master:${c.id}`}>{c.code} · {c.name}</option>)}
+                    </optgroup>}
+                    <optgroup label="Legacy / Offline Categories">
+                      {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
                   </select>
                 </div>
 
@@ -844,6 +992,25 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                   onChange={(e) => setNewAmount(e.target.value)}
                   autoFocus
                 />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted v2-mb-1" style={{ display: "block" }}>
+                  Vendor / Payee *
+                </label>
+                <select
+                  className="v2-input v2-input-sm"
+                  value={newVendorId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setNewVendorId(id);
+                    const vendor = expenseVendorOptions.find((x) => x.id === id);
+                    if (vendor) setNewPayee(vendor.name);
+                  }}
+                >
+                  <option value="">Use typed payee below</option>
+                  {expenseVendorOptions.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.supplierCode} · {vendor.name}</option>)}
+                </select>
               </div>
 
               <div>
@@ -1042,6 +1209,27 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = () => {
                 <span className="v2-text-muted block v2-mb-1">Description:</span>
                 <div className="v2-font-bold">{viewItem.description}</div>
               </div>
+            </div>
+
+            <div className="v2-p-3 v2-mb-4" style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)" }}>
+              <div className="v2-flex v2-items-center v2-justify-between v2-mb-2">
+                <div>
+                  <div className="v2-text-xs v2-font-bold">Attachments</div>
+                  <div className="v2-text-xs v2-text-muted">Receipts and supporting evidence, max 5 MB each.</div>
+                </div>
+                {canCreateExpense && <label className="v2-btn v2-btn-secondary v2-btn-sm" style={{ cursor: attachmentBusy ? "wait" : "pointer" }}>
+                  {attachmentBusy ? "Uploading…" : "Add attachment"}
+                  <input type="file" hidden disabled={attachmentBusy} onChange={(event) => void handleAttachmentUpload(event)} accept="image/*,.pdf,.txt,.csv" />
+                </label>}
+              </div>
+              {attachmentError && <div className="v2-text-xs" style={{ color: "var(--danger)" }}>{attachmentError}</div>}
+              {viewAttachments.length === 0 && !attachmentError && <div className="v2-text-xs v2-text-muted">No attachments recorded.</div>}
+              {viewAttachments.map((attachment) => (
+                <div key={attachment.id} className="v2-flex v2-items-center v2-justify-between v2-text-xs v2-p-2" style={{ background: "var(--surface-1)", borderRadius: "var(--radius-sm)" }}>
+                  <span><b>{attachment.fileName}</b> · {Math.max(1, Math.ceil(attachment.sizeBytes / 1024))} KB</span>
+                  <span className="v2-flex v2-items-center v2-gap-2"><span className="v2-mono v2-text-muted">{attachment.sha256.slice(0, 12)}…</span><button type="button" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => void handleAttachmentDownload(attachment)}>Download</button></span>
+                </div>
+              ))}
             </div>
 
             <div className="v2-flex v2-justify-end">

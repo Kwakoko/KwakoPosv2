@@ -94,6 +94,7 @@ import {
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
   CreateExpenseRequestSchema,
+  ExpensePaymentMethodEnum,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
   CreateAccountRequestSchema,
@@ -227,7 +228,7 @@ import {
   RunbookEngine,
   PlatformHealthEvaluator,
 } from "@kwakopos2/observability";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
 import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
 import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
@@ -1398,6 +1399,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       // Financial constraint violations → 409.
       if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
         return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
+
+      // Expense business-rule rejections are client-correctable → 400.
+      if (msg === "EXPENSE_APPROVAL_REQUIRED" || msg === "EXPENSE_ATTACHMENT_LIMIT_EXCEEDED" || msg === "EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY" || msg === "EXPENSE_INVALID_STATE_TRANSITION")
+        return [400, "BAD_REQUEST", "The Expense action violates the current workflow state."];
 
       // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
       if (
@@ -2701,7 +2706,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   };
 
-  const assertExpenseAuthority = (req: any, action: "view" | "create" | "void") => {
+  const assertExpenseAuthority = (req: any, action: "view" | "create" | "approve" | "void") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
@@ -2709,11 +2714,152 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const hasWildcard = permissions.includes("*");
     const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
     const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
+    const canApprove = isAdmin || hasWildcard || permissions.includes("FINANCE_APPROVE") || permissions.includes("FINANCE_CREATE");
     const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
-    const allowed = action === "view" ? canView : action === "create" ? canCreate : canVoid;
+    const allowed = action === "view" ? canView : action === "create" ? canCreate : action === "approve" ? canApprove : canVoid;
     if (!allowed) throw new Error("FORBIDDEN: Expense finance permission required");
     return ctx;
   };
+
+  // Expense production control plane: category/vendor master, approvals, attachments, recurring spend, reports, ledger and audit.
+  server.get("/api/v1/expenses/categories", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const categories = await prisma.expenseCategory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isActive: "desc" }, { name: "asc" }] });
+    return { success: true, data: { categories } };
+  });
+  server.post("/api/v1/expenses/categories", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ code: z.string().trim().min(2).max(40), name: z.string().trim().min(2).max(160), description: z.string().trim().max(500).optional() }).parse(req.body);
+    const category = await prisma.expenseCategory.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, code: body.code.toUpperCase(), name: body.name, description: body.description || null } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_CATEGORY_CREATED", entityType: "ExpenseCategory", entityId: category.id, metadata: { code: category.code } } });
+    return reply.status(201).send({ success: true, data: category });
+  });
+  server.patch("/api/v1/expenses/categories/:id", async (req) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ name: z.string().trim().min(2).max(160).optional(), description: z.string().trim().max(500).nullable().optional(), isActive: z.boolean().optional() }).parse(req.body);
+    const existing = await prisma.expenseCategory.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!existing) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
+    const updated = await prisma.expenseCategory.update({ where: { id: existing.id }, data: body });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_CATEGORY_UPDATED", entityType: "ExpenseCategory", entityId: existing.id, metadata: body } });
+    return { success: true, data: updated };
+  });
+
+  server.get("/api/v1/expenses/vendors", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const vendors = await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { name: "asc" } });
+    return { success: true, data: { vendors } };
+  });
+  server.post("/api/v1/expenses/vendors", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ supplierCode: z.string().trim().min(2).max(80), name: z.string().trim().min(2).max(200), phone: z.string().trim().max(60).optional(), email: z.string().email().optional(), address: z.string().trim().max(500).optional(), taxPin: z.string().trim().max(100).optional() }).parse(req.body);
+    const vendor = await prisma.supplier.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, supplierCode: body.supplierCode, name: body.name, phone: body.phone || null, email: body.email || null, address: body.address || null, taxPin: body.taxPin || null } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_VENDOR_CREATED", entityType: "Supplier", entityId: vendor.id, metadata: { supplierCode: vendor.supplierCode } } });
+    return reply.status(201).send({ success: true, data: vendor });
+  });
+  server.patch("/api/v1/expenses/vendors/:id", async (req) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ name: z.string().trim().min(2).max(200).optional(), phone: z.string().trim().max(60).nullable().optional(), email: z.string().email().nullable().optional(), address: z.string().trim().max(500).nullable().optional(), taxPin: z.string().trim().max(100).nullable().optional(), status: z.string().optional() }).parse(req.body);
+    const existing = await prisma.supplier.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!existing) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
+    const updated = await prisma.supplier.update({ where: { id: existing.id }, data: body });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_VENDOR_UPDATED", entityType: "Supplier", entityId: existing.id, metadata: body } });
+    return { success: true, data: updated };
+  });
+
+  server.get("/api/v1/expenses/approvals", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const approvals = await prisma.expenseApproval.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: "PENDING" }, include: { expense: true }, orderBy: { createdAt: "asc" } });
+    return { success: true, data: approvals };
+  });
+  server.post("/api/v1/expenses/approvals/:id/approve", async (req) => {
+    const ctx = assertExpenseAuthority(req, "approve");
+    const body = z.object({ reason: z.string().trim().max(500).optional(), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
+    const expense = await atomicCommercialFinance!.approveExpense(ctx, String((req.params as any).id), body.reason || "Approved by finance");
+    return { success: true, data: normalizeExpenseResponse(expense) };
+  });
+  server.post("/api/v1/expenses/approvals/:id/reject", async (req) => {
+    const ctx = assertExpenseAuthority(req, "approve");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
+    const expense = await atomicCommercialFinance!.rejectExpense(ctx, String((req.params as any).id), body.reason);
+    return { success: true, data: normalizeExpenseResponse(expense) };
+  });
+
+  server.get("/api/v1/expenses/recurring", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const rows = await prisma.recurringExpense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { nextRunAt: "asc" } });
+    return { success: true, data: rows };
+  });
+  server.post("/api/v1/expenses/recurring", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ categoryId: z.string().uuid().optional(), vendorId: z.string().uuid().optional(), category: z.string().trim().min(1), amount: z.number().positive(), reason: z.string().min(1), description: z.string().min(1), payee: z.string().min(1), paymentMethod: ExpensePaymentMethodEnum.default("BANK"), taxDeductible: z.boolean().default(false), frequency: z.enum(["WEEKLY","MONTHLY","QUARTERLY"]), nextRunAt: z.string().datetime(), idempotencyKey: z.string().min(1).optional() }).parse(req.body);
+    if (body.categoryId && !await prisma.expenseCategory.findFirst({ where: { id: body.categoryId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } })) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
+    if (body.vendorId && !await prisma.supplier.findFirst({ where: { id: body.vendorId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } })) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
+    const row = await prisma.recurringExpense.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, ...body, categoryId: body.categoryId || null, vendorId: body.vendorId || null, idempotencyKey: body.idempotencyKey || randomUUID(), createdById: ctx.userId } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "RECURRING_EXPENSE_CREATED", entityType: "RecurringExpense", entityId: row.id, metadata: { frequency: row.frequency, nextRunAt: row.nextRunAt.toISOString() } } });
+    return reply.status(201).send({ success: true, data: row });
+  });
+  server.post("/api/v1/expenses/recurring/:id/run", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    if (!atomicCommercialFinance) throw new Error("EXPENSE_REQUIRES_POSTGRESQL_AUTHORITY");
+    const row = await prisma.recurringExpense.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId, active: true } });
+    if (!row) throw new Error("RECURRING_EXPENSE_NOT_FOUND");
+    const runKey = `recurring-expense-${row.id}-${row.nextRunAt.toISOString()}`;
+    const expense = await atomicCommercialFinance.recordExpense(ctx, { id: randomUUID(), categoryId: row.categoryId || undefined, vendorId: row.vendorId || undefined, category: row.category, amount: Number(row.amount), reason: row.reason, description: row.description, payee: row.payee, paymentMethod: row.paymentMethod, status: "PENDING", taxDeductible: row.taxDeductible, incurredAt: row.nextRunAt.toISOString(), idempotencyKey: runKey, deviceId: String(req.headers["x-device-id"] || "web"), recurringExpenseId: row.id });
+    const next = new Date(row.nextRunAt);
+    if (row.frequency === "WEEKLY") next.setDate(next.getDate()+7); else if (row.frequency === "QUARTERLY") next.setMonth(next.getMonth()+3); else next.setMonth(next.getMonth()+1);
+    await prisma.recurringExpense.update({ where: { id: row.id }, data: { lastRunAt: row.nextRunAt, nextRunAt: next } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "RECURRING_EXPENSE_MATERIALIZED", entityType: "RecurringExpense", entityId: row.id, metadata: { expenseId: expense.id, runKey } } });
+    return reply.status(201).send({ success: true, data: normalizeExpenseResponse(expense) });
+  });
+
+  server.post("/api/v1/expenses/:id/attachments", async (req, reply) => {
+    const ctx = assertExpenseAuthority(req, "create");
+    const body = z.object({ fileName: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(120), contentBase64: z.string().min(1).max(7000000) }).parse(req.body);
+    const expense = await prisma.expense.findFirst({ where: { id: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!expense) throw new Error("EXPENSE_NOT_FOUND");
+    const buffer = Buffer.from(body.contentBase64, "base64");
+    if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error("EXPENSE_ATTACHMENT_LIMIT_EXCEEDED");
+    const sha256 = createHash("sha256").update(buffer).digest("hex");
+    const existing = await prisma.expenseAttachment.findFirst({ where: { expenseId: expense.id, sha256 } });
+    if (existing) return reply.status(200).send({ success: true, data: existing });
+    const attachment = await prisma.expenseAttachment.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: expense.id, fileName: body.fileName, mimeType: body.mimeType, sizeBytes: buffer.length, sha256, contentBase64: body.contentBase64, createdById: ctx.userId } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: String(req.headers["x-device-id"] || "web"), action: "EXPENSE_ATTACHMENT_ADDED", entityType: "Expense", entityId: expense.id, metadata: { attachmentId: attachment.id, fileName: attachment.fileName, sizeBytes: attachment.sizeBytes, sha256 } } });
+    return reply.status(201).send({ success: true, data: { ...attachment, contentBase64: undefined } });
+  });
+  server.get("/api/v1/expenses/:id/attachments", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const rows = await prisma.expenseAttachment.findMany({ where: { expenseId: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id:true,fileName:true,mimeType:true,sizeBytes:true,sha256:true,createdAt:true } });
+    return { success: true, data: rows };
+  });
+  server.get("/api/v1/expenses/:id/attachments/:attachmentId/content", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const attachment = await prisma.expenseAttachment.findFirst({ where: { id: String((req.params as any).attachmentId), expenseId: String((req.params as any).id), tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!attachment) throw new Error("EXPENSE_ATTACHMENT_NOT_FOUND");
+    return { success: true, data: { fileName: attachment.fileName, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes, contentBase64: attachment.contentBase64 || "" } };
+  });
+
+  server.get("/api/v1/expenses/reports", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const query = req.query as any;
+    const from = query.from ? new Date(query.from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const to = query.to ? new Date(query.to) : new Date();
+    const rows = await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, incurredAt: { gte: from, lte: to } } });
+    const active = rows.filter(x=>x.status!=="VOIDED");
+    const sum=(xs:any[])=>xs.reduce((s,x)=>s+Number(x.amount),0);
+    const group=(field:string)=>Object.entries(rows.reduce((m:any,x:any)=>{const k=String(x[field]||"Unspecified");m[k]=(m[k]||0)+Number(x.amount);return m;},{})).map(([k,v])=>({[field]:k,amount:v}));
+    return { success:true, data:{summary:{total:sum(active),paid:sum(active.filter(x=>x.status==="PAID")),pending:sum(active.filter(x=>x.status==="PENDING")),voided:sum(rows.filter(x=>x.status==="VOIDED")),taxDeductible:sum(active.filter(x=>x.taxDeductible))},byCategory:group("category"),byVendor:group("payee"),from:from.toISOString(),to:to.toISOString()}};
+  });
+  server.get("/api/v1/expenses/ledger", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const rows = await prisma.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy:{incurredAt:"desc"} });
+    const ids=rows.map(r=>r.id); const journals=ids.length?await prisma.journalEntry.findMany({where:{tenantId:ctx.tenantId,branchId:ctx.branchId,sourceId:{in:ids}},select:{id: true,journalNumber:true,sourceId:true,sourceType:true,totalDebit:true,totalCredit:true,status:true}}):[];
+    const map=new Map(journals.map(j=>[j.sourceId,j])); return {success:true,data:rows.map(r=>({...normalizeExpenseResponse(r),journalNumber:map.get(r.id)?.journalNumber||null,journalStatus:map.get(r.id)?.status||null}))};
+  });
+  server.get("/api/v1/expenses/audit", async (req) => {
+    const ctx = assertExpenseAuthority(req, "view");
+    const rows = await prisma.auditEvent.findMany({ where:{tenantId:ctx.tenantId,branchId:ctx.branchId,entityType:"Expense"},orderBy:{createdAt:"desc"},take:500 });
+    return {success:true,data:rows};
+  });
 
   // Cash Sessions & Drawer Reconciliation
   server.post("/api/v1/cash-sessions", async (req, reply) => {

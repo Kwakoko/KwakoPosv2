@@ -85,6 +85,10 @@ model Tenant {
   stockCounts            StockCount[]
   productBundles         ProductBundle[]
   wastageRecords         WastageRecord[]
+  expenseCategories      ExpenseCategory[]
+  recurringExpenses      RecurringExpense[]
+  expenseApprovals       ExpenseApproval[]
+  expenseAttachments     ExpenseAttachment[]
 
   devices                Device[]
   @@map("tenants")
@@ -123,6 +127,10 @@ model Branch {
   payments             Payment[]
   cashSessions         CashSession[]
   expenses             Expense[]
+  expenseCategories    ExpenseCategory[]
+  recurringExpenses    RecurringExpense[]
+  expenseApprovals     ExpenseApproval[]
+  expenseAttachments   ExpenseAttachment[]
   priceLists           PriceList[]
   taxes                Tax[]
   accounts             Account[]
@@ -1109,12 +1117,112 @@ model Expense {
   updatedAt      DateTime     @updatedAt
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  cashSession       CashSession?        @relation(fields: [cashSessionId], references: [id])
+  categoryRef       ExpenseCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  approvals         ExpenseApproval[]
+  attachments       ExpenseAttachment[]
+  recurringExpense  RecurringExpense?   @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+
+  categoryId       String?
+  vendorId         String?
+  approvalStatus   String   @default("APPROVED")
+  approvedById     String?
+  approvedAt       DateTime?
+  approvalReason   String?
+  recurringExpenseId String?
 
   @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, incurredAt])
   @@index([tenantId, branchId, status, incurredAt])
   @@map("expenses")
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  expenses    Expense[]
+  recurringExpenses RecurringExpense[]
+  @@unique([tenantId, branchId, code])
+  @@index([tenantId, branchId, isActive])
+  @@map("expense_categories")
+}
+
+model RecurringExpense {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  categoryId     String?
+  vendorId       String?
+  category       String
+  amount         Decimal  @db.Decimal(12, 2)
+  reason         String
+  description    String   @default("")
+  payee          String   @default("")
+  paymentMethod  String   @default("BANK")
+  taxDeductible  Boolean  @default(false)
+  frequency      String
+  nextRunAt      DateTime
+  lastRunAt      DateTime?
+  active         Boolean  @default(true)
+  createdById    String
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  categoryRef    ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  expenses       Expense[]
+  @@index([tenantId, branchId, active, nextRunAt])
+  @@map("recurring_expenses")
+}
+
+model ExpenseApproval {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  expenseId      String   @unique
+  status         String   @default("PENDING")
+  requestedById  String
+  decidedById    String?
+  decidedAt      DateTime?
+  reason         String?
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  expense        Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  @@index([tenantId, branchId, status, createdAt])
+  @@map("expense_approvals")
+}
+
+model ExpenseAttachment {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  expenseId      String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  sha256         String
+  contentBase64  String?  @db.Text
+  createdById    String
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  expense        Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  @@unique([expenseId, sha256])
+  @@index([tenantId, branchId, expenseId, createdAt])
+  @@map("expense_attachments")
 }
 
 model PriceList {

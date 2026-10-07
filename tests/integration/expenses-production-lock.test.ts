@@ -1,0 +1,41 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { buildServer } from "../../apps/api/src/server.js";
+import { hashPassword } from "@kwakopos2/auth";
+import { prisma } from "@kwakopos2/database";
+import { globalLegalGovernanceService } from "../../apps/api/src/services/legalGovernanceService.js";
+describe("Expenses production control loop",()=>{
+ const tenantId=randomUUID(),branchId=randomUUID(),userId=randomUUID(),roleId=randomUUID(),expenseId=randomUUID();
+ let app:any;
+ const headers={"x-tenant-id":tenantId,"x-branch-id":branchId,"x-user-id":userId,"x-device-id":"EXPENSE-LOCK-TEST"};
+ beforeAll(async()=>{
+  await prisma.tenant.create({data:{id:tenantId,name:"Expense Lock Test",slug:"expense-lock-"+tenantId.slice(0,8),status:"ACTIVE"}});
+  await prisma.branch.create({data:{id:branchId,tenantId,name:"Main",code:"MAIN",isMain:true}});
+  await prisma.role.create({data:{id:roleId,tenantId,name:"EXPENSE_LOCK",permissions:["FINANCE_VIEW","FINANCE_CREATE","JOURNAL_REVERSE","FINANCE_APPROVE"]}});
+  await prisma.user.create({data:{id:userId,tenantId,branchId,email:"expense-lock@"+tenantId.slice(0,8)+".test",passwordHash:await hashPassword("ExpenseLock!123"),name:"Expense Lock",roleId,status:"ACTIVE"}});
+  const legal=globalLegalGovernanceService.checkUserAcceptanceStatus(userId,tenantId); for(const d of legal.requiredDocuments) globalLegalGovernanceService.recordAcceptance(userId,tenantId,{documentId:d.documentId,documentVersion:d.requiredVersion,language:"en",acceptanceMethod:"CLICK_WRAP",sessionDeviceRef:"expense-lock"});
+  app=buildServer({productionPersistence:true}); await app.ready();
+ });
+ afterAll(async()=>{await app?.close(); await prisma.tenant.delete({where:{id:tenantId}}).catch(()=>undefined);});
+ it("closes the authoritative control loop",async()=>{
+  const cat=await app.inject({method:"POST",url:"/api/v1/expenses/categories",headers,payload:{code:"UTIL",name:"Utilities"}}); expect(cat.statusCode).toBe(201);
+  const vendor=await app.inject({method:"POST",url:"/api/v1/expenses/vendors",headers,payload:{supplierCode:"EV-001",name:"Expense Vendor"}}); expect(vendor.statusCode).toBe(201);
+  const created=await app.inject({method:"POST",url:"/api/v1/expenses",headers,payload:{id:expenseId,category:"Utilities",categoryId:cat.json().data.id,vendorId:vendor.json().data.id,amount:10000,reason:"Internet",description:"Internet",payee:"Expense Vendor",paymentMethod:"BANK",status:"PENDING",taxDeductible:true,incurredAt:"2026-10-07T04:00:00.000Z",idempotencyKey:"expense-lock-"+expenseId}});
+  expect(created.statusCode).toBe(201); expect(created.json().data.approvalStatus).toBe("PENDING");
+  const blocked=await app.inject({method:"POST",url:"/api/v1/expenses/"+expenseId+"/pay",headers,payload:{paymentMethod:"BANK",idempotencyKey:"pay-"+expenseId}}); expect(blocked.statusCode).toBe(400);
+  const approved=await app.inject({method:"POST",url:"/api/v1/expenses/approvals/"+expenseId+"/approve",headers,payload:{idempotencyKey:"approve-"+expenseId}}); expect(approved.statusCode).toBe(200);
+  const paid=await app.inject({method:"POST",url:"/api/v1/expenses/"+expenseId+"/pay",headers,payload:{paymentMethod:"BANK",idempotencyKey:"pay2-"+expenseId}}); expect(paid.statusCode).toBe(200);
+  const report=await app.inject({method:"GET",url:"/api/v1/expenses/reports",headers}); expect(report.statusCode).toBe(200);
+  const ledger=await app.inject({method:"GET",url:"/api/v1/expenses/ledger",headers}); expect(ledger.statusCode).toBe(200);
+  const audit=await app.inject({method:"GET",url:"/api/v1/expenses/audit",headers}); expect(audit.statusCode).toBe(200);
+  const att=await app.inject({method:"POST",url:"/api/v1/expenses/"+expenseId+"/attachments",headers,payload:{fileName:"receipt.txt",mimeType:"text/plain",contentBase64:Buffer.from("receipt").toString("base64")}}); expect(att.statusCode).toBe(201);
+  const syncedAttachment=Buffer.from("offline receipt").toString("base64");
+  const authoritativeVersion=await prisma.expense.findUnique({where:{id:expenseId},select:{updatedAt:true}}); expect(authoritativeVersion?.updatedAt).toBeTruthy();
+  const attachmentSync=await app.inject({method:"POST",url:"/sync/push",headers,payload:{deviceId:"EXPENSE-OFFLINE-ATTACHMENT",operations:[{operationId:"expense-attachment-op-"+expenseId,idempotencyKey:"expense-attachment-key-"+expenseId,entityType:"Expense",entityId:expenseId,operationType:"UPDATE",clientCreatedAt:"2026-10-07T06:00:00.000Z",payload:{id:expenseId,attachments:[{id:randomUUID(),fileName:"offline-receipt.txt",mimeType:"text/plain",contentBase64:syncedAttachment}],_baseUpdatedAt:authoritativeVersion?.updatedAt.toISOString()}}]}}); expect(attachmentSync.statusCode).toBe(200); expect(attachmentSync.json().data.results[0].status).toBe("SUCCESS");
+  const attachmentCount=await prisma.expenseAttachment.count({where:{expenseId,tenantId,branchId}}); expect(attachmentCount).toBe(2);
+  const content=await app.inject({method:"GET",url:"/api/v1/expenses/"+expenseId+"/attachments/"+att.json().data.id+"/content",headers}); expect(content.statusCode).toBe(200); expect(content.json().data.contentBase64).toBe(Buffer.from("receipt").toString("base64"));
+  const rec=await app.inject({method:"POST",url:"/api/v1/expenses/recurring",headers,payload:{category:"Utilities",amount:15000,reason:"Monthly Internet",description:"Monthly Internet",payee:"Expense Vendor",paymentMethod:"BANK",frequency:"MONTHLY",nextRunAt:"2026-10-07T05:00:00.000Z",vendorId:vendor.json().data.id}});
+  expect(rec.statusCode).toBe(201);
+  const run=await app.inject({method:"POST",url:"/api/v1/expenses/recurring/"+rec.json().data.id+"/run",headers}); expect(run.statusCode).toBe(201);
+ });
+});

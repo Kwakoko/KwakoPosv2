@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
 import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
 import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
@@ -970,6 +970,43 @@ const now = new Date();
 
       const base = getBaseUpdatedAt(op.payload);
       if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: expense changed on server");
+
+      if (payload.approvalStatus === "APPROVED" && existing.approvalStatus !== "APPROVED") {
+        await financeTx.approveExpense(ctx, op.entityId, String(payload.approvalReason || "Approved from synchronized client mutation"));
+      }
+      if (payload.approvalStatus === "REJECTED" && existing.approvalStatus !== "REJECTED") {
+        await financeTx.rejectExpense(ctx, op.entityId, String(payload.approvalReason || "Rejected from synchronized client mutation"));
+        return;
+      }
+
+      if (Array.isArray(payload.attachments)) {
+        for (const attachment of payload.attachments) {
+          const content = String(attachment.contentBase64 || "");
+          if (!content) continue;
+          const buffer = Buffer.from(content, "base64");
+          if (!buffer.length || buffer.length > 5 * 1024 * 1024) throw new Error("EXPENSE_ATTACHMENT_LIMIT_EXCEEDED");
+          const sha256 = createHash("sha256").update(buffer).digest("hex");
+          await tx.expenseAttachment.upsert({
+            where: { expenseId_sha256: { expenseId: op.entityId, sha256 } },
+            create: { id: attachment.id || randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: op.entityId, fileName: String(attachment.fileName || "attachment"), mimeType: String(attachment.mimeType || "application/octet-stream"), sizeBytes: buffer.length, sha256, contentBase64: content, createdById: ctx.userId },
+            update: {},
+          });
+        }
+      }
+
+      if (Array.isArray(payload.attachments)
+        && payload.status === undefined
+        && payload.approvalStatus === undefined
+        && payload.category === undefined
+        && payload.reason === undefined
+        && payload.description === undefined
+        && payload.payee === undefined
+        && payload.paymentMethod === undefined
+        && payload.paymentRef === undefined
+        && payload.taxDeductible === undefined
+        && payload.incurredAt === undefined) {
+        return;
+      }
 
       if (payload.status === "VOIDED") {
         await financeTx.voidExpense(ctx, op.entityId, String(payload.voidReason || payload.reason || "Voided from synchronized client mutation"), {

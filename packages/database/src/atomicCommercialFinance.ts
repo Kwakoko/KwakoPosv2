@@ -450,6 +450,15 @@ export class PrismaAtomicCommercialFinanceService {
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const status = String(req.status || "PAID").toUpperCase();
       if (!["PENDING", "PAID"].includes(status)) throw new Error("INVALID_EXPENSE_STATUS");
+      if (req.categoryId) {
+        const category = await tx.expenseCategory.findFirst({ where: { id: String(req.categoryId), tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+        if (!category) throw new Error("EXPENSE_CATEGORY_NOT_FOUND");
+      }
+      if (req.vendorId) {
+        const vendor = await tx.supplier.findFirst({ where: { id: String(req.vendorId), tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+        if (!vendor) throw new Error("EXPENSE_VENDOR_NOT_FOUND");
+      }
+      const approvalStatus = status === "PENDING" ? "PENDING" : "APPROVED";
       const cashSession = paymentMethod === "CASH" && status === "PAID"
         ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true)
         : null;
@@ -462,7 +471,14 @@ export class PrismaAtomicCommercialFinanceService {
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
           cashSessionId: status === "PAID" && paymentMethod === "CASH" ? (cashSession?.id ?? null) : null,
+          categoryId: req.categoryId || null,
+          vendorId: req.vendorId || null,
           category: req.category,
+          approvalStatus,
+          approvedById: approvalStatus === "APPROVED" ? ctx.userId : null,
+          approvedAt: approvalStatus === "APPROVED" ? now : null,
+          approvalReason: null,
+          recurringExpenseId: req.recurringExpenseId || null,
           amount: req.amount,
           reason: req.reason,
           description: req.description || req.reason,
@@ -476,6 +492,15 @@ export class PrismaAtomicCommercialFinanceService {
           paidAt: status === "PAID" ? now : null,
           idempotencyKey: String(req.idempotencyKey || id),
           incurredAt: req.incurredAt ? new Date(req.incurredAt) : now,
+        },
+      });
+
+      await tx.expenseApproval.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, expenseId: expense.id,
+          status: approvalStatus, requestedById: ctx.userId, decidedById: approvalStatus === "APPROVED" ? ctx.userId : null,
+          decidedAt: approvalStatus === "APPROVED" ? now : null, reason: null,
+          idempotencyKey: `approval-${expense.id}`,
         },
       });
 
@@ -502,9 +527,40 @@ export class PrismaAtomicCommercialFinanceService {
     });
   }
 
+  async approveExpense(ctx: TenantContext, id: string, reason = "Approved by finance") {
+    return this.db.$transaction(async (tx: any) => {
+      await this.lockExpense(tx, ctx, id);
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
+      if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
+      if (expense.approvalStatus === "APPROVED") return expense;
+      const now = new Date();
+      const updated = await tx.expense.update({ where: { id }, data: { approvalStatus: "APPROVED", approvedById: ctx.userId, approvedAt: now, approvalReason: reason } });
+      await tx.expenseApproval.update({ where: { expenseId: id }, data: { status: "APPROVED", decidedById: ctx.userId, decidedAt: now, reason } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "web", action: "EXPENSE_APPROVED", entityType: "Expense", entityId: id, metadata: { reason } } });
+      return updated;
+    });
+  }
+
+  async rejectExpense(ctx: TenantContext, id: string, reason = "Rejected by finance") {
+    return this.db.$transaction(async (tx: any) => {
+      await this.lockExpense(tx, ctx, id);
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
+      if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
+      if (expense.status === "PAID") throw new Error("EXPENSE_ALREADY_PAID");
+      const now = new Date();
+      const updated = await tx.expense.update({ where: { id }, data: { approvalStatus: "REJECTED", approvalReason: reason } });
+      await tx.expenseApproval.update({ where: { expenseId: id }, data: { status: "REJECTED", decidedById: ctx.userId, decidedAt: now, reason } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "web", action: "EXPENSE_REJECTED", entityType: "Expense", entityId: id, metadata: { reason } } });
+      return updated;
+    });
+  }
+
   async getExpenses(ctx: TenantContext) {
     return this.db.expense.findMany({
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      include: { attachments: { select: { id:true,fileName:true,mimeType:true,sizeBytes:true,sha256:true,createdAt:true } }, approvals: true },
       orderBy: { incurredAt: "desc" },
     });
   }
@@ -516,6 +572,7 @@ export class PrismaAtomicCommercialFinanceService {
       if (!expense || expense.tenantId !== ctx.tenantId || expense.branchId !== ctx.branchId) throw new Error("EXPENSE_NOT_FOUND");
       if (expense.status === "VOIDED") throw new Error("EXPENSE_ALREADY_VOIDED");
       if (expense.status === "PAID") return expense;
+      if (expense.approvalStatus !== "APPROVED") throw new Error("EXPENSE_APPROVAL_REQUIRED");
 
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const cashSession = paymentMethod === "CASH" ? await this.resolveCashSession(tx, ctx, req.cashSessionId, true) : null;

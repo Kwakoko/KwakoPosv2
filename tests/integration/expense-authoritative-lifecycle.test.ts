@@ -16,7 +16,7 @@ describe("Expenses — authoritative PostgreSQL lifecycle", () => {
     branchId,
     userId,
     roles: ["FINANCE_MANAGER"],
-    permissions: ["FINANCE_VIEW", "FINANCE_CREATE", "JOURNAL_REVERSE"],
+    permissions: ["FINANCE_VIEW", "FINANCE_CREATE", "FINANCE_APPROVE", "JOURNAL_REVERSE"],
   };
 
   let finance: PrismaAtomicCommercialFinanceService;
@@ -81,6 +81,8 @@ describe("Expenses — authoritative PostgreSQL lifecycle", () => {
     expect(pending.status).toBe("PENDING");
     expect(pending.cashSessionId).toBeNull();
     expect(await prisma.journalEntry.count({ where: { tenantId, branchId, sourceType: "EXPENSE", sourceId: expenseId, isReversal: false } })).toBe(0);
+    const approved = await finance.approveExpense(ctx, expenseId, "Approved for settlement");
+    expect(approved.approvalStatus).toBe("APPROVED");
 
     const paid = await finance.payExpense(ctx, expenseId, {
       paymentMethod: "CASH",
