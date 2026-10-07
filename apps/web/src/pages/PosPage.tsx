@@ -260,10 +260,11 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   }, [db]);
 
   const [selectedCustomer, setSelectedCustomer] = useState("Walk-In Customer");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [showQuickKeys, setShowQuickKeys] = useState(true);
   const [lineDiscountModal, setLineDiscountModal] = useState<{ index: number; itemName: string; currentPercent: number } | null>(null);
   const [customLineDiscountInput, setCustomLineDiscountInput] = useState("");
-  const [customerOptions, setCustomerOptions] = useState<string[]>(["Walk-In Customer"]);
+  const [customerOptions, setCustomerOptions] = useState<Array<{ id: string; name: string; phone?: string }>>([]);
 
   useEffect(() => {
     let active = true;
@@ -272,8 +273,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         await db.ready;
         const custs = Array.from(db.customers.values());
         if (active && custs.length > 0) {
-          const names = custs.map((c: any) => c.name).filter(Boolean);
-          setCustomerOptions((prev) => Array.from(new Set(["Walk-In Customer", ...names, ...prev])));
+          const records = custs
+            .filter((c: any) => c.id && c.name)
+            .map((c: any) => ({ id: String(c.id), name: String(c.name), phone: c.phone ? String(c.phone) : undefined }));
+          setCustomerOptions(records);
         }
       } catch {}
     };
@@ -309,8 +312,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     };
     const tenantContext = { tenantId: currentTenantId, branchId: currentBranchId };
     await commitLocalMutation({ db, tenantContext, entityType: "Customer", entityId: customerId, operationType: "CREATE", payload: newCust, idempotencyKey: customerId, writes: [{ store: "customers", key: customerId, value: newCust }] });
-    setCustomerOptions((prev) => Array.from(new Set([...prev, trimmed])));
+    setCustomerOptions((prev) => prev.some((c) => c.id === customerId) ? prev : [...prev, { id: customerId, name: trimmed, phone: newCustomerPhone.trim() || undefined }]);
     setSelectedCustomer(trimmed);
+    setSelectedCustomerId(customerId);
     setNewCustomerName("");
     setNewCustomerPhone("");
     setQuickCustomerModal(false);
@@ -422,13 +426,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const loadOrders = async () => {
       try {
         await db.ready;
-        const salesArr = Array.from(db.sales.values());
-        if (active && salesArr.length > 0) {
-          setPastOrders(
+        if (isOnline) {
+          const response = await apiFetch<{ success: boolean; data?: any[] }>("/api/v1/pos/sales", { method: "GET" });
+          const remote = Array.isArray(response?.data) ? response.data : [];
+          if (active) {
+            setPastOrders(remote.map((sale: any) => ({
+              ...sale,
+              customer: sale.customer?.name || sale.customerName || "Walk-In Customer",
+              items: sale.lines || sale.items || [],
+            })).sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime()));
+          }
+        } else {
+          const salesArr = Array.from(db.sales.values());
+          if (active) setPastOrders(
             salesArr.sort((a: any, b: any) => new Date(b.soldAt || 0).getTime() - new Date(a.soldAt || 0).getTime())
           );
         }
-      } catch {}
+      } catch {
+        if (active && !isOnline) setPastOrders(Array.from(db.sales.values()));
+      }}
     };
     void loadOrders();
     window.addEventListener(DATA_CHANGED_EVENT, loadOrders);
@@ -436,7 +452,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       active = false;
       window.removeEventListener(DATA_CHANGED_EVENT, loadOrders);
     };
-  }, [db]);
+  }, [db, isOnline]);
 
   // Sidebar Sub-item listener (New Sale, Sales History, Returns)
   useEffect(() => {
@@ -445,6 +461,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       setCart([]);
       setDiscountPercent(0);
       setSelectedCustomer("Walk-In Customer");
+      setSelectedCustomerId(null);
       setIsBackdatedSale(false);
       setBackdatedSaleAt("");
       setIsHistoryModalOpen(false);
@@ -897,7 +914,10 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
 
   const handleResumeCart = (held: HeldCartRecord) => {
     setCart(held.items);
-    if (held.customer) setSelectedCustomer(held.customer);
+    if (held.customer) {
+      setSelectedCustomer(held.customer);
+      setSelectedCustomerId(customerOptions.find((c) => c.name === held.customer)?.id || null);
+    }
     if (typeof held.discountPercent === "number") setDiscountPercent(held.discountPercent);
     if (typeof held.selectedTaxRate === "number") setSelectedTaxRate(held.selectedTaxRate);
     const updated = heldCarts.filter((h) => h.id !== held.id);
@@ -1102,13 +1122,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     const paymentDeviceId = getOrCreatePersistentDeviceId("pos");
 
     const tenantContext = { tenantId: currentTenantId!, branchId: currentBranchId! };
-    const selectedCustomerId = selectedCustomer === "Walk-In Customer"
-      ? null
-      : Array.from(db.customers.values()).find((customer: any) =>
-          customer.tenantId === currentTenantId &&
-          customer.branchId === currentBranchId &&
-          customer.name === selectedCustomer
-        )?.id ?? null;
+    const authoritativeCustomerId = selectedCustomer === "Walk-In Customer" ? null : (
+      selectedCustomerId ||
+      Array.from(db.customers.values()).find((customer: any) =>
+        customer.tenantId === currentTenantId &&
+        customer.branchId === currentBranchId &&
+        customer.name === selectedCustomer
+      )?.id ?? null
+    );
     const traVfdEnabled = Boolean(getTraVfdConfig(db, tenantContext).enabled);
 
     const saleRecord = {
@@ -1121,7 +1142,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       cashSessionId: activeCashSession.id,
       operationId: saleId,
       idempotencyKey: `${paymentDeviceId}/${saleId}`,
-      customerId: selectedCustomerId,
+      customerId: authoritativeCustomerId,
       customer: selectedCustomer,
       customerName: selectedCustomer,
       cashierId: user?.id || "",
@@ -2031,11 +2052,17 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
             <select
               className="v2-input v2-input-sm"
               style={{ flex: 1 }}
-              value={selectedCustomer}
-              onChange={(e) => setSelectedCustomer(e.target.value)}
+              value={selectedCustomerId || ""}
+              onChange={(e) => {
+                const id = e.target.value || null;
+                const record = customerOptions.find((c) => c.id === id);
+                setSelectedCustomerId(id);
+                setSelectedCustomer(record?.name || "Walk-In Customer");
+              }}
             >
+              <option value="">Walk-In Customer</option>
               {customerOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
+                <option key={opt.id} value={opt.id}>{opt.name}{opt.phone ? ` · ${opt.phone}` : ""}</option>
               ))}
             </select>
             <button
