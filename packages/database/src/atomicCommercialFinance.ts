@@ -81,12 +81,26 @@ export class PrismaAtomicCommercialFinanceService {
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
       const variantProductIds = new Map<string, string>();
+      const variantPrices = new Map<string, number>();
+      const variantCosts = new Map<string, number>();
+      let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
         if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
+        const authoritativePrice = Number(v.price);
+        if (authoritativePrice > 0 && Math.abs(Number(item.unitPrice) - authoritativePrice) > 0.005) throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
+        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         variantProductIds.set(item.variantId, v.productId);
+        variantPrices.set(item.variantId, authoritativePrice);
+        variantCosts.set(item.variantId, Number(v.costPrice || 0));
+      }
+      if (saleDiscountRequested) {
+        const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+        const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+        const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") || roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
+        if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
       }
       // Resolve tax from the authoritative tenant/branch Settings row. Client tax values are
       // informational only; production financial fields must be derived server-side.
@@ -111,8 +125,8 @@ export class PrismaAtomicCommercialFinanceService {
 
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
-          unitPrice: item.unitPrice,
-          unitCost: item.unitCost || 0,
+          unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
+          unitCost: Number(variantCosts.get(item.variantId) ?? 0),
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
           taxConfig,
@@ -138,6 +152,7 @@ export class PrismaAtomicCommercialFinanceService {
         })),
         req.discountTotal || 0,
       );
+      if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
       const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
@@ -194,6 +209,16 @@ export class PrismaAtomicCommercialFinanceService {
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
 
+      if (payments.some((p: any) => p.paymentMethod === "CREDIT") && req.customerId) {
+        await tx.customer.update({ where: { id: req.customerId }, data: { currentBalance: { increment: Number(sale.grandTotal) } } });
+      }
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId,
+          action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
+          metadata: { operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldAt: occurredAt.toISOString(), isBackdated },
+        },
+      });
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
       const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;
