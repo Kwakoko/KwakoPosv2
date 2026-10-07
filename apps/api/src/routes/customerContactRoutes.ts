@@ -224,7 +224,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
     const [purchaseOrders, purchaseReceipts, payments, audits] = await Promise.all([
       prisma.purchaseOrder.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, orderNumber: true, status: true, totalAmount: true, orderedAt: true } }),
-      prisma.purchaseReceipt.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, receivedAt: true, status: true } }),
+      prisma.purchaseReceipt.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { receivedAt: "desc" }, take: 200, select: { id: true, receiptNumber: true, receivedAt: true } }),
       prisma.payment.findMany({ where: { supplierId, tenantId: c.tenantId, branchId: c.branchId }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
       prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "Supplier", entityId: supplierId }, orderBy: { createdAt: "desc" }, take: 200 }),
     ]);
