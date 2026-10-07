@@ -93,6 +93,7 @@ import {
   OpenCashSessionRequestSchema,
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
+  CashTransferRequestSchema,
   CreateExpenseRequestSchema,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
