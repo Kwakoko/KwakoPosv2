@@ -2659,12 +2659,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // POS Sales Engine
   const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
     const ctx = requireTenantContext(req);
-    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+    const raw = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+    const permissions = new Set(raw.map((p) => p.toUpperCase()));
+    const permissionsLower = new Set(raw.map((p) => p.toLowerCase()));
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
-    const wildcard = permissions.includes("*");
-    const map: Record<string, string> = { view: "SALE_VIEW", create: "SALE_CREATE", void: "SALE_VOID", return: "SALE_RETURN" };
-    if (!(admin || wildcard || permissions.includes(map[action]))) throw new Error(`FORBIDDEN: ${map[action]} required`);
+    const manager = roles.some((r: string) => ["MANAGER", "BRANCH_MANAGER"].includes(r));
+    const wildcard = permissions.has("*") || permissionsLower.has("*") || permissionsLower.has("sales.*");
+    const allowedByAction: Record<string, boolean> = {
+      view: permissions.has("SALE_VIEW") || permissions.has("SALE_CREATE") || permissionsLower.has("sales.view") || permissionsLower.has("sales.create"),
+      create: permissions.has("SALE_CREATE") || permissionsLower.has("sales.create"),
+      void: permissions.has("SALE_VOID") || permissionsLower.has("sales.void") || permissionsLower.has("sales.cancel"),
+      return: permissions.has("SALE_RETURN") || permissions.has("PAYMENT_REFUND") || permissionsLower.has("sales.return") || permissionsLower.has("sales.refund"),
+    };
+    if (!(admin || manager || wildcard || allowedByAction[action])) throw new Error(`FORBIDDEN: SALE_${action.toUpperCase()} required`);
     return ctx;
   };
 
@@ -2679,10 +2687,12 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreatePosSaleRequestSchema.parse(req.body);
     const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
     if (discountRequested) {
-      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+      const upperPermissions = new Set(permissions.map((p) => p.toUpperCase()));
+      const lowerPermissions = new Set(permissions.map((p) => p.toLowerCase()));
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
-      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER"].includes(r));
-      if (!(manager || permissions.includes("*") || permissions.includes("DISCOUNT_MANAGE"))) {
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+      if (!(manager || upperPermissions.has("*") || lowerPermissions.has("*") || upperPermissions.has("DISCOUNT_MANAGE") || lowerPermissions.has("discount.manage") || lowerPermissions.has("sales.discount"))) {
         throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
       }
     }
@@ -2712,6 +2722,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
     const ctx = assertSalesAuthority(req, "return");
+    const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const refundAuthority = rawPermissions.includes("payment_refund") || rawPermissions.includes("sales.refund") || rawPermissions.includes("sales.return") ||
+      roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+    if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
     const result = await commercialRepository.createSaleReturn(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
