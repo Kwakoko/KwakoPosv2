@@ -98,9 +98,10 @@ const REQUIRED: Array<[string, string, string[]]> = [
     "decisionInfluence",
   ]],
   ["financial-authority", "packages/database/src/atomicCommercialFinance.ts", [
-    "customerCreditAmount",
-    "currentBalance: { increment: customerCreditAmount }",
-    "CUSTOMER_CREDIT_SALE_POSTED",
+    'paymentMethod === "CREDIT"',
+    "currentBalance: { increment: Number(sale.grandTotal) }",
+    "customerCreditLimit",
+    "customerCurrentBalance",
   ]],
   ["supplier-history", "apps/web/src/pages/PurchasingPage.tsx", [
     "supplierHistory",
