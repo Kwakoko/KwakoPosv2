@@ -342,6 +342,7 @@ export class PrismaAtomicCommercialFinanceService {
       });
       if (!sale) throw new Error("SALE_NOT_FOUND");
       if (sale.status === "CANCELLED") return { sale, alreadyVoided: true };
+      if (sale.status !== "COMPLETED") throw new Error("SALE_INVALID_VOID_STATE");
 
       for (const line of sale.lines) {
         const prior = await tx.stockLedger.findMany({
