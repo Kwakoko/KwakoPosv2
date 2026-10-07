@@ -533,7 +533,7 @@ export class PrismaCommercialRepository {
       }
 
       const lookup = await new PrismaAtomicCommercialFinanceService(tx).accounts(tx, ctx);
-      const journal = FinancialBridge.mapSaleReturnToJournal(
+      const journal = FinancialBridge.mapReturnToJournal(
         ctx, record as any, lookup as any, returnedCost,
         (await tx.journalEntry.count({ where: tenantWhere(ctx) })) + 1
       );
