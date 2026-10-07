@@ -696,8 +696,8 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
               </div>
               <div className="v2-flex v2-gap-2 v2-mt-3">
                 <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => void openContactHistory(c)} type="button"><History size={13} /> History</button>
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => openContactForm(c)} type="button"><Edit2 size={13} /></button>
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" style={{ color: "var(--danger)" }} onClick={() => void archiveContact(c)} type="button"><Archive size={13} /></button>
+                <button aria-label={`Edit contact ${c.firstName} ${c.lastName}`} title="Edit contact" className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => openContactForm(c)} type="button"><Edit2 size={13} /></button>
+                <button aria-label={`Archive contact ${c.firstName} ${c.lastName}`} title="Archive contact" className="v2-btn v2-btn-ghost v2-btn-sm" style={{ color: "var(--danger)" }} onClick={() => void archiveContact(c)} type="button"><Archive size={13} /></button>
               </div>
             </div>
           ))}
@@ -732,8 +732,8 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
                 <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => void openTransactions(c)} type="button"><Eye size={13} /> Details</button>
                 {c.outstandingBalance > 0 && <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => openPayment(c)} type="button">Repay</button>}
                 <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => { setSelectedCust(c); setWalletOpen(true); setWalletValue(0); }} type="button"><Wallet size={13} /> Wallet</button>
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => openCustomerForm(c)} type="button"><Edit2 size={13} /></button>
-                <button className="v2-btn v2-btn-ghost v2-btn-sm" style={{ color: "var(--danger)" }} onClick={() => void archiveCustomer(c)} type="button"><Archive size={13} /></button>
+                <button aria-label={`Edit ${targetType} ${c.name}`} title={`Edit ${targetType}`} className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => openCustomerForm(c)} type="button"><Edit2 size={13} /></button>
+                <button aria-label={`Archive ${targetType} ${c.name}`} title={`Archive ${targetType}`} className="v2-btn v2-btn-ghost v2-btn-sm" style={{ color: "var(--danger)" }} onClick={() => void archiveCustomer(c)} type="button"><Archive size={13} /></button>
               </div>
             </div>
           ))}
