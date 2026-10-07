@@ -161,7 +161,8 @@
     "certify:receivables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=receivables",
     "certify:payables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payables",
     "certify:expenses-lock": "tsx scripts/certification/finance-production-lock.ts --scope=expenses",
-    "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments"
+    "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments",
+    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
