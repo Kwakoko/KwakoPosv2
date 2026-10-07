@@ -193,6 +193,32 @@ export class PrismaAtomicCommercialFinanceService {
       const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
+      const customerCreditAmount = payments
+        .filter((p: any) => p.paymentMethod === "CREDIT")
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      if (req.customerId && customerCreditAmount > 0) {
+        await tx.customer.update({
+          where: { id: req.customerId },
+          data: { currentBalance: { increment: customerCreditAmount } },
+        });
+        await tx.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            userId: ctx.userId,
+            deviceId: req.deviceId,
+            action: "CUSTOMER_CREDIT_SALE_POSTED",
+            entityType: "Customer",
+            entityId: req.customerId,
+            metadata: {
+              saleId: sale.id,
+              amount: customerCreditAmount,
+              operationId: req.operationId,
+            },
+          },
+        });
+      }
 
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
