@@ -234,6 +234,28 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     return entries.map(([name, value]) => ({ name, value: amountTotal ? Math.round(Number(value.amount || 0) / amountTotal * 100) : 0, amount: Number(value.amount || 0) }));
   }, [reportMetrics]);
 
+  const supplierSummary = useMemo(() => {
+    const grouped = new Map<string, { supplierId: string; supplierName: string; purchaseOrders: number; totalPurchased: number }>();
+    for (const po of purchaseOrders) {
+      const supplierId = String(po.supplierId || po.supplier?.id || po.supplierName || "UNKNOWN");
+      const current = grouped.get(supplierId) || {
+        supplierId,
+        supplierName: po.supplier?.name || po.supplierName || po.supplier || "Unknown",
+        purchaseOrders: 0,
+        totalPurchased: 0,
+      };
+      current.purchaseOrders += 1;
+      current.totalPurchased += Number(po.totalAmount || po.total || 0);
+      grouped.set(supplierId, current);
+    }
+    return Array.from(grouped.values()).sort((a, b) => b.totalPurchased - a.totalPurchased);
+  }, [purchaseOrders]);
+
+  const payableRows = useMemo(
+    () => Array.isArray(payablesAgingReport?.items) ? payablesAgingReport.items : [],
+    [payablesAgingReport]
+  );
+
   // ─── Empty State Helper ────────────────────────────────────────────────────
   const EmptyState = ({ icon: Icon, title, desc }: { icon: React.ElementType; title: string; desc: string }) => (
     <div className="v2-p-8 v2-text-center">
@@ -244,15 +266,37 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   );
 
   const exportCurrentReportCsv = useCallback(() => {
-    const rows = activeTab === "sales" || activeTab === "profit" || activeTab === "cashier" || activeTab === "branch"
+    const rows = activeTab === "sales"
       ? validSales
+      : activeTab === "profit"
+      ? [
+          { lineItem: "Gross Revenue", amount: totalGrossSales },
+          { lineItem: "COGS", amount: totalCOGS },
+          { lineItem: "Gross Profit", amount: grossProfit },
+          { lineItem: "Expenses", amount: totalExpensesAmt },
+          { lineItem: "Net Operating Profit", amount: netOperatingProfit },
+          { lineItem: "Margin %", amount: marginPct },
+        ]
+      : activeTab === "cashier"
+      ? salesByCashier
+      : activeTab === "branch"
+      ? salesByBranch
       : activeTab === "expenses" ? expenses
       : activeTab === "purchasing" ? purchaseOrders
       : activeTab === "movements" ? stockMovements
       : activeTab === "aging" ? arAgingCustomers
+      : activeTab === "payables" ? payableRows
+      : activeTab === "suppliers" ? supplierSummary
       : activeTab === "returns" ? returnedSales
       : activeTab === "customers" ? customers
-      : activeTab === "inventory" ? products
+      : activeTab === "inventory" ? (inventoryValuation.length ? inventoryValuation : products)
+      : activeTab === "tax" ? validSales.map((sale: any) => ({
+          receiptNumber: sale.receiptNumber || sale.id,
+          soldAt: sale.soldAt || sale.createdAt,
+          grossAmount: sale.grandTotal,
+          taxAmount: sale.taxTotal,
+          fiscalizationState: sale.fiscalizationState || sale.efdStatus,
+        }))
       : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
       : discountedSales;
     const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
@@ -266,7 +310,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales]);
+  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales, inventoryValuation, payableRows, supplierSummary, salesByCashier, salesByBranch, totalGrossSales, totalCOGS, grossProfit, totalExpensesAmt, netOperatingProfit, marginPct]);
 
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
@@ -557,6 +601,29 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
         </div>
       )}
 
+      {/* ── SUPPLIERS ── */}
+      {activeTab === "suppliers" && (
+        <div className="v2-card">
+          <div className="v2-card-header"><div className="v2-card-title">Supplier Report</div></div>
+          {supplierSummary.length === 0 ? (
+            <EmptyState icon={Truck} title="No Supplier Purchasing Activity" desc="Supplier purchasing activity for the selected report period will appear here." />
+          ) : (
+            <table className="v2-table">
+              <thead><tr><th>Supplier</th><th>Purchase Orders</th><th>Total Purchased</th></tr></thead>
+              <tbody>
+                {supplierSummary.map((supplier) => (
+                  <tr key={supplier.supplierId}>
+                    <td className="v2-font-bold">{supplier.supplierName}</td>
+                    <td className="v2-mono">{supplier.purchaseOrders}</td>
+                    <td className="v2-mono v2-font-black">{money(supplier.totalPurchased)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* ── CUSTOMER CREDIT ── */}
       {activeTab === "customers" && (
         <div className="v2-card">
@@ -773,6 +840,40 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                     <td><span className={`badge ${po.status === "RECEIVED" ? "v2-badge-success" : po.status === "CANCELLED" ? "v2-badge-danger" : "v2-badge-warning"}`}>{po.status || "PENDING"}</span></td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── ACCOUNTS PAYABLE AGING ── */}
+      {activeTab === "payables" && (
+        <div className="v2-card">
+          <div className="v2-card-header">
+            <div className="v2-card-title">Accounts Payable Aging Report</div>
+            <div className="v2-text-xs v2-text-muted">
+              As of {reportMetrics?.reportAsOf ? new Date(reportMetrics.reportAsOf).toLocaleString() : "selected period end"}
+            </div>
+          </div>
+          {payableRows.length === 0 ? (
+            <EmptyState icon={AlertTriangle} title="No Outstanding Payables" desc="Supplier balances outstanding at the selected report end date will appear here." />
+          ) : (
+            <table className="v2-table">
+              <thead><tr><th>Supplier</th><th>Outstanding</th><th>Days Outstanding</th><th>Risk</th></tr></thead>
+              <tbody>
+                {payableRows.map((item: any, i: number) => {
+                  const balance = Number(item.totalOutstanding ?? item.balanceDue ?? item.balance ?? 0);
+                  const days = Number(item.daysOutstanding ?? item.maxDaysOutstanding ?? 0);
+                  const risk = days > 90 ? "HIGH" : days > 30 ? "MEDIUM" : "LOW";
+                  return (
+                    <tr key={item.id || item.entityId || i}>
+                      <td className="v2-font-bold">{item.entityName || item.supplierName || item.name || "—"}</td>
+                      <td className="v2-mono v2-font-black v2-text-warning">{money(balance)}</td>
+                      <td className="v2-mono">{days > 0 ? days + " days" : "—"}</td>
+                      <td><span className={"badge " + (risk === "HIGH" ? "v2-badge-danger" : risk === "MEDIUM" ? "v2-badge-warning" : "v2-badge-success")}>{risk}</span></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
