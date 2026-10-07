@@ -43,6 +43,7 @@ const ContactCreateSchema = z.object({
 const ContactUpdateSchema = ContactCreateSchema.omit({ customerId: true, id: true }).partial();
 
 const CustomerPaymentSchema = z.object({
+  idempotencyKey: z.string().trim().min(8).max(128),
   amount: z.number().positive(),
   paymentMethod: z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD", "OTHER"]).default("BANK"),
   provider: z.string().trim().optional(),
@@ -100,6 +101,21 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "CustomerContact" }, orderBy: { createdAt: "desc" }, take: 500 }).then((rows: any[]) => rows.filter((row) => String((row.metadata as any)?.customerId || "") === customerId).slice(0, 200)).catch(() => []),
     ]);
     return { success: true, data: { customer, sales, payments, returns, audits, contactAudits } };
+  });
+
+  server.get("/api/v1/customers/:id/contacts/:contactId/history", async (req) => {
+    requirePermission(req, "CUSTOMER_VIEW", "customers.read");
+    const c = ctx(req);
+    const customerId = String((req.params as any).id);
+    const contactId = String((req.params as any).contactId);
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, tenantId: c.tenantId, branchId: c.branchId } });
+    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+    const rows = await prisma.auditEvent.findMany({
+      where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "CustomerContact", entityId: contactId },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return { success: true, data: rows.filter((row: any) => String((row.metadata as any)?.customerId || "") === customerId) };
   });
 
   server.get("/api/v1/customers/:id/contacts", async (req) => {
@@ -209,7 +225,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       const paymentNumber = payload.idempotencyKey
         ? "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase()
         : "PAY-CUST-" + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const created = await tx.payment.create({ data: { id: paymentId, tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || idemReference || null, status: "COMPLETED", paidAt: new Date() } });
+      const created = await tx.payment.create({ data: { id: paymentId, tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
       await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: payload.amount } } });
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, userId: c.userId, deviceId: "customer-contacts-api", action: "CUSTOMER_PAYMENT_POSTED", entityType: "Customer", entityId: customer.id, metadata: { paymentId: created.id, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null } } });
       return created;
@@ -232,7 +248,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     return { success: true, data: { supplier, purchaseOrders, purchaseReceipts, payments, audits } };
   });
 
-  server.get("/api/v1/customers/export.csv", async (req, reply) =>
+  server.get("/api/v1/customers/export.csv", async (req, reply) => {
     requirePermission(req, "CUSTOMER_VIEW", "customers.read", "REPORT_EXPORT");
     const c = ctx(req);
     const rows = await prisma.customer.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId }, orderBy: { customerCode: "asc" } });
@@ -241,6 +257,21 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const csv = [header.join(","), ...rows.map((r: any) => [r.customerCode,r.name,r.phone,r.email,r.address,r.creditLimit,r.currentBalance,r.status].map(csvCell).join(","))].join("\n") + "\n";
     reply.header("content-type", "text/csv; charset=utf-8");
     reply.header("content-disposition", 'attachment; filename="customers.csv"');
+    return reply.send(csv);
+  });
+
+  server.get("/api/v1/contacts/export.csv", async (req, reply) => {
+    requirePermission(req, "CUSTOMER_VIEW", "customers.read", "REPORT_EXPORT");
+    const c = ctx(req);
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      'SELECT cc.id,cc."customerId",cc."firstName",cc."lastName",cc.title,cc.role,cc.department,cc.phone,cc.email,cc."isPrimary",cc."decisionInfluence",cc.notes,cc.status,c."customerCode",c.name AS "customerName" FROM customer_contacts cc JOIN customers c ON c.id=cc."customerId" AND c."tenantId"=$1 AND c."branchId"=$2 WHERE cc."tenantId"=$1 AND cc."branchId"=$2 ORDER BY c."customerCode",cc."firstName",cc."lastName"',
+      c.tenantId, c.branchId,
+    );
+    await audit(prisma, c, "CONTACT_EXPORT", "CustomerContactDirectory", c.tenantId + ":" + c.branchId, { rowCount: rows.length });
+    const header = ["customerCode","customerName","firstName","lastName","title","role","department","phone","email","isPrimary","decisionInfluence","notes","status"];
+    const csv = [header.join(","), ...rows.map((r:any)=>[r.customerCode,r.customerName,r.firstName,r.lastName,r.title,r.role,r.department,r.phone,r.email,r.isPrimary,r.decisionInfluence,r.notes,r.status].map(csvCell).join(","))].join("\n")+"\n";
+    reply.header("content-type","text/csv; charset=utf-8");
+    reply.header("content-disposition",'attachment; filename="customer-contacts.csv"');
     return reply.send(csv);
   });
 
