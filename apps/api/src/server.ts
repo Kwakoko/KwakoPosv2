@@ -2815,11 +2815,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: result });
   });
 
-  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+  const assertCashDrawerAuthority = (req: any, permission: "view" | "open" | "close" | "move" | "approve") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const canView = admin || permissions.includes("*") || permissions.includes("cashdrawer.view") || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close") || permissions.includes("cashdrawer.move") || permissions.includes("cashdrawer.approve");
+    const allowed = permission === "view"
+      ? canView
+      : admin || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
