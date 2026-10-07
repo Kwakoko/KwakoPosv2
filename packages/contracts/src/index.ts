@@ -1975,6 +1975,7 @@ export const BalanceSheetReportSchema = z.object({
     bankBalances: z.number(),
     accountsReceivable: z.number(),
     inventoryValuation: z.number(),
+    inputVatRecoverable: z.number().default(0),
     totalCurrentAssets: z.number(),
     totalAssets: z.number(),
   }),
