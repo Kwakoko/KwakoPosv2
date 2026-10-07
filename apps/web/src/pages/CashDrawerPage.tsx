@@ -41,7 +41,7 @@ export interface CashMovementRecord {
   time: string;
   type: "OPENING_FLOAT" | "CASH_SALE" | "CASH_REFUND" | "CASH_IN" | "CASH_OUT" | "CASH_TRANSFER_OUT" | "CASH_TRANSFER_IN" | "PETTY_CASH" | "SAFE_DROP" | "BANK_DEPOSIT" | "NO_SALE";
   amount: number;
-  balance: number;
+  balance: number | null;
   reason: string;
   user: string;
   terminal: string;
@@ -266,7 +266,9 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         if (isOnline) {
           try {
             const movementResponse = await apiFetch<{ success: boolean; data: any[] }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/movements`);
-            setLedger(movementResponse?.success && Array.isArray(movementResponse.data) ? movementResponse.data.map((m: any) => ({ id: String(m.id), time: new Date(m.occurredAt).toISOString().replace("T", " ").slice(0, 16), type: m.type, amount: m.type === "CASH_IN" ? Number(m.amount) : -Number(m.amount), balance: 0, reason: String(m.reason || m.type), user: String(m.actorId || ""), terminal: String(m.deviceId || ""), witness: m.witness || undefined, approvalStatus: m.approvalStatus || "APPROVED" })) : []);
+            setLedger(movementResponse?.success && Array.isArray(movementResponse.data) ? movementResponse.data.map((m: any) => ({ id: String(m.id), time: new Date(m.occurredAt).toISOString().replace("T", " ").slice(0, 16), type: m.type,
+              amount: ["CASH_IN", "CASH_TRANSFER_IN"].includes(String(m.type)) ? Number(m.amount) : -Number(m.amount),
+              balance: null, reason: String(m.reason || m.type), user: String(m.actorId || ""), terminal: String(m.deviceId || ""), witness: m.witness || undefined, approvalStatus: m.approvalStatus || "APPROVED" })) : []);
           } catch {
             setLedger([]);
           }
@@ -1453,7 +1455,7 @@ Manager Sign-off:  _____________________
                   <td className={`v2-mono v2-font-bold ${l.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
                     {l.amount > 0 ? `+${money(l.amount)}` : money(l.amount)}
                   </td>
-                  <td className="v2-mono">{money(l.balance)}</td>
+                  <td className="v2-mono">{l.balance === null ? "—" : money(l.balance)}</td>
                   <td className="v2-text-xs">{l.reason}</td>
                   <td className="v2-text-xs v2-text-muted">{l.user}</td>
                   <td>
