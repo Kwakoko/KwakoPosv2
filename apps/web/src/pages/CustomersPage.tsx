@@ -342,7 +342,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     if (!confirm(`Archive ${customer.name}?`)) return;
     try {
       await commitLocalMutation({
-        db, tenantContext: requireTenantBranchContext(): tenantContext, entityType: "Customer", entityId: customer.id, operationType: "UPDATE",
+        db, tenantContext: requireTenantBranchContext(), entityType: "Customer", entityId: customer.id, operationType: "UPDATE",
         payload: { status: "SUSPENDED", _baseUpdatedAt: customer.updatedAt },
         idempotencyKey: uuid(),
         writes: [{ store: "customers", key: customer.id, value: { ...customer, status: "SUSPENDED" } }],
