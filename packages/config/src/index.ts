@@ -156,7 +156,7 @@ export interface CompatibilityMetadata {
 export const CURRENT_COMPATIBILITY: CompatibilityMetadata = {
   databaseSchemaVersion: 4,
   syncProtocolVersion: 2,
-  pwaSchemaVersion: 6,
+  pwaSchemaVersion: 7,
   minSupportedClientVersion: "2.0.0",
   recommendedClientVersion: "2.13.0",
 };
