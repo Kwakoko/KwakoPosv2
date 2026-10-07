@@ -696,6 +696,11 @@ export class WorldStandardPrismaSyncEngine {
       if (op.operationType === "DELETE") {
         if (Number(current.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
         await tx.customer.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
       } else {
         await tx.customer.update({
           where: { id: op.entityId },
@@ -727,6 +732,11 @@ export class WorldStandardPrismaSyncEngine {
       const payload: any = stripSyncControlFields(op.payload as any);
       if (op.operationType === "DELETE") {
         await tx.supplier.update({ where: { id: op.entityId }, data: { status: "INACTIVE" } });
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "SUPPLIER_ARCHIVED", entityType: "Supplier", entityId: op.entityId,
+          metadata: { operationId: op.operationId, previousStatus: current.status },
+        }});
       } else {
         await tx.supplier.update({
           where: { id: op.entityId },
@@ -1185,6 +1195,11 @@ const now = new Date();
           String(payload.phone || "").trim(), String(payload.email || "").trim(), Boolean(payload.isPrimary), String(payload.notes || ""),
           String(payload.decisionInfluence || "INFLUENCER"),
         );
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_CREATED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
         return;
       }
 
@@ -1198,6 +1213,11 @@ const now = new Date();
 
       if (op.operationType === "DELETE") {
         await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3', op.entityId, ctx.tenantId, ctx.branchId);
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: "CONTACT_ARCHIVED", entityType: "CustomerContact", entityId: op.entityId,
+          metadata: { customerId, operationId: op.operationId },
+        }});
         return;
       }
 
