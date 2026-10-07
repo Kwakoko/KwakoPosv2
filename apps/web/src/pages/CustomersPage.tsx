@@ -70,6 +70,7 @@ export const CustomersPage: React.FC = () => {
   const [paymentOpen,setPaymentOpen] = useState(false);
   const [paymentAmount,setPaymentAmount] = useState(0);
   const [paymentMethod,setPaymentMethod] = useState("BANK");
+  const [paymentPosting,setPaymentPosting] = useState(false);
   const [contactOpen,setContactOpen] = useState(false);
   const [editingContact,setEditingContact] = useState<ContactRecord|null>(null);
   const [contactForm,setContactForm] = useState({
