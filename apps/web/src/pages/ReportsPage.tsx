@@ -586,7 +586,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                   const qty = isHistorical ? Number(p.quantity || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0) : Number(p.availableStock || p.totalStock || 0));
                   const stockValue = isHistorical ? Number(p.stockValue || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0) : 0);
                   const cost = isHistorical ? Number(p.averageCost || 0) : (qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0));
-                  const retail = Number(p.sellingPrice || p.price || 0);
+                  const retail = Number(p.retailPrice || p.sellingPrice || p.price || 0);
                   return (
                     <tr key={p.id || p.sku || i}>
                       <td className="v2-mono v2-text-xs">{p.sku || p.barcode || `PRD-${i + 1}`}</td>
