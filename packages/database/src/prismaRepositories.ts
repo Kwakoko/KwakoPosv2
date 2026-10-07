@@ -351,30 +351,34 @@ export class PrismaProductRepository {
     return true;
   }
 
-  async recordPriceChange(ctx: TenantContext, req: any): Promise<any> {
-    const product = await this.getProductById(ctx, req.productId);
+  async recordPriceChange(ctx: TenantContext, req: any, db: any = prisma): Promise<any> {
+    const product = await db.product.findFirst({ where: { id: req.productId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
     if (!product) throw new Error(`Product ${req.productId} not found`);
     const variantId = req.variantId ?? null;
     let previousBuyingPrice = product.buyingPrice;
     let previousSellingPrice = product.sellingPrice;
     if (variantId) {
-      const variant = await prisma.productVariant.findUnique({ where: { id: variantId } });
+      const variant = await db.productVariant.findFirst({ where: { id: variantId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
       if (!variant) throw new Error(`Variant ${variantId} not found`);
-      assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
       previousBuyingPrice = Number(variant.costPrice);
       previousSellingPrice = Number(variant.price);
     }
     const where = { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: req.productId, ...(variantId ? { variantId } : {}) };
-    const latest = await prisma.productPriceHistory.findFirst({ where, orderBy: { versionNumber: 'desc' } });
+    const latest = await db.productPriceHistory.findFirst({ where, orderBy: { versionNumber: 'desc' } });
     const effectiveFrom = new Date(req.effectiveFrom ?? Date.now());
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
-    const row = await prisma.$transaction(async (tx:any) => {
+    const persist = async (tx: any) => {
       await tx.productPriceHistory.updateMany({ where: { ...where, effectiveTo: null }, data: { effectiveTo: effectiveFrom } });
-      const h = await tx.productPriceHistory.upsert({ where: { idempotencyKey: req.idempotencyKey }, create: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: req.productId, variantId, versionNumber, previousBuyingPrice, newBuyingPrice: req.newBuyingPrice, previousSellingPrice, newSellingPrice: req.newSellingPrice, marginAmount: req.newSellingPrice-req.newBuyingPrice, marginPercentage: req.newSellingPrice>0?((req.newSellingPrice-req.newBuyingPrice)/req.newSellingPrice)*100:0, changeType:req.changeType, changeReason:req.changeReason, effectiveFrom, changedByUserId:ctx.userId, deviceId:req.deviceId, idempotencyKey:req.idempotencyKey }, update:{} });
+      const h = await tx.productPriceHistory.upsert({
+        where: { idempotencyKey: req.idempotencyKey },
+        create: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, productId: req.productId, variantId, versionNumber, previousBuyingPrice, newBuyingPrice: req.newBuyingPrice, previousSellingPrice, newSellingPrice: req.newSellingPrice, marginAmount: req.newSellingPrice-req.newBuyingPrice, marginPercentage: req.newSellingPrice>0?((req.newSellingPrice-req.newBuyingPrice)/req.newSellingPrice)*100:0, changeType:req.changeType, changeReason:req.changeReason, effectiveFrom, changedByUserId:ctx.userId, deviceId:req.deviceId, idempotencyKey:req.idempotencyKey },
+        update: {},
+      });
       if (variantId) await tx.productVariant.update({ where:{id:variantId}, data:{costPrice:req.newBuyingPrice, price:req.newSellingPrice} });
       else await tx.product.update({ where:{id:req.productId}, data:{buyingPrice:req.newBuyingPrice,sellingPrice:req.newSellingPrice,currentMarginAmount:req.newSellingPrice-req.newBuyingPrice,currentMarginPercentage:req.newSellingPrice>0?((req.newSellingPrice-req.newBuyingPrice)/req.newSellingPrice)*100:0} });
       return h;
-    });
+    };
+    const row = db === prisma ? await db.$transaction(persist) : await persist(db);
     return { ...row, previousBuyingPrice:Number(row.previousBuyingPrice), newBuyingPrice:Number(row.newBuyingPrice), previousSellingPrice:Number(row.previousSellingPrice), newSellingPrice:Number(row.newSellingPrice), marginAmount:Number(row.marginAmount), marginPercentage:Number(row.marginPercentage), effectiveFrom:row.effectiveFrom.toISOString(), effectiveTo:row.effectiveTo?.toISOString()??null, createdAt:row.createdAt.toISOString() };
   }
 

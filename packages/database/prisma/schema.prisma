@@ -81,6 +81,10 @@ model Tenant {
   traVfdConfigs          TraVfdConfig[]
   traVfdFiscalizations   TraVfdFiscalization[]
   traVfdOutbox           TraVfdOutbox[]
+  stockTransfers         StockTransfer[]
+  stockCounts            StockCount[]
+  productBundles         ProductBundle[]
+  wastageRecords         WastageRecord[]
 
   devices                Device[]
   @@map("tenants")
@@ -150,6 +154,11 @@ model Branch {
   traVfdConfigs        TraVfdConfig[]
   traVfdFiscalizations TraVfdFiscalization[]
   traVfdOutbox         TraVfdOutbox[]
+  stockTransfersFrom  StockTransfer[] @relation("StockTransferSourceBranch")
+  stockTransfersTo    StockTransfer[] @relation("StockTransferDestinationBranch")
+  stockCounts         StockCount[]
+  productBundles      ProductBundle[]
+  wastageRecords      WastageRecord[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -416,6 +425,11 @@ model Product {
   priceHistories          ProductPriceHistory[]
   branchStocks            ProductBranchStock[]
   saleLines               SaleLine[]
+  bundleDefinitions       ProductBundle[] @relation("ProductBundleProduct")
+  stockTransferItems      StockTransferItem[]
+  stockCountItems         StockCountItem[]
+  bundleComponentProducts ProductBundleItem[] @relation("ProductBundleComponentProduct")
+  wastageRecords          WastageRecord[]
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId, branchId])
@@ -458,6 +472,10 @@ model ProductVariant {
   salesOrderItems         SalesOrderItem[]
   saleLines               SaleLine[]
   returnLines             ReturnLine[]
+  stockTransferItems      StockTransferItem[]
+  stockCountItems         StockCountItem[]
+  bundleComponents        ProductBundleItem[]
+  wastageRecords           WastageRecord[]
 
   @@unique([tenantId, branchId, sku])
   @@index([tenantId, branchId, productId])
@@ -575,6 +593,168 @@ model StockAdjustment {
   @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, variantId])
   @@map("stock_adjustments")
+}
+
+model StockTransfer {
+  id                   String @map("id")             @id
+  tenantId             String @map("tenant_id")
+  sourceBranchId       String @map("source_branch_id")
+  destinationBranchId  String @map("destination_branch_id")
+  transferNumber       String @map("transfer_number")
+  status               String @map("status")             @default("DRAFT")
+  notes                String? @map("notes")
+  requestedById        String? @map("requested_by_id")
+  submittedAt          DateTime? @map("submitted_at")
+  receivedAt           DateTime? @map("received_at")
+  receivedById         String? @map("received_by_id")
+  idempotencyKey       String @map("idempotency_key")
+  createdAt            DateTime @map("created_at")           @default(now())
+  updatedAt            DateTime @map("updated_at")           @updatedAt
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceBranch        Branch             @relation("StockTransferSourceBranch", fields: [sourceBranchId], references: [id], onDelete: Cascade)
+  destinationBranch   Branch             @relation("StockTransferDestinationBranch", fields: [destinationBranchId], references: [id], onDelete: Cascade)
+  items               StockTransferItem[]
+  @@unique([tenantId, transferNumber])
+  @@unique([tenantId, sourceBranchId, idempotencyKey])
+  @@index([tenantId, sourceBranchId, status])
+  @@index([tenantId, destinationBranchId, status])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id                   String @map("id")          @id
+  transferId           String @map("transfer_id")
+  productId            String @map("product_id")
+  variantId            String @map("variant_id")
+  quantity             Decimal @map("quantity")         @db.Decimal(12, 4)
+  unitCost             Decimal @map("unit_cost")         @default(0) @db.Decimal(15, 2)
+  createdAt            DateTime @map("created_at")        @default(now())
+  transfer   StockTransfer   @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant    ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  @@index([transferId, variantId])
+  @@map("stock_transfer_items")
+}
+
+model StockCount {
+  id                   String @map("id")          @id
+  tenantId             String @map("tenant_id")
+  branchId             String @map("branch_id")
+  sessionNumber        String @map("session_number")
+  name                 String @map("name")
+  scope                String @map("scope")          @default("FULL_STORE")
+  status               String @map("status")          @default("COUNTING")
+  categoryId           String? @map("category_id")
+  locationId           String? @map("location_id")
+  notes                String? @map("notes")
+  startedAt            DateTime @map("started_at")        @default(now())
+  reconciledAt         DateTime? @map("reconciled_at")
+  postedAt             DateTime? @map("posted_at")
+  createdById          String @map("created_by_id")
+  approvedById         String? @map("approved_by_id")
+  idempotencyKey       String @map("idempotency_key")
+  createdAt            DateTime @map("created_at")        @default(now())
+  updatedAt            DateTime @map("updated_at")        @updatedAt
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  items          StockCountItem[]
+  @@unique([tenantId, branchId, sessionNumber])
+  @@unique([tenantId, branchId, idempotencyKey])
+  @@index([tenantId, branchId, status])
+  @@map("stock_counts")
+}
+
+model StockCountItem {
+  id                   String @map("id")         @id
+  countId              String @map("count_id")
+  productId            String @map("product_id")
+  variantId            String @map("variant_id")
+  sku                  String @map("sku")
+  productName          String @map("product_name")
+  systemQuantity       Decimal @map("system_quantity")        @db.Decimal(12, 4)
+  countedQuantity      Decimal? @map("counted_quantity")       @db.Decimal(12, 4)
+  varianceQuantity     Decimal @map("variance_quantity")        @default(0) @db.Decimal(12, 4)
+  varianceValue        Decimal @map("variance_value")        @default(0) @db.Decimal(15, 2)
+  unitCost             Decimal @map("unit_cost")        @default(0) @db.Decimal(15, 2)
+  countedByUserId      String? @map("counted_by_user_id")
+  countedAt            DateTime? @map("counted_at")
+  notes                String? @map("notes")
+  postedAdjustmentId   String? @map("posted_adjustment_id")
+  createdAt            DateTime @map("created_at")       @default(now())
+  updatedAt            DateTime @map("updated_at")       @updatedAt
+  count               StockCount     @relation(fields: [countId], references: [id], onDelete: Cascade)
+  product             Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant             ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  @@index([countId, variantId])
+  @@map("stock_count_items")
+}
+
+model ProductBundle {
+  id                   String @map("id")             @id
+  tenantId             String @map("tenant_id")
+  branchId             String @map("branch_id")
+  productId            String @map("product_id")
+  name                 String @map("name")
+  status               String @map("status")             @default("ACTIVE")
+  effectiveFrom        DateTime @map("effective_from")           @default(now())
+  effectiveTo          DateTime? @map("effective_to")
+  notes                String? @map("notes")
+  createdById          String? @map("created_by_id")
+  lastAssemblyAt       DateTime? @map("last_assembly_at")
+  idempotencyKey       String @map("idempotency_key")
+  createdAt            DateTime @map("created_at")           @default(now())
+  updatedAt            DateTime @map("updated_at")           @updatedAt
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product            @relation("ProductBundleProduct", fields: [productId], references: [id], onDelete: Cascade)
+  items          ProductBundleItem[]
+  @@unique([tenantId, branchId, idempotencyKey])
+  @@index([tenantId, branchId, productId, status])
+  @@map("product_bundles")
+}
+
+model ProductBundleItem {
+  id                   String @map("id")         @id
+  bundleId             String @map("bundle_id")
+  componentProductId   String @map("component_product_id")
+  componentVariantId   String @map("component_variant_id")
+  quantity             Decimal @map("quantity")        @db.Decimal(12, 4)
+  createdAt            DateTime @map("created_at")       @default(now())
+  bundle             ProductBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  componentProduct   Product        @relation("ProductBundleComponentProduct", fields: [componentProductId], references: [id], onDelete: Cascade)
+  componentVariant   ProductVariant @relation(fields: [componentVariantId], references: [id], onDelete: Cascade)
+  @@index([bundleId, componentVariantId])
+  @@map("product_bundle_items")
+}
+
+model WastageRecord {
+  id                   String @map("id")         @id
+  tenantId             String @map("tenant_id")
+  branchId             String @map("branch_id")
+  productId            String @map("product_id")
+  variantId            String @map("variant_id")
+  quantity             Decimal @map("quantity")        @db.Decimal(12, 4)
+  reason               String @map("reason")
+  notes                String? @map("notes")
+  occurredAt           DateTime @map("occurred_at")       @default(now())
+  unitCost             Decimal @map("unit_cost")        @default(0) @db.Decimal(15, 2)
+  totalCost            Decimal @map("total_cost")        @default(0) @db.Decimal(15, 2)
+  ledgerId             String? @map("ledger_id")
+  status               String @map("status")         @default("POSTED")
+  createdById          String @map("created_by_id")
+  deviceId             String @map("device_id")
+  operationId          String @map("operation_id")
+  idempotencyKey       String @map("idempotency_key")
+  createdAt            DateTime @map("created_at")       @default(now())
+  updatedAt            DateTime @map("updated_at")       @updatedAt
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant        ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  @@unique([tenantId, branchId, idempotencyKey])
+  @@index([tenantId, branchId, occurredAt])
+  @@index([tenantId, branchId, variantId])
+  @@map("wastage_records")
 }
 
 model PurchaseOrder {

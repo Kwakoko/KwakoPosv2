@@ -10,6 +10,7 @@ import {
   persistDomainEvent,
   publishPendingDomainEvents,
 } from "./durableDomainEventBridge.js";
+import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
 
 const MAX_DELTA = 500;
 
@@ -329,12 +330,14 @@ export class WorldStandardPrismaSyncEngine {
     // These business commands can atomically create one or more immutable
     // StockLedger rows. The ledger rows are inventory truth, so every row must be
     // independently replayable by downstream replicas.
-    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction"]);
+    const generatedLedgerTypes = new Set(["StockAdjustment", "Sale", "PurchaseReceipt", "UnitConversionTransaction", "StockTransfer", "StockCount", "ProductBundle", "WastageRecord"]);
     if (!generatedLedgerTypes.has(op.entityType)) return;
 
     const operationIdFilter = op.entityType === "UnitConversionTransaction"
       ? { startsWith: `${op.operationId}-` }
-      : op.operationId;
+      : ["StockTransfer", "StockCount", "ProductBundle"].includes(op.entityType)
+        ? { startsWith: `${op.operationId}:` }
+        : op.operationId;
     const ledgers = await db.stockLedger.findMany({
       where: {
         tenantId: ctx.tenantId,
@@ -392,12 +395,12 @@ export class WorldStandardPrismaSyncEngine {
          FROM sync_operations so
         WHERE so.tenant_id = $1 AND so.branch_id = $2 AND so.status = 'PROCESSED'
           AND so.operation_type = 'CREATE'
-          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction')
+          AND so.entity_type IN ('StockAdjustment', 'Sale', 'PurchaseReceipt', 'UnitConversionTransaction', 'StockTransfer', 'StockCount', 'ProductBundle', 'WastageRecord')
           AND NOT EXISTS (
             SELECT 1 FROM sync_change_journal cj
              WHERE cj.tenant_id = so.tenant_id
                AND cj.branch_id = so.branch_id
-               AND cj.operation_id LIKE so.operation_id || ':ledger:%'
+               AND (cj.operation_id LIKE so.operation_id || ':%' OR cj.operation_id LIKE so.operation_id || '-%')
           )
         ORDER BY so.created_at ASC LIMIT 1000`,
       ctx.tenantId, ctx.branchId,
@@ -426,6 +429,8 @@ export class WorldStandardPrismaSyncEngine {
     if (preconditionedEntities.has(op.entityType) && ["UPDATE", "DELETE"].includes(op.operationType)) {
       requireBaseUpdatedAt(op.payload, op.entityType);
     }
+
+    if (await applyInventoryProductionLockOperation(ctx, req, op, tx, (priceCtx, priceReq, priceDb) => this.productRepo.recordPriceChange(priceCtx, priceReq, priceDb))) return;
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);
@@ -1513,7 +1518,11 @@ const now = new Date();
       const priceHistories = await tx.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { effectiveFrom: "asc" } });
       const settings = await tx.setting.findMany({ where: { tenantId: ctx.tenantId, isActive: true, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] }, orderBy: { updatedAt: "asc" } });
       const expenses = (await tx.expense.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { incurredAt: "asc" } })).map(expenseShape);
-      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses };
+      const stockTransfers = await tx.stockTransfer.findMany({ where: { tenantId: ctx.tenantId, OR: [{ sourceBranchId: ctx.branchId }, { destinationBranchId: ctx.branchId }] }, include: { items: true }, orderBy: { createdAt: "asc" } });
+      const stockCounts = await tx.stockCount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { createdAt: "asc" } });
+      const productBundles = await tx.productBundle.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { items: true }, orderBy: { createdAt: "asc" } });
+      const wastageRecords = await tx.wastageRecord.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
+      const payload = { products, variants, stockLedger, adjustments, customers, suppliers, categories, brands, sales, payments, purchaseReceipts, priceHistories, settings, expenses, stockTransfers, stockCounts, productBundles, wastageRecords };
       const entityCounts = Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
       return { tenantId: ctx.tenantId, branchId: ctx.branchId, snapshotTimestamp, serverRevision: snapshotRevision, syncEpoch, integrityChecksum: computePayloadChecksum(payload), schemaVersion: req.schemaVersion || 4, entityCounts, ...payload };
     });
@@ -1570,6 +1579,10 @@ const now = new Date();
       categories: await prisma.category.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       brands: await prisma.brand.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       priceHistories: (await prisma.productPriceHistory.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, createdAt: { gte: since, lte: anchor } } })).map((h: any) => ({ ...h, previousBuyingPrice: Number(h.previousBuyingPrice), newBuyingPrice: Number(h.newBuyingPrice), previousSellingPrice: Number(h.previousSellingPrice), newSellingPrice: Number(h.newSellingPrice), marginAmount: Number(h.marginAmount), marginPercentage: Number(h.marginPercentage) })),
+      stockTransfers: await prisma.stockTransfer.findMany({ where: { tenantId: ctx.tenantId, OR: [{ sourceBranchId: ctx.branchId }, { destinationBranchId: ctx.branchId }], updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
+      stockCounts: await prisma.stockCount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
+      productBundles: await prisma.productBundle.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, include: { items: true }, orderBy: { updatedAt: "asc" } }),
+      wastageRecords: await prisma.wastageRecord.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } }, orderBy: { updatedAt: "asc" } }),
       settings: (await prisma.setting.findMany({
         where: { tenantId: ctx.tenantId, updatedAt: { gte: since, lte: anchor }, OR: [{ scope: "TENANT" }, { scope: "BRANCH", branchId: ctx.branchId }, { scope: "USER", userId: ctx.userId }] },
         orderBy: { updatedAt: "asc" },

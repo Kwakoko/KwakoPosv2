@@ -712,6 +712,9 @@ export class LocalIndexedDbStore {
     if (ctx?.tenantId && (!product.tenantId || product.tenantId !== ctx.tenantId)) {
       product = { ...product, tenantId: ctx.tenantId };
     }
+    if (ctx?.branchId && (!(product as any).branchId || (product as any).branchId !== ctx.branchId)) {
+      product = { ...product, branchId: ctx.branchId } as any;
+    }
 
     // World-class Product-Variant First Architecture: deterministic stock derivation
     if (product.variants && product.variants.length > 0) {
@@ -741,8 +744,11 @@ export class LocalIndexedDbStore {
   }
 
   saveVariantLocal(variant: ProductVariant, ctx?: TenantScopedContext): void {
-    if (ctx?.tenantId && !(variant as any).tenantId) {
+    if (ctx?.tenantId && (!(variant as any).tenantId || (variant as any).tenantId !== ctx.tenantId)) {
       variant = { ...variant, tenantId: ctx.tenantId } as any;
+    }
+    if (ctx?.branchId && (!(variant as any).branchId || (variant as any).branchId !== ctx.branchId)) {
+      variant = { ...variant, branchId: ctx.branchId } as any;
     }
     this.productVariants.set(variant.id, variant);
     this.persist("productVariants", variant.id, variant);
@@ -798,6 +804,9 @@ export class LocalIndexedDbStore {
     if (ctx?.tenantId && (!entry.tenantId || entry.tenantId !== ctx.tenantId)) {
       entry = { ...entry, tenantId: ctx.tenantId };
     }
+    if (ctx?.branchId && (!entry.branchId || entry.branchId !== ctx.branchId)) {
+      entry = { ...entry, branchId: ctx.branchId };
+    }
     this.stockLedger.set(entry.id, entry);
     this.persist("stockLedger", entry.id, entry);
   }
@@ -806,19 +815,31 @@ export class LocalIndexedDbStore {
     if (ctx?.tenantId && (!adjustment.tenantId || adjustment.tenantId !== ctx.tenantId)) {
       adjustment = { ...adjustment, tenantId: ctx.tenantId };
     }
+    if (ctx?.branchId && (!adjustment.branchId || adjustment.branchId !== ctx.branchId)) {
+      adjustment = { ...adjustment, branchId: ctx.branchId };
+    }
     this.stockAdjustments.set(adjustment.id, adjustment);
     this.persist("stockAdjustments", adjustment.id, adjustment);
   }
 
   saveStockBalanceLocal(balance: ProductBranchStock, ctx?: TenantScopedContext): void {
-    if (ctx?.tenantId && !(balance as any).tenantId) {
+    if (ctx?.tenantId && (!(balance as any).tenantId || (balance as any).tenantId !== ctx.tenantId)) {
       balance = { ...balance, tenantId: ctx.tenantId } as any;
+    }
+    if (ctx?.branchId && (!(balance as any).branchId || (balance as any).branchId !== ctx.branchId)) {
+      balance = { ...balance, branchId: ctx.branchId } as any;
     }
     this.stockBalance.set(balance.id, balance);
     this.persist("stockBalance", balance.id, balance);
   }
 
   saveProductPriceHistoryLocal(history: ProductPriceHistory, ctx?: TenantScopedContext): void {
+    if (ctx?.tenantId && (!history.tenantId || history.tenantId !== ctx.tenantId)) {
+      history = { ...history, tenantId: ctx.tenantId };
+    }
+    if (ctx?.branchId && (!history.branchId || history.branchId !== ctx.branchId)) {
+      history = { ...history, branchId: ctx.branchId };
+    }
     this.productPriceHistory.set(history.id, history);
     this.persist("productPriceHistory", history.id, history);
   }
@@ -1383,7 +1404,37 @@ export class LocalIndexedDbStore {
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
     const expenses = Array.isArray((delta as any).expenses) ? (delta as any).expenses : [];
     const settings = Array.isArray((delta as any).settings) ? (delta as any).settings : [];
+    const inventoryChanges = Array.isArray((delta as any).changes) ? (delta as any).changes.filter((c: any) =>
+      ["StockTransfer", "StockCount", "ProductBundle", "WastageRecord", "ProductPriceHistory"].includes(String(c?.entityType || "")),
+    ) : [];
     let appliedCount = 0;
+    const applyInventoryChange = (change: any) => {
+      const record = change?.record;
+      if (!record) return;
+      const tenantId = String(record.tenantId || "");
+      if (!tenantId) return;
+      const entityType = String(change.entityType);
+      const branchIds = entityType === "StockTransfer"
+        ? [String(record.sourceBranchId || ""), String(record.destinationBranchId || "")].filter(Boolean)
+        : [String(record.branchId || "")].filter(Boolean);
+      for (const branchId of branchIds) {
+        const key = `inventory:ops:${entityType}`;
+        const existing = this.getConfigurationLocal(key, { tenantId, branchId });
+        const rows = Array.isArray(existing) ? [...existing] : [];
+        const index = rows.findIndex((row: any) => String(row.id) === String(change.entityId));
+        if (change.operationType === "DELETE" || record._deleted) {
+          if (index >= 0) rows.splice(index, 1);
+        } else if (index >= 0) {
+          rows[index] = record;
+        } else {
+          rows.unshift(record);
+        }
+        this.saveConfigurationLocal(key, rows.slice(0, 500), { tenantId, branchId });
+      }
+      appliedCount += 1;
+    };
+
+    for (const change of inventoryChanges) applyInventoryChange(change);
 
     if (!this.nativeDb) {
       for (const product of products) {
@@ -1639,6 +1690,10 @@ export class LocalIndexedDbStore {
     const purchaseReceipts = Array.isArray((snapshot as any).purchaseReceipts) ? (snapshot as any).purchaseReceipts : [];
     const expenses = Array.isArray((snapshot as any).expenses) ? (snapshot as any).expenses : [];
     const settings = Array.isArray((snapshot as any).settings) ? (snapshot as any).settings : [];
+    const stockTransfers = Array.isArray((snapshot as any).stockTransfers) ? (snapshot as any).stockTransfers : [];
+    const stockCounts = Array.isArray((snapshot as any).stockCounts) ? (snapshot as any).stockCounts : [];
+    const productBundles = Array.isArray((snapshot as any).productBundles) ? (snapshot as any).productBundles : [];
+    const wastageRecords = Array.isArray((snapshot as any).wastageRecords) ? (snapshot as any).wastageRecords : [];
 
     const tenantId = String(ctx?.tenantId || (snapshot as any).tenantId || products[0]?.tenantId || "");
     const branchId = String(ctx?.branchId || (snapshot as any).branchId || products[0]?.branchId || "branch-default");
@@ -1742,6 +1797,10 @@ export class LocalIndexedDbStore {
     if (!pendingCatalogTypes.has("Category")) allConfig.set(tenantId + ":" + branchId + ":inventory_categories_meta", categoryValue);
     if (!pendingCatalogTypes.has("Brand")) allConfig.set(tenantId + ":" + branchId + ":inventory_brands_meta", brandValue);
     allConfig.set(tenantId + ":" + branchId + ":expenses", expenseValue);
+    if (stockTransfers.length) allConfig.set(tenantId + ":" + branchId + ":inventory:ops:StockTransfer", { key: "inventory:ops:StockTransfer", value: stockTransfers, tenantId, branchId });
+    if (stockCounts.length) allConfig.set(tenantId + ":" + branchId + ":inventory:ops:StockCount", { key: "inventory:ops:StockCount", value: stockCounts, tenantId, branchId });
+    if (productBundles.length) allConfig.set(tenantId + ":" + branchId + ":inventory:ops:ProductBundle", { key: "inventory:ops:ProductBundle", value: productBundles, tenantId, branchId });
+    if (wastageRecords.length) allConfig.set(tenantId + ":" + branchId + ":inventory:ops:WastageRecord", { key: "inventory:ops:WastageRecord", value: wastageRecords, tenantId, branchId });
     for (const prodId of this.products.keys()) this.recalculateProductStockLocal(prodId);
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastSyncTime"), snapshot.snapshotTimestamp);
     this.syncMetadata.set(this.scopedSyncKey(tenantId, branchId, "lastBootstrapTime"), snapshot.snapshotTimestamp);
