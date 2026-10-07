@@ -334,6 +334,129 @@ export class PrismaAtomicCommercialFinanceService {
     });
   }
 
+  async voidSale(ctx: TenantContext, saleId: string, reason: string, req: any = {}) {
+    return this.db.$transaction(async (tx: any) => {
+      const sale = await tx.sale.findFirst({
+        where: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+        include: { lines: true, payments: true },
+      });
+      if (!sale) throw new Error("SALE_NOT_FOUND");
+      if (sale.status === "CANCELLED") return { sale, alreadyVoided: true };
+
+      for (const line of sale.lines) {
+        const prior = await tx.stockLedger.findMany({
+          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId },
+          orderBy: { occurredAt: "asc" },
+        });
+        const before = calculateAvailableStock(prior as any);
+        const key = `SALE-VOID-${sale.id}-${line.variantId}`;
+        const exists = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: key } });
+        if (exists) continue;
+        const quantity = Math.abs(Number(line.quantity));
+        await tx.stockLedger.create({
+          data: {
+            id: randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: line.productId,
+            variantId: line.variantId,
+            movementType: "SALE_VOID",
+            quantityChange: quantity,
+            quantity,
+            quantityBefore: before,
+            quantityAfter: before + quantity,
+            unitCost: Number(line.unitCost || 0),
+            totalCost: quantity * Number(line.unitCost || 0),
+            referenceType: "SALE_VOID",
+            referenceId: sale.id,
+            occurredAt: new Date(),
+            deviceId: req.deviceId || "web",
+            operationId: req.operationId || sale.id,
+            idempotencyKey: key,
+            notes: reason,
+          },
+        });
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, line.productId);
+      }
+
+      for (const payment of sale.payments.filter((p: any) => p.status === "COMPLETED")) {
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+        if (payment.paymentMethod === "CASH" && sale.cashSessionId) {
+          const key = `SALE-VOID-CASH-${payment.id}`;
+          const exists = await tx.cashMovement.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: key } });
+          if (!exists) {
+            await tx.cashMovement.create({
+              data: {
+                id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: sale.cashSessionId,
+                type: "CASH_OUT", amount: payment.amount, reason: `Void ${sale.saleNumber}`,
+                deviceId: req.deviceId || "web", actorId: ctx.userId, approvalStatus: "APPROVED",
+                idempotencyKey: key, occurredAt: new Date(),
+              },
+            });
+            await tx.cashSession.update({ where: { id: sale.cashSessionId }, data: { cashRefundsTotal: { increment: Number(payment.amount) } } });
+          }
+        }
+      }
+
+      if (sale.customerId && sale.payments.some((p: any) => p.paymentMethod === "CREDIT")) {
+        await tx.customer.update({ where: { id: sale.customerId }, data: { currentBalance: { decrement: Number(sale.grandTotal) } } });
+      }
+
+      const original = await tx.journalEntry.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "SALE", sourceId: sale.id },
+        include: { lines: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (original && !(await tx.journalEntry.findUnique({ where: { idempotencyKey: `jrn-sale-void-${sale.id}` } }).catch(() => null))) {
+        await this.writeJournal(tx, ctx, {
+          journal: {
+            id: randomUUID(),
+            journalNumber: `JRN-VOID-${sale.id.slice(0, 8).toUpperCase()}`,
+            entryDate: new Date().toISOString(),
+            postingDate: new Date().toISOString(),
+            sourceType: "REVERSAL",
+            sourceId: sale.id,
+            description: `Void Sale ${sale.saleNumber}`,
+            currency: "TZS",
+            exchangeRate: 1,
+            totalDebit: Number(original.totalCredit),
+            totalCredit: Number(original.totalDebit),
+            isReversal: true,
+            reversalOfJournalId: original.id,
+            reversalReason: reason,
+            idempotencyKey: `jrn-sale-void-${sale.id}`,
+          },
+          lines: (original.lines || []).map((l: any) => ({
+            id: randomUUID(),
+            accountId: l.accountId,
+            costCenterId: l.costCenterId ?? null,
+            description: `Void reversal ${sale.saleNumber}`,
+            debit: Number(l.credit),
+            credit: Number(l.debit),
+            currency: l.currency || "TZS",
+            exchangeRate: Number(l.exchangeRate || 1),
+          })),
+        });
+      }
+
+      const updated = await tx.sale.update({
+        where: { id: sale.id },
+        data: { status: "CANCELLED" },
+        include: { lines: true, payments: true },
+      });
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId || "web", action: "SALE_VOIDED", entityType: "Sale", entityId: sale.id,
+          metadata: { reason, operationId: req.operationId || sale.id, idempotencyKey: req.idempotencyKey || sale.id },
+        },
+      });
+      return { sale: updated, alreadyVoided: false };
+    });
+  }
+
   async createPurchaseReceipt(ctx: TenantContext, req: any) {
     return this.db.$transaction(async (tx: any) => {
       const supplier = await tx.supplier.findUnique({ where: { id: req.supplierId } }); if (!supplier || supplier.tenantId !== ctx.tenantId || supplier.branchId !== ctx.branchId) throw new Error("FINANCE_SUPPLIER_BOUNDARY_VIOLATION");
