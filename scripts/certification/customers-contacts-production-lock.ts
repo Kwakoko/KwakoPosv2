@@ -115,7 +115,11 @@ const REQUIRED: Array<[string, string, string[]]> = [
   ]],
   ["migration", "apps/web/src/persistence/migrationEngine.ts", [
     "V6 -> V7",
+    "toVersion >= 7 && fromVersion < 7",
     'createObjectStore("contacts")',
+  ]],
+  ["release-manifest", "release-manifest.json", [
+    '"pwaSchemaVersion": 7',
   ]],
   ["release-compatibility", "apps/web/src/persistence/releaseCompatibility.ts", [
     "schemaVersion: 7",
