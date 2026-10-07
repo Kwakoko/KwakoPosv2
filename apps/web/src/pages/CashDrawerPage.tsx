@@ -1449,7 +1449,6 @@ Manager Sign-off:  _____________________
 
       {/* ─── TAB 8: CASH MOVEMENT LEDGER ───────────────────────────────────────── */}
       {activeTab === "ledger" && (
-        <>
         <div className="v2-card">
           <div className="v2-card-header v2-flex v2-items-center v2-justify-between">
             <div className="v2-card-title">Immutable Cash Movement Ledger ({ledger.length} entries)</div>
@@ -1495,7 +1494,6 @@ Manager Sign-off:  _____________________
               ))}
             </tbody>
           </table>
-        </div>
           <div className="v2-card v2-mt-4">
             <div className="v2-card-header"><div className="v2-card-title">Authoritative Cash Audit Trail ({cashAuditTrail.length} events)</div></div>
             <table className="v2-table">
@@ -1514,7 +1512,6 @@ Manager Sign-off:  _____________________
             </table>
           </div>
         </div>
-        </>
       )}
 
       {/* ─── TAB 9: SHIFT RECORDS HISTORY ──────────────────────────────────────── */}
