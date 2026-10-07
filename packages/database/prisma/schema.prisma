@@ -815,6 +815,7 @@ model Payment {
 
 model CashSession {
   id                String    @id @default(uuid())
+  registerCode      String?
   tenantId          String
   branchId          String
   sessionNumber     String
@@ -845,6 +846,7 @@ model CashSession {
   cashMovements     CashMovement[]
 
   @@unique([tenantId, branchId, sessionNumber])
+  @@index([tenantId, branchId, registerCode])
   @@index([tenantId, branchId, cashierId])
   @@map("cash_sessions")
 }
