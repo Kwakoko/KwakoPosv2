@@ -114,7 +114,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { name: "Cash Drawer", subItems: ["Shift & Active Register", "Cash Movement Ledger", "Denomination Calculator", "Reconciliation & Variances", "Safe & Bank Deposits", "No Sale & Event Logs", "15 Financial Reports", "Security & RBAC Rules", "AI Cash Advisor"] },
       { name: "Inventory", subItems: ["Inventory Overview", "Products", "Categories & Brands", "Stock Adjustment", "Stock Transfer", "Stock Alerts", "Stock Sync Engine", "Product Bundles & Kits", "Stock Count", "Ledger Drilldown", "Wastage & Spillage", "Inventory Reports"] },
       { name: "Receipts", subItems: ["Receipt History", "Receipt Viewer", "Receipt Templates", "Receipt Analytics", "Receipt Verification", "Receipt Archive"] },
-      "Customers",
+      { name: "Customers", subItems: ["Customer Directory", "Contacts", "Customer Transactions", "Import / Export"] },
       { name: "Purchasing", subItems: ["Suppliers", "Purchase Orders", "Goods Received", "Supplier Ledgers", "Warehouses"] },
       "Expenses",
       { name: "Reports", subItems: ["Sales", "Profit", "Inventory Valuation", "Tax", "Customers Report", "Expenses Report", "Payment Methods", "Stock Movement", "Purchasing Report", "Discounts", "Returns & Refunds", "Branch Comparison", "Cashier Performance", "Receivables Aging"] },
