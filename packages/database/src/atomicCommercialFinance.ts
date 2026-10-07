@@ -81,6 +81,7 @@ export class PrismaAtomicCommercialFinanceService {
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
       const variantProductIds = new Map<string, string>();
+      const variantPrices = new Map<string, number>();
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
@@ -94,6 +95,7 @@ export class PrismaAtomicCommercialFinanceService {
         }
         if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         variantProductIds.set(item.variantId, v.productId);
+        variantPrices.set(item.variantId, authoritativePrice);
       }
       if (saleDiscountRequested) {
         const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
@@ -125,7 +127,7 @@ export class PrismaAtomicCommercialFinanceService {
 
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
-          unitPrice: Number((await tx.productVariant.findUnique({ where: { id: item.variantId } }))?.price ?? item.unitPrice),
+          unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
           unitCost: item.unitCost || 0,
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
