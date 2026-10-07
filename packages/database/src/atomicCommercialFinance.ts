@@ -82,6 +82,7 @@ export class PrismaAtomicCommercialFinanceService {
       }
       const variantProductIds = new Map<string, string>();
       const variantPrices = new Map<string, number>();
+      const variantCosts = new Map<string, number>();
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
@@ -96,6 +97,7 @@ export class PrismaAtomicCommercialFinanceService {
         if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         variantProductIds.set(item.variantId, v.productId);
         variantPrices.set(item.variantId, authoritativePrice);
+        variantCosts.set(item.variantId, Number(v.costPrice || 0));
       }
       if (saleDiscountRequested) {
         const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
@@ -128,7 +130,7 @@ export class PrismaAtomicCommercialFinanceService {
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
           unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
-          unitCost: item.unitCost || 0,
+          unitCost: Number(variantCosts.get(item.variantId) ?? 0),
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
           taxConfig,
@@ -176,7 +178,8 @@ export class PrismaAtomicCommercialFinanceService {
           grossProfit: Number((adjustedGrandTotal - Number(totals.totalCost)).toFixed(2)),
         };
       }
-      const saleId = req.id || crypto.randomUUID(); const now = new Date();
+      if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
+            const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
       const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
       if (req.isBackdated && !req.occurredAt) throw new Error("BACKDATED_SALE_DATE_REQUIRED");
