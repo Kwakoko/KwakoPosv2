@@ -26,7 +26,7 @@ import { countUniqueLocalConflictIds } from "./services/syncConflictPresentation
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
-const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
+const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "customerContacts", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
 type KnownStore = typeof KNOWN_STORES[number];
 
 function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
@@ -123,6 +123,7 @@ export async function applyRevisionedChanges(
       case "StockLedger": return "stockLedger";
       case "StockAdjustment": return "stockAdjustments";
       case "Customer": return "customers";
+      case "CustomerContact": return "customerContacts";
       case "Supplier": return "suppliers";
       case "ProductPriceHistory": return "productPriceHistory";
       case "Sale": return "sales";
