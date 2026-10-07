@@ -38,8 +38,8 @@ import { productionCleanupService } from "../services/productionCleanupService.j
 
 type ReportTab =
   | "sales" | "profit" | "cashier" | "payment" | "inventory"
-  | "customers" | "returns" | "branch" | "tax" | "discount"
-  | "expenses" | "movements" | "purchasing" | "aging";
+  | "customers" | "suppliers" | "returns" | "branch" | "tax" | "discount"
+  | "expenses" | "movements" | "purchasing" | "aging" | "payables";
 
 const money = (v: number) =>
   v >= 1_000_000 ? `Tsh ${(v / 1_000_000).toFixed(2)}M`
@@ -60,15 +60,20 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [expenses, setExpenses] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [stockMovements, setStockMovements] = useState<any[]>([]);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
+  const [inventoryValuation, setInventoryValuation] = useState<any[]>([]);
+  const [receivablesAgingReport, setReceivablesAgingReport] = useState<any>(null);
+  const [payablesAgingReport, setPayablesAgingReport] = useState<any>(null);
   const [reportBranches, setReportBranches] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportMetrics, setReportMetrics] = useState<any>(null);
   const [dateRange, setDateRange] = useState("this_month");
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState("current");
   const [showPillarsInfo, setShowPillarsInfo] = useState(false);
   const isProductionLocked = productionCleanupService.isProductionLocked();
 
@@ -81,6 +86,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "payment": "Payment Methods",
       "inventory": "Inventory Valuation",
       "customers": "Customers Report",
+      "suppliers": "Suppliers Report",
       "returns": "Returns & Refunds",
       "branch": "Branch Comparison",
       "tax": "Tax",
@@ -89,6 +95,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "movements": "Stock Movement",
       "purchasing": "Purchasing Report",
       "aging": "Receivables Aging",
+      "payables": "Payables Aging",
     };
     setGlobalActiveTab(globalTab[tab]);
   }, [setGlobalActiveTab]);
@@ -103,6 +110,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "Payment Methods": "payment",
       "Inventory Valuation": "inventory",
       "Customers Report": "customers",
+      "Suppliers Report": "suppliers",
       "Returns & Refunds": "returns",
       "Branch Comparison": "branch",
       "Tax": "tax",
@@ -113,6 +121,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       "Stock Movement": "movements",
       "Purchasing Report": "purchasing",
       "Receivables Aging": "aging",
+      "Payables Aging": "payables",
     };
     if (map[propActiveTab]) {
       setActiveTab(map[propActiveTab]);
@@ -125,13 +134,15 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     setReportLoading(true); setReportError(null);
     try {
       let branchId: string | null = null;
+      const params = new URLSearchParams({ range: dateRange });
       if (branchFilter === "hq") {
         const main = reportBranches.find((b: any) => b.isMain);
         branchId = main?.id || null;
         if (!branchId) throw new Error("REPORT_MAIN_BRANCH_NOT_FOUND");
+        params.set("branchId", branchId);
+      } else if (branchFilter === "all") {
+        params.set("allBranches", "true");
       }
-      const params = new URLSearchParams({ range: dateRange });
-      if (branchId) params.set("branchId", branchId);
       const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/reports/data?${params.toString()}`);
       if (!response?.success || !response.data) throw new Error("REPORT_DATA_UNAVAILABLE");
       const data = response.data;
@@ -140,16 +151,22 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
       setProducts(Array.isArray(data.products) ? data.products : []);
       setCustomers(Array.isArray(data.customers) ? data.customers : []);
+      setSuppliers(Array.isArray(data.suppliers) ? data.suppliers : []);
       setPurchaseOrders(Array.isArray(data.purchaseOrders) ? data.purchaseOrders : []);
       setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : []);
       setInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setSupplierInvoices(Array.isArray(data.supplierInvoices) ? data.supplierInvoices : []);
+      setInventoryValuation(Array.isArray(data.inventoryValuation) ? data.inventoryValuation : []);
+      setReceivablesAgingReport(data.receivablesAging || null);
+      setPayablesAgingReport(data.payablesAging || null);
       setReportBranches(Array.isArray(data.branches) ? data.branches : []);
       setReportMetrics(data.metrics || null);
     } catch (e: any) {
       console.error("[Reports] Authoritative report load failed", e);
       setReportError(String(e?.message || e || "REPORT_DATA_UNAVAILABLE"));
-      setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]);
-      setPurchaseOrders([]); setStockMovements([]); setInvoices([]); setReportMetrics(null);
+      setSales([]); setReturnedSalesData([]); setExpenses([]); setProducts([]); setCustomers([]); setSuppliers([]);
+      setPurchaseOrders([]); setStockMovements([]); setInvoices([]); setSupplierInvoices([]);
+      setInventoryValuation([]); setReceivablesAgingReport(null); setPayablesAgingReport(null); setReportMetrics(null);
     } finally { setReportLoading(false); }
   }, [dateRange, branchFilter]);
 
@@ -190,18 +207,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   }, [validSales]);
 
   const arAgingCustomers = useMemo(() => {
-    const customerMap = new Map(customers.map((c: any) => [c.id, c]));
-    const grouped = new Map<string, any>();
-    for (const inv of invoices.filter((i) => !["PAID", "CANCELLED"].includes(String(i.status).toUpperCase()))) {
-      const balance = Math.max(0, Number(inv.balanceDue || 0));
-      if (!balance) continue;
-      const days = Math.max(0, Math.floor((Date.now() - new Date(inv.dueDate).getTime()) / 86400000));
-      const existing = grouped.get(inv.customerId) || { ...(customerMap.get(inv.customerId) || {}), balance: 0, days: 0 };
-      existing.balance += balance; existing.days = Math.max(existing.days, days);
-      grouped.set(inv.customerId, existing);
-    }
-    return Array.from(grouped.values());
-  }, [customers, invoices]);
+    const items = Array.isArray(receivablesAgingReport?.items) ? receivablesAgingReport.items : [];
+    return items.map((item: any) => ({
+      ...item,
+      name: item.entityName || item.name,
+      balance: Number(item.totalOutstanding ?? item.balanceDue ?? item.balance ?? 0),
+      days: Number(item.daysOutstanding ?? item.maxDaysOutstanding ?? 0),
+    }));
+  }, [receivablesAgingReport]);
 
   const salesChartData = useMemo(() => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -223,6 +236,28 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     return entries.map(([name, value]) => ({ name, value: amountTotal ? Math.round(Number(value.amount || 0) / amountTotal * 100) : 0, amount: Number(value.amount || 0) }));
   }, [reportMetrics]);
 
+  const supplierSummary = useMemo(() => {
+    const grouped = new Map<string, { supplierId: string; supplierName: string; purchaseOrders: number; totalPurchased: number }>();
+    for (const po of purchaseOrders) {
+      const supplierId = String(po.supplierId || po.supplier?.id || po.supplierName || "UNKNOWN");
+      const current = grouped.get(supplierId) || {
+        supplierId,
+        supplierName: po.supplier?.name || po.supplierName || po.supplier || "Unknown",
+        purchaseOrders: 0,
+        totalPurchased: 0,
+      };
+      current.purchaseOrders += 1;
+      current.totalPurchased += Number(po.totalAmount || po.total || 0);
+      grouped.set(supplierId, current);
+    }
+    return Array.from(grouped.values()).sort((a, b) => b.totalPurchased - a.totalPurchased);
+  }, [purchaseOrders]);
+
+  const payableRows = useMemo(
+    () => Array.isArray(payablesAgingReport?.items) ? payablesAgingReport.items : [],
+    [payablesAgingReport]
+  );
+
   // ─── Empty State Helper ────────────────────────────────────────────────────
   const EmptyState = ({ icon: Icon, title, desc }: { icon: React.ElementType; title: string; desc: string }) => (
     <div className="v2-p-8 v2-text-center">
@@ -233,19 +268,41 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   );
 
   const exportCurrentReportCsv = useCallback(() => {
-    const rows = activeTab === "sales" || activeTab === "profit" || activeTab === "cashier" || activeTab === "branch"
+    const rows = activeTab === "sales"
       ? validSales
+      : activeTab === "profit"
+      ? [
+          { lineItem: "Gross Revenue", amount: totalGrossSales },
+          { lineItem: "COGS", amount: totalCOGS },
+          { lineItem: "Gross Profit", amount: grossProfit },
+          { lineItem: "Expenses", amount: totalExpensesAmt },
+          { lineItem: "Net Operating Profit", amount: netOperatingProfit },
+          { lineItem: "Margin %", amount: marginPct },
+        ]
+      : activeTab === "cashier"
+      ? salesByCashier
+      : activeTab === "branch"
+      ? salesByBranch
       : activeTab === "expenses" ? expenses
       : activeTab === "purchasing" ? purchaseOrders
       : activeTab === "movements" ? stockMovements
       : activeTab === "aging" ? arAgingCustomers
+      : activeTab === "payables" ? payableRows
+      : activeTab === "suppliers" ? supplierSummary
       : activeTab === "returns" ? returnedSales
       : activeTab === "customers" ? customers
-      : activeTab === "inventory" ? products
+      : activeTab === "inventory" ? (inventoryValuation.length ? inventoryValuation : products)
+      : activeTab === "tax" ? validSales.map((sale: any) => ({
+          receiptNumber: sale.receiptNumber || sale.id,
+          soldAt: sale.soldAt || sale.createdAt,
+          grossAmount: sale.grandTotal,
+          taxAmount: sale.taxTotal,
+          fiscalizationState: sale.fiscalizationState || sale.efdStatus,
+        }))
       : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
       : discountedSales;
     const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
-    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r))));
+    const headers = Array.from(new Set(flat.flatMap((r: any) => Object.keys(r)))) as string[];
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [headers.map(esc).join(","), ...flat.map((r: any) => headers.map((h) => esc(r[h])).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -255,7 +312,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales]);
+  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales, inventoryValuation, payableRows, supplierSummary, salesByCashier, salesByBranch, totalGrossSales, totalCOGS, grossProfit, totalExpensesAmt, netOperatingProfit, marginPct]);
 
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
@@ -295,6 +352,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             value={branchFilter}
             onChange={(e) => setBranchFilter(e.target.value)}
           >
+            <option value="current">Current Branch</option>
             <option value="all">All Branches</option>
             <option value="hq">HQ Main Branch</option>
           </select>
@@ -350,6 +408,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
           { id: "payment", label: "Payments", icon: PieChart },
           { id: "inventory", label: "Stock Valuation", icon: Package },
           { id: "customers", label: "Customer Credit", icon: Users },
+          { id: "suppliers", label: "Suppliers", icon: Truck },
           { id: "returns", label: "Returns & Refunds", icon: RefreshCw },
           { id: "branch", label: "Branch Comparison", icon: Building },
           { id: "tax", label: "Tax & TRA EFD", icon: Scale },
@@ -358,6 +417,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
           { id: "movements", label: "Stock Lineage", icon: BarChart2 },
           { id: "purchasing", label: "Purchasing", icon: ShoppingBag },
           { id: "aging", label: "AR Aging", icon: AlertCircle },
+          { id: "payables", label: "AP Aging", icon: AlertTriangle },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -521,12 +581,12 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             <table className="v2-table">
               <thead><tr><th>SKU / Code</th><th>Product Name</th><th>Qty in Stock</th><th>Cost Price</th><th>Retail Price</th><th>Stock Value</th></tr></thead>
               <tbody>
-                {products.slice(0, 100).map((p: any, i: number) => {
-                  const stocks = Array.isArray(p.branchStocks) ? p.branchStocks : [];
-                  const qty = stocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0);
-                  const stockValue = stocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0);
-                  const cost = qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0);
-                  const retail = Number(p.sellingPrice || p.price || 0);
+                {(inventoryValuation.length ? inventoryValuation : products).slice(0, 200).map((p: any, i: number) => {
+                  const isHistorical = inventoryValuation.length > 0;
+                  const qty = isHistorical ? Number(p.quantity || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.currentQuantity || 0), 0) || Number(p.availableStock || p.totalStock || 0) : Number(p.availableStock || p.totalStock || 0));
+                  const stockValue = isHistorical ? Number(p.stockValue || 0) : (Array.isArray(p.branchStocks) ? p.branchStocks.reduce((n: number, s: any) => n + Number(s.stockValue || 0), 0) : 0);
+                  const cost = isHistorical ? Number(p.averageCost || 0) : (qty > 0 ? stockValue / qty : Number(p.buyingPrice || 0));
+                  const retail = Number(p.retailPrice || p.sellingPrice || p.price || 0);
                   return (
                     <tr key={p.id || p.sku || i}>
                       <td className="v2-mono v2-text-xs">{p.sku || p.barcode || `PRD-${i + 1}`}</td>
@@ -538,6 +598,29 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── SUPPLIERS ── */}
+      {activeTab === "suppliers" && (
+        <div className="v2-card">
+          <div className="v2-card-header"><div className="v2-card-title">Supplier Report</div></div>
+          {supplierSummary.length === 0 ? (
+            <EmptyState icon={Truck} title="No Supplier Purchasing Activity" desc="Supplier purchasing activity for the selected report period will appear here." />
+          ) : (
+            <table className="v2-table">
+              <thead><tr><th>Supplier</th><th>Purchase Orders</th><th>Total Purchased</th></tr></thead>
+              <tbody>
+                {supplierSummary.map((supplier) => (
+                  <tr key={supplier.supplierId}>
+                    <td className="v2-font-bold">{supplier.supplierName}</td>
+                    <td className="v2-mono">{supplier.purchaseOrders}</td>
+                    <td className="v2-mono v2-font-black">{money(supplier.totalPurchased)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
@@ -766,6 +849,41 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
         </div>
       )}
 
+      {/* ── ACCOUNTS PAYABLE AGING ── */}
+      {activeTab === "payables" && (
+        <div className="v2-card">
+          <div className="v2-card-header">
+            <div className="v2-card-title">Accounts Payable Aging Report</div>
+            <div className="v2-text-xs v2-text-muted">
+              As of {reportMetrics?.reportAsOf ? new Date(reportMetrics.reportAsOf).toLocaleString() : "selected period end"}
+            </div>
+          </div>
+          {payableRows.length === 0 ? (
+            <EmptyState icon={AlertTriangle} title="No Outstanding Payables" desc="Supplier balances outstanding at the selected report end date will appear here." />
+          ) : (
+            <table className="v2-table">
+              <thead><tr><th>Supplier</th><th>Current</th><th>1–30</th><th>31–60</th><th>61–90</th><th>90+</th><th>Total</th></tr></thead>
+              <tbody>
+                {payableRows.map((item: any, i: number) => {
+                  const buckets = item.buckets || {};
+                  return (
+                    <tr key={item.id || item.entityId || i}>
+                      <td className="v2-font-bold">{item.entityName || item.supplierName || item.name || "—"}</td>
+                      <td className="v2-mono">{money(Number(buckets.current || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days1To30 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days31To60 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days61To90 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days90Plus || 0))}</td>
+                      <td className="v2-mono v2-font-black">{money(Number(buckets.total || item.totalOutstanding || 0))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* ── ACCOUNTS RECEIVABLE AGING ── */}
       {activeTab === "aging" && (
         <div className="v2-card">
@@ -781,19 +899,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             />
           ) : (
             <table className="v2-table">
-              <thead><tr><th>Customer</th><th>Phone</th><th>Credit Balance</th><th>Days Outstanding</th><th>Risk</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Current</th><th>1–30</th><th>31–60</th><th>61–90</th><th>90+</th><th>Total</th></tr></thead>
               <tbody>
                 {arAgingCustomers.map((c: any, i: number) => {
-                  const bal = Number(c.balance || c.creditBalance || c.amountOwed || 0);
-                  const days = c.days || c.creditDaysOutstanding || c.daysOwed || 0;
-                  const risk = days > 90 ? "HIGH" : days > 30 ? "MEDIUM" : "LOW";
+                  const buckets = c.buckets || {};
                   return (
                     <tr key={c.id || i}>
                       <td className="v2-font-bold">{c.name || c.fullName || "—"}</td>
-                      <td className="v2-text-xs v2-text-muted">{c.phone || "—"}</td>
-                      <td className="v2-mono v2-font-black v2-text-warning">{money(bal)}</td>
-                      <td className="v2-mono">{days > 0 ? `${days} days` : "—"}</td>
-                      <td><span className={`badge ${risk === "HIGH" ? "v2-badge-danger" : risk === "MEDIUM" ? "v2-badge-warning" : "v2-badge-success"}`}>{risk}</span></td>
+                      <td className="v2-mono">{money(Number(buckets.current || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days1To30 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days31To60 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days61To90 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days90Plus || 0))}</td>
+                      <td className="v2-mono v2-font-black">{money(Number(buckets.total || c.balance || 0))}</td>
                     </tr>
                   );
                 })}
