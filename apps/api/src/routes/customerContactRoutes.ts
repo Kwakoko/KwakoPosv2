@@ -231,7 +231,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     return { success: true, data: { supplier, purchaseOrders, purchaseReceipts, payments, audits } };
   });
 
-  server.get("/api/v1/customers/export.csv", async (req, reply) =>
+  server.get("/api/v1/customers/export.csv", async (req, reply) => {
     requirePermission(req, "CUSTOMER_VIEW", "customers.read", "REPORT_EXPORT");
     const c = ctx(req);
     const rows = await prisma.customer.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId }, orderBy: { customerCode: "asc" } });
