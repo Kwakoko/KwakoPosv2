@@ -77,8 +77,9 @@ export const CRM_CERTIFICATION_PILLARS: CrmCertificationPillar[] = [
   }),
   makePillar("CRM-10", "Contact creation links individual contact to business customer", e => {
     const cnt = e.createContact({
-      contactId: "CNT-01", tenantId: "CERT", customerId: "CUST-CERT-01",
-      firstName: "Jane", lastName: "Smith", email: "jane@acme.com", isPrimary: true,
+      contactId: "CNT-01", tenantId: "CERT", branchId: "BRANCH-CERT", customerId: "CUST-CERT-01",
+      firstName: "Jane", lastName: "Smith", title: "", role: "", department: "", email: "jane@acme.com", phone: "",
+      notes: "", status: "ACTIVE", decisionInfluence: "INFLUENCER", isPrimary: true,
     });
     return Boolean(cnt.success && cnt.contact?.customerId === "CUST-CERT-01");
   }),
