@@ -20,16 +20,16 @@ const REQUIRED_SURFACES = [
 ];
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/pages/CustomersPage.tsx": "c85ca7831afd571906023f29fc2e61a6aaf2070a",
+  "apps/web/src/pages/CustomersPage.tsx": "4a7e27f271b8911f0385b1aeeff71fbd8e01bb4d",
   "apps/web/src/indexedDb.ts": "245cf822def2edf7dcc27741b708efb1c6c6276b",
   "apps/web/src/persistence/migrationEngine.ts": "5b6ac2bb41b7747289b54ae8507201e50614b099",
   "apps/web/src/clientSyncEngine.ts": "6bbd64c387fdc6ea16a0fa0e46e283c92e0ad65e",
   "apps/api/src/server.ts": "ae89266a23967e40432763b43fe583e61827c530",
   "packages/contracts/src/index.ts": "cc04c1115f5b4b145c524629606cca3ac827ab59",
-  "packages/database/prisma/schema.prisma": "e279207f4d31e05ae15ed370487f7ca6b0a71b64",
-  "packages/database/prisma/migrations/202610070001_customers_contacts_authority/migration.sql": "5b273536b1e9896de60b5b47814a730f8d51711b",
+  "packages/database/prisma/schema.prisma": "4bf880ef5fe0f012f270706bdc6bf93c032547dc",
+  "packages/database/prisma/migrations/202610070001_customers_contacts_authority/migration.sql": "b108a95e9732350bc4291859307758ab974e80c6",
   "packages/database/src/prismaProductionRepositories.ts": "cf5d1d6fc648e0f28d752254e61fe05fbd50b52b",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "c05e2286acb1634bdd5ef998c9043b15973f1f67",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "f7ccab61ae3ade83dcf8e22ff69094b690a32c18",
   "apps/web/src/modules/moduleRegistry.ts": "5706ec7e7983c564f3ba5b35a286e269529af06b",
   "apps/web/src/App.tsx": "652498161865f20835fcc86fc89072808b3d2e00",
   "tests/integration/customers-contacts-production-lock.test.ts": "379ac34246b140ccc21fb80ced09e21b0d90bdab",
