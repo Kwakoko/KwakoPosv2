@@ -100,7 +100,14 @@ export function runRepositoryForensicIntegrityCertification() {
   };
   fs.mkdirSync(evidenceDir, { recursive: true });
   fs.writeFileSync(output, JSON.stringify(evidence, null, 2), "utf8");
-  if (verdict !== "PASS") throw new Error(`REPOSITORY_FORENSIC_CERTIFICATION_FAILED:${output}`);
+  if (verdict !== "PASS") {
+    const parse = parseFailures.map(r => r.relative).slice(0, 5).join(", ");
+    const control = controlFailures.map(r => r.relative).slice(0, 5).join(", ");
+    const suspicious = suspiciousHits.map(r => r.relative).slice(0, 5).join(", ");
+    throw new Error(
+      `REPOSITORY_FORENSIC_CERTIFICATION_FAILED:${output}; parse=[${parse || "none"}]; control=[${control || "none"}]; suspicious=[${suspicious || "none"}]`,
+    );
+  }
   console.log(`REPOSITORY_FORENSIC_CERTIFICATION=${verdict}`);
   console.log(`TRACKED_FILES=${files.length}`);
   console.log(`TEXT_FILES=${results.filter(r => r.isText).length}`);
