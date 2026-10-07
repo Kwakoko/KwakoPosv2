@@ -24,12 +24,12 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/contracts/src/index.ts": "2808a8a3b9b1ce7f37593cebb2fc4a5ca989d105",
   "packages/database/src/prismaProductionRepositories.ts": "15d1fc2862a66f26e4f26543c950f91dd0cb1690",
   "packages/database/src/commercialRepositories.ts": "c188b7d11db34e5740d754ed7113af635838b7d6",
-  "packages/database/prisma/schema.prisma": "8e8e49418d07d1b2899f89908ffcc7ba73afcf16",
+  "packages/database/prisma/schema.prisma": "70bb9d9709e77e4f27548b6346488e49e60cb525",
   "packages/database/prisma/migrations/202610070001_cash_register_control/migration.sql": "8dcb1fa1c5b2ea4615122beb05b5befa966ee7e3",
   "packages/domain/src/cashSessionEngine.ts": "dba62875d6293e50e38feeb4abbf977ff7b922ae",
   "packages/domain/src/financialBridge.ts": "398c6bdcacc0ac5c7c7c0b513e6ac47b7a7b4131",
   "packages/domain/src/financeInvariants.ts": "98670edd0783bce69211f79289a6abf48e0b9413",
-  "tests/integration/cash-management-production-lock.test.ts": "e4c10255c4f7be84af8d37bc60643b335784ddc8",
+  "tests/integration/cash-management-production-lock.test.ts": "a2ea9488e5fd9828c76f144a7d63d589fa3c81e3",
 };
 
 const MARKERS: Array<[string, string, string[]]> = [
