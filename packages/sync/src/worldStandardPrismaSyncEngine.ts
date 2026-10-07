@@ -700,14 +700,7 @@ export class WorldStandardPrismaSyncEngine {
       // POS sale stock is provisionally materialized locally with the Sale outbox.
       // The authoritative Sale transaction creates the canonical server StockLedger movement;
       // do not apply the companion StockAdjustment as a second inventory mutation.
-      if (String(payload.referenceType || "").toUpperCase() === "SALE" && payload.referenceId) {
-        const canonicalSale = await tx.sale.findFirst({
-          where: { id: String(payload.referenceId), tenantId: ctx.tenantId, branchId: ctx.branchId },
-          select: { id: true },
-        });
-        if (!canonicalSale) return;
-        return;
-      }
+      if (String(payload.referenceType || "").toUpperCase() === "SALE" && payload.referenceId) return;
       await tx.$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, payload.variantId, ctx.tenantId, ctx.branchId);
       const variant = await tx.productVariant.findUnique({ where: { id: payload.variantId } });
       if (!variant || variant.tenantId !== ctx.tenantId || variant.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
