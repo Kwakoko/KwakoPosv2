@@ -188,7 +188,8 @@ export class FinancialReportingEngine {
     const bankBalances = getBalance("1210");
     const accountsReceivable = getBalance("1310");
     const inventoryValuation = getBalance("1410");
-    const totalCurrentAssets = cashOnHand + bankBalances + accountsReceivable + inventoryValuation;
+    const inputVatRecoverable = getBalance("2220");
+    const totalCurrentAssets = cashOnHand + bankBalances + accountsReceivable + inventoryValuation + inputVatRecoverable;
     const totalAssets = totalCurrentAssets;
 
     // Liabilities
@@ -216,6 +217,7 @@ export class FinancialReportingEngine {
         bankBalances: Math.round(bankBalances * 100) / 100,
         accountsReceivable: Math.round(accountsReceivable * 100) / 100,
         inventoryValuation: Math.round(inventoryValuation * 100) / 100,
+        inputVatRecoverable: Math.round(inputVatRecoverable * 100) / 100,
         totalCurrentAssets: Math.round(totalCurrentAssets * 100) / 100,
         totalAssets: Math.round(totalAssets * 100) / 100,
       },
