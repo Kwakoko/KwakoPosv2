@@ -335,7 +335,7 @@ export const UpdateCustomerRequestSchema = z.object({
 });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequestSchema>;
 
-export const CustomerContactSchema = z.object({
+export const CustomerContactRecordSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
@@ -352,7 +352,7 @@ export const CustomerContactSchema = z.object({
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
-export type CustomerContact = z.infer<typeof CustomerContactSchema>;
+export type CustomerContactRecord = z.infer<typeof CustomerContactRecordSchema>;
 
 export const CreateCustomerContactRequestSchema = z.object({
   id: z.string().uuid().optional(),
@@ -1339,7 +1339,7 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
-  contacts: z.array(CustomerContactSchema).optional(),
+  contacts: z.array(CustomerContactRecordSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1383,7 +1383,7 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
-  contacts: z.array(CustomerContactSchema).optional(),
+  contacts: z.array(CustomerContactRecordSchema).optional(),
   expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
