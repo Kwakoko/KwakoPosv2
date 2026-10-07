@@ -30,7 +30,7 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
-import { recordPosSaleDeductions, recordPosSaleRefundRestock, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
@@ -221,6 +221,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return 0; // Default VAT = 0%
   }, [db]);
 
+  const [taxInclusivePricing, setTaxInclusivePricing] = useState<boolean>(() => {
+    try {
+      const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
+      return cfg?.taxInclusivePricing !== false;
+    } catch {}
+    return true;
+  });
+
   const [selectedTaxRate, setSelectedTaxRate] = useState<number>(() => {
     try {
       const cfg = db.getConfigurationLocal?.("tax.config", { tenantId: currentTenantId || "", branchId: currentBranchId || "" }) as any;
@@ -243,6 +251,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           } else {
             setSelectedTaxRate(0);
           }
+          setTaxInclusivePricing(cfg.taxInclusivePricing !== false);
         }
       } catch {}
     };
@@ -469,9 +478,13 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     return sum + linePrice * i.qty;
   }, 0);
   const discountAmount = (cartSubtotal * discountPercent) / 100;
-  const taxableTotal = cartSubtotal - discountAmount;
-  const taxAmount = taxableTotal * selectedTaxRate;
-  const cartGrandTotal = taxableTotal + taxAmount;
+  const taxableTotal = Math.max(0, cartSubtotal - discountAmount);
+  const taxAmount = selectedTaxRate > 0
+    ? taxInclusivePricing
+      ? taxableTotal - (taxableTotal / (1 + selectedTaxRate))
+      : taxableTotal * selectedTaxRate
+    : 0;
+  const cartGrandTotal = taxInclusivePricing ? taxableTotal : taxableTotal + taxAmount;
 
   const changeDue = Math.max(0, cashReceived - cartGrandTotal);
 
@@ -1180,16 +1193,82 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       { store: "sales", key: saleId, value: saleRecord },
       { store: "receipts", key: saleId, value: receiptRecord },
     ];
-    if (paymentMethod === "Credit" && selectedCustomer && selectedCustomer !== "Walk-In Customer") {
-      for (const cust of db.customers.values()) {
-        if (cust.name !== selectedCustomer) continue;
-        const currentDebt = Number(cust.outstandingBalance || cust.currentBalance || cust.debt || 0);
-        const newDebt = currentDebt + cartGrandTotal;
+    if (paymentMethod === "Credit" && selectedCustomerId) {
+      const cust = db.customers.get(selectedCustomerId) as any;
+      if (cust) {
+        const newDebt = Number(cust.outstandingBalance || cust.currentBalance || 0) + cartGrandTotal;
         localWrites.push({ store: "customers", key: cust.id, value: { ...cust, outstandingBalance: newDebt, currentBalance: newDebt, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId } });
-        break;
       }
     }
-    const atomicResult = await db.executeAtomicMutation({ writes: localWrites, outboxItem: localSaleOutbox, drawerOutboxItems, tenantContext });
+
+    const stockOutboxItems: any[] = [];
+    const stockByVariant = new Map<string, { qty: number; product: any; unitCost: number }>();
+    for (const item of mappedItems.filter((i: any) => !i.isCustom)) {
+      const variantId = String(item.variantId);
+      const prior = stockByVariant.get(variantId);
+      stockByVariant.set(variantId, {
+        qty: (prior?.qty || 0) + Number(item.quantity || 0),
+        product: item.product,
+        unitCost: Number(item.unitCost || item.product?.costPrice || item.product?.buyingPrice || 0),
+      });
+    }
+    for (const [variantId, info] of stockByVariant.entries()) {
+      const variant = db.productVariants.get(variantId) as any;
+      if (!variant || variant.tenantId !== tenantContext.tenantId || variant.branchId !== tenantContext.branchId) {
+        throw new Error(`POS_VARIANT_REQUIRED:${variantId}`);
+      }
+      const ledgerRows = [...db.stockLedger.values()].filter((entry: any) =>
+        entry.tenantId === tenantContext.tenantId &&
+        entry.branchId === tenantContext.branchId &&
+        entry.variantId === variantId
+      );
+      const quantityBefore = ledgerRows.reduce((sum: number, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
+      const quantityAfter = quantityBefore - info.qty;
+      if (quantityBefore < info.qty) throw new Error(`INSUFFICIENT_LOCAL_STOCK:${variantId}`);
+      const occurredAt = saleRecord.occurredAt;
+      const ledgerId = `led-${saleId}-${variantId}`;
+      const operationId = `sale-stock-${saleId}-${variantId}`;
+      const idempotencyKey = `SALE-STOCK-${saleId}-${variantId}`;
+      const ledgerRecord: any = {
+        id: ledgerId, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+        productId: info.product.id, variantId, movementType: "SALE", referenceType: "SALE", referenceId: saleId,
+        quantityBefore, quantityChange: -info.qty, quantity: -info.qty, quantityAfter,
+        unitCost: info.unitCost, totalCost: info.qty * info.unitCost, userId: user?.id,
+        deviceId: paymentDeviceId, operationId, idempotencyKey, notes: `POS Sale ${saleId}`,
+        synced: false, occurredAt, createdAt: occurredAt,
+      };
+      const updatedVariant = { ...variant, inventoryQuantity: quantityAfter, stock: quantityAfter, updatedAt: occurredAt };
+      const siblingVariants = [...db.productVariants.values()].filter((v: any) =>
+        v.productId === info.product.id && v.tenantId === tenantContext.tenantId && v.branchId === tenantContext.branchId
+      );
+      const productAfter = siblingVariants.reduce((sum: number, v: any) =>
+        sum + (v.id === variantId ? quantityAfter : Number(v.inventoryQuantity ?? v.stock ?? 0)), 0);
+      const product = db.products.get(info.product.id) as any;
+      const updatedProduct = product ? { ...product, availableStock: productAfter, totalStock: productAfter, stock: productAfter, updatedAt: occurredAt } : product;
+      localWrites.push({ store: "stockLedger", key: ledgerId, value: ledgerRecord });
+      localWrites.push({ store: "productVariants", key: variantId, value: updatedVariant });
+      if (updatedProduct) localWrites.push({ store: "products", key: info.product.id, value: updatedProduct });
+      stockOutboxItems.push({
+        id: operationId, entityType: "StockAdjustment", entityId: `adj-sale-${saleId}-${variantId}`,
+        operationType: "CREATE",
+        payload: {
+          id: `adj-sale-${saleId}-${variantId}`, productId: info.product.id, variantId,
+          adjustmentType: "DECREASE", movementType: "SALE", quantityChange: -info.qty, quantity: info.qty,
+          reason: `POS Sale ${saleId}`, deviceId: paymentDeviceId, operationId, idempotencyKey,
+          referenceType: "SALE", referenceId: saleId, ledgerId, unitCost: info.unitCost,
+          quantityBefore, quantityAfter, occurredAt,
+        },
+        clientCreatedAt: occurredAt, idempotencyKey, status: "PENDING",
+        tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
+      });
+    }
+
+    const atomicResult = await db.executeAtomicMutation({
+      writes: localWrites,
+      outboxItems: [localSaleOutbox, ...stockOutboxItems],
+      drawerOutboxItems,
+      tenantContext,
+    });
     const outboxItem = atomicResult.outbox;
     if (drawerOutboxItems.length) void dispatchDrawerOutbox(db, tenantContext).catch(() => {});
     const traVfdItem = await enqueueTraVfdOutbox(db, tenantContext, {
@@ -1201,11 +1280,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     if (traVfdItem && isOnline) {
       void processTraVfdOutbox(db, tenantContext).catch(() => {});
     }
-    await recordPosSaleDeductions(db, {
-      saleId,
-      items: cart.filter((item) => !item.isCustom).map((item) => ({ productId: item.product.id, variantId: item.variantId, qty: item.qty, unitCost: Number((item.product as any).costPrice || (item.product as any).buyingPrice || 0), name: item.product.name, sku: item.product.sku })),
-      tenantId: tenantContext.tenantId, branchId: tenantContext.branchId, userId: user?.id, deviceId: "pos-terminal",
-    });
     // 4. Update local products state so POS counter stock displays decrease immediately
     setProducts((prev) =>
       prev.map((p) => {
