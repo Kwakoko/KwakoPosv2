@@ -306,7 +306,7 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  status: z.enum(["ACTIVE", "SUSPENDED", "INACTIVE"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
