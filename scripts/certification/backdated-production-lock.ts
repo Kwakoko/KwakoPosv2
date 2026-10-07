@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-07";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "066b54b2c2d68f1edc38441fecc442c4c9fd3b96",
+  "package.json": "4e658fe20844f8ac288414491fdc76b23eb18a68",
   ".github/workflows/ci.yml": "2d549e81942e446d4f6039b1d1483dd590d4c4f4",
   ".github/workflows/production-certification.yml": "94d4e190679770f9e5006f8f378a1324bac81c02",
   ".github/workflows/production-release-exact-main.yml": "2b471027460eb60cc31901911df8ccfdd0590567",
