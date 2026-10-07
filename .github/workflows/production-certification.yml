@@ -68,6 +68,14 @@ jobs:
         run: npm run certify:cash-lock
       - name: Finance / Accounting Production Lock v1
         run: npm run certify:finance-lock
+      - name: Receivables Audit Production Lock
+        run: npm run certify:receivables-lock
+      - name: Accounts Payable Audit Production Lock
+        run: npm run certify:payables-lock
+      - name: Expenses Production Lock
+        run: npm run certify:expenses-lock
+      - name: Payments Audit Controls Production Lock
+        run: npm run certify:payments-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
       - name: Validate commit contract
