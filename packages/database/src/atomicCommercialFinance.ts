@@ -145,7 +145,7 @@ export class PrismaAtomicCommercialFinanceService {
           lineTotal: c.lineTotal,
         };
       });
-      const totals = PricingTaxEngine.calculateSaleTotals(
+      let totals = PricingTaxEngine.calculateSaleTotals(
         lines.map((l: any) => ({
           lineTotal: l.lineTotal,
           totalCost: l.unitCost * l.quantity,
@@ -154,6 +154,28 @@ export class PrismaAtomicCommercialFinanceService {
         })),
         req.discountTotal || 0,
       );
+      // Global/cart discount is a pre-tax commercial discount. Reconcile VAT so the
+      // authoritative grand total and tax match the POS presentation for inclusive
+      // and exclusive VAT configurations.
+      const globalDiscount = Math.max(0, Number(req.discountTotal || 0));
+      if (globalDiscount > 0) {
+        const taxReduction = taxConfig.ratePct > 0
+          ? taxConfig.isInclusive
+            ? globalDiscount - (globalDiscount / (1 + taxConfig.ratePct / 100))
+            : globalDiscount * (taxConfig.ratePct / 100)
+          : 0;
+        const adjustedGrandTotal = Math.max(0, Number(totals.grandTotal) - globalDiscount);
+        const adjustedTaxTotal = Math.max(0, Number(totals.taxTotal) - taxReduction);
+        const adjustedSubtotal = Math.max(0, adjustedGrandTotal - adjustedTaxTotal);
+        totals = {
+          ...totals,
+          subtotal: Number(adjustedSubtotal.toFixed(2)),
+          taxTotal: Number(adjustedTaxTotal.toFixed(2)),
+          grandTotal: Number(adjustedGrandTotal.toFixed(2)),
+          discountTotal: Number((Number(totals.discountTotal) + globalDiscount).toFixed(2)),
+          grossProfit: Number((adjustedGrandTotal - Number(totals.totalCost)).toFixed(2)),
+        };
+      }
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
       const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
