@@ -2,7 +2,7 @@
 -- Authoritative PostgreSQL contact store with strict tenant + branch ownership.
 CREATE TABLE IF NOT EXISTS customer_contacts (
   id UUID PRIMARY KEY,
-  "customerId" UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  "customerId" TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   "tenantId" TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   "branchId" TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
   "firstName" TEXT NOT NULL,
