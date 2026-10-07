@@ -29,7 +29,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/domain/src/cashSessionEngine.ts": "dba62875d6293e50e38feeb4abbf977ff7b922ae",
   "packages/domain/src/financialBridge.ts": "398c6bdcacc0ac5c7c7c0b513e6ac47b7a7b4131",
   "packages/domain/src/financeInvariants.ts": "98670edd0783bce69211f79289a6abf48e0b9413",
-  "tests/integration/cash-management-production-lock.test.ts": "a2ea9488e5fd9828c76f144a7d63d589fa3c81e3",
+  "tests/integration/cash-management-production-lock.test.ts": "203c4f5fb29548a9cafa189cf898f9bfbd199aa1",
 };
 
 const MARKERS: Array<[string, string, string[]]> = [
