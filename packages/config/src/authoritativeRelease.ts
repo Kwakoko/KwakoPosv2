@@ -67,11 +67,11 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   compatibility: {
     databaseSchemaVersion: 4,
     syncProtocolVersion: 2,
-    pwaSchemaVersion: 6,
+    pwaSchemaVersion: 7,
     minSupportedClientVersion: "2.0.0",
     recommendedClientVersion: "2.13.0",
     maximumSupportedClientVersion: "3.0.0",
-    migrationSet: ["1->2", "2->3", "3->4", "4->5", "5->6", "6->5", "6->4", "4->3", "4->2", "3->2", "2->1"],
+    migrationSet: ["1->2", "2->3", "3->4", "4->5", "5->6", "6->7", "7->6", "6->5", "6->4", "4->3", "4->2", "3->2", "2->1"],
   },
   brand: {
     parentBrand: "Kwakoko",
