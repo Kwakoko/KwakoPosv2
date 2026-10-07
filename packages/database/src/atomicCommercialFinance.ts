@@ -400,19 +400,24 @@ export class PrismaAtomicCommercialFinanceService {
 
       for (const payment of sale.payments.filter((p: any) => p.status === "COMPLETED")) {
         await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
-        if (payment.paymentMethod === "CASH" && sale.cashSessionId) {
+        if (payment.paymentMethod === "CASH") {
           const key = `SALE-VOID-CASH-${payment.id}`;
           const exists = await tx.cashMovement.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: key } });
           if (!exists) {
+            const session = await tx.cashSession.findFirst({
+              where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE"] } },
+              orderBy: { openedAt: "desc" },
+            });
+            if (!session) throw new Error("SALE_VOID_CASH_SESSION_REQUIRED");
             await tx.cashMovement.create({
               data: {
-                id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: sale.cashSessionId,
+                id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, cashSessionId: session.id,
                 type: "CASH_OUT", amount: payment.amount, reason: `Void ${sale.saleNumber}`,
                 deviceId: req.deviceId || "web", actorId: ctx.userId, approvalStatus: "APPROVED",
                 idempotencyKey: key, occurredAt: new Date(),
               },
             });
-            await tx.cashSession.update({ where: { id: sale.cashSessionId }, data: { cashRefundsTotal: { increment: Number(payment.amount) } } });
+            await tx.cashSession.update({ where: { id: session.id }, data: { cashRefundsTotal: { increment: Number(payment.amount) } } });
           }
         }
       }
