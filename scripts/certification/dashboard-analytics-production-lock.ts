@@ -14,7 +14,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
   ".github/workflows/ci.yml": "136d361a2f73e11d6ed4ce1aab6ded501b8b82c7",
   ".github/workflows/production-certification.yml": "04fd3f74b23569ceedd39feaa3e3635505105145",
-  ".github/workflows/production-release-exact-main.yml": "06855ae767e356619362a2f8e4eb2e3cad8c20a8"
+  ".github/workflows/production-release-exact-main.yml": "2830e101a4d3ac65f80256b6e055de13f45c53ab"
 };
 
 const REQUIRED_MARKERS: Array<[string,string,string]> = [

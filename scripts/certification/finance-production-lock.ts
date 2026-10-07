@@ -27,6 +27,7 @@ const repoFiles = [
   "package.json",
   ".github/workflows/ci.yml",
   ".github/workflows/production-certification.yml",
+  ".github/workflows/production-release-exact-main.yml",
 ];
 
 for (const file of repoFiles) read(file);
@@ -119,6 +120,7 @@ const pkg = read("package.json");
 must(pkg, '"certify:finance-lock"', "Finance lock package script");
 must(read(".github/workflows/ci.yml"), "npm run certify:finance-lock", "CI Finance lock gate");
 must(read(".github/workflows/production-certification.yml"), "npm run certify:finance-lock", "Production certification Finance lock gate");
+must(read(".github/workflows/production-release-exact-main.yml"), "npm run certify:finance-lock", "Exact-main Finance lock gate");
 
 const ctx = { tenantId: "11111111-1111-1111-1111-111111111111", branchId: "22222222-2222-2222-2222-222222222222", userId: "33333333-3333-3333-3333-333333333333", roles: ["ADMIN"], permissions: ["*"] };
 const accounts = AccountingEngine.seedDefaultAccounts(ctx as any);
