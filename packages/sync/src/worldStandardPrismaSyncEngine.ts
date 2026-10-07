@@ -238,7 +238,7 @@ export class WorldStandardPrismaSyncEngine {
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
       case "CustomerContact": {
-        const rows = await tx.$queryRawUnsafe<any[]>(
+        const rows = await tx.$queryRawUnsafe(
           'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
           entityId, ctx.tenantId, ctx.branchId,
         );
@@ -284,7 +284,7 @@ export class WorldStandardPrismaSyncEngine {
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
         case "CustomerContact": {
-          const rows = await db.$queryRawUnsafe<any[]>(
+          const rows = await db.$queryRawUnsafe(
             'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
             op.entityId, ctx.tenantId, ctx.branchId,
           );
@@ -1189,7 +1189,7 @@ const now = new Date();
       const customer = await tx.customer.findFirst({ where: { id: customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
       if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
 
-      const currentRows = await tx.$queryRawUnsafe<any[]>(
+      const currentRows = await tx.$queryRawUnsafe(
         'SELECT * FROM customer_contacts WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 LIMIT 1',
         op.entityId, ctx.tenantId, ctx.branchId,
       );
@@ -1670,8 +1670,8 @@ const now = new Date();
     await this.ensureInfrastructure();
     assertSyncConflictPermission(ctx, "sync.conflict.read");
     const rows = status === "ALL"
-      ? await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
-      : await prisma.$queryRawUnsafe<any[]>("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
+      ? await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
+      : await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
     return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
   }
 
@@ -1790,7 +1790,7 @@ const now = new Date();
       const adjustments = await tx.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const customers = await tx.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
       const suppliers = await tx.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: { createdAt: "asc" } });
-      const contacts = await tx.$queryRawUnsafe<any[]>(
+      const contacts = await tx.$queryRawUnsafe(
         'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE "tenantId"=$1 AND "branchId"=$2 ORDER BY "createdAt" ASC',
         ctx.tenantId, ctx.branchId,
       );
@@ -1856,7 +1856,7 @@ const now = new Date();
       adjustments: await prisma.stockAdjustment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       customers: await prisma.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
       suppliers: await prisma.supplier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, updatedAt: { gte: since, lte: anchor } } }),
-      contacts: await prisma.$queryRawUnsafe<any[]>(
+      contacts: await prisma.$queryRawUnsafe(
         'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE "tenantId"=$1 AND "branchId"=$2 AND "updatedAt">=$3 AND "updatedAt"<=$4 ORDER BY "updatedAt" ASC',
         ctx.tenantId, ctx.branchId, since, anchor,
       ),
@@ -1903,7 +1903,7 @@ const now = new Date();
       `;
     }
 
-    const rows = await prisma.$queryRawUnsafe<any[]>(query, ...params);
+    const rows = await prisma.$queryRawUnsafe(query, ...params);
     return rows.map((r) => ({
       tenantId: r.tenant_id,
       branchId: r.branch_id,
