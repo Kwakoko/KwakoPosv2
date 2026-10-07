@@ -60,6 +60,8 @@ jobs:
         run: npm run release:auth-lock
       - name: Lint
         run: npm run lint
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
       - name: Build
         run: npm run build
       - name: Synchronize test database schema
