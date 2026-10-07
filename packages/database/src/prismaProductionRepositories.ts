@@ -966,7 +966,7 @@ export class PrismaCommercialRepository {
       const position = await this.calculateCashSessionPosition(tx, ctx, id);
       const actualCash = Number(existing.actualCash);
       const variance = Math.round((actualCash - position.expectedCash) * 100) / 100;
-      if (Math.abs(variance) > 500 && !this.isCashDrawerApprover(ctx)) {
+      if (Math.abs(variance) > 500 && (!this.isCashDrawerApprover(ctx) || !String(req.managerApprovalReference || "").trim())) {
         throw new Error("CASH_VARIANCE_MANAGER_APPROVAL_REQUIRED");
       }
 
