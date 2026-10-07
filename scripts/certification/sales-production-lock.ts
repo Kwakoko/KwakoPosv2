@@ -6,17 +6,17 @@ const LOCK_ID = "SALES-PRODUCTION-LOCK-V1-2026-10-07";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "ad5973ea5af743a9f346d0c9e162658230b1ff84",
-  "apps/api/src/server.ts": "8437fb703d5984bde49d9b92786a8a46b83e3509",
+  "apps/web/src/pages/PosPage.tsx": "da72c90e6d1475c525c4d14097da8002110632c4",
+  "apps/api/src/server.ts": "dd026d5eb37da2077313c80f47a5a58b41ef981a",
   "packages/contracts/src/index.ts": "206f67d44e55828b6a9b83fd4ca55202ec1d8de2",
-  "packages/database/src/atomicCommercialFinance.ts": "2296bf1188e05544407cc2738c1cf0e6268f6ea2",
-  "packages/database/src/prismaProductionRepositories.ts": "c611d6c5c28dfb916679d69443359b845e90d23c",
+  "packages/database/src/atomicCommercialFinance.ts": "9e1209e9748bb421f4f7d0635f0d6803ecde741b",
+  "packages/database/src/prismaProductionRepositories.ts": "fce8e92073b0dbdffb61b46664d6541c552f4fd4",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "5cb0ca031a8f714b56318f4e5c4ca5169ae3104a",
   "apps/web/src/indexedDb.ts": "601ad98088a0da3f4ff62906c4d26523145be348"
 };
 
 const MARKERS: Array<[string,string,string[]]> = [
-  ["pos-surface","apps/web/src/pages/PosPage.tsx",["handleCompleteSale","handleInitiateCheckout","selectedCustomerId","Sales History","Returns"]],
+  ["pos-surface","apps/web/src/pages/PosPage.tsx",["handleCompleteSale","handleInitiateCheckout","selectedCustomerId","executeVoidSale","Void Completed Sale","Sales History","Returns"]],
   ["pos-tax","apps/web/src/pages/PosPage.tsx",["taxInclusivePricing","selectedTaxRate","cartGrandTotal"]],
   ["pos-offline","apps/web/src/pages/PosPage.tsx",["executeAtomicMutation","outboxItems","stockLedger","SALE-STOCK-"]],
   ["history-authority","apps/web/src/pages/PosPage.tsx",["/api/v1/pos/sales","isOnline"]],
