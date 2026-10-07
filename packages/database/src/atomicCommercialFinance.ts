@@ -118,7 +118,7 @@ export class PrismaAtomicCommercialFinanceService {
           taxConfig,
         });
         return {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           productId: item.productId ?? variantProductIds.get(item.variantId),
           variantId: item.variantId,
           quantity: item.quantity,
