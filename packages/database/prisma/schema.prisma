@@ -108,6 +108,7 @@ model Branch {
   brands               Brand[]
   unitsOfMeasure       UnitOfMeasure[]
   customers            Customer[]
+  customerContacts      CustomerContact[]
   suppliers            Supplier[]
   inventoryLocations   InventoryLocation[]
   stockLedgers         StockLedger[]
