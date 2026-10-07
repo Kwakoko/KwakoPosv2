@@ -1490,7 +1490,6 @@ Manager Sign-off:  _____________________
               </tbody>
             </table>
           </div>
-        )}
         </div>
       )}
 
