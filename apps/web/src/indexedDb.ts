@@ -159,6 +159,7 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
   if (item.entityType === "StockAdjustment") return 60;
   if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
+  if (item.entityType === "CustomerContact") return 75;
   if (item.entityType === "PurchaseOrder") return 80;
   if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
   if (item.entityType === "Expense") return 95;
