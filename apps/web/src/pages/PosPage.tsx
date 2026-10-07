@@ -447,7 +447,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         }
       } catch {
         if (active && !isOnline) setPastOrders(Array.from(db.sales.values()));
-      }}
+      }
     };
     void loadOrders();
     window.addEventListener(DATA_CHANGED_EVENT, loadOrders);
