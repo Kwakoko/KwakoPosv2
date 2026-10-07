@@ -343,6 +343,12 @@ export class CrmEngine {
       lastName: lead.contactName.split(" ").slice(1).join(" ") || "Contact",
       email: lead.email || "",
       phone: lead.phone || "",
+      title: "",
+      role: "",
+      department: "",
+      notes: "",
+      status: "ACTIVE",
+      decisionInfluence: "INFLUENCER",
       isPrimary: true,
     });
 
