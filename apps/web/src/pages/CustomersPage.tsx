@@ -84,8 +84,7 @@ function parseCsv(text: string): Record<string, string>[] {
   ));
 }
 
-function downloadCsv(rows: Record<string, unknown>[], filename: string) {
-  const headers = ["customerCode", "name", "phone", "email", "address", "creditLimit", "currentBalance", "walletBalance", "status"];
+function downloadCsv(rows: Record<string, unknown>[], filename: string, headers = ["customerCode", "name", "phone", "email", "address", "creditLimit", "currentBalance", "walletBalance", "status"]) {
   const esc = (v: unknown) => `"${String(v ?? "").replaceAll('"', '""')}"`;
   const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => esc(r[h])).join(","))].join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -618,7 +617,11 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
           </button>
           {showingContacts ? (
             <>
-              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => downloadCsv(contacts.map((c) => ({ contactCode: c.contactCode, customerId: c.customerId, firstName: c.firstName, lastName: c.lastName, roleTitle: c.roleTitle, phone: c.phone, email: c.email, isPrimary: c.isPrimary, notes: c.notes, status: c.status })), "customer-contacts.csv")} type="button"><Download size={13} /> Export</button>
+              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => downloadCsv(
+                contacts.map((c) => ({ contactCode: c.contactCode, customerId: c.customerId, firstName: c.firstName, lastName: c.lastName, roleTitle: c.roleTitle, phone: c.phone, email: c.email, isPrimary: c.isPrimary, notes: c.notes, status: c.status })),
+                "customer-contacts.csv",
+                ["contactCode", "customerId", "firstName", "lastName", "roleTitle", "phone", "email", "isPrimary", "notes", "status"],
+              )} type="button"><Download size={13} /> Export</button>
               <label className={`v2-btn v2-btn-secondary v2-btn-sm${isOnline ? "" : " v2-opacity-50"}`} style={{ cursor: isOnline ? "pointer" : "not-allowed" }}>
                 <Upload size={13} /> Import CSV
                 <input hidden type="file" accept=".csv,text/csv" onChange={importContactFile} disabled={!isOnline} />
