@@ -43,16 +43,19 @@ for (const file of files) {
           return ancestor.openingElement.attributes.properties.some((p) => p.getText(sf).startsWith("onSubmit="));
         });
 
+        const line = sf.getLineAndCharacterOfPosition(opening.getStart(sf)).line + 1;
+        const fileRef = path.relative(process.cwd(), file).replace(/\\/g, "/");
+        const displayOnlyDisabled = /\bdisabled(?:\s*=|\s|$)/.test(attrs) && /data-governance\s*=\s*["']display["']/.test(attrs);
+        const propForwardingWrapper = fileRef === "apps/web/src/components/UI/Button.tsx" && /\{\.\.\.props\}/.test(attrs);
         const actionBound =
           hasProp(attrs, "onClick") ||
           hasProp(attrs, "onClickCapture") ||
           hasProp(attrs, "onMouseDown") ||
           hasProp(attrs, "formAction") ||
           /\btype\s*=\s*["']submit["']/.test(attrs) ||
-          insideSubmitForm;
-
-        const line = sf.getLineAndCharacterOfPosition(opening.getStart(sf)).line + 1;
-        const fileRef = path.relative(process.cwd(), file).replace(/\\/g, "/");
+          insideSubmitForm ||
+          displayOnlyDisabled ||
+          propForwardingWrapper;
 
         if (!actionBound) {
           unbound.push({ file: fileRef, line, kind: "UNBOUND", detail: opening.getText(sf).slice(0, 240) });

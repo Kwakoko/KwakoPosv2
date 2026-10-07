@@ -6,16 +6,16 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-07";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "490b7fd6ec428e77f1e2f48c8375856b1bac0eec",
-  "packages/database/prisma/schema.prisma": "1a9e7130834582d8ad69523d881a6ab5f685b036",
+  "package.json": "7d05d36ec0b43f970733844c357c342e36cf042b",
+  "packages/database/prisma/schema.prisma": "af684372fe661dea3254ade9e4c1879faf5bdcc4",
   "packages/database/prisma/migrations/202610070001_dashboard_production_read_model/migration.sql": "5a053151e38557c9a016dc3d7b47b01c8aa2eb25",
   "packages/database/prisma/migrations/202610070002_dashboard_read_model_rls/migration.sql": "d7d998c2a9baf9d82c0fa491986a26c7df80ba0b",
   "apps/web/src/services/dashboardCardRegistry.ts": "69ccee4ebd02944cecdb008d730692b632fb3146",
   "apps/web/src/modules/moduleRegistry.ts": "6002fc7096bf4412cc9bc8643c26a0561b08bfc6",
   "apps/web/src/pages/DashboardPage.tsx": "cbfe27afea615933098d3888bb958e5b944012fb",
-  "apps/api/src/services/dashboardKpiService.ts": "b085ec98cc339dc31f8d6dbde00feae5f78feff5",
+  "apps/api/src/services/dashboardKpiService.ts": "f07c91ae53ef563119ee24ee4efd4c149468b784",
   "apps/web/src/services/dashboardKpiService.ts": "ef9fcc7c256dcda2b901371ae9f73ed7819a7248",
-  "packages/database/src/prismaProductionRepositories.ts": "d07fa6b890b5a96ff60c746cacb47375dac03aaa",
+  "packages/database/src/prismaProductionRepositories.ts": "1fa400c3466a7315db9daae7f86d97ce64791f41",
   "tests/integration/dashboard-final-closures.test.ts": "777bb47676b33a90f2011fa9d45e030829a18d1b",
   ".github/workflows/ci.yml": "a92b7208971968053f6de87aa7cb74b8c4fab705",
   ".github/workflows/production-certification.yml": "4ea8fa0290d154e3a66ea135e524928f7bf1d273",

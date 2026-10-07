@@ -274,7 +274,7 @@ export class PrismaCommercialRepository {
       const lines = [];
       let total = 0;
       for (const item of requested) {
-        const source = receiptItems.get(item.variantId);
+        const source: any = receiptItems.get(item.variantId) as any;
         const qty = Number(item.quantityReturned);
         const unitCost = Number(item.unitCost ?? source?.unitCost ?? 0);
         if (!source || !(qty > 0) || qty > Number(source.quantityReceived) || unitCost < 0) throw new Error("PURCHASE_RETURN_LINE_INVALID");
