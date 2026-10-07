@@ -36,6 +36,7 @@ const ContactCreateSchema = z.object({
   email: z.string().email().optional().or(z.literal("")).default(""),
   isPrimary: z.boolean().optional().default(false),
   notes: z.string().optional().default(""),
+  idempotencyKey: z.string().trim().min(1).max(128).optional(),
   decisionInfluence: z.enum(["DECISION_MAKER","INFLUENCER","USER","CHAMPION","BLOCKER"]).optional().default("INFLUENCER"),
 });
 
@@ -95,7 +96,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       prisma.sale.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId }, orderBy: { soldAt: "desc" }, take: 200, select: { id: true, saleNumber: true, grandTotal: true, paymentStatus: true, status: true, soldAt: true } }),
       prisma.payment.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId }, orderBy: { paidAt: "desc" }, take: 200, select: { id: true, paymentNumber: true, amount: true, paymentMethod: true, provider: true, providerReference: true, status: true, paidAt: true } }),
       prisma.return.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, customerId }, orderBy: { createdAt: "desc" }, take: 200, select: { id: true, returnNumber: true, refundType: true, reason: true, createdAt: true } }),
-      prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "Customer", entityId: customerId }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: { in: ["Customer", "CustomerContact"] }, entityId: { in: [customerId] } }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.auditEvent.findMany({ where: { tenantId: c.tenantId, branchId: c.branchId, entityType: "CustomerContact" }, orderBy: { createdAt: "desc" }, take: 500 }).then((rows: any[]) => rows.filter((row) => String((row.metadata as any)?.customerId || "") === customerId).slice(0, 200)).catch(() => []),
     ]);
     return { success: true, data: { customer, sales, payments, returns, audits, contactAudits } };
@@ -208,7 +209,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       const paymentNumber = payload.idempotencyKey
         ? "PAY-CUST-" + payload.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 24).toUpperCase()
         : "PAY-CUST-" + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
-      const created = await tx.payment.create({ data: { id: paymentId, tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      const created = await tx.payment.create({ data: { id: paymentId, tenantId: c.tenantId, branchId: c.branchId, paymentNumber, customerId, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || idemReference || null, status: "COMPLETED", paidAt: new Date() } });
       await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: payload.amount } } });
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, userId: c.userId, deviceId: "customer-contacts-api", action: "CUSTOMER_PAYMENT_POSTED", entityType: "Customer", entityId: customer.id, metadata: { paymentId: created.id, amount: payload.amount, paymentMethod: payload.paymentMethod, provider: payload.provider || null, providerReference: payload.providerReference || null } } });
       return created;
