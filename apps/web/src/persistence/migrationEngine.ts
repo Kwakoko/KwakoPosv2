@@ -1,7 +1,7 @@
 /**
  * KwakoPos Transactional IndexedDB Migration Engine
  *
- * Deterministic forward migrations (V1->V2, V2->V3, V3->V4, V4->V5) and
+ * Deterministic forward migrations (V1->V2, V2->V3, V3->V4, V4->V5, V6->V7) and
  * backward/downgrade strategies (V4->V3, V4->V2).
  * Executes inside safe IndexedDB upgrade transactions with resumable
  * migration journals, checkpoints, and pre/post verification assertions.
@@ -164,6 +164,21 @@ export class MigrationEngine {
         const store = transaction.objectStore("drawerOutbox");
         if (!store.indexNames.contains("by_tenant")) store.createIndex("by_tenant", "tenantId", { unique: false });
         if (!store.indexNames.contains("by_status")) store.createIndex("by_status", "status", { unique: false });
+      } catch {}
+    }
+
+    // V6 -> V7: Dedicated tenant/branch-scoped customer contact replica.
+    // Contacts share the Customer lifecycle but remain independently durable so
+    // search, history, and cross-device convergence do not depend on a monolithic
+    // customer profile blob.
+    if (toVersion === 7) {
+      if (!db.objectStoreNames.contains("customerContacts")) db.createObjectStore("customerContacts");
+      try {
+        const store = transaction.objectStore("customerContacts");
+        if (!store.indexNames.contains("by_tenant")) store.createIndex("by_tenant", "tenantId", { unique: false });
+        if (!store.indexNames.contains("by_customer")) store.createIndex("by_customer", "customerId", { unique: false });
+        if (!store.indexNames.contains("by_phone")) store.createIndex("by_phone", "phone", { unique: false });
+        if (!store.indexNames.contains("by_email")) store.createIndex("by_email", "email", { unique: false });
       } catch {}
     }
   }
