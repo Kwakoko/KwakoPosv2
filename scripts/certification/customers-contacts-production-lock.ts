@@ -16,6 +16,7 @@ const REQUIRED_SURFACES = [
   "Contact history",
   "Import/export",
   "Contact synchronization",
+  "Supplier profile / ledger drilldown",
   "Audit",
 ];
 
@@ -32,6 +33,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "f7ccab61ae3ade83dcf8e22ff69094b690a32c18",
   "apps/web/src/modules/moduleRegistry.ts": "5706ec7e7983c564f3ba5b35a286e269529af06b",
   "apps/web/src/App.tsx": "652498161865f20835fcc86fc89072808b3d2e00",
+  "apps/web/src/pages/PurchasingPage.tsx": "a3ccfaaccf690e5af759c42a78c3011f875b0444",
   "tests/integration/customers-contacts-production-lock.test.ts": "379ac34246b140ccc21fb80ced09e21b0d90bdab",
 };
 
@@ -66,6 +68,9 @@ const MARKERS: Array<[string, string, ...string[]]> = [
     "Customer Directory", "Contacts", "Customer Transactions", "Import / Export"],
   ["customer-route", "apps/web/src/App.tsx",
     "Customer Directory", "Contacts", "Customer Transactions", "Import / Export"],
+  ["supplier-ui", "apps/web/src/pages/PurchasingPage.tsx",
+    "Supplier Directory", "Supplier Profile & Ledger", "/api/v1/suppliers/",
+    "View supplier profile and transaction history"],
   ["customer-integration-test", "tests/integration/customers-contacts-production-lock.test.ts",
     "Customers / Contacts Production Lock", "CUSTOMER_CONTACT_CREATED", "CUSTOMER_PAYMENT_RECORDED",
     "CUSTOMER_WALLET_DEPOSIT", "ALREADY_PROCESSED", "CUSTOMER_NOT_FOUND"],
