@@ -714,9 +714,15 @@ export class PrismaCommercialRepository {
 
   async getActiveCashSession(ctx: TenantContext, registerCode?: string) {
     const code = String(registerCode || "").trim();
-    const row = code
+    let row = code
       ? await db.cashSession.findFirst({ where: { ...tenantWhere(ctx), registerCode: code, status: "OPEN" }, orderBy: { openedAt: "desc" } })
       : await db.cashSession.findFirst({ where: { ...tenantWhere(ctx), cashierId: ctx.userId, status: "OPEN" }, orderBy: { openedAt: "desc" } });
+    if (!row && code) {
+      row = await db.cashSession.findFirst({
+        where: { ...tenantWhere(ctx), cashierId: ctx.userId, registerCode: null, status: "OPEN" },
+        orderBy: { openedAt: "desc" },
+      });
+    }
     return normalize(row);
   }
 
