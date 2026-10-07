@@ -19,7 +19,8 @@ describe("Receipt production lock", () => {
 
   it("has a concrete Web Serial ESC/POS printer implementation", () => {
     const printer = read("apps/web/src/services/receiptPrinterService.ts");
-    expect(printer).toContain("navigator.serial");
+    expect(printer).toContain("requestThermalPrinterPort");
+    expect(printer).toContain("requestPort");
     expect(printer).toContain("getWriter");
     expect(printer).toContain("buildEscPosPayload");
   });
