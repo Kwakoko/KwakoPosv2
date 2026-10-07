@@ -23,19 +23,21 @@ const REQUIRED_SURFACES = [
 
 const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/CustomersPage.tsx": "0681f28e71a441fb5342ce55c11a33bec6ed9161",
-  "apps/web/src/indexedDb.ts": "48ba5664741a32ad22a22e478d36d1d04a1891cc",
+  "apps/web/src/indexedDb.ts": "03382d251e7eed4962a1fff8a25154aeebcb5c3b",
   "apps/web/src/persistence/migrationEngine.ts": "5b6ac2bb41b7747289b54ae8507201e50614b099",
-  "apps/web/src/clientSyncEngine.ts": "6bbd64c387fdc6ea16a0fa0e46e283c92e0ad65e",
-  "apps/api/src/server.ts": "ae89266a23967e40432763b43fe583e61827c530",
-  "packages/contracts/src/index.ts": "02142d8fa4b6ab7d91b27955aac39d426ad78df0",
+  "apps/web/src/clientSyncEngine.ts": "7b846fb46a1cb725b7d6c09130669963d6078c4e",
+  "apps/api/src/server.ts": "a74c1c1515c1e4e242bdf521157620c01b06a7be",
+  "packages/contracts/src/index.ts": "172aa74a708e8a551e2f02e6194367a47bbe97e0",
   "packages/database/prisma/schema.prisma": "4bf880ef5fe0f012f270706bdc6bf93c032547dc",
   "packages/database/prisma/migrations/202610070001_customers_contacts_authority/migration.sql": "b108a95e9732350bc4291859307758ab974e80c6",
-  "packages/database/src/prismaProductionRepositories.ts": "cf5d1d6fc648e0f28d752254e61fe05fbd50b52b",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "f7ccab61ae3ade83dcf8e22ff69094b690a32c18",
+  "packages/database/src/prismaProductionRepositories.ts": "bdfa9bf62d475f3129c44ff986daf450c3e42442",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "c439797e147cb3f03a1dd69d546d7a50f091f91f",
   "apps/web/src/modules/moduleRegistry.ts": "5706ec7e7983c564f3ba5b35a286e269529af06b",
-  "apps/web/src/App.tsx": "652498161865f20835fcc86fc89072808b3d2e00",
+  "apps/web/src/App.tsx": "863d4a8c295bc1ef9659e77723ee3d311729311c",
   "apps/web/src/pages/PurchasingPage.tsx": "a3ccfaaccf690e5af759c42a78c3011f875b0444",
   "tests/integration/customers-contacts-production-lock.test.ts": "379ac34246b140ccc21fb80ced09e21b0d90bdab",
+  ".github/workflows/production-certification.yml": "57aaaf7dbd7bf32e3b0d67a82e2eb40280ef5111",
+  ".github/workflows/production-release-exact-main.yml": "6e13f452332fe16893b68cda724f71145e5f7aa5",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
@@ -55,7 +57,7 @@ const MARKERS: Array<[string, string, ...string[]]> = [
   ["customer-schema", "packages/database/prisma/schema.prisma",
     "model CustomerContact", "walletBalance", "CustomerContact[]", "customer_contacts"],
   ["contact-migration", "packages/database/prisma/migrations/202610070001_customers_contacts_authority/migration.sql",
-    "CREATE TABLE IF NOT EXISTS", "customer_contacts", "wallet_balance"],
+    "CREATE TABLE IF NOT EXISTS", "customer_contacts", "walletBalance"],
   ["sync-authority", "packages/sync/src/worldStandardPrismaSyncEngine.ts",
     '["Customer", "Supplier", "CustomerContact"]', "CUSTOMER_CONTACT_CREATED", "CUSTOMER_PAYMENT_RECORDED",
     "CUSTOMER_WALLET_DEPOSIT", "SYNC_CONFLICT", "tenantId: ctx.tenantId", "branchId: ctx.branchId"],
