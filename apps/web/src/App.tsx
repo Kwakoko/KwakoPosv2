@@ -141,6 +141,10 @@ const TAB_TO_PATH: Record<string, string> = {
   "Receipt Archive": "/receipts",
   // Customers
   Customers: "/customers",
+  "Customer Directory": "/customers",
+  Contacts: "/customers",
+  "Customer Transactions": "/customers",
+  "Import / Export": "/customers",
   // Purchasing
   Purchasing: "/purchasing",
   Suppliers: "/purchasing",
