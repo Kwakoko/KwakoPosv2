@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 const LOCK_ID = "CUSTOMERS-CONTACTS-PRODUCTION-LOCK-2026-10-07";
+// Certification source revision: 2026-10-07-final-trigger
 const REQUIRED_SURFACES = [
   "Customers",
   "Suppliers",
