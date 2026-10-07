@@ -340,6 +340,7 @@ model Customer {
   creditLimit    Decimal      @default(0) @db.Decimal(12, 2)
   currentBalance Decimal      @default(0) @db.Decimal(12, 2)
   openingBalance Decimal      @default(0) @db.Decimal(12, 2)
+  walletBalance  Decimal      @default(0) @db.Decimal(12, 2)
   status         String       @default("ACTIVE")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -349,10 +350,39 @@ model Customer {
   sales          Sale[]
   returns        Return[]
   payments       Payment[]
+  contacts       CustomerContact[]
 
   @@unique([tenantId, branchId, customerCode])
   @@index([tenantId, branchId])
   @@map("customers")
+}
+
+model CustomerContact {
+  id          String   @id @default(uuid())
+  tenantId    String
+  branchId    String
+  customerId  String
+  contactCode String
+  firstName   String
+  lastName    String   @default("")
+  roleTitle   String?
+  phone       String?
+  email       String?
+  isPrimary   Boolean  @default(false)
+  notes       String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, branchId, contactCode])
+  @@index([tenantId, branchId, customerId])
+  @@index([tenantId, branchId, phone])
+  @@index([tenantId, branchId, email])
+  @@map("customer_contacts")
 }
 
 model Supplier {
