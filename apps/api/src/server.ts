@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import Fastify, { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import { loadConfig, getReleaseIdentity } from "@kwakopos2/config";
@@ -106,6 +107,9 @@ import {
   CreateCustomerInvoiceRequestSchema,
   CreateSupplierInvoiceRequestSchema,
   AllocatePaymentRequestSchema,
+  RefundPaymentRequestSchema,
+  ReversePaymentRequestSchema,
+  PaymentReconciliationRequestSchema,
   CreateBankAccountRequestSchema,
   CreateBankTransactionRequestSchema,
   CreateBudgetRequestSchema,
@@ -2682,6 +2686,80 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
     const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
+  });
+
+  const assertPaymentAuthority = (req: any, permission: "view" | "refund" | "reconcile") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
+    const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const hasWildcard = permissions.includes("*");
+    const required = permission === "refund" ? "PAYMENT_REFUND" : permission === "reconcile" ? "PAYMENT_RECONCILE" : "PAYMENT_VIEW";
+    if (!(isAdmin || hasWildcard || permissions.includes(required))) throw new Error("FORBIDDEN: Payment authority required");
+    return ctx;
+  };
+
+  server.post("/api/v1/payments/:id/reverse", async (req, reply) => {
+    assertPaymentAuthority(req, "refund");
+    const body = ReversePaymentRequestSchema.parse(req.body);
+    const result = await commercialRepository.reversePayment(req.tenantContext!, (req.params as any).id, body);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.post("/api/v1/payments/:id/refund", async (req, reply) => {
+    assertPaymentAuthority(req, "refund");
+    const body = RefundPaymentRequestSchema.parse(req.body);
+    const result = await commercialRepository.refundPayment(req.tenantContext!, (req.params as any).id, body);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/payments/reports/channels", async (req) => {
+    assertPaymentAuthority(req, "view");
+    const query: any = req.query || {};
+    const from = query.from ? new Date(query.from) : new Date(new Date().setHours(0, 0, 0, 0));
+    const to = query.to ? new Date(query.to) : new Date();
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error("PAYMENT_REPORT_PERIOD_INVALID");
+    const report = await commercialRepository.getPaymentChannelReport(req.tenantContext!, from, to);
+    return { success: true, data: report };
+  });
+
+  server.post("/api/v1/payments/reconcile", async (req) => {
+    assertPaymentAuthority(req, "reconcile");
+    const body = PaymentReconciliationRequestSchema.parse(req.body);
+    return { success: true, data: await commercialRepository.reconcilePayments(req.tenantContext!, body) };
+  });
+
+  server.post("/api/v1/payments/webhooks/:provider", async (req, reply) => {
+    const body: any = req.body || {};
+    const paymentId = String(body.paymentId || "");
+    const providerEventId = String(body.providerEventId || body.eventId || "");
+    const provider = String((req.params as any).provider || "").toUpperCase();
+    if (!paymentId || !providerEventId || !provider) return reply.status(400).send({ success: false, error: "PAYMENT_WEBHOOK_FIELDS_REQUIRED" });
+
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) return reply.status(404).send({ success: false, error: "PAYMENT_NOT_FOUND" });
+
+    const secretRow = await prisma.setting.findFirst({
+      where: { tenantId: payment.tenantId, branchId: payment.branchId, scope: "BRANCH", key: `payment.webhookSecret.${provider}`, isActive: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    const secret = secretRow?.value && typeof secretRow.value === "object" ? String((secretRow.value as any).secret || "") : "";
+    const supplied = String(req.headers["x-payment-signature"] || "").trim().toLowerCase();
+    if (!secret || !supplied) return reply.status(401).send({ success: false, error: "PAYMENT_WEBHOOK_SIGNATURE_REQUIRED" });
+    const expected = createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
+    const valid = supplied.length === expected.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+    if (!valid) return reply.status(401).send({ success: false, error: "PAYMENT_WEBHOOK_SIGNATURE_INVALID" });
+
+    const systemUserId = "00000000-0000-0000-0000-000000000000";
+    const ctx = { tenantId: payment.tenantId, branchId: payment.branchId, userId: systemUserId, roles: ["SYSTEM"], permissions: ["*"] } as TenantContext;
+    const result = await commercialRepository.confirmProviderPayment(ctx, payment.id, {
+      amount: Number(body.amount),
+      provider,
+      providerReference: body.providerReference || body.reference,
+      providerEventId,
+      externalReference: body.externalReference || providerEventId,
+    });
+    return reply.status(200).send({ success: true, data: result });
   });
 
   const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {

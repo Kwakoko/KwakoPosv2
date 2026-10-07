@@ -13,6 +13,7 @@ import {
 import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
 import { applyPayablesProductionLockOperation } from "./payablesProductionLock.js";
 import { applyReceivablesProductionLockOperation } from "./receivablesProductionLock.js";
+import { applyPaymentsProductionLockOperation } from "./paymentsProductionLock.js";
 
 const MAX_DELTA = 500;
 
@@ -440,8 +441,14 @@ export class WorldStandardPrismaSyncEngine {
     }
 
     if (await applyInventoryProductionLockOperation(ctx, req, op, tx, (priceCtx, priceReq, priceDb) => this.productRepo.recordPriceChange(priceCtx, priceReq, priceDb))) return;
+    if (op.entityType === "Payment" && op.operationType !== "CREATE") {
+      if (await applyPaymentsProductionLockOperation(ctx, req, op, tx)) return;
+    }
     if (await applyPayablesProductionLockOperation(ctx, req, op, tx)) return;
     if (await applyReceivablesProductionLockOperation(ctx, req, op, tx)) return;
+    if (op.entityType === "Payment" && op.operationType === "CREATE") {
+      if (await applyPaymentsProductionLockOperation(ctx, req, op, tx)) return;
+    }
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);

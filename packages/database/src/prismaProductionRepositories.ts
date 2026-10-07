@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
-import { assertTenantIsolation, EmployeeEngine } from "@kwakopos2/domain";
+import { assertTenantIsolation, EmployeeEngine, FinancialBridge } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
 
 const db: any = prisma;
@@ -249,6 +249,9 @@ export class PrismaCommercialRepository {
     if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
     if (supplier.status !== "ACTIVE") throw new Error("SUPPLIER_NOT_ACTIVE");
     if (req.amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
+    if (["CARD", "BANK", "MOBILE_MONEY"].includes(String(req.paymentMethod).toUpperCase()) && !String(req.providerReference || "").trim()) {
+      throw new Error("PAYMENT_PROVIDER_REFERENCE_REQUIRED");
+    }
     const paymentNumber = `PAY-SUP-${String(req.idempotencyKey).replace(/[^A-Za-z0-9]/g, "").slice(0, 24)}`;
 
     return normalize(await db.$transaction(async (tx: any) => {
@@ -282,10 +285,22 @@ export class PrismaCommercialRepository {
           paymentMethod: req.paymentMethod,
           provider: req.provider || null,
           providerReference: req.providerReference || null,
+          providerVerifiedAt: String(req.paymentMethod).toUpperCase() === "CASH" || Boolean(req.providerReference) ? new Date() : null,
+          reconciliationStatus: String(req.paymentMethod).toUpperCase() === "CASH" || Boolean(req.providerReference) ? "MATCHED" : "UNRECONCILED",
+          reconciliationReference: req.providerReference || null,
           status: "COMPLETED",
           paidAt: new Date(),
         },
       });
+
+      const paymentAccounts = await this.atomic.getFinancialAccountLookup(ctx, tx);
+      const paymentJournal = FinancialBridge.mapSupplierPaymentToJournal(
+        ctx,
+        payment as any,
+        paymentAccounts as any,
+        (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
+      );
+      await this.atomic.postFinancialJournal(ctx, paymentJournal, tx);
 
       let remaining = Number(req.amount);
       const allocations: any[] = [];
@@ -443,23 +458,48 @@ export class PrismaCommercialRepository {
 
   async createSaleReturn(ctx: TenantContext, req: any) {
     return normalize(await db.$transaction(async (tx: any) => {
-      const original = req.originalSaleId ? await tx.sale.findFirst({ where: { id: req.originalSaleId, ...tenantWhere(ctx) }, include: { lines: true } }) : null;
+      const original = req.originalSaleId
+        ? await tx.sale.findFirst({ where: { id: req.originalSaleId, ...tenantWhere(ctx) }, include: { lines: true, payments: true } })
+        : null;
       const count = await tx.return.count({ where: tenantWhere(ctx) });
       const returnNumber = req.returnNumber || `RET-MAIN-${String(count + 1).padStart(6, "0")}`;
       const lines = (req.items || req.lines || []).map((x: any) => ({
-        id: x.id || randomUUID(), variantId: x.variantId, quantityReturned: Math.abs(x.quantityReturned ?? x.quantity ?? 0),
+        id: x.id || randomUUID(),
+        variantId: x.variantId,
+        quantityReturned: Math.abs(x.quantityReturned ?? x.quantity ?? 0),
         refundUnitPrice: x.refundUnitPrice ?? x.unitPrice ?? 0,
         refundLineTotal: x.refundLineTotal ?? ((x.refundUnitPrice ?? x.unitPrice ?? 0) * Math.abs(x.quantityReturned ?? x.quantity ?? 0)),
         condition: x.condition || "GOOD",
       }));
       const total = lines.reduce((s: number, x: any) => s + Number(x.refundLineTotal || 0), 0);
+      if (!(total > 0)) throw new Error("REFUND_AMOUNT_REQUIRED");
+
+      if (original) {
+        const priorReturns = await tx.return.aggregate({ where: { ...tenantWhere(ctx), originalSaleId: original.id, status: "COMPLETED" }, _sum: { totalRefundAmount: true } });
+        const alreadyRefunded = Number(priorReturns._sum.totalRefundAmount ?? 0);
+        if (alreadyRefunded + total > Number(original.grandTotal) + 0.01) throw new Error("SALE_REFUND_EXCEEDS_REMAINING");
+      }
+
       const record = await tx.return.create({ data: {
-        id: req.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId, returnNumber,
-        originalSaleId: original?.id ?? req.originalSaleId ?? null, customerId: req.customerId ?? original?.customerId ?? null,
-        reason: req.reason || "Customer return", refundType: req.refundType || "CASH",
-        totalRefundAmount: req.totalRefundAmount ?? total, status: "COMPLETED",
-        authorizedById: ctx.userId, lines: { create: lines },
+        id: req.id || undefined,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        returnNumber,
+        originalSaleId: original?.id ?? req.originalSaleId ?? null,
+        customerId: req.customerId ?? original?.customerId ?? null,
+        reason: req.reason || "Customer return",
+        refundType: req.refundType || "CASH",
+        totalRefundAmount: req.totalRefundAmount ?? total,
+        status: "COMPLETED",
+        authorizedById: ctx.userId,
+        lines: { create: lines },
       }, include: { lines: true } });
+
+      const saleCostByVariant = new Map<string, number>();
+      for (const saleLine of original?.lines || []) {
+        saleCostByVariant.set(String(saleLine.variantId), Number(saleLine.unitCost || 0));
+      }
+      let costOfReturnedGoods = 0;
       for (const line of lines) {
         const variant = await tx.productVariant.findFirst({ where: { id: line.variantId, ...tenantWhere(ctx) } });
         if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
@@ -468,11 +508,13 @@ export class PrismaCommercialRepository {
         const change = Number(line.quantityReturned);
         const after = before + change;
         if (after < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
+        const unitCost = saleCostByVariant.get(String(variant.id)) ?? 0;
+        if (line.condition === "GOOD") costOfReturnedGoods += unitCost * change;
 
         await tx.stockLedger.create({ data: {
           tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: variant.id,
           movementType: "RETURN", quantityChange: change, quantity: change,
-          quantityBefore: before, quantityAfter: after, unitCost: 0, totalCost: 0, referenceType: "RETURN",
+          quantityBefore: before, quantityAfter: after, unitCost, totalCost: unitCost * change, referenceType: "RETURN",
           referenceId: record.id, occurredAt: new Date(), deviceId: req.deviceId || "web",
           operationId: req.operationId || record.id, idempotencyKey: `${req.idempotencyKey || record.id}-${variant.id}`,
         }});
@@ -480,7 +522,178 @@ export class PrismaCommercialRepository {
         await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
         await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       }
-      return record;
+
+      const finance = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
+      const accounts = await finance.getFinancialAccountLookup(ctx, tx);
+      const built = FinancialBridge.mapReturnToJournal(ctx, record as any, accounts as any, costOfReturnedGoods, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      await finance.postFinancialJournal(ctx, built, tx);
+
+      const refundMethod = req.refundType === "STORE_CREDIT" ? "CREDIT" : (req.refundType || "CASH");
+      let remaining = Number(record.totalRefundAmount);
+      const eligible = (original?.payments || [])
+        .filter((p: any) => ["COMPLETED", "PARTIALLY_REFUNDED"].includes(p.status) && !p.isRefund)
+        .sort((a: any, b: any) => Number(a.paymentMethod === refundMethod) - Number(b.paymentMethod === refundMethod))
+        .reverse();
+      for (const payment of eligible) {
+        if (remaining <= 0.01) break;
+        const available = Math.max(0, Number(payment.amount) - Number(payment.refundedAmount || 0));
+        const applied = Math.min(remaining, available);
+        if (applied > 0) {
+          const newRefunded = Number(payment.refundedAmount || 0) + applied;
+          await tx.payment.update({ where: { id: payment.id }, data: {
+            refundedAmount: newRefunded,
+            status: newRefunded + 0.01 >= Number(payment.amount) ? "REFUNDED" : "PARTIALLY_REFUNDED",
+            refundReturnId: record.id,
+            refundReason: record.reason,
+            refundMethod,
+          }});
+          remaining -= applied;
+        }
+      }
+      if (remaining > 0.01) throw new Error("REFUND_UNALLOCATED_TO_ORIGINAL_PAYMENTS");
+
+      const refundPayment = await tx.payment.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentNumber: `REF-RET-${randomUUID().slice(0, 12).toUpperCase()}`,
+          saleId: original?.id ?? null,
+          customerId: record.customerId,
+          amount: Number(record.totalRefundAmount),
+          paymentMethod: refundMethod,
+          provider: req.refundType === "MOBILE_MONEY" ? (req.provider || null) : null,
+          providerReference: req.providerReference || null,
+          status: "REFUNDED",
+          isRefund: true,
+          refundReturnId: record.id,
+          refundReason: record.reason,
+          refundMethod,
+          refundProvider: req.provider || null,
+          refundProviderReference: req.providerReference || null,
+          reconciliationStatus: "MATCHED",
+          reconciledAt: new Date(),
+          paidAt: new Date(),
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId || "web",
+          action: "PAYMENT_REFUND_RECORDED", entityType: "Payment", entityId: refundPayment.id,
+          metadata: { returnId: record.id, originalSaleId: original?.id ?? null, amount: Number(record.totalRefundAmount), refundType: record.refundType, reason: record.reason },
+        },
+      });
+      return { returnRecord: record, refundPayment };
+    }));
+  }
+
+  async reversePayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await this.atomic.reversePayment(ctx, paymentId, req.reason));
+  }
+
+  async refundPayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await this.atomic.refundPayment(ctx, paymentId, req));
+  }
+
+  async confirmProviderPayment(ctx: TenantContext, paymentId: string, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      return this.atomic.confirmProviderPaymentInTransaction(ctx, paymentId, req, tx);
+    }));
+  }
+
+  async getPaymentChannelReport(ctx: TenantContext, from: Date, to: Date) {
+    const payments = await db.payment.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paidAt: { gte: from, lt: to } },
+      orderBy: { paidAt: "asc" },
+    });
+    const channels: Record<string, { paymentMethod: string; provider: string; gross: number; refunds: number; reversed: number; net: number; count: number; refundCount: number }> = {};
+    for (const payment of payments as any[]) {
+      const key = `${String(payment.paymentMethod || "OTHER").toUpperCase()}:${String(payment.provider || "NONE").toUpperCase()}`;
+      channels[key] ||= { paymentMethod: String(payment.paymentMethod || "OTHER"), provider: String(payment.provider || "NONE"), gross: 0, refunds: 0, reversed: 0, net: 0, count: 0, refundCount: 0 };
+      const bucket = channels[key];
+      if (payment.isRefund || payment.status === "REFUNDED") {
+        bucket.refunds += Number(payment.amount);
+        bucket.refundCount += 1;
+      } else if (payment.status === "REVERSED") {
+        bucket.reversed += Number(payment.amount);
+      } else if (["COMPLETED", "PARTIALLY_REFUNDED"].includes(payment.status)) {
+        bucket.gross += Number(payment.amount);
+        bucket.count += 1;
+        bucket.net += Number(payment.amount) - Number(payment.refundedAmount || 0);
+      }
+    }
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      period: { from: from.toISOString(), to: to.toISOString() },
+      channels: Object.values(channels).map((c) => ({ ...c, net: Math.round(c.net * 100) / 100 })),
+      totals: Object.values(channels).reduce((acc, c) => ({
+        gross: acc.gross + c.gross,
+        refunds: acc.refunds + c.refunds,
+        reversed: acc.reversed + c.reversed,
+        net: acc.net + c.net,
+        count: acc.count + c.count,
+        refundCount: acc.refundCount + c.refundCount,
+      }), { gross: 0, refunds: 0, reversed: 0, net: 0, count: 0, refundCount: 0 }),
+    };
+  }
+
+  async reconcilePayments(ctx: TenantContext, req: any) {
+    return normalize(await db.$transaction(async (tx: any) => {
+      const from = new Date(req.from);
+      const to = new Date(req.to);
+      if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error("PAYMENT_RECONCILIATION_PERIOD_INVALID");
+      const payments = await tx.payment.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paidAt: { gte: from, lt: to }, isRefund: false, status: { in: ["COMPLETED", "PARTIALLY_REFUNDED"] } },
+      });
+      const used = new Set<string>();
+      const matched: any[] = [];
+      const unmatchedExternal: any[] = [];
+
+      for (const entry of req.entries) {
+        const candidates = payments.filter((p: any) =>
+          !used.has(p.id) &&
+          (entry.paymentId ? p.id === entry.paymentId : entry.providerReference ? p.providerReference === entry.providerReference : true) &&
+          Math.abs(Number(p.amount) - Number(entry.amount)) <= 0.01 &&
+          p.paymentMethod === entry.paymentMethod &&
+          (!entry.provider || p.provider === entry.provider)
+        );
+        if (candidates.length !== 1) {
+          unmatchedExternal.push(entry);
+          continue;
+        }
+        const payment = candidates[0];
+        used.add(payment.id);
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            reconciliationStatus: "MATCHED",
+            reconciliationReference: entry.externalReference,
+            reconciledAt: new Date(),
+          },
+        });
+        matched.push({ paymentId: payment.id, externalReference: entry.externalReference, amount: Number(entry.amount) });
+      }
+
+      const unmatchedInternal = [];
+      for (const payment of payments) {
+        if (!used.has(payment.id)) {
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { reconciliationStatus: "VARIANCE", reconciliationReference: req.reference || null, reconciledAt: new Date() },
+          });
+          unmatchedInternal.push({ paymentId: payment.id, amount: Number(payment.amount), paymentMethod: payment.paymentMethod, provider: payment.provider, providerReference: payment.providerReference });
+        }
+      }
+
+      const event = await tx.auditEvent.create({
+        data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: "payment-reconciliation",
+          action: "PAYMENT_RECONCILIATION_COMPLETED", entityType: "Payment", entityId: ctx.branchId,
+          metadata: { from: req.from, to: req.to, matchedCount: matched.length, externalUnmatchedCount: unmatchedExternal.length, internalUnmatchedCount: unmatchedInternal.length },
+        },
+      });
+      return { matched, unmatchedExternal, unmatchedInternal, auditEventId: event.id, reconciled: unmatchedExternal.length === 0 && unmatchedInternal.length === 0 };
     }));
   }
 

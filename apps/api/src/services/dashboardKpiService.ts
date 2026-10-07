@@ -314,7 +314,7 @@ export async function getDashboardKpiSnapshot(
       ),
       tx.$queryRawUnsafe<Array<{ paymentMethod: string; volume: unknown; count: bigint | number | string; order_count: bigint | number | string }>>(
         `SELECT COALESCE(p."paymentMethod", 'CASH') AS "paymentMethod",
-                COALESCE(SUM(p."amount"),0) AS volume,
+                COALESCE(SUM(GREATEST(0, p."amount" - COALESCE(p."refundedAmount",0))),0) AS volume,
                 COUNT(*) AS count,
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
@@ -323,14 +323,14 @@ export async function getDashboardKpiSnapshot(
             AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
             AND s."tenantId" = $1 AND s."branchId" = $2
-            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND p."status" IN ('COMPLETED','PARTIALLY_REFUNDED') AND COALESCE(p."isRefund", false) = false AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4
           GROUP BY COALESCE(p."paymentMethod", 'CASH')
           ORDER BY volume DESC`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),
       tx.$queryRawUnsafe<Array<{ total_volume: unknown; payment_count: bigint | number | string; order_count: bigint | number | string }>>(
-        `SELECT COALESCE(SUM(p."amount"),0) AS total_volume,
+        `SELECT COALESCE(SUM(GREATEST(0, p."amount" - COALESCE(p."refundedAmount",0))),0) AS total_volume,
                 COUNT(*) AS payment_count,
                 COUNT(DISTINCT p."saleId") AS order_count
            FROM payments p
@@ -339,7 +339,7 @@ export async function getDashboardKpiSnapshot(
             AND s."branchId" = p."branchId"
           WHERE p."tenantId" = $1 AND p."branchId" = $2
             AND s."tenantId" = $1 AND s."branchId" = $2
-            AND p."status" = 'COMPLETED' AND s."status" = 'COMPLETED'
+            AND p."status" IN ('COMPLETED','PARTIALLY_REFUNDED') AND COALESCE(p."isRefund", false) = false AND s."status" = 'COMPLETED'
             AND s."soldAt" >= $3 AND s."soldAt" < $4`,
         ctx.tenantId, ctx.branchId, windowStart, new Date(now.getTime() + 86400000),
       ),      tx.$queryRawUnsafe<Array<{ product_id: string; name: string; revenue: unknown; units: unknown; stock: unknown; category: string; revenue_rank: number; units_rank: number }>>(

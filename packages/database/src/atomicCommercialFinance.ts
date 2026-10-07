@@ -57,6 +57,177 @@ export class PrismaAtomicCommercialFinanceService {
     return { journal: j, lines };
   }
 
+  public async getFinancialAccountLookup(ctx: TenantContext, tx: any = this.db) {
+    return this.accounts(tx, ctx);
+  }
+
+  public async postFinancialJournal(ctx: TenantContext, built: any, tx: any = this.db) {
+    return this.writeJournal(tx, ctx, built);
+  }
+
+  async reversePayment(ctx: TenantContext, paymentId: string, reason: string) {
+    return this.db.$transaction((tx: any) => this.reversePaymentInTransaction(ctx, paymentId, reason, tx));
+  }
+
+  async reversePaymentInTransaction(ctx: TenantContext, paymentId: string, reason: string, tx: any) {
+    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
+    if (payment.saleId) throw new Error("PAYMENT_SALE_REVERSAL_REQUIRES_RETURN");
+    if (payment.isRefund) throw new Error("PAYMENT_REFUND_CANNOT_BE_REVERSED");
+    if (payment.status !== "COMPLETED") throw new Error("PAYMENT_NOT_REVERSIBLE");
+    const existing = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, reversalOfPaymentId: payment.id } });
+    if (existing) return existing;
+
+    const journal = await tx.journalEntry.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "PAYMENT", sourceId: payment.id, status: "POSTED" }, include: { lines: true } });
+    if (!journal) throw new Error("PAYMENT_JOURNAL_REQUIRED_FOR_REVERSAL");
+    const journalNumber = TransactionNumbering.formatNumber("REV", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+    const built = AccountingEngine.createReversalJournal(ctx, journal as any, journal.lines as any, reason, journalNumber);
+    await this.writeJournal(tx, ctx, { journal: built.reversalJournal, lines: built.reversalLines });
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: "REVERSED", reversalReason: reason, reversedAt: new Date(), reversedById: ctx.userId },
+    });
+    const reversal = await tx.payment.create({
+      data: {
+        id: crypto.randomUUID(),
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        paymentNumber: `REV-PAY-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
+        saleId: null,
+        purchaseReceiptId: payment.purchaseReceiptId,
+        customerId: payment.customerId,
+        supplierId: payment.supplierId,
+        amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        provider: payment.provider,
+        providerReference: payment.providerReference,
+        status: "REVERSED",
+        reconciliationStatus: "MATCHED",
+        reversalOfPaymentId: payment.id,
+        reversalReason: reason,
+        reversedAt: new Date(),
+        reversedById: ctx.userId,
+        paidAt: new Date(),
+      },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payments-reversal", action: "PAYMENT_REVERSED", entityType: "Payment", entityId: payment.id,
+        metadata: { reversalPaymentId: reversal.id, amount: Number(payment.amount), reason },
+      },
+    });
+    return reversal;
+  }
+
+  async refundPayment(ctx: TenantContext, paymentId: string, req: any) {
+    return this.db.$transaction((tx: any) => this.refundPaymentInTransaction(ctx, paymentId, req, tx));
+  }
+
+  async refundPaymentInTransaction(ctx: TenantContext, paymentId: string, req: any, tx: any) {
+    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
+    if (payment.isRefund) throw new Error("PAYMENT_REFUND_CANNOT_BE_REFUNDED");
+    if (payment.saleId) throw new Error("PAYMENT_SALE_REFUND_REQUIRES_RETURN");
+    if (!["COMPLETED", "PARTIALLY_REFUNDED"].includes(payment.status)) throw new Error("PAYMENT_NOT_REFUNDABLE");
+    const refundAmount = Number(req.amount);
+    const remaining = Number(payment.amount) - Number(payment.refundedAmount || 0);
+    if (!(refundAmount > 0) || refundAmount > remaining + 0.01) throw new Error("REFUND_EXCEEDS_REMAINING_PAYMENT");
+
+    const accounts = await this.accounts(tx, ctx);
+    const journalNumber = TransactionNumbering.formatNumber("REV", "MAIN", (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+    const isBank = ["BANK", "MOBILE_MONEY", "CARD"].includes(payment.paymentMethod);
+    const refundDebit = payment.customerId ? accounts.receivableAccountId : accounts.payableAccountId;
+    const refundCredit = isBank ? accounts.bankAccountId : accounts.cashAccountId;
+    const lines = payment.customerId
+      ? [
+          { accountId: refundDebit, description: `Payment Refund ${payment.paymentNumber} - AR Restoration`, debit: refundAmount, credit: 0 },
+          { accountId: refundCredit, description: `Payment Refund ${payment.paymentNumber} - Funds Outflow`, debit: 0, credit: refundAmount },
+        ]
+      : [
+          { accountId: refundCredit, description: `Supplier Payment Refund ${payment.paymentNumber} - Funds Inflow`, debit: refundAmount, credit: 0 },
+          { accountId: refundDebit, description: `Supplier Payment Refund ${payment.paymentNumber} - AP Restoration`, debit: 0, credit: refundAmount },
+        ];
+    const built = AccountingEngine.createJournalEntry(ctx, {
+      journalNumber,
+      sourceType: "PAYMENT",
+      sourceId: payment.id,
+      description: `Payment Refund ${payment.paymentNumber}`,
+      idempotencyKey: `jrn-refund-pay-${payment.id}-${req.idempotencyKey}`,
+      lines,
+    });
+    await this.writeJournal(tx, ctx, built);
+
+    const newRefunded = Number(payment.refundedAmount || 0) + refundAmount;
+    const status = newRefunded + 0.01 >= Number(payment.amount) ? "REFUNDED" : "PARTIALLY_REFUNDED";
+    const refund = await tx.payment.create({
+      data: {
+        id: crypto.randomUUID(),
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        paymentNumber: `REF-PAY-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
+        customerId: payment.customerId,
+        supplierId: payment.supplierId,
+        amount: refundAmount,
+        paymentMethod: req.refundMethod || payment.paymentMethod,
+        provider: req.provider || payment.provider || null,
+        providerReference: req.providerReference || null,
+        status: "REFUNDED",
+        isRefund: true,
+        refundReason: req.reason,
+        refundMethod: req.refundMethod || payment.paymentMethod,
+        refundProvider: req.provider || null,
+        refundProviderReference: req.providerReference || null,
+        reversalOfPaymentId: payment.id,
+        reconciliationStatus: "MATCHED",
+        paidAt: new Date(),
+      },
+    });
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { refundedAmount: newRefunded, status, refundReason: req.reason, refundMethod: req.refundMethod || payment.paymentMethod, refundProvider: req.provider || payment.provider || null, refundProviderReference: req.providerReference || null },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payments-refund", action: "PAYMENT_REFUNDED", entityType: "Payment", entityId: payment.id,
+        metadata: { refundPaymentId: refund.id, amount: refundAmount, reason: req.reason, remainingAfter: Math.max(0, Number(payment.amount) - newRefunded) },
+      },
+    });
+    return refund;
+  }
+
+  async confirmProviderPaymentInTransaction(ctx: TenantContext, paymentId: string, req: any, tx: any) {
+    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.tenantId !== ctx.tenantId || payment.branchId !== ctx.branchId) throw new Error("PAYMENT_NOT_FOUND");
+    if (!["PENDING", "COMPLETED"].includes(payment.status) || payment.isRefund || payment.reversalOfPaymentId) throw new Error("PAYMENT_PROVIDER_CONFIRMATION_INVALID_STATE");
+    if (Math.abs(Number(req.amount) - Number(payment.amount)) > 0.01) throw new Error("PAYMENT_PROVIDER_AMOUNT_MISMATCH");
+    const duplicate = await tx.payment.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, providerEventId: req.providerEventId } });
+    if (duplicate && duplicate.id !== payment.id) throw new Error("PAYMENT_PROVIDER_EVENT_REPLAY");
+    const updated = await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: "COMPLETED",
+        provider: req.provider || payment.provider,
+        providerReference: req.providerReference || payment.providerReference,
+        providerEventId: req.providerEventId,
+        providerVerifiedAt: new Date(),
+        reconciliationStatus: "MATCHED",
+        reconciliationReference: req.externalReference || req.providerEventId,
+        reconciledAt: new Date(),
+      },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: "payment-provider", action: "PAYMENT_PROVIDER_CONFIRMED", entityType: "Payment", entityId: payment.id,
+        metadata: { provider: updated.provider, providerReference: updated.providerReference, providerEventId: req.providerEventId, amount: Number(updated.amount) },
+      },
+    });
+    return updated;
+  }
+
   async createSale(ctx: TenantContext, req: any) {
     return this.db.$transaction(async (tx: any) => {
       const existing = await tx.sale.findUnique({ where: { idempotencyKey: req.idempotencyKey }, include: { lines: true, payments: true } });
@@ -163,8 +334,23 @@ export class PrismaAtomicCommercialFinanceService {
           customerCurrentBalance,
         });
         if (!r.success) throw new Error(r.error || "PAYMENT_REJECTED");
-        payments.push({ id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, amount: p.amount, paymentMethod: p.paymentMethod, provider: p.provider ?? null, providerReference: r.reference, status: "COMPLETED", paidAt: now }); }
+        payments.push({
+          id: crypto.randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentNumber: `PAY-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+          amount: p.amount,
+          paymentMethod: p.paymentMethod,
+          provider: p.provider ?? null,
+          providerReference: r.reference,
+          providerVerifiedAt: p.paymentMethod === "CASH" || p.providerReference ? now : null,
+          reconciliationStatus: p.paymentMethod === "CASH" || p.providerReference ? "MATCHED" : "UNRECONCILED",
+          reconciliationReference: p.providerReference ?? null,
+          status: "COMPLETED",
+          paidAt: now,
+        }); }
       const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      if (totalPaid > Number(totals.grandTotal) + 0.005) throw new Error("PAYMENT_OVERPAYMENT");
       if (totalPaid + 0.005 < totals.grandTotal) throw new Error("PAYMENT_UNDERPAYMENT");
       if (payments.some((p) => p.paymentMethod === "CASH")) {
         if (!req.cashSessionId) throw new Error("CASH_SESSION_REQUIRED");
@@ -275,8 +461,13 @@ export class PrismaAtomicCommercialFinanceService {
       }
 
       const lookup = await this.accounts(tx, ctx);
-      const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
-      const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+      const built = FinancialBridge.mapSaleToJournal(
+        ctx,
+        sale as any,
+        lookup as any,
+        (sale.payments || payments) as any,
+        (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
+      );
       await this.writeJournal(tx, ctx, built);
       return { sale, lines: sale.lines, ledgers, drawerOperations };
     });

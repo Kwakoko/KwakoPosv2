@@ -966,6 +966,8 @@ export const CreateSaleReturnRequestSchema = z.object({
   customerId: z.string().optional(),
   reason: z.string().min(1),
   refundType: z.enum(["CASH", "STORE_CREDIT", "BANK", "MOBILE_MONEY"]).default("CASH"),
+  provider: PaymentProviderEnum.optional(),
+  providerReference: z.string().optional(),
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
@@ -997,7 +999,23 @@ export const PaymentSchema = z.object({
   paymentMethod: PaymentMethodEnum,
   provider: PaymentProviderEnum.nullable().optional(),
   providerReference: z.string().nullable().optional(),
-  status: z.enum(["COMPLETED", "PENDING", "FAILED", "REFUNDED"]),
+  status: z.enum(["COMPLETED", "PENDING", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED", "REVERSED"]),
+  refundedAmount: z.number().nonnegative().optional(),
+  isRefund: z.boolean().optional(),
+  refundReturnId: z.string().uuid().nullable().optional(),
+  refundReason: z.string().nullable().optional(),
+  refundMethod: z.string().nullable().optional(),
+  refundProvider: PaymentProviderEnum.nullable().optional(),
+  refundProviderReference: z.string().nullable().optional(),
+  reversalOfPaymentId: z.string().uuid().nullable().optional(),
+  reversalReason: z.string().nullable().optional(),
+  reversedAt: z.string().or(z.date()).nullable().optional(),
+  reversedById: z.string().uuid().nullable().optional(),
+  providerEventId: z.string().nullable().optional(),
+  providerVerifiedAt: z.string().or(z.date()).nullable().optional(),
+  reconciliationStatus: z.enum(["UNRECONCILED", "MATCHED", "VARIANCE"]).optional(),
+  reconciliationReference: z.string().nullable().optional(),
+  reconciledAt: z.string().or(z.date()).nullable().optional(),
   paidAt: z.string().or(z.date()),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
@@ -1013,8 +1031,40 @@ export const CreatePaymentRequestSchema = z.object({
   paymentMethod: PaymentMethodEnum,
   provider: PaymentProviderEnum.optional(),
   providerReference: z.string().optional(),
+  idempotencyKey: z.string().min(1),
 });
 export type CreatePaymentRequest = z.infer<typeof CreatePaymentRequestSchema>;
+
+export const RefundPaymentRequestSchema = z.object({
+  amount: z.number().positive(),
+  reason: z.string().trim().min(1),
+  refundMethod: PaymentMethodEnum.default("CASH"),
+  provider: PaymentProviderEnum.optional(),
+  providerReference: z.string().optional(),
+  idempotencyKey: z.string().min(1),
+});
+export type RefundPaymentRequest = z.infer<typeof RefundPaymentRequestSchema>;
+
+export const ReversePaymentRequestSchema = z.object({
+  reason: z.string().trim().min(1),
+  idempotencyKey: z.string().min(1),
+});
+export type ReversePaymentRequest = z.infer<typeof ReversePaymentRequestSchema>;
+
+export const PaymentReconciliationEntrySchema = z.object({
+  paymentId: z.string().uuid().optional(),
+  providerReference: z.string().optional(),
+  amount: z.number().nonnegative(),
+  paymentMethod: PaymentMethodEnum,
+  provider: PaymentProviderEnum.optional(),
+  externalReference: z.string().min(1),
+});
+export const PaymentReconciliationRequestSchema = z.object({
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+  entries: z.array(PaymentReconciliationEntrySchema),
+});
+export type PaymentReconciliationRequest = z.infer<typeof PaymentReconciliationRequestSchema>;
 
 // ==========================================
 // Cash Session Contracts

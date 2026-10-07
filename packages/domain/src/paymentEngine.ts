@@ -54,23 +54,30 @@ export class PaymentEngine {
       };
     }
 
-    // 2. Mobile Money Providers (M-Pesa, Airtel Money, Tigo Pesa, HaloPesa)
-    if (input.paymentMethod === "MOBILE_MONEY") {
-      const provider = input.provider || "MPESA";
-      const reference = input.providerReference || `${provider}-${Date.now()}`;
+    // 2. Provider-controlled tenders must carry an authoritative external reference.
+    // Never fabricate provider success locally; production payment integrity is fail-closed.
+    if (["MOBILE_MONEY", "CARD", "BANK"].includes(input.paymentMethod)) {
+      if (!input.providerReference?.trim()) {
+        return {
+          success: false,
+          paymentStatus: "FAILED",
+          reference: "",
+          error: `${input.paymentMethod}_PROVIDER_REFERENCE_REQUIRED`,
+        };
+      }
       return {
         success: true,
         paymentStatus: "COMPLETED",
-        reference,
-        providerStatus: "SUCCESSFUL_CONFIRMATION",
+        reference: input.providerReference.trim(),
+        providerStatus: "PROVIDER_REFERENCE_ACCEPTED",
       };
     }
 
-    // 3. Cash / Card / Bank
+    // 3. Cash / Other
     return {
       success: true,
       paymentStatus: "COMPLETED",
-      reference: `${input.paymentMethod}-${Date.now()}`,
+      reference: input.paymentMethod === "CASH" ? `CASH-${Date.now()}` : `${input.paymentMethod}-${Date.now()}`,
     };
   }
 

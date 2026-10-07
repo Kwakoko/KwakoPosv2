@@ -718,7 +718,27 @@ export class PrismaFinanceRepository {
 
   async getBankAccounts(ctx: TenantContext) { return this.db.bankAccount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { transactions: true } }); }
   async createBankAccount(ctx: TenantContext, req: any) { const dup = await this.db.bankAccount.findFirst({ where: { tenantId: ctx.tenantId, accountNumber: req.accountNumber } }); if (dup) throw new Error("FINANCE_BANK_ACCOUNT_EXISTS"); return this.db.bankAccount.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, accountName: req.accountName, bankName: req.bankName, accountNumber: req.accountNumber, currency: req.currency ?? "TZS", openingBalance: req.openingBalance ?? 0, currentBalance: req.openingBalance ?? 0, isActive: true } }); }
-  async recordBankTransaction(ctx: TenantContext, bankAccountId: string, req: any) { return this.db.$transaction(async (tx: any) => { const bank = await tx.bankAccount.findUnique({ where: { id: bankAccountId } }); this.assertTenant(ctx, bank); const t = await tx.bankTransaction.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, bankAccountId, transactionDate: new Date(req.transactionDate ?? new Date()), transactionType: req.transactionType, amount: req.amount, reference: req.reference, description: req.description ?? null } }); await tx.bankAccount.update({ where: { id: bankAccountId }, data: { currentBalance: { increment: req.amount } } }); return t; }); }
+  async recordBankTransaction(ctx: TenantContext, bankAccountId: string, req: any) {
+    return this.db.$transaction(async (tx: any) => {
+      const bank = await tx.bankAccount.findUnique({ where: { id: bankAccountId } });
+      this.assertTenant(ctx, bank);
+      const type = String(req.transactionType).toUpperCase();
+      const amount = Number(req.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("FINANCE_INVALID_BANK_TRANSACTION_AMOUNT");
+      const signedDelta = new Set(["DEPOSIT", "TRANSFER_IN", "INTEREST"]).has(type)
+        ? amount
+        : new Set(["WITHDRAWAL", "TRANSFER_OUT", "FEE"]).has(type)
+          ? -amount
+          : amount;
+      const t = await tx.bankTransaction.create({ data: {
+        id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, bankAccountId,
+        transactionDate: new Date(req.transactionDate ?? new Date()), transactionType: req.transactionType,
+        amount: signedDelta, reference: req.reference, description: req.description ?? null,
+      } });
+      await tx.bankAccount.update({ where: { id: bankAccountId }, data: { currentBalance: { increment: signedDelta } } });
+      return t;
+    });
+  }
   async getBudgets(ctx: TenantContext) { return this.db.budget.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true } }); }
   async createBudget(ctx: TenantContext, req: any) { for (const l of req.lines ?? []) { const a = await this.db.account.findUnique({ where: { id: l.accountId } }); this.assertTenant(ctx, a); } const total = (req.lines ?? []).reduce((s: number, l: any) => s + l.budgetedAmount, 0); return this.db.budget.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, name: req.name, fiscalYear: req.fiscalYear, period: req.period ?? null, totalBudget: total, status: "APPROVED", lines: { create: (req.lines ?? []).map((l: any) => ({ accountId: l.accountId, costCenterId: l.costCenterId ?? null, budgetedAmount: l.budgetedAmount, actualAmount: 0, varianceAmount: l.budgetedAmount })) } } }); }
 

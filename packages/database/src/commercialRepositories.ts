@@ -453,10 +453,12 @@ export class ScopedCommercialRepository {
       }
     }
 
-    const { paymentStatus } = PaymentEngine.evaluateSalePaymentStatus(
+    const paymentEvaluation = PaymentEngine.evaluateSalePaymentStatus(
       totals.grandTotal,
       completedPayments.map((p) => ({ amount: p.amount, status: p.status }))
     );
+    if (paymentEvaluation.totalPaid > Number(totals.grandTotal) + 0.005) throw new Error("PAYMENT_OVERPAYMENT");
+    const { paymentStatus } = paymentEvaluation;
 
     const sale: Sale = {
       id: saleId,

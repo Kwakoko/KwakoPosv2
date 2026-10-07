@@ -136,6 +136,7 @@
     "certify:ui-action-parity": "tsx scripts/certification/ui-action-parity-gate.ts",
     "certify:receivables-lock": "tsx scripts/certification/receivables-production-lock.ts",
     "certify:payables-lock": "tsx scripts/certification/payables-production-lock.ts",
+    "certify:payments-lock": "tsx scripts/certification/payments-production-lock.ts",
     "certify:expenses-lock": "tsx scripts/certification/expenses-production-lock.ts",
     "workflow:verify": "tsx scripts/release/verify-workflow-integrity.ts",
     "certify:action-service": "tsx scripts/certification/action-service-parity-gate.ts",

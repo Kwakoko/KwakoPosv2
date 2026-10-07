@@ -44,7 +44,7 @@ export class FinancialBridge {
     ctx: TenantContext,
     sale: Sale,
     accounts: AccountLookup,
-    paymentMethod: "CASH" | "BANK" | "MOBILE_MONEY" | "CREDIT" = "CASH",
+    paymentMethodOrPayments: "CASH" | "BANK" | "MOBILE_MONEY" | "CREDIT" | Payment[] = "CASH",
     journalSequence = 1
   ): { journal: JournalEntry; lines: JournalLine[] } {
     const journalNumber = TransactionNumbering.formatNumber("JRN", "MAIN", journalSequence);
@@ -55,20 +55,43 @@ export class FinancialBridge {
     const revenuePortion = grandTotal - taxTotal;
     const totalCost = Number(sale.totalCost) || 0;
 
-    // 1. Debit Tender (Cash, Bank, or Accounts Receivable for Credit Sale)
-    const tenderAccountId =
-      paymentMethod === "CREDIT"
-        ? accounts.receivableAccountId
-        : paymentMethod === "BANK" || paymentMethod === "MOBILE_MONEY"
-        ? accounts.bankAccountId
-        : accounts.cashAccountId;
-
-    lines.push({
-      accountId: tenderAccountId,
-      description: `Sale ${sale.saleNumber} - Payment/Receivable (${paymentMethod})`,
-      debit: grandTotal,
-      credit: 0,
-    });
+    // 1. Debit each actual tender independently. This prevents a split sale from being
+    // posted entirely to the first payment channel.
+    const payments = Array.isArray(paymentMethodOrPayments) ? paymentMethodOrPayments : null;
+    if (payments) {
+      const tenderTotal = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+      if (Math.abs(tenderTotal - grandTotal) > 0.01) {
+        throw new Error("SALE_TENDER_TOTAL_MISMATCH");
+      }
+      for (const payment of payments) {
+        const tenderAccountId =
+          payment.paymentMethod === "CREDIT"
+            ? accounts.receivableAccountId
+            : payment.paymentMethod === "CASH"
+              ? accounts.cashAccountId
+              : accounts.bankAccountId;
+        lines.push({
+          accountId: tenderAccountId,
+          description: `Sale ${sale.saleNumber} - Payment/Receivable (${payment.paymentMethod})`,
+          debit: Number(payment.amount),
+          credit: 0,
+        });
+      }
+    } else {
+      const paymentMethod = paymentMethodOrPayments;
+      const tenderAccountId =
+        paymentMethod === "CREDIT"
+          ? accounts.receivableAccountId
+          : paymentMethod === "BANK" || paymentMethod === "MOBILE_MONEY"
+            ? accounts.bankAccountId
+            : accounts.cashAccountId;
+      lines.push({
+        accountId: tenderAccountId,
+        description: `Sale ${sale.saleNumber} - Payment/Receivable (${paymentMethod})`,
+        debit: grandTotal,
+        credit: 0,
+      });
+    }
 
     // 2. Credit Revenue (net of tax)
     lines.push({
@@ -166,7 +189,7 @@ export class FinancialBridge {
   ): { journal: JournalEntry; lines: JournalLine[] } {
     const journalNumber = TransactionNumbering.formatNumber("JRN", "MAIN", journalSequence);
     const amount = Number(payment.amount);
-    const isBank = payment.paymentMethod === "BANK" || payment.paymentMethod === "MOBILE_MONEY";
+    const isBank = ["BANK", "MOBILE_MONEY", "CARD"].includes(payment.paymentMethod);
     const debitAccount = isBank ? accounts.bankAccountId : accounts.cashAccountId;
 
     const lines = [
@@ -207,7 +230,7 @@ export class FinancialBridge {
   ): { journal: JournalEntry; lines: JournalLine[] } {
     const journalNumber = TransactionNumbering.formatNumber("JRN", "MAIN", journalSequence);
     const amount = Number(payment.amount);
-    const isBank = payment.paymentMethod === "BANK" || payment.paymentMethod === "MOBILE_MONEY";
+    const isBank = ["BANK", "MOBILE_MONEY", "CARD"].includes(payment.paymentMethod);
     const creditAccount = isBank ? accounts.bankAccountId : accounts.cashAccountId;
 
     const lines = [

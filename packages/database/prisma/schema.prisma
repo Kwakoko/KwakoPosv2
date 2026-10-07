@@ -981,7 +981,23 @@ model Payment {
   paymentMethod     String           @default("CASH") // CASH, CARD, BANK, MOBILE_MONEY, CREDIT, OTHER
   provider          String? // MPESA, AIRTEL_MONEY, TIGO_PESA, HALOPESA, NMB, CRDB, CASH
   providerReference String?
-  status            String           @default("COMPLETED") // COMPLETED, PENDING, FAILED, REFUNDED
+  status            String           @default("COMPLETED") // COMPLETED, PENDING, FAILED, REFUNDED, PARTIALLY_REFUNDED, REVERSED
+  refundedAmount    Decimal          @default(0) @db.Decimal(12, 2)
+  isRefund          Boolean          @default(false)
+  refundReturnId    String?
+  refundReason      String?
+  refundMethod      String?
+  refundProvider    String?
+  refundProviderReference String?
+  reversalOfPaymentId String?
+  reversalReason    String?
+  reversedAt        DateTime?
+  reversedById      String?
+  providerEventId   String?
+  providerVerifiedAt DateTime?
+  reconciliationStatus String @default("UNRECONCILED") // UNRECONCILED, MATCHED, VARIANCE
+  reconciliationReference String?
+  reconciledAt      DateTime?
   paidAt            DateTime         @default(now())
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -994,6 +1010,10 @@ model Payment {
 
   @@unique([tenantId, branchId, paymentNumber])
   @@index([tenantId, branchId, paidAt])
+  @@index([tenantId, branchId, reconciliationStatus, paidAt])
+  @@index([tenantId, branchId, saleId])
+  @@index([tenantId, branchId, providerReference])
+  @@index([tenantId, branchId, providerEventId])
   drawerOperationId String? @unique
   drawerOperation DrawerOperation? @relation("PaymentDrawerOperation", fields: [drawerOperationId], references: [id], onDelete: SetNull)
   drawerOperationByPaymentId DrawerOperation? @relation("DrawerOperationPayment")
