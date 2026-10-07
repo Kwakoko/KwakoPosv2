@@ -1051,33 +1051,176 @@ const now = new Date();
 
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
-      if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
-      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
       const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
-      if (existing) return;
-      const amount = Number(payload.amount);
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      const amount = Number(payload.amount ?? payload.walletDepositAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("INVALID_PAYMENT_AMOUNT");
+
+      if (payload.customerId) {
+        const customer = await tx.customer.findFirst({ where: { id: String(payload.customerId), ...tenantWhere(ctx) } });
+        if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+
+        const isWalletDeposit = payload.walletDepositAmount !== undefined || payload.kind === "WALLET_DEPOSIT";
+        if (!isWalletDeposit && amount > Number(customer.currentBalance)) throw new Error("PAYMENT_EXCEEDS_CUSTOMER_BALANCE");
+        if (!isWalletDeposit && payload.payUsingWallet && amount > Number(customer.walletBalance)) throw new Error("INSUFFICIENT_CUSTOMER_WALLET");
+
+        const payment = await tx.payment.create({ data: {
+          id: op.entityId,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentNumber: payload.paymentNumber || (isWalletDeposit ? `WALLET-${op.entityId.slice(0, 24)}` : `PAY-CUST-${op.entityId.slice(0, 24)}`),
+          customerId: customer.id,
+          amount,
+          paymentMethod: isWalletDeposit ? (payload.paymentMethod || "CASH") : (payload.payUsingWallet ? "WALLET" : (payload.paymentMethod || "CASH")),
+          provider: payload.provider || null,
+          providerReference: payload.providerReference || null,
+          status: "COMPLETED",
+          paidAt: new Date(),
+        }});
+
+        if (isWalletDeposit) {
+          await tx.customer.update({ where: { id: customer.id }, data: { walletBalance: { increment: amount } } });
+        } else if (payload.payUsingWallet) {
+          await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount }, walletBalance: { decrement: amount } } });
+        } else {
+          await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: amount } } });
+        }
+
+        await tx.auditEvent.create({ data: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+          deviceId: req.deviceId, action: isWalletDeposit ? "CUSTOMER_WALLET_DEPOSIT" : "CUSTOMER_PAYMENT_RECORDED",
+          entityType: "Payment", entityId: payment.id,
+          metadata: { customerId: customer.id, amount, payUsingWallet: Boolean(payload.payUsingWallet), kind: isWalletDeposit ? "WALLET_DEPOSIT" : "CUSTOMER_REPAYMENT" },
+        }});
+        return;
+      }
+
+      if (!payload.supplierId) throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
+      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, ...tenantWhere(ctx) } });
+      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
       if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
-      await tx.payment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`, purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount, paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
+      const payment = await tx.payment.create({ data: {
+        id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        paymentNumber: payload.paymentNumber || `PAY-SUP-${op.entityId.slice(0, 24)}`,
+        purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount,
+        paymentMethod: payload.paymentMethod || "BANK",
+        provider: payload.provider || null, providerReference: payload.providerReference || null,
+        status: "COMPLETED", paidAt: new Date(),
+      }});
       await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+        deviceId: req.deviceId, action: "SUPPLIER_PAYMENT_RECORDED", entityType: "Payment", entityId: payment.id,
+        metadata: { supplierId: supplier.id, amount },
+      }});
       return;
     }
 
-    if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {
-      const financeTx = new PrismaAtomicCommercialFinanceService({ $transaction: async (work: any) => work(tx) });
-      await financeTx.createPurchaseReceipt(ctx, { ...(op.payload as any), id: op.entityId, deviceId: req.deviceId, operationId: op.operationId, idempotencyKey: op.idempotencyKey });
-      return;
-    }
+    if (["Customer", "Supplier", "CustomerContact"].includes(op.entityType) && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
+      const payload: any = stripSyncControlFields(op.payload as any);
 
-    if (op.entityType === "Customer" && op.operationType === "CREATE") {
-      const existing = await tx.customer.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.customer.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      return;
-    }
+      if (op.entityType === "Customer") {
+        const existing = await tx.customer.findUnique({ where: { id: op.entityId } });
+        if (existing && (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
 
-    if (op.entityType === "Supplier" && op.operationType === "CREATE") {
-      const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
-      if (!existing) await tx.supplier.create({ data: { ...(op.payload as any), id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+        if (op.operationType === "CREATE") {
+          if (!existing) {
+            const row = await tx.customer.create({ data: {
+              id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+              customerCode: payload.customerCode || `CUST-${op.entityId.slice(0, 8)}`,
+              name: payload.name, phone: payload.phone || null, email: payload.email || null,
+              address: payload.address || null, creditLimit: Number(payload.creditLimit || 0),
+              currentBalance: Number(payload.openingBalance || 0), openingBalance: Number(payload.openingBalance || 0),
+              walletBalance: 0, status: "ACTIVE",
+            }});
+            await tx.auditEvent.create({ data: {
+              id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId,
+              deviceId: req.deviceId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: row.id,
+              metadata: { customerCode: row.customerCode },
+            }});
+          }
+          return;
+        }
+
+        if (!existing) throw new Error("CUSTOMER_NOT_FOUND");
+        const base = getBaseUpdatedAt(op.payload);
+        if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: customer changed on server");
+
+        if (op.operationType === "DELETE") {
+          if (Number(existing.currentBalance) !== 0 || Number(existing.walletBalance) !== 0) throw new Error("CUSTOMER_NONZERO_BALANCE_ARCHIVE_BLOCKED");
+          const row = await tx.customer.update({ where: { id: op.entityId }, data: { status: "SUSPENDED" } });
+          await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: row.id, metadata: { previousStatus: existing.status } } });
+          return;
+        }
+
+        const data: any = {};
+        for (const key of ["name","phone","email","address","creditLimit","status"]) if (payload[key] !== undefined) data[key] = payload[key];
+        const row = await tx.customer.update({ where: { id: op.entityId }, data });
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: row.id, metadata: { changedFields: Object.keys(data).sort() } } });
+        return;
+      }
+
+      if (op.entityType === "Supplier") {
+        const existing = await tx.supplier.findUnique({ where: { id: op.entityId } });
+        if (existing && (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        if (op.operationType === "CREATE") {
+          if (!existing) {
+            const row = await tx.supplier.create({ data: {
+              id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+              supplierCode: payload.supplierCode || `SUP-${op.entityId.slice(0, 8)}`,
+              name: payload.name, phone: payload.phone || null, email: payload.email || null,
+              address: payload.address || null, taxPin: payload.taxPin || null,
+              outstandingBalance: Number(payload.outstandingBalance || 0), status: "ACTIVE",
+            }});
+            await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: row.id, metadata: { supplierCode: row.supplierCode } } });
+          }
+          return;
+        }
+        if (!existing) throw new Error("SUPPLIER_NOT_FOUND");
+        const base = getBaseUpdatedAt(op.payload);
+        if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: supplier changed on server");
+        const data: any = {};
+        for (const key of ["name","phone","email","address","taxPin","status"]) if (payload[key] !== undefined) data[key] = payload[key];
+        const row = await tx.supplier.update({ where: { id: op.entityId }, data });
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: row.id, metadata: { changedFields: Object.keys(data).sort() } } });
+        return;
+      }
+
+      const existing = await tx.customerContact.findUnique({ where: { id: op.entityId } });
+      if (existing && (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId)) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+      if (op.operationType === "CREATE") {
+        if (!payload.customerId) throw new Error("CONTACT_CUSTOMER_REQUIRED");
+        const customer = await tx.customer.findFirst({ where: { id: payload.customerId, ...tenantWhere(ctx) } });
+        if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+        if (!existing) {
+          const isPrimary = Boolean(payload.isPrimary);
+          if (isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: customer.id, isPrimary: true }, data: { isPrimary: false } });
+          const row = await tx.customerContact.create({ data: {
+            id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id,
+            contactCode: payload.contactCode || `CNT-${op.entityId.slice(0, 8)}`, firstName: payload.firstName,
+            lastName: payload.lastName || "", roleTitle: payload.roleTitle || null, phone: payload.phone || null,
+            email: payload.email || null, isPrimary, notes: payload.notes || null, status: "ACTIVE",
+          }});
+          await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_CONTACT_CREATED", entityType: "CustomerContact", entityId: row.id, metadata: { customerId: row.customerId } } });
+        }
+        return;
+      }
+      if (!existing) throw new Error("CONTACT_NOT_FOUND");
+      const base = getBaseUpdatedAt(op.payload);
+      if (base && existing.updatedAt.getTime() > new Date(base).getTime()) throw new Error("STALE_WRITE_CONFLICT: contact changed on server");
+      if (op.operationType === "DELETE") {
+        const row = await tx.customerContact.update({ where: { id: op.entityId }, data: { status: "SUSPENDED" } });
+        await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_CONTACT_ARCHIVED", entityType: "CustomerContact", entityId: row.id, metadata: { customerId: row.customerId } } });
+        return;
+      }
+      const data: any = {};
+      for (const key of ["firstName","lastName","roleTitle","phone","email","isPrimary","notes","status"]) if (payload[key] !== undefined) data[key] = payload[key];
+      if (data.isPrimary) await tx.customerContact.updateMany({ where: { ...tenantWhere(ctx), customerId: existing.customerId, isPrimary: true, id: { not: op.entityId } }, data: { isPrimary: false } });
+      const row = await tx.customerContact.update({ where: { id: op.entityId }, data });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId, action: "CUSTOMER_CONTACT_UPDATED", entityType: "CustomerContact", entityId: row.id, metadata: { customerId: row.customerId, changedFields: Object.keys(data).sort() } } });
       return;
     }
 
