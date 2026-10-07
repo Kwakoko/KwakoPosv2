@@ -833,6 +833,9 @@ model CashSession {
   cashOutTotal      Decimal   @default(0) @db.Decimal(12, 2)
   safeDropTotal     Decimal   @default(0) @db.Decimal(12, 2)
   variance          Decimal?  @db.Decimal(12, 2)
+  countSealedAt     DateTime?
+  countSealedById   String?
+  countSealedDeviceId String?
   status            String    @default("OPEN") // OPEN, ACTIVE, CLOSE_REQUESTED, CLOSED
   notes             String?
   createdAt         DateTime  @default(now())
