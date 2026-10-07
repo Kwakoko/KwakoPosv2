@@ -2681,6 +2681,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: await commercialRepository.createCustomerContact(req.tenantContext!, validated) });
   });
 
+  server.post("/api/v1/contacts/import", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const body = z.object({ rows: z.array(z.record(z.unknown())).min(1).max(2000) }).parse(req.body);
+    const imported = await commercialRepository.importCustomerContacts(req.tenantContext!, body.rows);
+    return reply.status(201).send({ success: true, data: imported });
+  });
+
+  server.get("/api/v1/contacts/export", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
+    requireCommercialPermission(req, "report.export");
+    const rows = await commercialRepository.getCustomerContacts(req.tenantContext!);
+    const headers = ["contactCode","customerId","firstName","lastName","roleTitle","phone","email","isPrimary","notes","status"];
+    const esc = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = [headers.join(","), ...rows.map((row: any) => headers.map((h) => esc(row[h])).join(","))].join("\n");
+    return reply.type("text/csv; charset=utf-8").header("Content-Disposition", 'attachment; filename="customer-contacts.csv"').send(csv);
+  });
+
   server.get("/api/v1/contacts/:id", async (req, reply) => {
     requireCommercialPermission(req, "customer.view");
     const row = await commercialRepository.getCustomerContactById(req.tenantContext!, (req.params as any).id);
