@@ -105,7 +105,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     requirePermission(req, "CUSTOMER_VIEW", "customers.read");
     const c = ctx(req);
     const customerId = String((req.params as any).id);
-    const rows = await prisma.$queryRawUnsafe<any[]>(
+    const rows = await prisma.$queryRawUnsafe(
       'SELECT id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status","createdAt","updatedAt" FROM customer_contacts WHERE id IS NOT NULL AND "customerId" = $1 AND "tenantId" = $2 AND "branchId" = $3 ORDER BY "isPrimary" DESC,"firstName" ASC,"lastName" ASC',
       customerId, c.tenantId, c.branchId
     );
