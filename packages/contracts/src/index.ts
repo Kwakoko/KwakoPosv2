@@ -1855,6 +1855,15 @@ export const CreateBankTransactionRequestSchema = z.object({
 });
 export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
 
+export const CreateTaxRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  rate: z.number().nonnegative().max(100),
+  isInclusive: z.boolean().default(true),
+});
+export type CreateTaxRequest = z.infer<typeof CreateTaxRequestSchema>;
+
 // Budget
 export const BudgetLineSchema = z.object({
   id: z.string().uuid(),
