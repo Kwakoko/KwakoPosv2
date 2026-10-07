@@ -93,6 +93,7 @@ import {
   OpenCashSessionRequestSchema,
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
+  CashTransferRequestSchema,
   CreateExpenseRequestSchema,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
@@ -2732,11 +2733,15 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: result });
   });
 
-  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+  const assertCashDrawerAuthority = (req: any, permission: "view" | "open" | "close" | "move" | "approve") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const canView = admin || permissions.includes("*") || permissions.includes("cashdrawer.view") || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close") || permissions.includes("cashdrawer.move") || permissions.includes("cashdrawer.approve");
+    const allowed = permission === "view"
+      ? canView
+      : admin || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
@@ -2769,6 +2774,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   };
 
   // Cash Sessions & Drawer Reconciliation
+  server.get("/api/v1/cash-registers", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    return { success: true, data: await commercialRepository.listCashRegisters(req.tenantContext!) };
+  });
+
+  server.get("/api/v1/cash-sessions", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    const query = (req.query as any) || {};
+    return {
+      success: true,
+      data: await commercialRepository.listCashSessions(
+        req.tenantContext!,
+        query.status ? String(query.status) : undefined,
+        Number(query.limit || 100),
+      ),
+    };
+  });
+
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
     const validated = OpenCashSessionRequestSchema.parse(req.body);
@@ -2777,7 +2800,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/cash-sessions/active", async (req) => {
-    const session = await commercialRepository.getActiveCashSession(req.tenantContext!);
+    assertCashDrawerAuthority(req, "view");
+    const registerCode = String((req.query as any)?.registerCode || "").trim() || undefined;
+    const session = await commercialRepository.getActiveCashSession(req.tenantContext!, registerCode);
     return { success: true, data: session || null };
   });
 
@@ -2854,6 +2879,26 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const body = { ...parsed, cashSessionId: String((req.params as any).id) };
     const movement = await commercialRepository.createCashMovement(req.tenantContext!, body);
     return reply.status(201).send({ success: true, data: movement });
+  });
+
+  server.post("/api/v1/cash-sessions/:id/transfer", async (req, reply) => {
+    assertCashDrawerAuthority(req, "move");
+    if (!productionPersistence) throw new Error("CASH_TRANSFER_REQUIRES_POSTGRESQL_AUTHORITY");
+    const validated = CashTransferRequestSchema.parse(req.body);
+    const result = await commercialRepository.transferCash(req.tenantContext!, String((req.params as any).id), validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/cash-sessions/:id/payment-channel-reconciliation", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("PAYMENT_CHANNEL_RECONCILIATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getPaymentChannelReconciliation(req.tenantContext!, String((req.params as any).id)) };
+  });
+
+  server.get("/api/v1/cash-sessions/:id/audit-trail", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("CASH_AUDIT_TRAIL_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getCashAuditTrail(req.tenantContext!, String((req.params as any).id)) };
   });
 
   server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
