@@ -6,15 +6,15 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-04";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "01bedc8401687e4da6a3943fa6fb3a8e3ac4c5c8",
+  "package.json": "a7894f5b1bd58797e16c6732c5c86b1de86386a9",
   "apps/web/src/pages/DashboardPage.tsx": "2adcdd19e046a098e6fd8f37c8c4d6871ef11bf4",
   "apps/api/src/services/dashboardKpiService.ts": "86f8ee60dde1074f08818e33ab5dc36ebd3779ff",
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
-  "packages/database/src/prismaProductionRepositories.ts": "eb2269ba2e049805f0be12595ee93a949f0c3668",
+  "packages/database/src/prismaProductionRepositories.ts": "15d1fc2862a66f26e4f26543c950f91dd0cb1690",
   "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
-  ".github/workflows/ci.yml": "1f82fae916417cfaba057684e4f8e57750a52cdd",
-  ".github/workflows/production-certification.yml": "94d4e190679770f9e5006f8f378a1324bac81c02",
-  ".github/workflows/production-release-exact-main.yml": "2b471027460eb60cc31901911df8ccfdd0590567"
+  ".github/workflows/ci.yml": "127f087619f4ffe4e479cfad1842f0d1749df6ef",
+  ".github/workflows/production-certification.yml": "54a98fddc64885eca5473caed60cf7801fbd436c",
+  ".github/workflows/production-release-exact-main.yml": "06855ae767e356619362a2f8e4eb2e3cad8c20a8"
 };
 
 const REQUIRED_MARKERS: Array<[string,string,string]> = [

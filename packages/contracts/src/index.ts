@@ -1034,6 +1034,7 @@ export const CashSessionSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
+  registerCode: z.string().trim().min(1).max(64).nullable().optional(),
   sessionNumber: z.string(),
   cashierId: z.string().uuid(),
   openedAt: z.string().or(z.date()),
@@ -1045,6 +1046,9 @@ export const CashSessionSchema = z.object({
   cashSalesTotal: z.number().default(0),
   cashRefundsTotal: z.number().default(0),
   cashExpensesTotal: z.number().default(0),
+  cashInTotal: z.number().default(0),
+  cashOutTotal: z.number().default(0),
+  safeDropTotal: z.number().default(0),
   variance: z.number().nullable().optional(),
   countSealedAt: z.string().or(z.date()).nullable().optional(),
   countSealedById: z.string().uuid().nullable().optional(),
@@ -1058,7 +1062,8 @@ export type CashSession = z.infer<typeof CashSessionSchema>;
 
 export const OpenCashSessionRequestSchema = z.object({
   openingCash: z.number().nonnegative().default(0),
-  notes: z.string().optional(),
+  registerCode: z.string().trim().min(1).max(64).optional(),
+  notes: z.string().max(500).optional(),
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
 
@@ -1069,9 +1074,21 @@ export const SealCashSessionCountRequestSchema = z.object({
 export type SealCashSessionCountRequest = z.infer<typeof SealCashSessionCountRequestSchema>;
 
 export const CloseCashSessionRequestSchema = z.object({
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
+  managerApprovalReference: z.string().trim().min(1).max(200).optional(),
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;
+
+export const CashTransferRequestSchema = z.object({
+  destinationCashSessionId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(3).max(500),
+  deviceId: z.string().trim().min(1).max(128),
+  witness: z.string().trim().max(200).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  occurredAt: z.string().datetime().optional(),
+});
+export type CashTransferRequest = z.infer<typeof CashTransferRequestSchema>;
 
 export const ExpensePaymentMethodEnum = z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD"]);
 export type ExpensePaymentMethod = z.infer<typeof ExpensePaymentMethodEnum>;
