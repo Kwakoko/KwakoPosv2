@@ -134,8 +134,8 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
     const id = payload.id || randomUUID();
     await prisma.$transaction(async (tx: any) => {
-      if (payload.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1::uuid AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
-      await tx.$executeRawUnsafe('INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
+      if (payload.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
+      await tx.$executeRawUnsafe('INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title",role,department,"phone","email","isPrimary","notes","decisionInfluence","status") VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,\'ACTIVE\')',
         id, customerId, c.tenantId, c.branchId, payload.firstName, payload.lastName, payload.title, payload.role, payload.department, payload.phone, payload.email, payload.isPrimary, payload.notes, payload.decisionInfluence);
       await audit(tx, c, "CONTACT_CREATED", "CustomerContact", id, { customerId });
     });
@@ -149,14 +149,14 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const contactId = String((req.params as any).contactId);
     const patch = ContactUpdateSchema.parse(req.body);
     const current = await prisma.$queryRawUnsafe<any[]>(
-      'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "customerId"=$2::uuid AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1',
+      'SELECT * FROM customer_contacts WHERE id=$1::uuid AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1',
       contactId, customerId, c.tenantId, c.branchId
     );
     if (!current[0]) throw new Error("CONTACT_NOT_FOUND");
     await prisma.$transaction(async (tx: any) => {
-      if (patch.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1::uuid AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
+      if (patch.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
       const row = { ...current[0], ...patch };
-      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12::uuid AND "customerId"=$13::uuid AND "tenantId"=$14 AND "branchId"=$15',
+      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12::uuid AND "customerId"=$13 AND "tenantId"=$14 AND "branchId"=$15',
         row.firstName, row.lastName || "", row.title || "", row.role || "", row.department || "", row.phone || "", row.email || "", Boolean(row.isPrimary), row.notes || "", row.decisionInfluence || "INFLUENCER", row.status || "ACTIVE", contactId, customerId, c.tenantId, c.branchId);
       await audit(tx, c, "CONTACT_UPDATED", "CustomerContact", contactId, { customerId, changedFields: Object.keys(patch).sort() });
     });
@@ -169,9 +169,9 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const customerId = String((req.params as any).id);
     const contactId = String((req.params as any).contactId);
     const result = await prisma.$transaction(async (tx: any) => {
-      const rows = await tx.$queryRawUnsafe('SELECT id,"isPrimary" FROM customer_contacts WHERE id=$1::uuid AND "customerId"=$2::uuid AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1', contactId, customerId, c.tenantId, c.branchId);
+      const rows = await tx.$queryRawUnsafe('SELECT id,"isPrimary" FROM customer_contacts WHERE id=$1::uuid AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1', contactId, customerId, c.tenantId, c.branchId);
       if (!rows[0]) throw new Error("CONTACT_NOT_FOUND");
-      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1::uuid AND "customerId"=$2::uuid AND "tenantId"=$3 AND "branchId"=$4', contactId, customerId, c.tenantId, c.branchId);
+      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1::uuid AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4', contactId, customerId, c.tenantId, c.branchId);
       await audit(tx, c, "CONTACT_ARCHIVED", "CustomerContact", contactId, { customerId, wasPrimary: Boolean(rows[0].isPrimary) });
       return { archived: true };
     });
