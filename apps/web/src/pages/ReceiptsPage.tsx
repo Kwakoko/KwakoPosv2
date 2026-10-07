@@ -18,7 +18,7 @@ import { Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckC
   Sliders, Plus, FileText, Send, Copy, AlertTriangle, UserCheck, Sparkles
 } from "lucide-react";
 import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopos2/contracts";
-import { apiFetch } from "../services/apiClient.js";
+import { apiFetch } from "../services/applicationApiService.js";
 import { isThermalPrinterSupported, printReceiptToThermal } from "../services/receiptPrinterService.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
