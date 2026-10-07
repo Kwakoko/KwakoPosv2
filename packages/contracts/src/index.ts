@@ -306,7 +306,7 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  status: z.enum(["ACTIVE", "SUSPENDED", "INACTIVE"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
@@ -493,8 +493,6 @@ export const CreatePriceChangeRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
-  occurredAt: z.string().datetime().optional(),
-  isBackdated: z.boolean().optional().default(false),
 });
 export type CreatePriceChangeRequest = z.infer<typeof CreatePriceChangeRequestSchema>;
 
@@ -968,14 +966,13 @@ export const ReturnSchema = z.object({
 export type Return = z.infer<typeof ReturnSchema>;
 
 export const CreateSaleReturnRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  originalSaleId: z.string().uuid(),
-  customerId: z.string().uuid().optional(),
-  reason: z.string().trim().min(3).max(500),
+  originalSaleId: z.string().optional(),
+  customerId: z.string().optional(),
+  reason: z.string().min(1),
   refundType: z.enum(["CASH", "STORE_CREDIT", "BANK", "MOBILE_MONEY"]).default("CASH"),
-  deviceId: z.string().min(1).max(128),
-  operationId: z.string().min(1).max(200),
-  idempotencyKey: z.string().min(1).max(200),
+  deviceId: z.string().min(1),
+  operationId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
   items: z.array(
     z.object({
       variantId: z.string().uuid(),
@@ -1192,6 +1189,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "StockAdjustment",
   "StockLedger",
   "Customer",
+  "CustomerContact",
   "Supplier",
   "Sale",
   "Return",
@@ -1277,6 +1275,7 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
+  contacts: z.array(z.record(z.unknown())).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1320,6 +1319,7 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
+  contacts: z.array(z.record(z.unknown())).optional(),
   expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),

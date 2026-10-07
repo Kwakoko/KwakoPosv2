@@ -7,7 +7,7 @@ import { projectProductBranchStock, projectProductStockSummary, projectVariantIn
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
 
-  async accounts(tx: any, ctx: TenantContext) {
+  private async accounts(tx: any, ctx: TenantContext) {
     const codes = [
       ["1110", "Cash", "ASSET", "CASH"], ["1210", "Bank", "ASSET", "BANK"],
       ["1310", "Accounts Receivable", "ASSET", "ACCOUNTS_RECEIVABLE"], ["1410", "Inventory", "ASSET", "INVENTORY"],
@@ -24,7 +24,7 @@ export class PrismaAtomicCommercialFinanceService {
     return { cashAccountId: result["1110"], bankAccountId: result["1210"], receivableAccountId: result["1310"], inventoryAccountId: result["1410"], payableAccountId: result["2110"], taxPayableAccountId: result["2210"], salesRevenueAccountId: result["4100"], salesDiscountAccountId: result["4900"], cogsAccountId: result["5100"], expenseDefaultAccountId: result["6900"], cashVarianceAccountId: result["8100"] };
   }
 
-  async writeJournal(tx: any, ctx: TenantContext, built: any) {
+  private async writeJournal(tx: any, ctx: TenantContext, built: any) {
     const existing = await tx.journalEntry.findUnique({ where: { idempotencyKey: built.journal.idempotencyKey } }).catch(() => null);
     if (existing) {
       const lines = await tx.journalLine.findMany({ where: { journalEntryId: existing.id } });
@@ -81,26 +81,12 @@ export class PrismaAtomicCommercialFinanceService {
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
       const variantProductIds = new Map<string, string>();
-      const variantPrices = new Map<string, number>();
-      const variantCosts = new Map<string, number>();
-      let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       for (const item of req.items) {
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
         if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
-        const authoritativePrice = Number(v.price);
-        if (authoritativePrice > 0 && Math.abs(Number(item.unitPrice) - authoritativePrice) > 0.005) throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
-        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         variantProductIds.set(item.variantId, v.productId);
-        variantPrices.set(item.variantId, authoritativePrice);
-        variantCosts.set(item.variantId, Number(v.costPrice || 0));
-      }
-      if (saleDiscountRequested) {
-        const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
-        const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
-        const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") || roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
-        if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
       }
       // Resolve tax from the authoritative tenant/branch Settings row. Client tax values are
       // informational only; production financial fields must be derived server-side.
@@ -125,14 +111,14 @@ export class PrismaAtomicCommercialFinanceService {
 
       const lines = req.items.map((item: any) => {
         const c = PricingTaxEngine.calculateLineItem({
-          unitPrice: Number(variantPrices.get(item.variantId) ?? item.unitPrice),
-          unitCost: Number(variantCosts.get(item.variantId) ?? 0),
+          unitPrice: item.unitPrice,
+          unitCost: item.unitCost || 0,
           quantity: item.quantity,
           discount: item.discountAmount ? { type: "FIXED", value: item.discountAmount } : undefined,
           taxConfig,
         });
         return {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           productId: item.productId ?? variantProductIds.get(item.variantId),
           variantId: item.variantId,
           quantity: item.quantity,
@@ -152,7 +138,6 @@ export class PrismaAtomicCommercialFinanceService {
         })),
         req.discountTotal || 0,
       );
-      if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
       const occurredAt = req.occurredAt ? new Date(req.occurredAt) : now;
       const isBackdated = Boolean(req.isBackdated || (req.occurredAt && Math.abs(now.getTime() - occurredAt.getTime()) > 5 * 60 * 1000));
@@ -208,17 +193,33 @@ export class PrismaAtomicCommercialFinanceService {
       const netRevenueBeforeTax = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
       const authoritativeGrossProfit = Number((netRevenueBeforeTax - Number(totals.totalCost)).toFixed(2));
       const sale = await tx.sale.create({ data: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber, customerId: req.customerId ?? null, cashSessionId: req.cashSessionId ?? null, subtotal: netRevenueBeforeTax, discountTotal: totals.discountTotal, taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost: totals.totalCost, grossProfit: authoritativeGrossProfit, status: "COMPLETED", paymentStatus, deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldById: ctx.userId, soldAt: occurredAt, lines: { create: lines }, payments: { create: payments } }, include: { lines: true, payments: true } });
-
-      if (payments.some((p: any) => p.paymentMethod === "CREDIT") && req.customerId) {
-        await tx.customer.update({ where: { id: req.customerId }, data: { currentBalance: { increment: Number(sale.grandTotal) } } });
+      const customerCreditAmount = payments
+        .filter((p: any) => p.paymentMethod === "CREDIT")
+        .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+      if (req.customerId && customerCreditAmount > 0) {
+        await tx.customer.update({
+          where: { id: req.customerId },
+          data: { currentBalance: { increment: customerCreditAmount } },
+        });
+        await tx.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(),
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            userId: ctx.userId,
+            deviceId: req.deviceId,
+            action: "CUSTOMER_CREDIT_SALE_POSTED",
+            entityType: "Customer",
+            entityId: req.customerId,
+            metadata: {
+              saleId: sale.id,
+              amount: customerCreditAmount,
+              operationId: req.operationId,
+            },
+          },
+        });
       }
-      await tx.auditEvent.create({
-        data: {
-          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId,
-          action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
-          metadata: { operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldAt: occurredAt.toISOString(), isBackdated },
-        },
-      });
+
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
       const drawerOperations: any[] = [];
       const salePayments = Array.isArray(sale.payments) ? sale.payments : payments;
@@ -346,178 +347,7 @@ export class PrismaAtomicCommercialFinanceService {
       const tender = payments[0]?.paymentMethod === "BANK" ? "BANK" : payments[0]?.paymentMethod === "CREDIT" ? "CREDIT" : payments[0]?.paymentMethod === "MOBILE_MONEY" ? "MOBILE_MONEY" : "CASH";
       const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       await this.writeJournal(tx, ctx, built);
-      if (typeof tx.$executeRawUnsafe === "function") {
-        await tx.$executeRawUnsafe(
-          "INSERT INTO sync_change_journal (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source) VALUES ($1,$2,$3,'Sale',$4,'CREATE',$5::jsonb,'sale-service') ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING",
-          ctx.tenantId,
-          ctx.branchId,
-          req.operationId,
-          sale.id,
-          JSON.stringify(sale),
-        );
-      }
       return { sale, lines: sale.lines, ledgers, drawerOperations };
-    });
-  }
-
-  async voidSale(ctx: TenantContext, saleId: string, reason: string, req: any = {}) {
-    return this.db.$transaction(async (tx: any) => {
-      const sale = await tx.sale.findFirst({
-        where: { id: saleId, tenantId: ctx.tenantId, branchId: ctx.branchId },
-        include: { lines: true, payments: true },
-      });
-      if (!sale) throw new Error("SALE_NOT_FOUND");
-      if (sale.status === "CANCELLED") return { sale, alreadyVoided: true };
-      if (sale.status !== "COMPLETED") throw new Error("SALE_INVALID_VOID_STATE");
-
-      for (const line of sale.lines) {
-        const rows = await tx.stockLedger.findMany({
-          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: line.variantId },
-          orderBy: { occurredAt: "asc" },
-        });
-        const before = calculateAvailableStock(rows as any);
-        const key = "SALE-VOID-" + sale.id + "-" + line.variantId;
-        const existing = await tx.stockLedger.findFirst({
-          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: key },
-        });
-        if (existing) continue;
-        const quantity = Math.abs(Number(line.quantity));
-        await tx.stockLedger.create({
-          data: {
-            id: randomUUID(),
-            tenantId: ctx.tenantId,
-            branchId: ctx.branchId,
-            productId: line.productId,
-            variantId: line.variantId,
-            movementType: "SALE_VOID",
-            quantityChange: quantity,
-            quantity,
-            quantityBefore: before,
-            quantityAfter: before + quantity,
-            unitCost: Number(line.unitCost || 0),
-            totalCost: quantity * Number(line.unitCost || 0),
-            referenceType: "SALE_VOID",
-            referenceId: sale.id,
-            occurredAt: new Date(),
-            deviceId: req.deviceId || "web",
-            operationId: req.operationId || sale.id,
-            idempotencyKey: key,
-            notes: reason,
-          },
-        });
-        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, line.variantId);
-        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, line.variantId, null);
-        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, line.productId);
-      }
-
-      for (const payment of sale.payments.filter((p: any) => p.status === "COMPLETED")) {
-        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
-        if (payment.paymentMethod === "CASH") {
-          const cashKey = "SALE-VOID-CASH-" + payment.id;
-          const existingCash = await tx.cashMovement.findFirst({
-            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: cashKey },
-          });
-          if (!existingCash) {
-            const session = await tx.cashSession.findFirst({
-              where: { tenantId: ctx.tenantId, branchId: ctx.branchId, cashierId: ctx.userId, status: { in: ["OPEN", "ACTIVE"] } },
-              orderBy: { openedAt: "desc" },
-            });
-            if (!session) throw new Error("SALE_VOID_CASH_SESSION_REQUIRED");
-            await tx.cashMovement.create({
-              data: {
-                id: randomUUID(),
-                tenantId: ctx.tenantId,
-                branchId: ctx.branchId,
-                cashSessionId: session.id,
-                type: "CASH_OUT",
-                amount: payment.amount,
-                reason: "Void " + sale.saleNumber,
-                deviceId: req.deviceId || "web",
-                actorId: ctx.userId,
-                approvalStatus: "APPROVED",
-                idempotencyKey: cashKey,
-                occurredAt: new Date(),
-              },
-            });
-            await tx.cashSession.update({
-              where: { id: session.id },
-              data: { cashRefundsTotal: { increment: Number(payment.amount) } },
-            });
-          }
-        }
-      }
-
-      if (sale.customerId && sale.payments.some((p: any) => p.paymentMethod === "CREDIT")) {
-        await tx.customer.update({
-          where: { id: sale.customerId },
-          data: { currentBalance: { decrement: Number(sale.grandTotal) } },
-        });
-      }
-
-      const original = await tx.journalEntry.findFirst({
-        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, sourceType: "SALE", sourceId: sale.id },
-        include: { lines: true },
-        orderBy: { createdAt: "desc" },
-      });
-      if (original) {
-        const reversalKey = "jrn-sale-void-" + sale.id;
-        const existingReversal = await tx.journalEntry.findUnique({ where: { idempotencyKey: reversalKey } }).catch(() => null);
-        if (!existingReversal) {
-          await this.writeJournal(tx, ctx, {
-            journal: {
-              id: randomUUID(),
-              journalNumber: "JRN-VOID-" + sale.id.slice(0, 8).toUpperCase(),
-              entryDate: new Date().toISOString(),
-              postingDate: new Date().toISOString(),
-              sourceType: "REVERSAL",
-              sourceId: sale.id,
-              description: "Void Sale " + sale.saleNumber,
-              currency: "TZS",
-              exchangeRate: 1,
-              totalDebit: Number(original.totalCredit),
-              totalCredit: Number(original.totalDebit),
-              isReversal: true,
-              reversalOfJournalId: original.id,
-              reversalReason: reason,
-              idempotencyKey: reversalKey,
-            },
-            lines: (original.lines || []).map((line: any) => ({
-              id: randomUUID(),
-              accountId: line.accountId,
-              costCenterId: line.costCenterId ?? null,
-              description: "Void reversal " + sale.saleNumber,
-              debit: Number(line.credit),
-              credit: Number(line.debit),
-              currency: line.currency || "TZS",
-              exchangeRate: Number(line.exchangeRate || 1),
-            })),
-          });
-        }
-      }
-
-      const updated = await tx.sale.update({
-        where: { id: sale.id },
-        data: { status: "CANCELLED" },
-        include: { lines: true, payments: true },
-      });
-      await tx.auditEvent.create({
-        data: {
-          id: randomUUID(),
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          userId: ctx.userId,
-          deviceId: req.deviceId || "web",
-          action: "SALE_VOIDED",
-          entityType: "Sale",
-          entityId: sale.id,
-          metadata: {
-            reason,
-            operationId: req.operationId || sale.id,
-            idempotencyKey: req.idempotencyKey || sale.id,
-          },
-        },
-      });
-      return { sale: updated, alreadyVoided: false };
     });
   }
 
