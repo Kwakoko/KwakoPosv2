@@ -218,15 +218,25 @@ export async function runProductionCleanlinessCertification(): Promise<{
   try {
     const forensicData = runRepositoryForensicIntegrityCertification();
     forensicPassed = forensicData.verdict === "PASS" && forensicData.files?.parseFailures === 0 && forensicData.files?.controlFailures === 0;
-  } catch {
+    const forensicDetail =
+      forensicPassed
+        ? "Verified zero TypeScript AST parse diagnostics, zero control characters, and zero forbidden test fixtures."
+        : `Forensic failure: verdict=${forensicData.verdict}, parseFailures=${forensicData.files?.parseFailures ?? "unknown"}, controlFailures=${forensicData.files?.controlFailures ?? "unknown"}, suspiciousFiles=${forensicData.files?.suspiciousFiles ?? "unknown"}.`;
+    addPillar(
+      "CLN-10",
+      "Forensic Source Cleanliness & Syntax Integrity",
+      forensicPassed,
+      forensicDetail,
+    );
+  } catch (error: any) {
     forensicPassed = false;
+    addPillar(
+      "CLN-10",
+      "Forensic Source Cleanliness & Syntax Integrity",
+      false,
+      `Forensic engine error: ${String(error?.message || error)}`,
+    );
   }
-  addPillar(
-    "CLN-10",
-    "Forensic Source Cleanliness & Syntax Integrity",
-    forensicPassed,
-    "Verified zero TypeScript AST parse diagnostics, zero control characters, and zero forbidden test fixtures.",
-  );
 
   for (const res of results) {
     const icon = res.passed ? "✓" : "✗";
