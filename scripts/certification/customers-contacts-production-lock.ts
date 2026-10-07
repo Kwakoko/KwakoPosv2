@@ -22,7 +22,7 @@ const REQUIRED_SUBITEMS = [
 
 const REQUIRED: Array<[string, string, string[]]> = [
   ["customer-ui", "apps/web/src/pages/CustomersPage.tsx", [
-    "crypto.randomUUID",
+    "randomUUID",
     'entityType:"Customer"',
     'entityType:"CustomerContact"',
     "Contact Search",
