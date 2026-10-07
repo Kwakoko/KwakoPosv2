@@ -91,8 +91,10 @@ export class PrismaAtomicCommercialFinanceService {
           await tx.payment.update({ where: { id: payment.id }, data: { drawerOperationId: operation.id } });
           drawerOperations.push(operation);
         }
+        const existingLedgers = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id }, orderBy: { createdAt: "asc" } });
         const receipt = await this.ensureSaleReceipt(tx, ctx, existing, req);
-        return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations, receipt };
+        await this.journalSaleSync(tx, ctx, existing, receipt, existingLedgers, String(req.operationId || existing.operationId), String(req.idempotencyKey || existing.idempotencyKey));
+        return { sale: existing, lines: existing.lines, ledgers: existingLedgers, drawerOperations, receipt };
       }
       const variantProductIds = new Map<string, string>();
       const variantPrices = new Map<string, number>();
@@ -386,6 +388,7 @@ export class PrismaAtomicCommercialFinanceService {
       const built = FinancialBridge.mapSaleToJournal(ctx, sale as any, lookup as any, tender as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
       await this.writeJournal(tx, ctx, built);
       const receipt = await this.ensureSaleReceipt(tx, ctx, sale, req);
+      await this.journalSaleSync(tx, ctx, sale, receipt, ledgers, String(req.operationId), String(req.idempotencyKey));
       return { sale, lines: sale.lines, ledgers, drawerOperations, receipt };
     });
   }
@@ -920,6 +923,37 @@ export class PrismaAtomicCommercialFinanceService {
       },
       include: { items: true },
     });
+  }
+
+  private async journalSaleSync(tx: any, ctx: TenantContext, sale: any, receipt: any, ledgers: any[], operationId: string, idempotencyKey: string) {
+    if (typeof tx?.$executeRawUnsafe !== "function") throw new Error("SYNC_JOURNAL_UNAVAILABLE");
+    const entries: Array<{ operationId: string; entityType: string; entityId: string; operationType: string; record: unknown }> = [
+      { operationId, entityType: "Sale", entityId: sale.id, operationType: "CREATE", record: sale },
+      { operationId: `${operationId}:receipt`, entityType: "Receipt", entityId: receipt.id, operationType: "CREATE", record: receipt },
+      ...ledgers.map((ledger: any) => ({
+        operationId: `${operationId}:ledger:${ledger.id}`,
+        entityType: "StockLedger",
+        entityId: ledger.id,
+        operationType: "CREATE",
+        record: ledger,
+      })),
+    ];
+    for (const entry of entries) {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO sync_change_journal
+          (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,'sale-service')
+         ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING`,
+        ctx.tenantId,
+        ctx.branchId,
+        entry.operationId,
+        entry.entityType,
+        entry.entityId,
+        entry.operationType,
+        JSON.stringify(entry.record ?? {}),
+      );
+    }
+    return idempotencyKey;
   }
 
   async createSale(ctx: TenantContext, req: any) {
