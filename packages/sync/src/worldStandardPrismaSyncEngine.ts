@@ -1374,6 +1374,23 @@ const now = new Date();
           case "Customer":
             await tx.customer.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { customerCode: effective.customerCode ?? current.customerCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, creditLimit: effective.creditLimit ?? current.creditLimit, openingBalance: effective.openingBalance ?? current.openingBalance, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
             break;
+          case "CustomerContact":
+            if (deleting) {
+              await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3', String(conflict.entity_id), ctx.tenantId, ctx.branchId);
+            } else {
+              const next: any = { ...current, ...effective };
+              if (next.isPrimary) {
+                await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3 AND id<>$4', String(next.customerId), ctx.tenantId, ctx.branchId, String(conflict.entity_id));
+              }
+              await tx.$executeRawUnsafe(
+                'UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12 AND "tenantId"=$13 AND "branchId"=$14 AND "customerId"=$15',
+                String(next.firstName || "").trim(), String(next.lastName || "").trim(), String(next.title || "").trim(),
+                String(next.role || "").trim(), String(next.department || "").trim(), String(next.phone || "").trim(), String(next.email || "").trim(),
+                Boolean(next.isPrimary), String(next.notes || ""), String(next.decisionInfluence || "INFLUENCER"), String(next.status || "ACTIVE"),
+                String(conflict.entity_id), ctx.tenantId, ctx.branchId, String(next.customerId),
+              );
+            }
+            break;
           case "Supplier":
             await tx.supplier.updateMany({ where: { id: String(conflict.entity_id), tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { supplierCode: effective.supplierCode ?? current.supplierCode, name: effective.name ?? current.name, phone: effective.phone ?? null, email: effective.email ?? null, address: effective.address ?? null, taxPin: effective.taxPin ?? null, status: deleting ? "INACTIVE" : (effective.status ?? current.status) } });
             break;
