@@ -26,7 +26,7 @@ import { countUniqueLocalConflictIds } from "./services/syncConflictPresentation
 
 const MAX_SYNC_BATCH_SIZE = 500;
 const DB_NAME = "kwakopos-v2";
-const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
+const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
 type KnownStore = typeof KNOWN_STORES[number];
 
 function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
@@ -124,6 +124,7 @@ export async function applyRevisionedChanges(
       case "StockAdjustment": return "stockAdjustments";
       case "Customer": return "customers";
       case "Supplier": return "suppliers";
+      case "CustomerContact": return "contacts";
       case "ProductPriceHistory": return "productPriceHistory";
       case "Sale": return "sales";
       case "Payment": return "payments";
@@ -662,7 +663,7 @@ export class ClientSyncEngine {
         totalPulled = bootstrapRes.applied;
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
-          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+          "sales", "payments", "receipts", "customers", "suppliers", "contacts", "configuration", "syncOutbox", "syncMetadata",
         ]);
       } else if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
         totalPulled = await applyRevisionedChanges(
