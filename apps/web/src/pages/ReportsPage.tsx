@@ -862,18 +862,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             <EmptyState icon={AlertTriangle} title="No Outstanding Payables" desc="Supplier balances outstanding at the selected report end date will appear here." />
           ) : (
             <table className="v2-table">
-              <thead><tr><th>Supplier</th><th>Outstanding</th><th>Days Outstanding</th><th>Risk</th></tr></thead>
+              <thead><tr><th>Supplier</th><th>Current</th><th>1–30</th><th>31–60</th><th>61–90</th><th>90+</th><th>Total</th></tr></thead>
               <tbody>
                 {payableRows.map((item: any, i: number) => {
-                  const balance = Number(item.totalOutstanding ?? item.balanceDue ?? item.balance ?? 0);
-                  const days = Number(item.daysOutstanding ?? item.maxDaysOutstanding ?? 0);
-                  const risk = days > 90 ? "HIGH" : days > 30 ? "MEDIUM" : "LOW";
+                  const buckets = item.buckets || {};
                   return (
                     <tr key={item.id || item.entityId || i}>
                       <td className="v2-font-bold">{item.entityName || item.supplierName || item.name || "—"}</td>
-                      <td className="v2-mono v2-font-black v2-text-warning">{money(balance)}</td>
-                      <td className="v2-mono">{days > 0 ? days + " days" : "—"}</td>
-                      <td><span className={"badge " + (risk === "HIGH" ? "v2-badge-danger" : risk === "MEDIUM" ? "v2-badge-warning" : "v2-badge-success")}>{risk}</span></td>
+                      <td className="v2-mono">{money(Number(buckets.current || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days1To30 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days31To60 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days61To90 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days90Plus || 0))}</td>
+                      <td className="v2-mono v2-font-black">{money(Number(buckets.total || item.totalOutstanding || 0))}</td>
                     </tr>
                   );
                 })}
@@ -898,19 +899,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
             />
           ) : (
             <table className="v2-table">
-              <thead><tr><th>Customer</th><th>Phone</th><th>Credit Balance</th><th>Days Outstanding</th><th>Risk</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Current</th><th>1–30</th><th>31–60</th><th>61–90</th><th>90+</th><th>Total</th></tr></thead>
               <tbody>
                 {arAgingCustomers.map((c: any, i: number) => {
-                  const bal = Number(c.balance || c.creditBalance || c.amountOwed || 0);
-                  const days = c.days || c.creditDaysOutstanding || c.daysOwed || 0;
-                  const risk = days > 90 ? "HIGH" : days > 30 ? "MEDIUM" : "LOW";
+                  const buckets = c.buckets || {};
                   return (
                     <tr key={c.id || i}>
                       <td className="v2-font-bold">{c.name || c.fullName || "—"}</td>
-                      <td className="v2-text-xs v2-text-muted">{c.phone || "—"}</td>
-                      <td className="v2-mono v2-font-black v2-text-warning">{money(bal)}</td>
-                      <td className="v2-mono">{days > 0 ? `${days} days` : "—"}</td>
-                      <td><span className={`badge ${risk === "HIGH" ? "v2-badge-danger" : risk === "MEDIUM" ? "v2-badge-warning" : "v2-badge-success"}`}>{risk}</span></td>
+                      <td className="v2-mono">{money(Number(buckets.current || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days1To30 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days31To60 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days61To90 || 0))}</td>
+                      <td className="v2-mono">{money(Number(buckets.days90Plus || 0))}</td>
+                      <td className="v2-mono v2-font-black">{money(Number(buckets.total || c.balance || 0))}</td>
                     </tr>
                   );
                 })}
