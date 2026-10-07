@@ -415,6 +415,9 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
   const [returnOrderId, setReturnOrderId] = useState("");
   const [selectedOrderToReturn, setSelectedOrderToReturn] = useState<any | null>(null);
   const [returnItems, setReturnItems] = useState<Record<string, number>>({});
+  const [selectedOrderToVoid, setSelectedOrderToVoid] = useState<any | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
 
   const toggleDayCollapse = (dateKey: string) => {
     setCollapsedDays((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
@@ -1494,6 +1497,36 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     } catch (error: any) {
       console.error("[POS] Authoritative return failed", error);
       toast.error("Refund Blocked", String(error?.message || "The authoritative return could not be committed."));
+    }
+  };
+
+  const executeVoidSale = async () => {
+    if (!selectedOrderToVoid) return;
+    if (!isOnline) {
+      toast.warning("Void Requires Connection", "Finalized sale voids are fail-closed offline until the authoritative server can commit the reversal.");
+      return;
+    }
+    const reason = voidReason.trim();
+    if (reason.length < 3) {
+      toast.warning("Void Reason Required", "Enter a reason of at least 3 characters.");
+      return;
+    }
+    try {
+      const operationId = safeUUID();
+      const response = await apiFetch<{ success: boolean; data?: any }>(`/api/v1/pos/sales/${encodeURIComponent(selectedOrderToVoid.id)}/void`, {
+        method: "POST",
+        body: JSON.stringify({ reason, operationId, idempotencyKey: operationId, deviceId: getOrCreatePersistentDeviceId("pos") }),
+      });
+      if (!response?.success || !response.data) throw new Error("SALE_VOID_COMMIT_FAILED");
+      setIsVoidModalOpen(false);
+      setSelectedOrderToVoid(null);
+      setVoidReason("");
+      await syncOutbox?.().catch(() => {});
+      playSuccessChime();
+      toast.success("Sale Voided", `${selectedOrderToVoid.saleNumber || selectedOrderToVoid.id} was voided with an authoritative reversal.`);
+      publishDataChanged({ action: "SALE_VOIDED", sale: response.data.sale || response.data });
+    } catch (error: any) {
+      toast.error("Void Blocked", String(error?.message || "The authoritative sale void could not be committed."));
     }
   };
 
@@ -2622,6 +2655,34 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         </div>
       )}
 
+      {/* --- Governed Sale Void Modal --- */}
+      {isVoidModalOpen && selectedOrderToVoid && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div className="v2-card" style={{ width: 440, maxWidth: "94vw", padding: "1.5rem" }}>
+            <h2 className="v2-text-base v2-font-black v2-mb-2">Void Completed Sale</h2>
+            <div className="v2-text-xs v2-text-muted v2-mb-3">
+              {selectedOrderToVoid.saleNumber || selectedOrderToVoid.id} · {money(selectedOrderToVoid.grandTotal || selectedOrderToVoid.total || 0)}
+            </div>
+            <p className="v2-text-xs v2-text-muted v2-mb-3">
+              This creates an immutable reversal. The original sale remains in history while stock, payment, cash and journal effects are reversed.
+            </p>
+            <textarea
+              className="v2-input"
+              rows={3}
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Reason for voiding this completed sale"
+            />
+            <div className="v2-flex v2-justify-end v2-gap-2 v2-mt-3">
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => { setIsVoidModalOpen(false); setSelectedOrderToVoid(null); }} type="button">Cancel</button>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => void executeVoidSale()} type="button">
+                <X size={12} /> Confirm Void
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- Hold Cart Modal --- */}
       {holdCartModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", display: "grid", placeItems: "center", zIndex: 1000 }}>
@@ -3214,6 +3275,20 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
                                     >
                                       <Printer size={12} /> Reprint
                                     </button>
+                                    {String(o.status || "COMPLETED").toUpperCase() === "COMPLETED" && (
+                                      <button
+                                        className="v2-btn v2-btn-ghost v2-btn-sm"
+                                        onClick={() => {
+                                          setSelectedOrderToVoid(o);
+                                          setVoidReason("");
+                                          setIsVoidModalOpen(true);
+                                        }}
+                                        type="button"
+                                        style={{ padding: ".25rem .6rem", color: "var(--danger)" }}
+                                      >
+                                        <X size={12} /> Void
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
