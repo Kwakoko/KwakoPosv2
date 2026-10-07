@@ -118,7 +118,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     const q = String((req.query as any)?.q || "").trim().toLowerCase();
     if (q.length < 2) return { success: true, data: [] };
     const like = "%" + q + "%";
-    const rows = await prisma.$queryRawUnsafe<any[]>(
+    const rows = await prisma.$queryRawUnsafe(
       'SELECT cc.id,cc."customerId",cc."firstName",cc."lastName",cc.title,cc.role,cc.department,cc.phone,cc.email,cc."isPrimary",cc."decisionInfluence",c.name AS "customerName" FROM customer_contacts cc JOIN customers c ON c.id=cc."customerId" AND c."tenantId"=$1 AND c."branchId"=$2 WHERE cc."tenantId"=$1 AND cc."branchId"=$2 AND (LOWER(cc."firstName") LIKE $3 OR LOWER(cc."lastName") LIKE $3 OR LOWER(cc.phone) LIKE $3 OR LOWER(cc.email) LIKE $3 OR LOWER(cc.title) LIKE $3 OR LOWER(c.name) LIKE $3) ORDER BY cc."isPrimary" DESC,cc."firstName" ASC LIMIT 100',
       c.tenantId, c.branchId, like
     );
