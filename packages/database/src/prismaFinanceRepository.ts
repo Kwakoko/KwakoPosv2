@@ -191,9 +191,6 @@ export class PrismaFinanceRepository {
     const { ReceivablesPayablesEngine } = await import("@kwakopos2/domain");
     return ReceivablesPayablesEngine.generatePayablesAgingReport(ctx, suppliers, invoices as any, new Date());
   }
-  async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
-  async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true }, orderBy: { invoiceDate: "desc" } }); }
-
   async createCustomerInvoice(ctx: TenantContext, req: any) {
     await this.ensureDefaultAccounts(ctx);
     const c = await this.db.customer.findFirst({ where: { id: req.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
