@@ -1068,7 +1068,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         qty: i.qty,
         product: i.product,
         sku: i.product.sku,
-        lineTotal: unitPrice * i.qty,
+        lineTotal: displayUnitPrice * i.qty,
         notes: i.notes,
         isCustom: i.isCustom,
       };
