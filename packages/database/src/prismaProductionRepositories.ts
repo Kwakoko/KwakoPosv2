@@ -589,7 +589,7 @@ export class PrismaCommercialRepository {
   private async calculateCashSessionPosition(tx: any, ctx: TenantContext, id: string) {
     const [cashSales, cashRefunds, cashExpenses, cashMovements] = await Promise.all([
       tx.payment.aggregate({
-        where: { ...tenantWhere(ctx), paymentMethod: "CASH", status: "COMPLETED", sale: { cashSessionId: id } },
+        where: { ...tenantWhere(ctx), paymentMethod: "CASH", status: "COMPLETED", sale: { cashSessionId: id, status: "COMPLETED" } },
         _sum: { amount: true },
       }),
       tx.return.aggregate({
@@ -884,7 +884,7 @@ export class PrismaCommercialRepository {
       db.return.aggregate({ where: { ...tenantWhere(ctx), originalSale: { cashSessionId }, status: "COMPLETED" }, _sum: { totalRefundAmount: true } }),
       db.payment.groupBy({
         by: ["paymentMethod", "status"],
-        where: { ...tenantWhere(ctx), sale: { cashSessionId }, status: { in: ["COMPLETED", "REFUNDED"] } },
+        where: { ...tenantWhere(ctx), sale: { cashSessionId, status: "COMPLETED" }, status: { in: ["COMPLETED", "REFUNDED"] } },
         _sum: { amount: true },
         _count: { _all: true },
       }),
