@@ -153,7 +153,13 @@ export const CustomersPage: React.FC = () => {
     setPaymentPosting(true);
     try {
       const idempotencyKey = uuid();
-      const r=await apiFetch<any>(`/api/v1/customers/${selected.id}/payment`,{method:"POST",body:JSON.stringify({amount:paymentAmount,paymentMethod,idempotencyKey})});
+      let cashSessionId: string | undefined;
+      if (paymentMethod === "CASH") {
+        const session = await apiFetch<any>("/api/v1/cash-sessions/active");
+        cashSessionId = session?.data?.id ? String(session.data.id) : undefined;
+        if (!cashSessionId) throw new Error("CASH_SESSION_REQUIRED");
+      }
+      const r=await apiFetch<any>(`/api/v1/customers/${selected.id}/payment`,{method:"POST",body:JSON.stringify({amount:paymentAmount,paymentMethod,idempotencyKey,cashSessionId})});
     if(!r?.success) throw new Error(r?.error?.message||"Payment failed");
       toast.success("Payment posted","The authoritative customer balance has been updated.");
       setPaymentOpen(false); setPaymentAmount(0); await loadCustomers(); if(selected) await openProfile(selected);
