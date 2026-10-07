@@ -12,7 +12,7 @@ const LOCKED_BLOBS: Record<string,string> = {
   "packages/database/src/atomicCommercialFinance.ts": "61edd609ee8260d547883e2ffa16a9204f747a65",
   "packages/database/src/prismaProductionRepositories.ts": "eb2269ba2e049805f0be12595ee93a949f0c3668",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "eaa90d0051fd5726a14890c99c814127feee6056",
-  "apps/web/src/indexedDb.ts": "09c8f6b7ef3fb551ae2636eeaa714b097153aa3f",
+  "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae"
 };
 
