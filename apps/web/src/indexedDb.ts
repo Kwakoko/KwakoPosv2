@@ -1675,7 +1675,7 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, contacts, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
     const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers", "contacts"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
