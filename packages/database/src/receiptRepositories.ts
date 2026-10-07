@@ -530,7 +530,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async getReceiptById(ctx: TenantContext, id: string): Promise<ReceiptDTO | null> {
     try {
       const found = await this.prisma.receipt.findFirst({
-        where: { id, tenantId: ctx.tenantId },
+        where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId },
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
@@ -542,7 +542,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async getReceiptByNumber(ctx: TenantContext, receiptNumber: string): Promise<ReceiptDTO | null> {
     try {
       const found = await this.prisma.receipt.findFirst({
-        where: { receiptNumber, tenantId: ctx.tenantId },
+        where: { receiptNumber, tenantId: ctx.tenantId, branchId: ctx.branchId },
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
