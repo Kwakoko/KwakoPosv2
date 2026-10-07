@@ -27,7 +27,7 @@ describe("Customers / Contacts Production Lock closed loop", () => {
     await prisma.branch.create({
       data: { id: branchId, tenantId, name: "Main", code: "CCL-" + branchId.slice(0, 6), isMain: true },
     });
-    server = buildServer({ productionPersistence: false });
+    server = buildServer({ productionPersistence: true });
     await server.ready();
   });
 
