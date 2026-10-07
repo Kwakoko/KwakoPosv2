@@ -139,6 +139,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactNotes, setContactNotes] = useState("");
+  const [contactPrimary, setContactPrimary] = useState(false);
   const [contactCustomerId, setContactCustomerId] = useState("");
 
   const [transactionsOpen, setTransactionsOpen] = useState(false);
@@ -442,6 +443,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     setContactPhone("");
     setContactEmail("");
     setContactNotes("");
+    setContactPrimary(false);
     setContactCustomerId("");
   };
 
@@ -455,6 +457,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       setContactPhone(contact.phone);
       setContactEmail(contact.email);
       setContactNotes(contact.notes);
+      setContactPrimary(contact.isPrimary);
       setContactCustomerId(contact.customerId);
     } else {
       setSelectedContact(null);
@@ -476,12 +479,12 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       const basePayload = {
         customerId: contactCustomerId,
         firstName: contactFirstName.trim(), lastName: contactLastName.trim(), roleTitle: contactRole.trim(),
-        phone: contactPhone.trim(), email: contactEmail.trim(), notes: contactNotes.trim(),
+        phone: contactPhone.trim(), email: contactEmail.trim(), notes: contactNotes.trim(), isPrimary: contactPrimary,
       };
       if (contactFormMode === "CREATE") {
         const row = {
           id, tenantId: tenantContext.tenantId, branchId: tenantContext.branchId,
-          contactCode: `CNT-${id.slice(0, 8).toUpperCase()}`, ...basePayload, isPrimary: false, status: "ACTIVE",
+          contactCode: `CNT-${id.slice(0, 8).toUpperCase()}`, ...basePayload, status: "ACTIVE",
         };
         await commitLocalMutation({
           db, tenantContext, entityType: "CustomerContact", entityId: id, operationType: "CREATE",
@@ -562,6 +565,29 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     }
   };
 
+  const importContactFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!isOnline) {
+      toast.warning("Import requires connection", "Bulk contact import is an authoritative server operation and must be completed online.");
+      return;
+    }
+    try {
+      const rows = parseCsv(await file.text());
+      if (!rows.length) throw new Error("CONTACT_CSV_FILE_EMPTY");
+      const res = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/contacts/import", {
+        method: "POST",
+        body: JSON.stringify({ rows }),
+      });
+      if (!res.success) throw new Error("CONTACT_IMPORT_FAILED");
+      await loadContacts();
+      toast.success("Contact import completed", `${res.data.filter((x) => x.imported).length} contacts imported.`);
+    } catch (error: any) {
+      toast.error("Contact import blocked", error?.message || "Unable to import contacts.");
+    }
+  };
+
   const tab = String(activeTab || "Customers");
   const showingContacts = /contact/i.test(tab);
   const showingTransactions = /transaction/i.test(tab);
@@ -591,7 +617,14 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
             <RefreshCw size={13} className={isLoading ? "v2-spin" : ""} /> Refresh
           </button>
           {showingContacts ? (
-            <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => openContactForm()} type="button"><UserPlus size={13} /> Add Contact</button>
+            <>
+              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => downloadCsv(contacts.map((c) => ({ contactCode: c.contactCode, customerId: c.customerId, firstName: c.firstName, lastName: c.lastName, roleTitle: c.roleTitle, phone: c.phone, email: c.email, isPrimary: c.isPrimary, notes: c.notes, status: c.status })), "customer-contacts.csv")} type="button"><Download size={13} /> Export</button>
+              <label className={`v2-btn v2-btn-secondary v2-btn-sm${isOnline ? "" : " v2-opacity-50"}`} style={{ cursor: isOnline ? "pointer" : "not-allowed" }}>
+                <Upload size={13} /> Import CSV
+                <input hidden type="file" accept=".csv,text/csv" onChange={importContactFile} disabled={!isOnline} />
+              </label>
+              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => openContactForm()} type="button"><UserPlus size={13} /> Add Contact</button>
+            </>
           ) : !showingTransactions ? (
             <>
               <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => downloadCsv(customers, "customers.csv")} type="button"><Download size={13} /> Export</button>
@@ -754,6 +787,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
               <input className="v2-input" placeholder="Role / title" value={contactRole} onChange={(e) => setContactRole(e.target.value)} />
               <div className="v2-grid v2-grid-2 v2-gap-2"><input className="v2-input" placeholder="Phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} /><input className="v2-input" type="email" placeholder="Email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} /></div>
               <textarea className="v2-input" rows={3} placeholder="Notes" value={contactNotes} onChange={(e) => setContactNotes(e.target.value)} />
+              <label className="v2-flex v2-items-center v2-gap-2 v2-text-xs"><input type="checkbox" checked={contactPrimary} onChange={(e) => setContactPrimary(e.target.checked)} /> Primary contact</label>
               <div className="v2-flex v2-justify-end v2-gap-2"><button className="v2-btn v2-btn-ghost" type="button" onClick={() => setContactFormOpen(false)}>Cancel</button><button className="v2-btn v2-btn-primary" type="submit">Save Contact</button></div>
             </form>
           </div>
