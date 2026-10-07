@@ -252,10 +252,17 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     wallet: customers.reduce((s, c) => s + c.walletBalance, 0),
   }), [customers]);
 
-  const tenantContext = useMemo(() => {
-    if (!currentTenantId || !currentBranchId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
-    return { tenantId: currentTenantId, branchId: currentBranchId };
-  }, [currentBranchId, currentTenantId]);
+  const tenantContext = useMemo(() => ({
+    tenantId: currentTenantId || "",
+    branchId: currentBranchId || "",
+  }), [currentBranchId, currentTenantId]);
+
+  const requireTenantBranchContext = useCallback(() => {
+    if (!tenantContext.tenantId || !tenantContext.branchId) {
+      throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
+    }
+    return tenantContext;
+  }, [tenantContext]);
 
   const resetCustomerForm = () => {
     setFormName("");
@@ -289,7 +296,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       return;
     }
     try {
-      const ctx = tenantContext;
+      const ctx = requireTenantBranchContext();
       if (formMode === "CREATE") {
         const id = uuid();
         const customer = {
@@ -335,7 +342,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     if (!confirm(`Archive ${customer.name}?`)) return;
     try {
       await commitLocalMutation({
-        db, tenantContext: tenantContext, entityType: "Customer", entityId: customer.id, operationType: "UPDATE",
+        db, tenantContext: requireTenantBranchContext(): tenantContext, entityType: "Customer", entityId: customer.id, operationType: "UPDATE",
         payload: { status: "SUSPENDED", _baseUpdatedAt: customer.updatedAt },
         idempotencyKey: uuid(),
         writes: [{ store: "customers", key: customer.id, value: { ...customer, status: "SUSPENDED" } }],
@@ -392,7 +399,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
         paidAt: new Date().toISOString(), paymentNumber: `PAY-CUST-${id.slice(0, 8).toUpperCase()}`,
       };
       await commitLocalMutation({
-        db, tenantContext, entityType: "Payment", entityId: id, operationType: "CREATE",
+        db, tenantContext: requireTenantBranchContext(), entityType: "Payment", entityId: id, operationType: "CREATE",
         payload: { id, customerId: selectedCust.id, amount: paymentValue, payUsingWallet, paymentMethod: payment.paymentMethod, _baseUpdatedAt: selectedCust.updatedAt },
         idempotencyKey: id,
         writes: [{ store: "customers", key: selectedCust.id, value: updated }, { store: "payments", key: id, value: payment }],
@@ -421,7 +428,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
         paidAt: new Date().toISOString(), paymentNumber: `WALLET-${id.slice(0, 8).toUpperCase()}`,
       };
       await commitLocalMutation({
-        db, tenantContext, entityType: "Payment", entityId: id, operationType: "CREATE",
+        db, tenantContext: requireTenantBranchContext(), entityType: "Payment", entityId: id, operationType: "CREATE",
         payload: { id, customerId: selectedCust.id, amount: walletValue, walletDepositAmount: walletValue, kind: "WALLET_DEPOSIT", paymentMethod: "CASH" },
         idempotencyKey: id,
         writes: [{ store: "customers", key: selectedCust.id, value: updated }, { store: "payments", key: id, value: payment }],
@@ -486,7 +493,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
           contactCode: `CNT-${id.slice(0, 8).toUpperCase()}`, ...basePayload, status: "ACTIVE",
         };
         await commitLocalMutation({
-          db, tenantContext, entityType: "CustomerContact", entityId: id, operationType: "CREATE",
+          db, tenantContext: requireTenantBranchContext(), entityType: "CustomerContact", entityId: id, operationType: "CREATE",
           payload: row, idempotencyKey: id,
           writes: [{ store: "customerContacts", key: id, value: row }],
         });
@@ -494,7 +501,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
       } else if (selectedContact) {
         const row = { ...selectedContact, ...basePayload, _baseUpdatedAt: selectedContact.updatedAt, updatedAt: new Date().toISOString() };
         await commitLocalMutation({
-          db, tenantContext, entityType: "CustomerContact", entityId: id, operationType: "UPDATE",
+          db, tenantContext: requireTenantBranchContext(), entityType: "CustomerContact", entityId: id, operationType: "UPDATE",
           payload: { ...basePayload, _baseUpdatedAt: selectedContact.updatedAt },
           idempotencyKey: uuid(),
           writes: [{ store: "customerContacts", key: id, value: row }],
@@ -514,7 +521,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
     if (!confirm(`Archive contact ${contact.firstName} ${contact.lastName}?`)) return;
     try {
       await commitLocalMutation({
-        db, tenantContext, entityType: "CustomerContact", entityId: contact.id, operationType: "UPDATE",
+        db, tenantContext: requireTenantBranchContext(), entityType: "CustomerContact", entityId: contact.id, operationType: "UPDATE",
         payload: { status: "SUSPENDED", _baseUpdatedAt: contact.updatedAt },
         idempotencyKey: uuid(),
         writes: [{ store: "customerContacts", key: contact.id, value: { ...contact, status: "SUSPENDED" } }],
