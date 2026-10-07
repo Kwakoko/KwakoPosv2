@@ -165,17 +165,18 @@ describe("Cash Management Production Lock v1 — authoritative lifecycle", () =>
     });
     const otherCtx: TenantContext = { tenantId: otherTenant, branchId: otherBranch, userId: otherUser, roles: ["CASHIER"], permissions: ["cashdrawer.move"] };
     const otherSession = await repository.openCashSession(otherCtx, { openingCash: 50000, registerCode: "OTHER-REG", deviceId: "OTHER" });
-    const key = "cross-tenant-" + randomUUID();
+    const seedSession = await repository.openCashSession(cashierCtx, { openingCash: 1000, registerCode: "REG-X", deviceId: "DEVICE-A" });
+    const key = "cash-lock-cross-tenant-key";
     await repository.createCashMovement(cashierCtx, {
-      id: randomUUID(), cashSessionId: sourceSessionId, type: "CASH_IN", amount: 10,
+      id: randomUUID(), cashSessionId: seedSession.id, type: "CASH_IN", amount: 10,
       reason: "Cross tenant seed", deviceId: "DEVICE-A", idempotencyKey: key,
-    }).catch(() => undefined);
+    });
     await expect(
       repository.createCashMovement(otherCtx, {
         id: randomUUID(), cashSessionId: otherSession.id, type: "CASH_IN", amount: 10,
         reason: "Cross tenant replay", deviceId: "OTHER", idempotencyKey: key,
       }),
-    ).rejects.toThrow(/CASH_MOVEMENT_IDEMPOTENCY_BOUNDARY_VIOLATION|CASH_MOVEMENT_IDEMPOTENCY_CONFLICT/);
+    ).rejects.toThrow("CASH_MOVEMENT_IDEMPOTENCY_BOUNDARY_VIOLATION");
     await prisma.tenant.delete({ where: { id: otherTenant } }).catch(() => undefined);
   });
 });
