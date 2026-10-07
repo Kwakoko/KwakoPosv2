@@ -88,6 +88,8 @@ jobs:
         run: npm run certify:version-sync
       - name: Commit Contract
         run: npx tsx scripts/ci/validate-commit-message.ts
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Navigation Production Lock
         run: npm run certify:navigation-lock
       - name: Dashboard Analytics Production Lock
