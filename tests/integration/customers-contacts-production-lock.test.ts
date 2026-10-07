@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { prisma, PrismaProductRepository, PrismaStockRepository, PrismaProductionCommercialRepository } from "@kwakopos2/database";
+import { prisma, PrismaProductRepository, PrismaStockRepository, PrismaCommercialRepository } from "@kwakopos2/database";
 import { PrismaSyncEngine } from "@kwakopos2/sync";
 
 describe("Customers / Contacts Production Lock", () => {
