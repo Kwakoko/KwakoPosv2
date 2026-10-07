@@ -2618,7 +2618,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       if (existing) return existing;
       const created = await tx.customer.create({ data: {
         id: validated.id || undefined, tenantId: ctx.tenantId, branchId: ctx.branchId,
-        customerCode: validated.customerCode || `CUST-${Date.now()}`, name: validated.name,
+        customerCode: validated.customerCode || `CUST-${String(validated.id || randomUUID()).replace(/-/g, "").slice(0, 12).toUpperCase()}`, name: validated.name,
         phone: validated.phone || null, email: validated.email || null, address: validated.address || null,
         creditLimit: validated.creditLimit || 0, currentBalance: validated.openingBalance || 0, openingBalance: validated.openingBalance || 0,
         status: "ACTIVE",
@@ -2639,21 +2639,39 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   server.put("/api/v1/customers/:id", async (req) => {
     const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
     const validated = UpdateCustomerRequestSchema.parse(req.body);
-    const id = (req.params as any).id;
-    const before = await commercialRepository.getCustomerById(ctx, id);
-    const updated = await commercialRepository.updateCustomer(ctx, id, validated);
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+    const id = String((req.params as any).id);
+    const updated = await prisma.$transaction(async (tx: any) => {
+      const before = await tx.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!before) throw new Error("CUSTOMER_NOT_FOUND");
+      const data: any = {};
+      for (const key of ["name", "phone", "email", "address", "creditLimit", "status"]) {
+        if (Object.prototype.hasOwnProperty.call(validated, key)) data[key] = (validated as any)[key];
+      }
+      const next = await tx.customer.update({ where: { id: before.id }, data });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId,
+        action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id,
+        metadata: { changedFields: Object.keys(data).sort(), before: { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } },
+      }});
+      return next;
+    });
     return { success: true, data: updated };
   });
 
   server.delete("/api/v1/customers/:id", async (req) => {
     const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
     const id = String((req.params as any).id);
-    const customer = await prisma.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
-    if (Number(customer.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
-    const updated = await prisma.customer.update({ where: { id }, data: { status: "INACTIVE" } });
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id, metadata: { previousStatus: customer.status } } });
+    const updated = await prisma.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+      if (Number(customer.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+      const next = await tx.customer.update({ where: { id }, data: { status: "INACTIVE" } });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId,
+        action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id, metadata: { previousStatus: customer.status },
+      }});
+      return next;
+    });
     return { success: true, data: updated };
   });
 
@@ -2683,9 +2701,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const ctx = requireCommercialPermission(req, "SUPPLIER_EDIT", "suppliers.write");
     const validated = UpdateSupplierRequestSchema.parse(req.body);
     const id = String((req.params as any).id);
-    const before = await commercialRepository.getSupplierById(ctx, id);
-    const updated = await commercialRepository.updateSupplier(ctx, id, validated);
-    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    const updated = await prisma.$transaction(async (tx: any) => {
+      const before = await tx.supplier.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!before) throw new Error("SUPPLIER_NOT_FOUND");
+      const data: any = {};
+      for (const key of ["name", "phone", "email", "address", "taxPin", "status"]) {
+        if (Object.prototype.hasOwnProperty.call(validated, key)) data[key] = (validated as any)[key];
+      }
+      const next = await tx.supplier.update({ where: { id: before.id }, data });
+      await tx.auditEvent.create({ data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId,
+        action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id,
+        metadata: { changedFields: Object.keys(data).sort(), before: { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } },
+      }});
+      return next;
+    });
     return { success: true, data: updated };
   });
 
