@@ -30,10 +30,13 @@ const ContactCreateSchema = z.object({
   firstName: z.string().trim().min(1),
   lastName: z.string().trim().optional().default(""),
   title: z.string().trim().optional().default(""),
+  role: z.string().trim().optional().default(""),
+  department: z.string().trim().optional().default(""),
   phone: z.string().trim().optional().default(""),
   email: z.string().email().optional().or(z.literal("")).default(""),
   isPrimary: z.boolean().optional().default(false),
   notes: z.string().optional().default(""),
+  decisionInfluence: z.enum(["DECISION_MAKER","INFLUENCER","USER","CHAMPION","BLOCKER"]).optional().default("INFLUENCER"),
 });
 
 const ContactUpdateSchema = ContactCreateSchema.omit({ customerId: true, id: true }).partial();
@@ -64,8 +67,8 @@ function csvCell(value: unknown): string {
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-async function audit(c: Ctx, action: string, entityType: string, entityId: string, metadata: Record<string, unknown> = {}) {
-  await prisma.auditEvent.create({
+async function audit(db: any, c: Ctx, action: string, entityType: string, entityId: string, metadata: Record<string, unknown> = {}) {
+  await db.auditEvent.create({
     data: {
       id: randomUUID(),
       tenantId: c.tenantId,
@@ -131,8 +134,8 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     await prisma.$transaction(async (tx: any) => {
       if (payload.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
       await tx.$executeRawUnsafe('INSERT INTO customer_contacts (id,"customerId","tenantId","branchId","firstName","lastName","title","phone","email","isPrimary","notes","status") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,\'ACTIVE\')',
-        id, customerId, c.tenantId, c.branchId, payload.firstName, payload.lastName, payload.title, payload.phone, payload.email, payload.isPrimary, payload.notes);
-      await audit(c, "CONTACT_CREATED", "CustomerContact", id, { customerId });
+        id, customerId, c.tenantId, c.branchId, payload.firstName, payload.lastName, payload.title, payload.role, payload.department, payload.phone, payload.email, payload.isPrimary, payload.notes, payload.decisionInfluence);
+      await audit(tx, c, "CONTACT_CREATED", "CustomerContact", id, { customerId });
     });
     return reply.status(201).send({ success: true, data: { id, ...payload } });
   });
@@ -151,9 +154,9 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
     await prisma.$transaction(async (tx: any) => {
       if (patch.isPrimary) await tx.$executeRawUnsafe('UPDATE customer_contacts SET "isPrimary"=false WHERE "customerId"=$1 AND "tenantId"=$2 AND "branchId"=$3', customerId, c.tenantId, c.branchId);
       const row = { ...current[0], ...patch };
-      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,"phone"=$4,"email"=$5,"isPrimary"=$6,"notes"=$7,"status"=$8,"updatedAt"=now() WHERE id=$9 AND "customerId"=$10 AND "tenantId"=$11 AND "branchId"=$12',
-        row.firstName, row.lastName || "", row.title || "", row.phone || "", row.email || "", Boolean(row.isPrimary), row.notes || "", row.status || "ACTIVE", contactId, customerId, c.tenantId, c.branchId);
-      await audit(c, "CONTACT_UPDATED", "CustomerContact", contactId, { customerId, changedFields: Object.keys(patch).sort() });
+      await tx.$executeRawUnsafe('UPDATE customer_contacts SET "firstName"=$1,"lastName"=$2,"title"=$3,role=$4,department=$5,"phone"=$6,"email"=$7,"isPrimary"=$8,"notes"=$9,"decisionInfluence"=$10,"status"=$11,"updatedAt"=now() WHERE id=$12 AND "customerId"=$13 AND "tenantId"=$14 AND "branchId"=$15',
+        row.firstName, row.lastName || "", row.title || "", row.role || "", row.department || "", row.phone || "", row.email || "", Boolean(row.isPrimary), row.notes || "", row.decisionInfluence || "INFLUENCER", row.status || "ACTIVE", contactId, customerId, c.tenantId, c.branchId);
+      await audit(tx, c, "CONTACT_UPDATED", "CustomerContact", contactId, { customerId, changedFields: Object.keys(patch).sort() });
     });
     return { success: true, data: { ...current[0], ...patch } };
   });
@@ -167,7 +170,7 @@ export async function customerContactRoutes(server: FastifyInstance): Promise<vo
       const rows = await tx.$queryRawUnsafe<any[]>('SELECT id,"isPrimary" FROM customer_contacts WHERE id=$1 AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4 LIMIT 1', contactId, customerId, c.tenantId, c.branchId);
       if (!rows[0]) throw new Error("CONTACT_NOT_FOUND");
       await tx.$executeRawUnsafe('UPDATE customer_contacts SET "status"=\'INACTIVE\',"updatedAt"=now() WHERE id=$1 AND "customerId"=$2 AND "tenantId"=$3 AND "branchId"=$4', contactId, customerId, c.tenantId, c.branchId);
-      await audit(c, "CONTACT_ARCHIVED", "CustomerContact", contactId, { customerId, wasPrimary: Boolean(rows[0].isPrimary) });
+      await audit(tx, c, "CONTACT_ARCHIVED", "CustomerContact", contactId, { customerId, wasPrimary: Boolean(rows[0].isPrimary) });
       return { archived: true };
     });
     return { success: true, data: result };
