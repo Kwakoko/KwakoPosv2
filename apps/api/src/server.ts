@@ -2996,8 +2996,41 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/finance/receivables/aging", async (req) => {
-    const report = await financeRepository.getReceivablesAging(req.tenantContext!);
+    const query = (req.query as any) || {};
+    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
+    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_AR_AS_OF_DATE");
+    const report = await financeRepository.getReceivablesAging(req.tenantContext!, asOfDate);
     return { success: true, data: report };
+  });
+
+  server.get("/api/v1/finance/receivables/statements/:customerId", async (req) => {
+    const query = (req.query as any) || {};
+    const statement = await financeRepository.getCustomerStatement(
+      req.tenantContext!,
+      (req.params as any).customerId,
+      query.from,
+      query.to,
+    );
+    return { success: true, data: statement };
+  });
+
+  server.get("/api/v1/finance/receivables/ledger", async (req) => {
+    const query = (req.query as any) || {};
+    const ledger = await financeRepository.getReceivablesLedger(req.tenantContext!, query.customerId);
+    return { success: true, data: ledger };
+  });
+
+  server.get("/api/v1/finance/receivables/collections", async (req) => {
+    const query = (req.query as any) || {};
+    const asOfDate = query.asOfDate ? new Date(query.asOfDate) : new Date();
+    if (!Number.isFinite(asOfDate.getTime())) throw new Error("FINANCE_INVALID_COLLECTIONS_AS_OF_DATE");
+    const collections = await financeRepository.getReceivablesCollections(req.tenantContext!, asOfDate);
+    return { success: true, data: collections };
+  });
+
+  server.post("/api/v1/finance/receivables/collections/actions", async (req) => {
+    const action = await financeRepository.recordCollectionAction(req.tenantContext!, (req.body as any) || {});
+    return { success: true, data: action };
   });
 
   // Accounts Payable (Supplier Invoices & Aging)

@@ -11,6 +11,7 @@ import {
   publishPendingDomainEvents,
 } from "./durableDomainEventBridge.js";
 import { applyInventoryProductionLockOperation } from "./inventoryProductionLock.js";
+import { applyReceivablesProductionLockOperation } from "./receivablesProductionLock.js";
 
 const MAX_DELTA = 500;
 
@@ -232,6 +233,8 @@ export class WorldStandardPrismaSyncEngine {
       case "Product": record = await tx.product.findUnique({ where: { id: entityId } }); break;
       case "ProductVariant": record = await tx.productVariant.findUnique({ where: { id: entityId } }); break;
       case "Customer": record = await tx.customer.findUnique({ where: { id: entityId } }); break;
+      case "CustomerInvoice": record = await tx.customerInvoice.findUnique({ where: { id: entityId }, include: { lines: true, allocations: true } }); break;
+      case "PaymentAllocation": record = await tx.paymentAllocation.findUnique({ where: { id: entityId } }); break;
       case "Supplier": record = await tx.supplier.findUnique({ where: { id: entityId } }); break;
       case "Category": record = await tx.category.findUnique({ where: { id: entityId } }); break;
       case "Brand": record = await tx.brand.findUnique({ where: { id: entityId } }); break;
@@ -270,6 +273,8 @@ export class WorldStandardPrismaSyncEngine {
         case "StockAdjustment": return await db.stockAdjustment.findUnique({ where: { id: op.entityId } });
         case "StockLedger": return await db.stockLedger.findUnique({ where: { id: op.entityId } });
         case "Customer": return await db.customer.findUnique({ where: { id: op.entityId } });
+        case "CustomerInvoice": return await db.customerInvoice.findUnique({ where: { id: op.entityId }, include: { lines: true, allocations: true } });
+        case "PaymentAllocation": return await db.paymentAllocation.findUnique({ where: { id: op.entityId } });
         case "Supplier": return await db.supplier.findUnique({ where: { id: op.entityId } });
         case "Category": return await db.category.findUnique({ where: { id: op.entityId } });
         case "Brand": return await db.brand.findUnique({ where: { id: op.entityId } });
@@ -420,7 +425,7 @@ export class WorldStandardPrismaSyncEngine {
 
   private async applyOperationInTransaction(ctx: TenantContext, req: SyncPushRequest, op: SyncPushRequest["operations"][number], tx: any): Promise<void> {
     const preconditionedEntities = new Set([
-      "Product", "ProductVariant", "Customer", "Supplier", "Category", "Brand", "Expense",
+      "Product", "ProductVariant", "Customer", "CustomerInvoice", "Supplier", "Category", "Brand", "Expense",
     ]);
     if (op.entityType === "ProductVariant" && op.operationType === "UPDATE") {
       // Preserve the domain-specific ledger-only error for forbidden absolute inventory writes.
@@ -431,6 +436,7 @@ export class WorldStandardPrismaSyncEngine {
     }
 
     if (await applyInventoryProductionLockOperation(ctx, req, op, tx, (priceCtx, priceReq, priceDb) => this.productRepo.recordPriceChange(priceCtx, priceReq, priceDb))) return;
+    if (await applyReceivablesProductionLockOperation(ctx, req, op, tx)) return;
 
     if (op.entityType === "Setting" && ["CREATE", "UPDATE", "DELETE"].includes(op.operationType)) {
       const payload: any = stripSyncControlFields(op.payload as any);
@@ -997,16 +1003,58 @@ const now = new Date();
 
     if (op.entityType === "Payment" && op.operationType === "CREATE") {
       const payload: any = stripSyncControlFields(op.payload as any);
-      if (!payload.supplierId || Number(payload.amount) <= 0) throw new Error("PAYMENT_SUPPLIER_AMOUNT_REQUIRED");
-      const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
-      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
-      if (existing) return;
       const amount = Number(payload.amount);
-      if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
-      await tx.payment.create({ data: { id: op.entityId, tenantId: ctx.tenantId, branchId: ctx.branchId, paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`, purchaseReceiptId: payload.purchaseReceiptId || null, supplierId: supplier.id, amount, paymentMethod: payload.paymentMethod || "BANK", provider: payload.provider || null, providerReference: payload.providerReference || null, status: "COMPLETED", paidAt: new Date() } });
-      await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
-      return;
+      if (!(amount > 0)) throw new Error("PAYMENT_AMOUNT_REQUIRED");
+      if (payload.customerId && payload.supplierId) throw new Error("PAYMENT_ENTITY_AMBIGUOUS");
+      const existing = await tx.payment.findUnique({ where: { id: op.entityId } });
+      if (existing) {
+        if (existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("TENANT_BRANCH_BOUNDARY_VIOLATION");
+        return;
+      }
+      if (payload.customerId) {
+        const customer = await tx.customer.findFirst({ where: { id: payload.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+        if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+        await tx.payment.create({
+          data: {
+            id: op.entityId,
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            paymentNumber: payload.paymentNumber || `PAY-CUS-${op.operationId.slice(0, 24)}`,
+            customerId: customer.id,
+            amount,
+            paymentMethod: payload.paymentMethod || "BANK",
+            provider: payload.provider || null,
+            providerReference: payload.providerReference || null,
+            status: "COMPLETED",
+            paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+          },
+        });
+        return;
+      }
+      if (payload.supplierId) {
+        const supplier = await tx.supplier.findFirst({ where: { id: payload.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+        if (!supplier) throw new Error("SUPPLIER_NOT_FOUND");
+        if (amount > Number(supplier.outstandingBalance)) throw new Error("PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE");
+        await tx.payment.create({
+          data: {
+            id: op.entityId,
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            paymentNumber: payload.paymentNumber || `PAY-SUP-${op.operationId.slice(0, 24)}`,
+            purchaseReceiptId: payload.purchaseReceiptId || null,
+            supplierId: supplier.id,
+            amount,
+            paymentMethod: payload.paymentMethod || "BANK",
+            provider: payload.provider || null,
+            providerReference: payload.providerReference || null,
+            status: "COMPLETED",
+            paidAt: payload.paidAt ? new Date(payload.paidAt) : new Date(),
+          },
+        });
+        await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: amount } } });
+        return;
+      }
+      throw new Error("PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED");
     }
 
     if (op.entityType === "PurchaseReceipt" && op.operationType === "CREATE") {

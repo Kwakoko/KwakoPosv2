@@ -1,6 +1,7 @@
 import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
-import { AccountingEngine, FinancialReportingEngine, TransactionNumbering, FinancialBridge } from "@kwakopos2/domain";
+import { randomUUID } from "node:crypto";
+import { AccountingEngine, FinancialReportingEngine, TransactionNumbering, FinancialBridge, ReceivablesPayablesEngine } from "@kwakopos2/domain";
 
 
 const num = (v: unknown) => Number(v ?? 0);
@@ -128,10 +129,353 @@ export class PrismaFinanceRepository {
   }
 
 
-  async getCustomerInvoices(ctx: TenantContext) { return this.db.customerInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
-  async getSupplierInvoices(ctx: TenantContext) { return this.db.supplierInvoice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { lines: true, allocations: true } }); }
-  async createCustomerInvoice(ctx: TenantContext, req: any) { const c = await this.db.customer.findUnique({ where: { id: req.customerId } }); this.assertTenant(ctx, c); const subtotal = req.items.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0); const tax = req.items.reduce((s: number, i: any) => s + (i.taxRate ? i.quantity * i.unitPrice * i.taxRate / 100 : 0), 0); const discount = req.items.reduce((s: number, i: any) => s + (i.discountAmount || 0), 0); const total = subtotal + tax - discount; return this.db.customerInvoice.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: req.customerId, saleId: req.saleId ?? null, invoiceNumber: req.invoiceNumber ?? `INV-${Date.now()}`, invoiceDate: req.invoiceDate ? new Date(req.invoiceDate) : new Date(), dueDate: new Date(req.dueDate), subtotal, taxTotal: tax, discountTotal: discount, grandTotal: total, amountPaid: 0, balanceDue: total, status: "ISSUED", notes: req.notes ?? null, lines: { create: req.items.map((i: any) => ({ variantId: i.variantId ?? null, description: i.description, quantity: i.quantity, unitPrice: i.unitPrice, taxRate: i.taxRate ?? 0, taxAmount: i.taxRate ? i.quantity * i.unitPrice * i.taxRate / 100 : 0, discountAmount: i.discountAmount ?? 0, lineTotal: i.quantity * i.unitPrice + (i.taxRate ? i.quantity * i.unitPrice * i.taxRate / 100 : 0) - (i.discountAmount ?? 0) })) } } }); }
-  async createSupplierInvoice(ctx: TenantContext, req: any) { const s = await this.db.supplier.findUnique({ where: { id: req.supplierId } }); this.assertTenant(ctx, s); const subtotal = req.items.reduce((x: number, i: any) => x + i.quantity * i.unitCost, 0); const tax = req.items.reduce((x: number, i: any) => x + (i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0), 0); const total = subtotal + tax; return this.db.supplierInvoice.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, supplierId: req.supplierId, purchaseReceiptId: req.purchaseReceiptId ?? null, invoiceNumber: req.invoiceNumber ?? `BIL-${Date.now()}`, invoiceDate: req.invoiceDate ? new Date(req.invoiceDate) : new Date(), dueDate: new Date(req.dueDate), subtotal, taxTotal: tax, grandTotal: total, amountPaid: 0, balanceDue: total, status: "APPROVED", notes: req.notes ?? null, lines: { create: req.items.map((i: any) => ({ variantId: i.variantId ?? null, description: i.description, quantity: i.quantity, unitCost: i.unitCost, taxRate: i.taxRate ?? 0, taxAmount: i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0, lineTotal: i.quantity * i.unitCost + (i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0) })) } } }); }
+  async getCustomerInvoices(ctx: TenantContext) {
+    return this.db.customerInvoice.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      include: { lines: true, allocations: true },
+      orderBy: [{ invoiceDate: "desc" }, { invoiceNumber: "desc" }],
+    });
+  }
+
+  async getSupplierInvoices(ctx: TenantContext) {
+    return this.db.supplierInvoice.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId },
+      include: { lines: true, allocations: true },
+      orderBy: [{ invoiceDate: "desc" }, { invoiceNumber: "desc" }],
+    });
+  }
+
+  async createCustomerInvoice(ctx: TenantContext, req: any) {
+    const customer = await this.db.customer.findUnique({ where: { id: req.customerId } });
+    this.assertTenant(ctx, customer);
+    if (customer.status !== "ACTIVE") throw new Error("FINANCE_CUSTOMER_NOT_ACTIVE");
+
+    return this.db.$transaction(async (tx: any) => {
+      if (req.id) {
+        const existing = await tx.customerInvoice.findUnique({ where: { id: req.id }, include: { lines: true, allocations: true } });
+        if (existing) {
+          this.assertTenant(ctx, existing);
+          return existing;
+        }
+      }
+
+      const sequence = (await tx.customerInvoice.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1;
+      const id = req.id || undefined;
+      const now = new Date();
+      const lines = (req.items || []).map((i: any) => {
+        const lineTax = i.taxRate ? Number(i.quantity) * Number(i.unitPrice) * Number(i.taxRate) / 100 : 0;
+        const lineDiscount = Number(i.discountAmount || 0);
+        const lineSubtotal = Number(i.quantity) * Number(i.unitPrice);
+        return {
+          id: i.id,
+          variantId: i.variantId ?? null,
+          description: i.description,
+          quantity: Number(i.quantity),
+          unitPrice: Number(i.unitPrice),
+          taxRate: Number(i.taxRate || 0),
+          taxAmount: lineTax,
+          discountAmount: lineDiscount,
+          lineTotal: lineSubtotal + lineTax - lineDiscount,
+        };
+      });
+      const subtotal = lines.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0);
+      const taxTotal = lines.reduce((s: number, i: any) => s + i.taxAmount, 0);
+      const discountTotal = lines.reduce((s: number, i: any) => s + i.discountAmount, 0);
+      const total = subtotal + taxTotal - discountTotal;
+      const invoice = await tx.customerInvoice.create({
+        data: {
+          id,
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          customerId: req.customerId,
+          saleId: req.saleId ?? null,
+          invoiceNumber: req.invoiceNumber || `${TransactionNumbering.formatNumber("INV", "MAIN", sequence)}-${randomUUID().slice(0, 6).toUpperCase()}`,
+          invoiceDate: req.invoiceDate ? new Date(req.invoiceDate) : now,
+          dueDate: new Date(req.dueDate),
+          subtotal,
+          taxTotal,
+          discountTotal,
+          grandTotal: total,
+          amountPaid: 0,
+          balanceDue: total,
+          status: "ISSUED",
+          notes: req.notes ?? null,
+          lines: { create: lines },
+        },
+        include: { lines: true, allocations: true },
+      });
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: `finance-api:${ctx.userId}`,
+          action: "AR_INVOICE_CREATED",
+          entityType: "CustomerInvoice",
+          entityId: invoice.id,
+          metadata: { invoiceNumber: invoice.invoiceNumber, customerId: invoice.customerId, grandTotal: total, dueDate: invoice.dueDate.toISOString() },
+        },
+      });
+      return invoice;
+    });
+  }
+
+  async createSupplierInvoice(ctx: TenantContext, req: any) {
+    const supplier = await this.db.supplier.findUnique({ where: { id: req.supplierId } });
+    this.assertTenant(ctx, supplier);
+    const subtotal = req.items.reduce((x: number, i: any) => x + i.quantity * i.unitCost, 0);
+    const tax = req.items.reduce((x: number, i: any) => x + (i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0), 0);
+    const total = subtotal + tax;
+    return this.db.supplierInvoice.create({
+      data: {
+        id: req.id,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        supplierId: req.supplierId,
+        purchaseReceiptId: req.purchaseReceiptId ?? null,
+        invoiceNumber: req.invoiceNumber ?? `BIL-${Date.now()}`,
+        invoiceDate: req.invoiceDate ? new Date(req.invoiceDate) : new Date(),
+        dueDate: new Date(req.dueDate),
+        subtotal,
+        taxTotal: tax,
+        grandTotal: total,
+        amountPaid: 0,
+        balanceDue: total,
+        status: "APPROVED",
+        notes: req.notes ?? null,
+        lines: { create: req.items.map((i: any) => ({ variantId: i.variantId ?? null, description: i.description, quantity: i.quantity, unitCost: i.unitCost, taxRate: i.taxRate ?? 0, taxAmount: i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0, lineTotal: i.quantity * i.unitCost + (i.taxRate ? i.quantity * i.unitCost * i.taxRate / 100 : 0) })) },
+      },
+    });
+  }
+
+  async getReceivablesAging(ctx: TenantContext, asOfDate = new Date()) {
+    const [customers, invoices] = await Promise.all([
+      this.db.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, select: { id: true, name: true, customerCode: true } }),
+      this.getCustomerInvoices(ctx),
+    ]);
+    const report = ReceivablesPayablesEngine.generateReceivablesAgingReport(
+      ctx,
+      customers,
+      invoices.map((i: any) => ({ ...i, amountPaid: Number(i.amountPaid), balanceDue: Number(i.balanceDue), grandTotal: Number(i.grandTotal) })) as any,
+      asOfDate,
+    );
+    return report;
+  }
+
+  async allocatePayment(ctx: TenantContext, req: any) {
+    if (!req.customerInvoiceId && !req.supplierInvoiceId) throw new Error("FINANCE_PAYMENT_TARGET_REQUIRED");
+    if (req.customerInvoiceId && req.supplierInvoiceId) throw new Error("FINANCE_PAYMENT_TARGET_AMBIGUOUS");
+    return this.db.$transaction(async (tx: any) => {
+      const payment = await tx.payment.findUnique({ where: { id: req.paymentId } });
+      this.assertTenant(ctx, payment);
+      if (payment.status !== "COMPLETED") throw new Error("FINANCE_PAYMENT_NOT_COMPLETED");
+      const invoice = req.customerInvoiceId
+        ? await tx.customerInvoice.findUnique({ where: { id: req.customerInvoiceId }, include: { allocations: true, lines: true } })
+        : await tx.supplierInvoice.findUnique({ where: { id: req.supplierInvoiceId }, include: { allocations: true, lines: true } });
+      this.assertTenant(ctx, invoice);
+      if (["CANCELLED", "REJECTED", "PAID"].includes(invoice.status)) throw new Error("FINANCE_INVOICE_NOT_ALLOCATABLE");
+
+      const paymentAllocations = await tx.paymentAllocation.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, paymentId: payment.id } });
+      const paymentAllocated = paymentAllocations.reduce((s: number, a: any) => s + Number(a.allocatedAmount), 0);
+      const paymentRemaining = Math.max(0, Number(payment.amount) - paymentAllocated);
+      const requestedAmount = Number(req.amount);
+      const allocationAmount = Math.min(requestedAmount, Number(invoice.balanceDue), paymentRemaining);
+      if (!(allocationAmount > 0)) throw new Error("FINANCE_PAYMENT_NO_REMAINING_ALLOCATABLE_AMOUNT");
+
+      if (req.customerInvoiceId && payment.customerId && payment.customerId !== invoice.customerId) {
+        throw new Error("FINANCE_PAYMENT_CUSTOMER_MISMATCH");
+      }
+      if (req.supplierInvoiceId && payment.supplierId && payment.supplierId !== invoice.supplierId) {
+        throw new Error("FINANCE_PAYMENT_SUPPLIER_MISMATCH");
+      }
+
+      const newAmountPaid = Number(invoice.amountPaid) + allocationAmount;
+      const newBalanceDue = Math.max(0, Number(invoice.balanceDue) - allocationAmount);
+      const newStatus = newBalanceDue <= 0 ? "PAID" : newAmountPaid > 0 ? "PARTIALLY_PAID" : invoice.status;
+      const updatedInvoice = req.customerInvoiceId
+        ? await tx.customerInvoice.update({
+            where: { id: invoice.id },
+            data: { amountPaid: newAmountPaid, balanceDue: newBalanceDue, status: newStatus },
+            include: { lines: true, allocations: true },
+          })
+        : await tx.supplierInvoice.update({
+            where: { id: invoice.id },
+            data: { amountPaid: newAmountPaid, balanceDue: newBalanceDue, status: newStatus },
+            include: { lines: true, allocations: true },
+          });
+
+      const allocation = await tx.paymentAllocation.create({
+        data: {
+          id: req.allocationId || randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          paymentId: payment.id,
+          customerInvoiceId: req.customerInvoiceId ?? null,
+          supplierInvoiceId: req.supplierInvoiceId ?? null,
+          allocatedAmount: allocationAmount,
+          createdById: ctx.userId,
+        },
+      });
+
+      if (req.customerInvoiceId) {
+        const customer = await tx.customer.findUnique({ where: { id: invoice.customerId } });
+        this.assertTenant(ctx, customer);
+        await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { decrement: allocationAmount } } });
+      } else {
+        const supplier = await tx.supplier.findUnique({ where: { id: invoice.supplierId } });
+        this.assertTenant(ctx, supplier);
+        await tx.supplier.update({ where: { id: supplier.id }, data: { outstandingBalance: { decrement: allocationAmount } } });
+      }
+
+      await tx.auditEvent.create({
+        data: {
+          id: randomUUID(),
+          tenantId: ctx.tenantId,
+          branchId: ctx.branchId,
+          userId: ctx.userId,
+          deviceId: `finance-api:${ctx.userId}`,
+          action: "AR_PAYMENT_ALLOCATED",
+          entityType: req.customerInvoiceId ? "CustomerInvoice" : "SupplierInvoice",
+          entityId: invoice.id,
+          metadata: { paymentId: payment.id, allocationId: allocation.id, amount: allocationAmount, remainingUnallocated: Number(req.amount) - allocationAmount, status: newStatus },
+        },
+      });
+
+      return { updatedInvoice, allocation, remainingUnallocated: Number(req.amount) - allocationAmount };
+    });
+  }
+
+  async getCustomerStatement(ctx: TenantContext, customerId: string, from?: string, to?: string) {
+    const customer = await this.db.customer.findUnique({ where: { id: customerId } });
+    this.assertTenant(ctx, customer);
+    const start = from ? new Date(from) : new Date(0);
+    const end = to ? new Date(to) : new Date();
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) throw new Error("FINANCE_INVALID_STATEMENT_PERIOD");
+
+    const [invoices, payments] = await Promise.all([
+      this.db.customerInvoice.findMany({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, customerId, invoiceDate: { lte: end } },
+        include: { allocations: true, lines: true },
+        orderBy: { invoiceDate: "asc" },
+      }),
+      this.db.payment.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, customerId, status: "COMPLETED", paidAt: { lte: end } }, orderBy: { paidAt: "asc" } }),
+    ]);
+
+    const startMs = start.getTime();
+    const openingBalance = Number(customer.openingBalance) +
+      invoices.filter((i: any) => new Date(i.invoiceDate).getTime() < startMs).reduce((s: number, i: any) => s + Number(i.grandTotal), 0) -
+      payments.filter((p: any) => new Date(p.paidAt).getTime() < startMs).reduce((s: number, p: any) => s + Number(p.amount), 0);
+
+    const entries = [
+      ...invoices.filter((i: any) => new Date(i.invoiceDate).getTime() >= startMs).map((i: any) => ({
+        type: "INVOICE", id: i.id, reference: i.invoiceNumber, date: i.invoiceDate, debit: Number(i.grandTotal), credit: 0, balanceDue: Number(i.balanceDue), status: i.status,
+      })),
+      ...payments.filter((p: any) => new Date(p.paidAt).getTime() >= startMs).map((p: any) => ({
+        type: "PAYMENT", id: p.id, reference: p.paymentNumber, date: p.paidAt, debit: 0, credit: Number(p.amount), status: p.status,
+      })),
+    ].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    let runningBalance = openingBalance;
+    for (const entry of entries as any[]) {
+      runningBalance += Number(entry.debit) - Number(entry.credit);
+      entry.runningBalance = Math.round(runningBalance * 100) / 100;
+    }
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      customerId,
+      customer: { id: customer.id, customerCode: customer.customerCode, name: customer.name },
+      period: { from: start.toISOString(), to: end.toISOString() },
+      openingBalance: Math.round(openingBalance * 100) / 100,
+      entries,
+      closingBalance: Math.round(runningBalance * 100) / 100,
+      currentBalance: Number(customer.currentBalance),
+    };
+  }
+
+  async getReceivablesLedger(ctx: TenantContext, customerId?: string) {
+    const where: any = { tenantId: ctx.tenantId, branchId: ctx.branchId };
+    if (customerId) where.customerId = customerId;
+    const invoices = await this.db.customerInvoice.findMany({ where, include: { allocations: true, lines: true }, orderBy: [{ invoiceDate: "asc" }, { invoiceNumber: "asc" }] });
+    const payments = await this.db.payment.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, ...(customerId ? { customerId } : {}), status: "COMPLETED" },
+      orderBy: { paidAt: "asc" },
+    });
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      customerId: customerId ?? null,
+      invoices,
+      payments,
+      totalInvoiced: invoices.reduce((s: number, i: any) => s + Number(i.grandTotal), 0),
+      totalCollected: payments.reduce((s: number, p: any) => s + Number(p.amount), 0),
+      totalOutstanding: invoices.reduce((s: number, i: any) => s + Number(i.balanceDue), 0),
+    };
+  }
+
+  async getReceivablesCollections(ctx: TenantContext, asOfDate = new Date()) {
+    const invoices = await this.db.customerInvoice.findMany({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, balanceDue: { gt: 0 }, dueDate: { lt: asOfDate }, status: { notIn: ["PAID", "CANCELLED"] } },
+      include: { lines: true, allocations: true },
+      orderBy: { dueDate: "asc" },
+    });
+    const customerIds = [...new Set(invoices.map((i: any) => i.customerId))];
+    const customers: any[] = await this.db.customer.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, id: { in: customerIds } }, select: { id: true, customerCode: true, name: true, phone: true, email: true, creditLimit: true, currentBalance: true } });
+    const byId = new Map<string, any>(customers.map((c: any) => [c.id, c]));
+    const rows = invoices.map((i: any) => {
+      const customer = byId.get(i.customerId);
+      const daysOverdue = ReceivablesPayablesEngine.calculateDaysOverdue(i.dueDate, asOfDate);
+      const balance = Number(i.balanceDue);
+      return {
+        invoiceId: i.id, invoiceNumber: i.invoiceNumber, customerId: i.customerId,
+        customer: customer ? { id: customer.id, code: customer.customerCode, name: customer.name, phone: customer.phone, email: customer.email } : null,
+        dueDate: i.dueDate, daysOverdue, balanceDue: balance,
+        collectionPriority: daysOverdue >= 90 || (Number(customer?.creditLimit || 0) > 0 && balance >= Number(customer?.creditLimit || 0)) ? "CRITICAL" : daysOverdue >= 60 ? "HIGH" : daysOverdue >= 31 ? "MEDIUM" : "LOW",
+      };
+    }).sort((a: any, b: any) => b.daysOverdue - a.daysOverdue || b.balanceDue - a.balanceDue);
+
+    return {
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      asOfDate: asOfDate.toISOString(),
+      count: rows.length,
+      totalOverdue: rows.reduce((s: number, r: any) => s + r.balanceDue, 0),
+      rows,
+    };
+  }
+
+  async recordCollectionAction(ctx: TenantContext, req: any) {
+    const invoice = await this.db.customerInvoice.findUnique({ where: { id: req.invoiceId } });
+    this.assertTenant(ctx, invoice);
+    if (Number(invoice.balanceDue) <= 0 || ["PAID", "CANCELLED"].includes(invoice.status)) {
+      throw new Error("AR_COLLECTION_INVOICE_NOT_OPEN");
+    }
+    const action = String(req.action || "").trim().toUpperCase();
+    const allowed = new Set(["CALL", "SMS", "EMAIL", "PROMISE_TO_PAY", "FOLLOW_UP", "ESCALATE"]);
+    if (!allowed.has(action)) throw new Error("AR_COLLECTION_ACTION_INVALID");
+    const event = await this.db.auditEvent.create({
+      data: {
+        id: randomUUID(),
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        userId: ctx.userId,
+        deviceId: `finance-api:${ctx.userId}`,
+        action: `AR_COLLECTION_${action}`,
+        entityType: "CustomerInvoice",
+        entityId: invoice.id,
+        metadata: {
+          invoiceNumber: invoice.invoiceNumber,
+          balanceDue: Number(invoice.balanceDue),
+          note: req.note ?? null,
+          nextFollowUpAt: req.nextFollowUpAt ?? null,
+        },
+      },
+    });
+    return { id: event.id, invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, action, recordedAt: event.createdAt };
+  }
+
   async getBankAccounts(ctx: TenantContext) { return this.db.bankAccount.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, include: { transactions: true } }); }
   async createBankAccount(ctx: TenantContext, req: any) { const dup = await this.db.bankAccount.findFirst({ where: { tenantId: ctx.tenantId, accountNumber: req.accountNumber } }); if (dup) throw new Error("FINANCE_BANK_ACCOUNT_EXISTS"); return this.db.bankAccount.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, accountName: req.accountName, bankName: req.bankName, accountNumber: req.accountNumber, currency: req.currency ?? "TZS", openingBalance: req.openingBalance ?? 0, currentBalance: req.openingBalance ?? 0, isActive: true } }); }
   async recordBankTransaction(ctx: TenantContext, bankAccountId: string, req: any) { return this.db.$transaction(async (tx: any) => { const bank = await tx.bankAccount.findUnique({ where: { id: bankAccountId } }); this.assertTenant(ctx, bank); const t = await tx.bankTransaction.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, bankAccountId, transactionDate: new Date(req.transactionDate ?? new Date()), transactionType: req.transactionType, amount: req.amount, reference: req.reference, description: req.description ?? null } }); await tx.bankAccount.update({ where: { id: bankAccountId }, data: { currentBalance: { increment: req.amount } } }); return t; }); }
