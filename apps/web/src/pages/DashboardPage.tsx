@@ -440,7 +440,7 @@ const ChartFallback = ({ children, ...props }: any) => (
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { activeModule = 'Retail', setActiveTab } = useModule();
   const { user } = useAuth();
-  const { currentBranchId, currentBranchName } = useBranch();
+  const { currentBranchId, currentBranchName, availableBranches, switchBranch } = useBranch();
   const { currentTenantId, currentTenantName } = useTenant();
   const { db, isOnline, forceBootstrap, isSyncing, pendingOutboxCount } = useSync();
 
@@ -1548,7 +1548,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       let desc = definition.description;
       let action: KPICardProps["action"] | undefined;
 
-      if (definition.systemKey === "pendingOutbox") {
+      if (definition.kpiKey === "SupplierPayables" && authoritativeKpis) {
+        const overdue = Number(authoritativeKpis.overduePayables || 0);
+        const overdueCount = Number(authoritativeKpis.overduePayablesCount || 0);
+        desc = overdueCount > 0
+          ? `${definition.description} · ${fmtCcy(overdue)} overdue across ${overdueCount} invoice${overdueCount === 1 ? "" : "s"}`
+          : `${definition.description} · No overdue supplier invoices`;
+      } else if (definition.systemKey === "pendingOutbox") {
         const pending = syncStatus.pendingOutboxCount + syncStatus.failedOutboxCount;
         const conflicts = syncStatus.abandonedOutboxCount ?? 0;
         value = pending;
@@ -1661,6 +1667,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </span>
           )}
           <div className="flex flex-wrap items-center justify-end gap-2.5">
+          {availableBranches.length > 1 && (
+            <label className="h-9 inline-flex items-center gap-2 rounded-xl border border-slate-600/60 bg-slate-800/80 px-3 text-xs font-bold text-slate-200 whitespace-nowrap">
+              <Building2 className="h-4 w-4 shrink-0" />
+              <span className="sr-only">Dashboard branch</span>
+              <select
+                value={currentBranchId || ''}
+                onChange={(event) => void switchBranch(event.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-200 outline-none"
+                aria-label="Dashboard branch"
+              >
+                {availableBranches.map((branch) => (
+                  <option key={branch.id} value={branch.id} className="bg-slate-900 text-slate-100">
+                    {branch.name}{branch.code ? ` (${branch.code})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {/* Status Badge 1: authoritative TRA VFD integration state */}
           <button
             type="button"
@@ -1809,13 +1833,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           description="Current branch stock valuation"
           variant="compact"
           onClick={() => setSelectedKpiAdvice({ title: 'Inventory Value', value: kpiCards.find((card) => card.title === 'Inventory Value')?.value?.toString() || 'Tsh 0', accent: '#248bff', problem: 'Inventory value shows how much cash is currently tied up in stock, but the total alone does not show whether the mix is healthy.', recommendation: 'Use the valuation as a control signal: compare high-value stock with sell-through, slow-moving items, and stock alerts before ordering more inventory.', nextStep: 'Open Inventory to review high-value and slow-moving stock before the next purchase decision.', action: { label: 'Open Inventory', onClick: () => { setSelectedKpiAdvice(null); handleNav('Inventory'); } } })} />
-        <ReferenceKPICard title="Device Sync"
-          value={kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0'}
-          icon={<RefreshCw className="h-5 w-5" />} accent="#ff2456"
-          description={kpiCards.find((card) => card.title === 'Device Sync')?.desc || 'Device synchronization status'}
+        <ReferenceKPICard title="Supplier Payables"
+          value={kpiCards.find((card) => card.title === 'Supplier Payables')?.value?.toString() || 'Tsh 0'}
+          icon={<Briefcase className="h-5 w-5" />} accent="#f97316"
+          description="Current supplier invoice balances in the branch"
           variant="compact"
-          action={kpiCards.find((card) => card.title === 'Device Sync')?.action}
-          onClick={() => setSelectedKpiAdvice({ title: 'Device Sync', value: kpiCards.find((card) => card.title === 'Device Sync')?.value?.toString() || '0', accent: '#ff2456', problem: 'Synchronization exceptions can leave local changes pending or conflicting with the server state.', recommendation: 'Confirm the device is online, inspect retry-exhausted or conflict records, then force synchronization only after reviewing the affected mutations. Do not silently discard local changes.', nextStep: 'Review the sync status and resolve conflicts before retrying synchronization.', action: { label: 'Review Sync Status', onClick: () => { setSelectedKpiAdvice(null); void forceBootstrap(); } } })} />
+          onClick={() => setSelectedKpiAdvice({
+            title: 'Supplier Payables',
+            value: kpiCards.find((card) => card.title === 'Supplier Payables')?.value?.toString() || 'Tsh 0',
+            accent: '#f97316',
+            problem: 'Supplier payables represent cash commitments already incurred. Overdue balances increase supply and relationship risk.',
+            recommendation: 'Review supplier invoices by due date and prioritize overdue balances before creating new purchasing commitments.',
+            nextStep: 'Open Purchasing and supplier ledgers to review outstanding invoices and payment allocation.',
+            action: { label: 'Open Purchasing', onClick: () => { setSelectedKpiAdvice(null); handleNav('Purchasing'); } },
+          })}
+          spark={revenueAnalytics.chartPoints.map(() => Number(authoritativeKpis?.supplierPayables ?? 0))} />
       </div>
 
       {/* ── GAAP Net Turnover Ledger Strip (Gross Sales - Discounts - Refunds = Net Sales) ── */}

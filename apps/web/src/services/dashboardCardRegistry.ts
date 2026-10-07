@@ -89,6 +89,15 @@ const CORE_CARDS: Record<string, DashboardCardDefinition> = {
     accent: "#8b5cf6",
     format: "currency",
   },
+  SupplierPayables: {
+    key: "SupplierPayables",
+    kpiKey: "SupplierPayables",
+    title: "Supplier Payables",
+    description: "Current supplier invoice balances in the branch",
+    icon: Briefcase,
+    accent: "#f97316",
+    format: "currency",
+  },
   InventoryValue: {
     key: "InventoryValue",
     kpiKey: "InventoryValue",
@@ -356,6 +365,7 @@ const DASHBOARD_CARD_REGISTRY: Record<string, DashboardCardDefinition> = {
   RetailProducts: { ...CORE_CARDS.ProductCount, key: "RetailProducts", title: "Total Products" },
   RetailStockAlerts: { ...CORE_CARDS.StockAlerts, key: "RetailStockAlerts" },
   RetailCustomerDebts: { ...CORE_CARDS.CustomerDebts, key: "RetailCustomerDebts" },
+  RetailSupplierPayables: { ...CORE_CARDS.SupplierPayables, key: "RetailSupplierPayables" },
   RetailInventoryValue: { ...CORE_CARDS.InventoryValue, key: "RetailInventoryValue" },
   RestaurantSalesToday: { ...CORE_CARDS.SalesToday, key: "RestaurantSalesToday" },
   RestaurantLowIngredients: { ...CORE_CARDS.LowStock, key: "RestaurantLowIngredients", title: "Low Ingredients" },

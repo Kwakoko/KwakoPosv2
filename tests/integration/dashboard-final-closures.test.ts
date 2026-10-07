@@ -15,6 +15,8 @@ describe("Dashboard final production closures", () => {
     const variantA = randomUUID();
     const productB = randomUUID();
     const variantB = randomUUID();
+    const supplierA = randomUUID();
+    const supplierInvoiceA = randomUUID();
     const saleA = randomUUID();
     const saleB = randomUUID();
 
@@ -90,6 +92,35 @@ describe("Dashboard final production closures", () => {
       });
 
       const now = new Date();
+      await prisma.supplier.create({
+        data: {
+          id: supplierA,
+          tenantId: tenantA,
+          branchId: branchA,
+          supplierCode: "SUP-DF-A",
+          name: "Dashboard Supplier A",
+          outstandingBalance: 1500,
+          status: "ACTIVE",
+        },
+      });
+      await prisma.supplierInvoice.create({
+        data: {
+          id: supplierInvoiceA,
+          tenantId: tenantA,
+          branchId: branchA,
+          supplierId: supplierA,
+          invoiceNumber: "BIL-DF-A",
+          invoiceDate: new Date(now.getTime() - 7 * 86400000),
+          dueDate: new Date(now.getTime() - 86400000),
+          subtotal: 1000,
+          taxTotal: 500,
+          grandTotal: 1500,
+          amountPaid: 0,
+          balanceDue: 1500,
+          status: "APPROVED",
+        },
+      });
+
       await prisma.sale.create({
         data: {
           id: saleA,
@@ -226,6 +257,11 @@ describe("Dashboard final production closures", () => {
       expect(snapshot.refundsToday).toBe(0);
       expect(snapshot.cogsToday).toBe(450);
       expect(snapshot.grossProfit).toBe(350);
+      expect(snapshot.supplierPayables).toBe(1500);
+      expect(snapshot.overduePayables).toBe(1500);
+      expect(snapshot.overduePayablesCount).toBe(1);
+      expect(snapshot.kpis.SupplierPayables).toBe(1500);
+      expect(snapshot.kpis.OverduePayables).toBe(1500);
       expect(snapshot.analytics.totalRevenue).toBe(800);
       expect(snapshot.analytics.totalCOGS).toBe(450);
       expect(snapshot.analytics.totalProfit).toBe(350);
@@ -250,6 +286,17 @@ describe("Dashboard final production closures", () => {
       expect(recentOrders).toHaveLength(2);
       expect(recentOrders.find((sale: any) => sale.id === saleA)?.cashierName).toBe("Amani Dashboard Cashier");
       expect(recentOrders.every((sale: any) => sale.tenantId === tenantA && sale.branchId === branchA)).toBe(true);
+
+      const cached = await prisma.dashboardReadModel.findUnique({
+        where: { tenantId_branchId_timeframe: { tenantId: tenantA, branchId: branchA, timeframe: "7d" } },
+      });
+      expect(cached?.asOfRevision).toBe(snapshot.asOfRevision);
+      expect(cached?.snapshotVersion).toBe(2);
+      expect(Number((cached?.snapshot as any)?.supplierPayables)).toBe(1500);
+
+      const secondSnapshot = await getDashboardKpiSnapshot(ctx, "7d");
+      expect(secondSnapshot.asOfRevision).toBe(snapshot.asOfRevision);
+      expect(secondSnapshot.supplierPayables).toBe(1500);
     } finally {
       await prisma.returnLine.deleteMany({ where: { returnRel: { tenantId: { in: [tenantA, tenantB] } } } });
       await prisma.return.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
@@ -257,6 +304,9 @@ describe("Dashboard final production closures", () => {
       await prisma.saleLine.deleteMany({ where: { sale: { tenantId: { in: [tenantA, tenantB] } } } });
       await prisma.sale.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
       await prisma.productVariant.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
+      await prisma.dashboardReadModel.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
+      await prisma.supplierInvoice.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
+      await prisma.supplier.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
       await prisma.product.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
       await prisma.user.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });
       await prisma.role.deleteMany({ where: { tenantId: { in: [tenantA, tenantB] } } });

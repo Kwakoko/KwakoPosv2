@@ -1417,6 +1417,7 @@ model SupplierInvoice {
 
   @@unique([tenantId, branchId, invoiceNumber])
   @@index([tenantId, supplierId, status])
+  @@index([tenantId, branchId, status, dueDate])
   @@map("supplier_invoices")
 }
 
@@ -3233,4 +3234,20 @@ model SyncControlState {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("sync_control_state")
+}
+
+model DashboardReadModel {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  timeframe      String
+  asOfRevision   String
+  snapshotVersion Int
+  snapshot       Json
+  capturedAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, branchId, timeframe])
+  @@index([tenantId, branchId, asOfRevision])
+  @@map("dashboard_read_models")
 }

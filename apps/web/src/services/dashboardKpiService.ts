@@ -34,6 +34,9 @@ export interface DashboardKpiSnapshot {
   lowStockCount: number;
   outOfStockCount: number;
   customerDebts: number;
+  supplierPayables: number;
+  overduePayables: number;
+  overduePayablesCount: number;
   customerCount: number;
   productCount: number;
   supplierCount: number;

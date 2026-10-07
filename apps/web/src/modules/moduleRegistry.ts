@@ -130,7 +130,7 @@ export const MODULE_MANIFESTS: Record<IndustryModule, ModuleManifest> = {
       { label: "Reports", tab: "Reports", icon: "BarChart3" },
     ],
     widgets: ["SalesToday", "ProfitToday", "InventoryValue", "LowStock"],
-    dashboardCardKeys: ["RetailSalesToday", "RetailGrossProfit", "RetailAov", "RetailProducts", "RetailStockAlerts", "RetailCustomerDebts", "RetailInventoryValue", "PendingSync"],
+    dashboardCardKeys: ["RetailSalesToday", "RetailGrossProfit", "RetailAov", "RetailProducts", "RetailStockAlerts", "RetailCustomerDebts", "RetailSupplierPayables", "RetailInventoryValue"],
     description: "Retail inventory count, sales, receipts, and client reward points.",
     version: "v2.5",
   },
