@@ -263,29 +263,6 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
           openedAt: activeShift.openedAt ? String(activeShift.openedAt) : null,
         }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
 
-        const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
-        let cSales = 0;
-        let mSales = 0;
-        let aSales = 0;
-        let crdSales = 0;
-        let cIn = 0;
-        let cOut = 0;
-        let sDrops = 0;
-        let cExp = 0;
-
-        for (const s of db.sales.values()) {
-          const sAny = s as any;
-          const sTime = new Date(sAny.createdAt || sAny.soldAt || 0).getTime();
-          if (shiftStartMs > 0 && sTime < shiftStartMs) continue;
-          if (sAny.status === "Voided" || sAny.status === "Cancelled") continue;
-          const method = (sAny.paymentMethod || "Cash").toLowerCase();
-          const amt = Number(sAny.grandTotal || sAny.totalAmount || 0);
-          if (method.includes("mpesa") || method.includes("m-pesa")) mSales += amt;
-          else if (method.includes("airtel")) aSales += amt;
-          else if (method.includes("card")) crdSales += amt;
-          else cSales += amt;
-        }
-
         if (isOnline) {
           try {
             const movementResponse = await apiFetch<{ success: boolean; data: any[] }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/movements`);
@@ -301,9 +278,7 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setCashSales(Number(activeShift.cashSalesTotal || 0));
         setCashRefunds(Number(activeShift.cashRefundsTotal || 0));
         setCashExpenses(Number(activeShift.cashExpensesTotal || 0));
-        setMpesaSales(mSales);
-        setAirtelSales(aSales);
-        setCardSales(crdSales);
+
         setCashIn(Number(activeShift.cashInTotal || 0));
         setCashOut(Number(activeShift.cashOutTotal || 0));
         setSafeDrops(Number(activeShift.safeDropTotal || 0));
