@@ -19,7 +19,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/database/src/index.ts": "9f6f055ad4c1597d9620a82d1a37eb40de80afa3",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
   "packages/database/src/atomicCommercialFinance.ts": "61edd609ee8260d547883e2ffa16a9204f747a65",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "dc83f0f67ccedc7413b9b316c56eb9313cfe4566",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "2230175727d1590e155c8c72e443cd959fa25fe2",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",
