@@ -84,6 +84,10 @@ import {
   CreatePriceChangeRequestSchema,
   CreateCustomerRequestSchema,
   UpdateCustomerRequestSchema,
+  CreateCustomerContactRequestSchema,
+  UpdateCustomerContactRequestSchema,
+  RecordCustomerPaymentRequestSchema,
+  RecordCustomerWalletDepositRequestSchema,
   CreateSupplierRequestSchema,
   UpdateSupplierRequestSchema,
   CreatePurchaseOrderRequestSchema,
@@ -310,6 +314,27 @@ function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VI
   const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
   const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
   const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
+  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
+  return ctx;
+}
+
+function requireCommercialPermission(req: FastifyRequest, permission: string): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
+  const owner = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const normalized = permission.trim().toLowerCase();
+  const aliases: Record<string, string[]> = {
+    "customer.view": ["customer.view", "customers.read", "customer_view"],
+    "customer.create": ["customer.create", "customers.create", "customer_create"],
+    "customer.edit": ["customer.edit", "customers.edit", "customer_edit"],
+    "supplier.view": ["supplier.view", "suppliers.read", "supplier_view"],
+    "supplier.create": ["supplier.create", "suppliers.create", "supplier_create"],
+    "supplier.edit": ["supplier.edit", "suppliers.edit", "supplier_edit"],
+    "report.export": ["report.export", "reports.export", "report_export"],
+  };
+  const accepted = aliases[normalized] || [normalized];
+  const allowed = owner || permissions.has("*") || permissions.has("admin:*") || accepted.some((value) => permissions.has(value));
   if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
   return ctx;
 }
@@ -2568,47 +2593,162 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Customer Management
   server.get("/api/v1/customers", async (req) => {
+    requireCommercialPermission(req, "customer.view");
     const customers = await commercialRepository.getCustomers(req.tenantContext!);
     return { success: true, data: customers };
   });
 
   server.post("/api/v1/customers", async (req, reply) => {
+    requireCommercialPermission(req, "customer.create");
     const validated = CreateCustomerRequestSchema.parse(req.body);
     const customer = await commercialRepository.createCustomer(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: customer });
   });
 
   server.get("/api/v1/customers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
     const customer = await commercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
     if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
     return { success: true, data: customer };
   });
 
+  server.get("/api/v1/customers/:id/transactions", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
+    const data = await commercialRepository.getCustomerTransactions(req.tenantContext!, (req.params as any).id);
+    return reply.send({ success: true, data });
+  });
+
   server.put("/api/v1/customers/:id", async (req) => {
+    requireCommercialPermission(req, "customer.edit");
     const validated = UpdateCustomerRequestSchema.parse(req.body);
     const updated = await commercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
   });
 
+  server.delete("/api/v1/customers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const archived = await commercialRepository.deleteCustomer(req.tenantContext!, (req.params as any).id);
+    return reply.send({ success: true, data: archived });
+  });
+
+  server.post("/api/v1/customers/:id/payment", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const validated = RecordCustomerPaymentRequestSchema.parse(req.body);
+    const payment = await commercialRepository.recordCustomerPayment(req.tenantContext!, (req.params as any).id, validated);
+    return reply.status(201).send({ success: true, data: payment });
+  });
+
+  server.post("/api/v1/customers/:id/wallet", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const validated = RecordCustomerWalletDepositRequestSchema.parse(req.body);
+    const payment = await commercialRepository.depositCustomerWallet(req.tenantContext!, (req.params as any).id, validated);
+    return reply.status(201).send({ success: true, data: payment });
+  });
+
+  server.post("/api/v1/customers/import", async (req, reply) => {
+    requireCommercialPermission(req, "customer.create");
+    const body = z.object({ rows: z.array(z.record(z.unknown())).min(1).max(2000) }).parse(req.body);
+    const imported = await commercialRepository.importCustomers(req.tenantContext!, body.rows);
+    return reply.status(201).send({ success: true, data: imported });
+  });
+
+  server.get("/api/v1/customers/export", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
+    requireCommercialPermission(req, "report.export");
+    const rows = await commercialRepository.getCustomers(req.tenantContext!);
+    const escapeCsv = (value: unknown) => {
+      const text = value == null ? "" : String(value);
+      return `"${text.replaceAll('"', '""')}"`;
+    };
+    const headers = ["customerCode", "name", "phone", "email", "address", "creditLimit", "currentBalance", "walletBalance", "status"];
+    const csv = [
+      headers.join(","),
+      ...rows.map((row: any) => headers.map((header) => escapeCsv(row[header])).join(",")),
+    ].join("\n");
+    return reply.type("text/csv; charset=utf-8").header("Content-Disposition", 'attachment; filename="customers.csv"').send(csv);
+  });
+
+  // Customer Contacts
+  server.get("/api/v1/contacts", async (req) => {
+    requireCommercialPermission(req, "customer.view");
+    const customerId = String((req.query as any)?.customerId || "").trim() || undefined;
+    return { success: true, data: await commercialRepository.getCustomerContacts(req.tenantContext!, customerId) };
+  });
+
+  server.post("/api/v1/contacts", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const validated = CreateCustomerContactRequestSchema.parse(req.body);
+    return reply.status(201).send({ success: true, data: await commercialRepository.createCustomerContact(req.tenantContext!, validated) });
+  });
+
+  server.post("/api/v1/contacts/import", async (req, reply) => {
+    requireCommercialPermission(req, "customer.edit");
+    const body = z.object({ rows: z.array(z.record(z.unknown())).min(1).max(2000) }).parse(req.body);
+    const imported = await commercialRepository.importCustomerContacts(req.tenantContext!, body.rows);
+    return reply.status(201).send({ success: true, data: imported });
+  });
+
+  server.get("/api/v1/contacts/export", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
+    requireCommercialPermission(req, "report.export");
+    const rows = await commercialRepository.getCustomerContacts(req.tenantContext!);
+    const headers = ["contactCode","customerId","firstName","lastName","roleTitle","phone","email","isPrimary","notes","status"];
+    const esc = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = [headers.join(","), ...rows.map((row: any) => headers.map((h) => esc(row[h])).join(","))].join("\n");
+    return reply.type("text/csv; charset=utf-8").header("Content-Disposition", 'attachment; filename="customer-contacts.csv"').send(csv);
+  });
+
+  server.get("/api/v1/contacts/:id", async (req, reply) => {
+    requireCommercialPermission(req, "customer.view");
+    const row = await commercialRepository.getCustomerContactById(req.tenantContext!, (req.params as any).id);
+    if (!row) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Contact not found" } });
+    return { success: true, data: row };
+  });
+
+  server.get("/api/v1/contacts/:id/history", async (req) => {
+    requireCommercialPermission(req, "customer.view");
+    return { success: true, data: await commercialRepository.getCustomerContactHistory(req.tenantContext!, (req.params as any).id) };
+  });
+
+  server.put("/api/v1/contacts/:id", async (req) => {
+    requireCommercialPermission(req, "customer.edit");
+    const validated = UpdateCustomerContactRequestSchema.parse(req.body);
+    return { success: true, data: await commercialRepository.updateCustomerContact(req.tenantContext!, (req.params as any).id, validated) };
+  });
+
+  server.delete("/api/v1/contacts/:id", async (req) => {
+    requireCommercialPermission(req, "customer.edit");
+    return { success: true, data: await commercialRepository.deleteCustomerContact(req.tenantContext!, (req.params as any).id) };
+  });
+
   // Supplier Management
   server.get("/api/v1/suppliers", async (req) => {
+    requireCommercialPermission(req, "supplier.view");
     const suppliers = await commercialRepository.getSuppliers(req.tenantContext!);
     return { success: true, data: suppliers };
   });
 
   server.post("/api/v1/suppliers", async (req, reply) => {
+    requireCommercialPermission(req, "supplier.create");
     const validated = CreateSupplierRequestSchema.parse(req.body);
     const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.get("/api/v1/suppliers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "supplier.view");
     const supplier = await commercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
     if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
     return { success: true, data: supplier };
   });
 
+  server.get("/api/v1/suppliers/:id/transactions", async (req) => {
+    requireCommercialPermission(req, "supplier.view");
+    return { success: true, data: await commercialRepository.getSupplierTransactions(req.tenantContext!, (req.params as any).id) };
+  });
+
   server.put("/api/v1/suppliers/:id", async (req) => {
+    requireCommercialPermission(req, "supplier.edit");
     const validated = UpdateSupplierRequestSchema.parse(req.body);
     const updated = await commercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
