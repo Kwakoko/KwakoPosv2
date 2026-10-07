@@ -33,9 +33,9 @@ const LOCKED_BLOBS: Record<string, string> = {
 
 const MARKERS: Array<[string, string, string[]]> = [
   ["registers", "apps/web/src/pages/CashDrawerPage.tsx", ["kwakopos:cash-register-id", "registerCode", "REGISTER TERMINAL"]],
-  ["session-opening", "apps/api/src/server.ts", ["server.post("/api/v1/cash-sessions"", "registerCode"]],
+  ["session-opening", "apps/api/src/server.ts", ['server.post("/api/v1/cash-sessions"', "registerCode"]],
   ["cash-in-out", "packages/database/src/prismaProductionRepositories.ts", ["CASH_IN", "CASH_OUT", "CASH_INSUFFICIENT_DRAWER_BALANCE", "CASH_COUNT_ALREADY_SEALED"]],
-  ["cash-transfer", "apps/api/src/server.ts", ["server.post("/api/v1/cash-sessions/:id/transfer"", "CashTransferRequestSchema"]],
+  ["cash-transfer", "apps/api/src/server.ts", ['server.post("/api/v1/cash-sessions/:id/transfer"', "CashTransferRequestSchema"]],
   ["cash-transfer-authority", "packages/database/src/prismaProductionRepositories.ts", ["async transferCash", "CASH_TRANSFER_BOUNDARY_VIOLATION"]],
   ["reconciliation", "packages/domain/src/cashSessionEngine.ts", ["Expected Cash", "Variance"]],
   ["variance-journal", "packages/database/src/prismaProductionRepositories.ts", ["CASH_VARIANCE_MANAGER_APPROVAL_REQUIRED", "mapCashSessionVarianceToJournal", "jrn-var-"]],
