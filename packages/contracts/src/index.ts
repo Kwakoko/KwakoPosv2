@@ -1062,7 +1062,7 @@ export type CashSession = z.infer<typeof CashSessionSchema>;
 
 export const OpenCashSessionRequestSchema = z.object({
   openingCash: z.number().nonnegative().default(0),
-  registerCode: z.string().trim().min(1).max(64).default("POS-TERM-01"),
+  registerCode: z.string().trim().min(1).max(64).optional(),
   notes: z.string().max(500).optional(),
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
