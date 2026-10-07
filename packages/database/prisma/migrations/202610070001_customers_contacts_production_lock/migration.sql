@@ -8,10 +8,13 @@ CREATE TABLE IF NOT EXISTS customer_contacts (
   "firstName" TEXT NOT NULL,
   "lastName" TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  department TEXT NOT NULL DEFAULT '',
   phone TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
   "isPrimary" BOOLEAN NOT NULL DEFAULT FALSE,
   notes TEXT NOT NULL DEFAULT '',
+  "decisionInfluence" TEXT NOT NULL DEFAULT 'INFLUENCER',
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -35,3 +38,7 @@ CREATE INDEX IF NOT EXISTS customer_contacts_active_idx
 
 -- Explicitly reject impossible cross-tenant customer linkage at write time by using
 -- application transaction checks plus tenant/branch scoped foreign-key-safe queries.
+
+ALTER TABLE customer_contacts ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT '';
+ALTER TABLE customer_contacts ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT '';
+ALTER TABLE customer_contacts ADD COLUMN IF NOT EXISTS "decisionInfluence" TEXT NOT NULL DEFAULT 'INFLUENCER';
