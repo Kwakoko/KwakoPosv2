@@ -1669,7 +1669,7 @@ const now = new Date();
   async listConflicts(ctx: TenantContext, status: string = "OPEN"): Promise<any[]> {
     await this.ensureInfrastructure();
     assertSyncConflictPermission(ctx, "sync.conflict.read");
-    const rows = status === "ALL"
+    const rows: any[] = status === "ALL"
       ? await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId)
       : await prisma.$queryRawUnsafe("SELECT id, tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, local_payload, remote_payload, status, created_at, resolved_at FROM sync_conflict_record WHERE tenant_id = $1 AND branch_id = $2 AND status = $3 ORDER BY created_at DESC", ctx.tenantId, ctx.branchId, status);
     return rows.map((row) => ({ id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, operationId: row.operation_id, entityType: row.entity_type, entityId: row.entity_id, operationType: row.operation_type, localPayload: row.local_payload, remoteRecord: row.remote_payload, status: row.status, detectedAt: row.created_at, resolvedAt: row.resolved_at }));
@@ -1903,7 +1903,7 @@ const now = new Date();
       `;
     }
 
-    const rows = await prisma.$queryRawUnsafe(query, ...params);
+    const rows: any[] = await prisma.$queryRawUnsafe(query, ...params);
     return rows.map((r) => ({
       tenantId: r.tenant_id,
       branchId: r.branch_id,
