@@ -221,8 +221,13 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
       toast.warning("Reprint reason required", "Enter a reason before reprinting.");
       return;
     }
-    await handleThermalPrint("REPRINT", reprintReason.trim());
-  }, [handleThermalPrint, reprintReason, selectedReceipt, toast]);
+    const reason = reprintReason.trim();
+    if (isThermalPrinterSupported()) {
+      await handleThermalPrint("REPRINT", reason);
+    } else {
+      await handleBrowserPrint("REPRINT", reason);
+    }
+  }, [handleBrowserPrint, handleThermalPrint, reprintReason, selectedReceipt, toast]);
 
   const handleVerify = () => {
     if (!verifyInput.trim()) return;
