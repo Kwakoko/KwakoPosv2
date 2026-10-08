@@ -310,10 +310,12 @@ export async function retryWithBackoff(
     retries: number;
     baseDelay: number;
     factor: number;
+    jitterRatio?: number;
     onFailure: (err: any) => Promise<void> | void;
   }
 ): Promise<void> {
   let delay = opts.baseDelay;
+  const jitterRatio = opts.jitterRatio ?? 0.20;
   for (let i = 0; i < opts.retries; i++) {
     try {
       await fn();
@@ -323,7 +325,8 @@ export async function retryWithBackoff(
         await opts.onFailure(err);
         return;
       }
-      await new Promise((res) => setTimeout(res, delay));
+      const jitterMultiplier = 1 - jitterRatio + Math.random() * jitterRatio * 2;
+      await new Promise((res) => setTimeout(res, Math.round(delay * jitterMultiplier)));
       delay *= opts.factor;
     }
   }
@@ -429,6 +432,6 @@ export async function processOutbox(opts?: {
     );
   }
 
-  await targetDb.flushPersistence().catch(() => {});
+  await targetDb.flushPersistence();
   return { processed: items.length, succeeded, failed };
 }
