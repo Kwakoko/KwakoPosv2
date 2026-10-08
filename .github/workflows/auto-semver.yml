@@ -16,7 +16,6 @@ permissions:
 
 jobs:
   auto-semver:
-  auto-semver:
     name: Calculate, certify and publish next SemVer
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -60,46 +59,6 @@ jobs:
           if [[ "$subject" =~ ^chore\(release\):\ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "Release commit detected: $subject"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Calculate automatic SemVer bump
-        if: steps.guard.outputs.skip != 'true'
-        run: npx tsx scripts/release/prepare-release.ts
-      - name: Resolve authoritative release candidate
-        if: steps.guard.outputs.skip != 'true'
-        id: candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [[ "$LATEST_TAG" != "v${VERSION}" ]]; then
-            echo "needs_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs_release=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Prepare protected release branch
-        if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
-        id: commit_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          LATEST_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
-          [[ -n "$LATEST_TAG" ]] || { echo "RELEASE_BLOCKED: no authoritative SemVer baseline tag"; exit 1; }
-          [[ "$VERSION" != "${LATEST_TAG#v}" ]] || { echo "RELEASE_BLOCKED: release candidate did not advance beyond $LATEST_TAG"; exit 1; }
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "RELEASE_BLOCKED: tag v${VERSION} already exists; refusing duplicate release tag"; exit 1;
-          fi
-          git config user.name "github-actions[bot]"
-          RELEASE_BRANCH="release/v${VERSION}"
-          OPEN_PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
-          if [[ -n "$OPEN_PR" ]]; then
-            echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi

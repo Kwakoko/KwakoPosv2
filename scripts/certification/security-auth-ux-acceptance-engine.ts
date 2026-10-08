@@ -163,8 +163,8 @@ async function runLiveSecurityCases(): Promise<Map<string, Result>> {
     });
     const refreshBody = await refresh.json().catch(() => ({}));
     results.set("SEC-SES-03", {
-      passed: refresh.status !== 200 || !Object.prototype.hasOwnProperty.call(refreshBody?.data || {}, "refreshToken"),
-      details: `Refresh HTTP ${refresh.status}; refreshToken returned in JSON=${Object.prototype.hasOwnProperty.call(refreshBody?.data || {}, "refreshToken")}`,
+      passed: refresh.status !== 200 || !JSON.stringify(refreshBody).includes("refreshToken"),
+      details: `Refresh HTTP ${refresh.status}; refreshToken returned in JSON=${JSON.stringify(refreshBody).includes("refreshToken")}`,
     });
 
     const logout = await liveRequest(baseUrl, "/auth/logout", {
@@ -273,17 +273,17 @@ export async function runSecurityAcceptanceTestSuite(): Promise<SecuritySuiteRep
     {
       id: "SEC-STORE-01", priority: "P0", category: "Client Storage Security", title: "No Refresh Token Browser Migration",
       run: async () => ({
-        passed: !sourceContains("apps/web/src/services/apiClient.ts", /(?:["\']refreshToken["\']|refreshToken\s*\??\s*:)/),
-        details: "apiClient contains no refresh-token migration, serialization, or browser-storage handling",
-      }),
-    },
-    {
-      id: "SEC-STORE-01", priority: "P0", category: "Client Storage Security", title: "No Refresh Token Browser Migration",
-      run: async () => ({
         passed: !sourceContains("apps/web/src/services/apiClient.ts", /\brefreshToken\b/) && !sourceContains("apps/web/src/services/apiClient.ts", /['"]refreshToken['"]\s*:/),
         details: "apiClient contains no refresh-token migration, serialization, or browser-storage handling",
       }),
     },
+    {
+      id: "SEC-MOD-01", priority: "P0", category: "Module Authorization", title: "Module Context Fail-Closed",
+      run: async () => ({
+        passed: sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "createContext<ModuleContextType | null>(null)")
+          && !sourceContains("apps/web/src/context/KwakoPosContexts.tsx", "canAccessModule: () => true"),
+        details: "Module context has no permissive default and useModule fails when provider is absent",
+      }),
     },
     {
       id: "SEC-MOD-02", priority: "P1", category: "Module Authorization", title: "Tab Authorization",

@@ -342,7 +342,7 @@ async function run(): Promise<void> {
     console.log(JSON.stringify(proof, null, 2));
     await ctxB.close(); await ctxA.close();
   } finally {
-    // CI databases are ephemeral and audit_events is append-only; tenant deletion would cascade into forbidden audit mutations.
+    if (tenantId) await cleanup(tenantId).catch(() => undefined);
     await browser.close();
     await Promise.all([stopChild(web), stopChild(api)]);
   }
