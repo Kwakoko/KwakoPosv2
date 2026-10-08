@@ -50,7 +50,34 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes("globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions)") &&
     !server.includes("body.approverId ||"),
     "Client-supplied permissions and approver identities are not authorization sources.");
-  add("SECPLAT-A06", "Emergency AI kill switch requires platform authority and step-up authentication",
+  add("SECPLAT-A06", "Enterprise approval lifecycle is actor- and tenant-bound",
+    server.includes("approverId: ctx.userId") &&
+    server.includes("executorId") === false &&
+    server.includes("executeApprovedRequest(id, ctx.userId, ctx.tenantId)") &&
+    server.includes("recordDecision({ ...body, approverId: ctx.userId"),
+    "Approval decisions/execution do not trust client-supplied identities.");
+
+  add("SECPLAT-A11", "Workflow approval tasks are tenant-bound",
+    server.includes("decideApproval(body.taskId, body.decision, ctx.userId, ctx.tenantId)") &&
+    read("packages/domain/src/workflowAutomationEngine.ts").includes("private taskTenants = new Map<string, string>()") &&
+    read("packages/domain/src/workflowAutomationEngine.ts").includes("taskTenant !== tenantId"),
+    "Workflow approval tasks are bound to authenticated tenant scope.");
+
+  add("SECPLAT-A12", "Treasury payment execution is tenant- and actor-bound",
+    server.includes("createPaymentRun({") &&
+    server.includes("initiatedBy: ctx.userId") &&
+    server.includes("executePaymentRun(id, ctx.userId, ctx.tenantId)") &&
+    read("packages/domain/src/financeTreasuryEngine.ts").includes("run.tenantId !== tenantId"),
+    "Payment runs cannot be executed under a client-selected tenant or executor identity.");
+
+  add("SECPLAT-A13", "System UI APIs use authenticated permissions and scope",
+    server.includes("generateNavigation(ctx.permissions)") &&
+    server.includes("executeGlobalSearch(body.query, ctx.tenantId, ctx.branchId)") &&
+    server.includes("executeCommand(body.actionId, ctx.permissions)") &&
+    server.includes("getAppShellState(ctx.tenantId, ctx.branchId, true)"),
+    "Navigation, search and commands do not accept client-controlled security context.");
+
+  add("SECPLAT-A14", "Emergency AI kill switch requires platform authority and step-up authentication",
     server.includes("requireSuperAdminContext(req)") &&
     server.includes('requireStepUpToken(req, ctx, "PLATFORM_EMERGENCY_KILL_SWITCH")'),
     "Global/high-impact AI control is platform-privileged and step-up protected.");
@@ -78,12 +105,12 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes("const AiApprovalSchema = z.object") &&
     server.includes("const AiKillSwitchSchema = z.object"),
     "Privileged AI/BI inputs have explicit bounded Zod contracts.");
-  add("SECPLAT-A11", "Support input is validated before persistence",
+  add("SECPLAT-A15", "Support input is validated before persistence",
     supportRoutes.includes("SUPPORT_SEVERITY_INVALID") &&
     supportRoutes.includes("branchId: ctx.branchId"),
     "Support ticket mutation is context-bound and input-constrained at the API boundary.");
 
-  add("SECPLAT-A12", "Known arbitrary SQL control-plane backdoor is absent",
+  add("SECPLAT-A16", "Known arbitrary SQL control-plane backdoor is absent",
     !server.includes("/api/v1/super-admin/db/query") &&
     !superAdminRoutes.includes("$queryRawUnsafe(query)"),
     "No HTTP endpoint executes arbitrary client-supplied SQL.");
@@ -106,64 +133,64 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     const source = read(rel);
     if (/\$(?:queryRaw|executeRaw)Unsafe\s*\([\s\S]{0,1200}\$\{/.test(source)) dynamicUnsafe.push(rel);
   }
-  add("SECPLAT-A13", "No dynamic interpolation in production unsafe-raw SQL calls",
+  add("SECPLAT-A17", "No dynamic interpolation in production unsafe-raw SQL calls",
     dynamicUnsafe.length === 0,
     dynamicUnsafe.length === 0 ? "No dynamic SQL interpolation found." : dynamicUnsafe.join(", "));
 
-  add("SECPLAT-A14", "Static file serving is constrained to resolved asset roots",
+  add("SECPLAT-A18", "Static file serving is constrained to resolved asset roots",
     server.includes("safeRelative.includes("..")") &&
     server.includes("resolved.startsWith(baseDir + path.sep)"),
     "Traversal segments and absolute paths are rejected before file reads.");
-  add("SECPLAT-A15", "Tracked auth/server runtime has no obvious hardcoded JWT/database secret",
+  add("SECPLAT-A19", "Tracked auth/server runtime has no obvious hardcoded JWT/database secret",
     !/(?:JWT_SECRET|DATABASE_URL)\s*=\s*["'][^"']{16,}["']/.test(auth + server),
     "No hardcoded production secret assignment pattern was found.");
-  add("SECPLAT-A16", "Refresh sessions are durable and revocable",
+  add("SECPLAT-A20", "Refresh sessions are durable and revocable",
     server.includes("configurePersistentSessions()") &&
     server.includes('status: "REVOKED"') &&
     server.includes("refreshTokenHash"),
     "Refresh state is persisted and revocation/rotation is server-controlled.");
-  add("SECPLAT-A17", "CSRF boundary is explicit",
+  add("SECPLAT-A21", "CSRF boundary is explicit",
     server.includes("HttpOnly; SameSite=Strict") &&
     server.includes("enforceTrustedBrowserOrigin(req, config)") &&
     server.includes('routePath === "/auth/refresh"'),
     "Refresh/logout browser-origin checks complement SameSite=Strict.");
-  add("SECPLAT-A18", "Production CORS uses an explicit allowlist",
+  add("SECPLAT-A22", "Production CORS uses an explicit allowlist",
     server.includes('["https://app.kwakopos.com", "https://admin.kwakopos.com"]') &&
     server.includes("credentials:    true"),
     "Production CORS is credential-aware but not wildcard.");
-  add("SECPLAT-A19", "Production rate limiting has no localhost bypass",
+  add("SECPLAT-A23", "Production rate limiting has no localhost bypass",
     security.includes("global: true") &&
     security.includes("timeWindow") &&
     security.includes('allowList: isProduction ? [] : ["127.0.0.1", "::1"]'),
     "The production rate limiter is globally enabled and not exempted for loopback.");
-  add("SECPLAT-A20", "Security-sensitive operations emit audit records",
+  add("SECPLAT-A24", "Security-sensitive operations emit audit records",
     server.includes("ProductionAuditStream.record") &&
     server.includes("logSuperAdminAuditEvent"),
     "Security events have an authoritative audit path.");
-  add("SECPLAT-A21", "Platform audit storage exists",
+  add("SECPLAT-A25", "Platform audit storage exists",
     auditMigration.includes("platform_audit_events") &&
     auditMigration.includes("tenant_id TEXT NULL"),
     "Platform-level security events have dedicated storage.");
-  add("SECPLAT-A22", "Production security headers are enabled",
+  add("SECPLAT-A26", "Production security headers are enabled",
     security.includes("@fastify/helmet") &&
     security.includes("strictTransportSecurity") &&
     security.includes("frameguard") &&
     security.includes("xContentTypeOptions"),
     "Helmet config covers transport, framing and content-type hardening.");
-  add("SECPLAT-A23", "Production CSP forbids inline scripts",
+  add("SECPLAT-A27", "Production CSP forbids inline scripts",
     security.includes('scriptSrc: ["\'self\'"]') &&
     !security.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]') &&
     indexHtml.includes('<script src="/bootstrap.js"></script>') &&
     !indexHtml.includes("window.process = window.process ||"),
     "Browser bootstrap is externalized so inline script execution is no longer required.");
-  add("SECPLAT-A24", "Dependency audit is release-gated",
+  add("SECPLAT-A28", "Dependency audit is release-gated",
     fs.existsSync(path.join(cwd, ".github/workflows/security-scan.yml")) &&
     read(".github/workflows/security-scan.yml").includes("npm audit --audit-level=high"),
     "High/Critical dependency advisories fail CI.");
-  add("SECPLAT-A25", "SheetJS dependency is pinned to 0.20.3",
+  add("SECPLAT-A29", "SheetJS dependency is pinned to 0.20.3",
     packageJson.includes("xlsx-0.20.3") && packageLock.includes("xlsx-0.20.3"),
     "The repository is pinned to the 0.20.3 SheetJS package.");
-  add("SECPLAT-A26", "Security Platform lock is wired into release gates",
+  add("SECPLAT-A30", "Security Platform lock is wired into release gates",
     packageJson.includes('"certify:security-platform-lock"') &&
     foundation.includes('"certify:security-platform-lock"'),
     "The dedicated lock is part of the production release contract.");
