@@ -231,5 +231,6 @@ export * from "./workflowGovernance.js";
 export * from "./aiAgentGovernance.js";
 export * from "./liveProductionEvidenceGovernance.js";
 export * from "./foundationProductionLock.js";
+export * from "./platformServicesProductionLock.js";
 
 export * from "./visualAssetLibrary.js";
