@@ -63,8 +63,12 @@ export class PricingAuthority {
       throw new Error("PRICING_PRODUCT_BOUNDARY_VIOLATION");
     }
 
-    const basePrice = Number(variant.inheritSellingPrice ? product.sellingPrice : product.sellingPrice);
-    const branchPrice = variant.inheritSellingPrice ? undefined : Number(variant.price);
+    const inheritedSellingPrice = Number(product.sellingPrice || 0);
+    const variantSellingPrice = Number(variant.price || 0);
+    const basePrice = variant.inheritSellingPrice
+      ? (inheritedSellingPrice > 0 ? inheritedSellingPrice : variantSellingPrice)
+      : variantSellingPrice;
+    const branchPrice = undefined;
 
     let customerPrice: any = null;
     let customer: any = null;
