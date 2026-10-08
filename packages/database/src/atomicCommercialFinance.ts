@@ -117,10 +117,30 @@ export class PrismaAtomicCommercialFinanceService {
       });
       const taxConfigRow = (taxSettingRows[0]?.value || {}) as any;
       const taxEnabled = Boolean(taxConfigRow.vatEnabled);
-      const configuredTaxRate = Number(taxConfigRow.vatRatePercent ?? 0);
+      let authoritativeTax: any = null;
+      if (taxEnabled) {
+        const taxId = typeof taxConfigRow.taxId === "string" ? taxConfigRow.taxId : "";
+        authoritativeTax = taxId
+          ? await tx.tax.findFirst({
+              where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+            })
+          : null;
+        if (!authoritativeTax) {
+          authoritativeTax = await tx.tax.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              code: String(taxConfigRow.taxCode || "VAT").trim().toUpperCase(),
+              isActive: true,
+            },
+          });
+        }
+        if (!authoritativeTax) throw new Error("SALE_TAX_CONFIG_NOT_FOUND");
+      }
+      const configuredTaxRate = authoritativeTax ? Number(authoritativeTax.rate) : 0;
       const taxConfig = {
         ratePct: Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && taxEnabled ? configuredTaxRate : 0,
-        isInclusive: taxConfigRow.taxInclusivePricing !== false,
+        isInclusive: authoritativeTax ? Boolean(authoritativeTax.isInclusive) : true,
       };
 
       const lines = req.items.map((item: any) => {
