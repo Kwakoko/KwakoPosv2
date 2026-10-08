@@ -2,32 +2,41 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-const LOCK_ID = "SALES-PRODUCTION-LOCK-V1-2026-10-07";
-const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail"];
+const LOCK_ID = "SALES-PRODUCTION-LOCK-V2-2026-10-08";
+const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail","Product Bundles / Kits","Bundle definition","Bundle components","Component quantities","Bundle stock availability","Bundle sale","Component stock deduction","Bundle reverse/refund","Bundle reporting","Bundle ledger integrity","Bundle offline synchronization"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "2d1cd007d1ff971ea37d5fa0248edf7e5d0dee6a",
-  "apps/api/src/server.ts": "74e9b9a241fd68550a4ead330b2d4d0fba6d4806",
-  "packages/contracts/src/index.ts": "54a4040515a597cfaf61a877a30ea0a033eeb94e",
-  "packages/database/src/atomicCommercialFinance.ts": "bd20e4c4ff11e36abfbbb2b28958a05cf97e6104",
-  "packages/database/src/prismaProductionRepositories.ts": "19be308366d07d0af829ed0dd2052c0447f7fa77",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "2230175727d1590e155c8c72e443cd959fa25fe2",
+  "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
+  "apps/api/src/server.ts": "46437e387ead7e2d8284b99a9871f883bdda4d38",
+  "packages/contracts/src/index.ts": "f1d05ff580b66d16e9bed5d5b439885d40743391",
+  "packages/database/src/atomicCommercialFinance.ts": "63e864d4d167d5309d09a884dfe423524d9e00cd",
+  "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
+  "packages/database/src/prismaProductionRepositories.ts": "72575e27a0c6ed11ba808e0aefb09e08a6fc4936",
+  "packages/database/src/bundleInventory.ts": "86a69340f7bdaf36304805720ab5461a1d99a3ff",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
   "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
-  "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae"
+  "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
+  "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
+  "apps/web/src/components/InventoryBundleWorkspace.tsx": "6f95a91ee619d9ab00c7cc623dfc00a486c72a54",
+  "tests/unit/bundle-production-closure.test.ts": "ee008c74dab2d6bf6cfc423ef350b706e7b8b08d"
 };
 
 const MARKERS: Array<[string,string,string[]]> = [
   ["pos-surface","apps/web/src/pages/PosPage.tsx",["handleCompleteSale","handleInitiateCheckout","selectedCustomerId","executeVoidSale","Void Completed Sale","Sales History","Returns"]],
   ["pos-tax","apps/web/src/pages/PosPage.tsx",["taxInclusivePricing","selectedTaxRate","cartGrandTotal"]],
-  ["pos-offline","apps/web/src/pages/PosPage.tsx",["executeAtomicMutation","outboxItems","stockLedger","SALE-STOCK-"]],
+  ["pos-offline","apps/web/src/pages/PosPage.tsx",["executeAtomicMutation","outboxItems","stockLedger","SALE-STOCK-","expandBundleSaleItems","INSUFFICIENT_BUNDLE_STOCK"]],
   ["history-authority","apps/web/src/pages/PosPage.tsx",["/api/v1/pos/sales","isOnline"]],
-  ["sale-contract","packages/contracts/src/index.ts",["CreatePosSaleRequestSchema","occurredAt","isBackdated","CreateSaleReturnRequestSchema"]],
-  ["sale-authority","packages/database/src/atomicCommercialFinance.ts",["async createSale","async voidSale","SALE_CREATED","SALE_VOIDED","jrn-sale-void","sync_change_journal"]],
-  ["return-authority","packages/database/src/prismaProductionRepositories.ts",["async createSaleReturn","RETURN_QUANTITY_EXCEEDS_REMAINING","SALE_RETURNED","mapReturnToJournal"]],
+  ["sale-contract","packages/contracts/src/index.ts",["CreatePosSaleRequestSchema","bundleDefinitionVersion","bundleComponents","CreateSaleReturnRequestSchema"]],
+  ["sale-authority","packages/database/src/atomicCommercialFinance.ts",["async createSale","resolveBundleDefinition","bundleDefinitionVersion","BUNDLE_DEFINITION_CHANGED_OFFLINE","BUNDLE_SALE:","INSUFFICIENT_BUNDLE_COMPONENT_STOCK"]],
+  ["bundle-resolver","packages/database/src/bundleInventory.ts",["resolveBundleDefinition","validateBundleDefinitionAttributes","bundleDefinitionVersion","BUNDLE_NESTING_NOT_SUPPORTED","BUNDLE_SELF_REFERENCE","BUNDLE_COMPONENT_QUANTITY_INVALID"]],
+  ["return-authority","packages/database/src/prismaProductionRepositories.ts",["async createSaleReturn","RETURN_QUANTITY_EXCEEDS_REMAINING","SALE_RETURNED","mapReturnToJournal","BUNDLE_RETURN_SNAPSHOT","BUNDLE_RETURN_SNAPSHOT_MISSING"]],
+  ["bundle-definition","apps/web/src/components/InventoryBundleWorkspace.tsx",["bundleComponents","Nested bundles/kits are not supported","Available bundle units"]],
+  ["bundle-local-stock","apps/web/src/services/inventoryStockService.ts",["getBundleAvailableQuantity","expandBundleSaleItems","BUNDLE_NESTING_NOT_SUPPORTED"]],
   ["api-rbac","apps/api/src/server.ts",["assertSalesAuthority","SALE_VIEW","SALE_CREATE","SALE_VOID","SALE_RETURN","DISCOUNT_MANAGE"]],
   ["sync-authority","packages/sync/src/worldStandardPrismaSyncEngine.ts",["entityType === \"Sale\"","referenceType || \"\").toUpperCase() === \"SALE\"","provisional"]],
   ["indexeddb-reconcile","apps/web/src/indexedDb.ts",["provisional client StockLedger","SERVER_CONFIRMED","entityType === \"Sale\""]],
-  ["receipt-sync-client","apps/web/src/clientSyncEngine.ts",["case \"Receipt\": return \"receipts\";","applyRevisionedChanges"]]
+  ["receipt-sync-client","apps/web/src/clientSyncEngine.ts",["case \"Receipt\": return \"receipts\";","applyRevisionedChanges"]],
+  ["bundle-tests","tests/unit/bundle-production-closure.test.ts",["bundle production invariants","minimum component capacity","BUNDLE_NESTING_NOT_SUPPORTED"]]
 ];
 
 function read(p:string){ const f=path.resolve(process.cwd(),p); if(!fs.existsSync(f)) throw new Error("missing file: "+p); return fs.readFileSync(f,"utf8"); }
