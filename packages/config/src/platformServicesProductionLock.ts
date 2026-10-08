@@ -26,7 +26,7 @@ export const PLATFORM_SERVICES_PRODUCTION_LOCKS: readonly PlatformServiceLock[] 
     requiredMarkers: [
       ["apps/api/src/services/tenantOnboardingService.ts", "class TenantOnboardingService"],
       ["apps/api/src/routes/tenantOnboardingRoutes.ts", "tenantOnboarding"],
-      ["apps/web/src/pages/TenantOnboardingPage.tsx", "Tenant Onboarding"],
+      ["apps/web/src/pages/TenantOnboardingPage.tsx", "onboarding.title"],
       ["tests/integration/tenant-onboarding.test.ts", "tenant"],
     ],
   },
