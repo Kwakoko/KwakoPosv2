@@ -17,6 +17,12 @@ const requireAbsent = (relative: string, needle: string, label = needle) => {
   const source = read(relative);
   if (source.includes(needle)) failures.push(`FORBIDDEN: ${relative} :: ${label}`);
 };
+const requireAbsentText = (source: string, needle: string, label = needle) => {
+  if (source.includes(needle)) failures.push(`FORBIDDEN: certification-runtime :: ${label}`);
+};
+const requireTrue = (label: string, condition: boolean) => {
+  if (!condition) failures.push(`MISSING: ${label}`);
+};
 
 // 1. Independent lock artifact and release wiring.
 requireText("package.json", '"certify:super-admin": "tsx scripts/certification/super-admin-production-lock.ts"', "package script");
