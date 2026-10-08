@@ -264,7 +264,7 @@ export async function beginSuperAdminSetup(token: string): Promise<{ userId: str
   const userId = verifySetupToken(token);
   const state = await getSuperAdminSecurity(userId);
   if (!state) throw new Error("Super Admin security state not found.");
-  if (!state.bootstrapPending && !state.mustChangePassword && state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
+  if (!state.bootstrapPending || !state.mustChangePassword || state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
   const secret = generateTotpSecret();
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
   return { userId, totpSecret: secret, issuer: "KwakoPos", account: user?.email || "platform-admin" };
@@ -328,11 +328,7 @@ export async function verifySuperAdminMfa(userId: string, code: string): Promise
   if (!state || !state.mfa_required) return true;
   if (!state.mfa_enrolled || !state.mfa_secret_ciphertext) return false;
   
-  // Support WebAuthn / Passkey signature verification mock if configured
-  if (state.mfa_type === "WEBAUTHN" && code.startsWith("webauthn:")) {
-    return verifyWebAuthnResponse(code);
-  }
-
+  if (state.mfa_type !== "TOTP") return false;
   return consumeSuperAdminTotp(userId, code);
 }
 
@@ -344,10 +340,6 @@ export function generateWebAuthnChallenge(userId: string): { challenge: string; 
   };
 }
 
-export function verifyWebAuthnResponse(responsePayload: string): boolean {
-  if (!responsePayload.startsWith("webauthn:")) return false;
-  return responsePayload.length > 15;
-}
 
 export async function logSuperAdminAuditEvent(params: {
   tenantId?: string;
@@ -385,6 +377,28 @@ export async function logSuperAdminAuditEvent(params: {
   }
 
   // If no tenant or branch exists in database yet, avoid foreign key constraint error
+  // Always write the platform audit record, including platform-only actions without tenant scope.
+  const sanitizedMeta: Record<string, unknown> = { outcome, timestamp: new Date().toISOString() };
+  for (const [key, val] of Object.entries(metadata)) {
+    if (!/password|secret|token|credential|key|hash|cookie/i.test(key)) sanitizedMeta[key] = val;
+  }
+
+  try {
+    await prisma.platformAuditEvent.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantId || null,
+        actorId: userId,
+        action,
+        entityType,
+        entityId,
+        metadata: sanitizedMeta as any,
+      },
+    });
+  } catch (err) {
+    console.error("FAILED_TO_WRITE_PLATFORM_AUDIT_EVENT", err instanceof Error ? err.message : err);
+  }
+
   if (!tenantId || !branchId) return;
 
   // Sanitize metadata to guarantee no passwords, secrets, or tokens are logged
