@@ -1761,6 +1761,7 @@ model Employee {
   schedules          WorkforceSchedule[]
   attendanceRecords  AttendanceRecord[]
   timesheets         Timesheet[]
+  sales              Sale[]
   staffExpenses      Expense[]
   leaveRequests      LeaveRequest[]
   assignedTasks      WorkforceTask[]
