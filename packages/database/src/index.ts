@@ -1490,4 +1490,4 @@ export {
 
 export * from "./inventoryAuthority.js";
 
-export * from "./bundleInventory.js";
+export { PricingAuthority } from "./pricingAuthority.js";

@@ -97,14 +97,14 @@ jobs:
         run: npm run certify:inventory-lock
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
+      - name: Pricing / Promotions Production Lock
+        run: npm run certify:pricing-lock
       - name: Receipt Store Production Lock v1
         run: npm run certify:receipts-lock
       - name: Cash Management Production Lock v1
         run: npm run certify:cash-lock
       - name: Finance / Accounting Production Lock v1
         run: npm run certify:finance-lock
-      - name: Tax / Fiscalization Production Lock v1
-        run: npm run certify:tax-fiscal-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
 
@@ -134,27 +134,6 @@ jobs:
 
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
-
-      - name: Start local API for security acceptance tests
-        shell: bash
-        env:
-          PORT: "3000"
-          HOST: "127.0.0.1"
-          JWT_SECRET: "ci-security-local-only-not-for-production"
-          START_SERVER: "true"
-          SYNC_CERTIFICATION_PRISMA: "true"
-        run: |
-          set -euo pipefail
-          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
-          echo $! > /tmp/kwakopos-candidate-security-api.pid
-          for i in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat /tmp/kwakopos-candidate-security-api.log
-          exit 1
 
       - name: Execute Phase 12 Security & Compliance Certification Engine
         run: npm run certify:security

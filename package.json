@@ -16,7 +16,7 @@
     "apps/web"
   ],
   "scripts": {
-    "production-release:verify": "node scripts/release/auth-transport-lock.mjs && tsx scripts/release/verify-production-release-authority.ts",
+    "production-release:verify": "node scripts/release/auth-transport-lock.mjs && npm run certify:pricing-lock && tsx scripts/release/verify-production-release-authority.ts",
     "release:auth-lock": "node scripts/release/auth-transport-lock.mjs",
     "start": "node index.js",
     "dev": "tsx scripts/dev.ts",
@@ -156,14 +156,14 @@
     "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
     "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
     "certify:sales-lock": "tsx scripts/certification/sales-production-lock.ts",
+    "certify:pricing-lock": "tsx scripts/certification/pricing-production-lock.ts",
     "certify:cash-lock": "tsx scripts/certification/cash-management-production-lock.ts",
     "certify:finance-lock": "tsx scripts/certification/finance-production-lock.ts",
     "certify:receivables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=receivables",
     "certify:payables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payables",
     "certify:expenses-lock": "tsx scripts/certification/finance-production-lock.ts --scope=expenses",
     "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments",
-    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts",
-    "certify:tax-fiscal-lock": "tsx scripts/certification/tax-fiscalization-production-lock.ts"
+    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

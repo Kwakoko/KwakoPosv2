@@ -155,7 +155,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         ...prev,
         vatEnabled: Boolean(saved?.vatEnabled),
         vatRatePercent: Number(saved?.vatRatePercent ?? 0),
-        taxInclusivePricing: saved?.taxInclusivePricing !== false,
         currencySymbol: saved?.currencySymbol || prev.currencySymbol,
         currencyCode: saved?.currencyCode || prev.currencyCode,
         traVfdEnabled: savedVfd?.enabled ?? saved?.traVfdEnabled ?? prev.traVfdEnabled,
@@ -255,7 +254,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
         return {
           vatEnabled: Boolean(saved?.vatEnabled),
           vatRatePercent: Number(saved?.vatRatePercent ?? 0),
-          taxInclusivePricing: saved?.taxInclusivePricing !== false,
           currencySymbol: saved?.currencySymbol || "Tsh",
           currencyCode: saved?.currencyCode || "TZS",
           traVfdEnabled: savedVfd?.enabled ?? saved?.traVfdEnabled ?? false,
@@ -273,7 +271,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
     return {
       vatEnabled: false,
       vatRatePercent: 0,
-      taxInclusivePricing: true,
       currencySymbol: "Tsh",
       currencyCode: "TZS",
       traVfdEnabled: false,
@@ -685,17 +682,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ activeTab: propActiv
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.vatRate")}</label>
                 <input className="v2-input" type="number" min={0} max={100} value={taxConfig.vatRatePercent} onChange={(e) => setTaxConfig({ ...taxConfig, vatRatePercent: Number(e.target.value) })} />
-              </div>
-              <div>
-                <label className="v2-text-xs v2-font-bold v2-text-muted">VAT Pricing Mode</label>
-                <select
-                  className="v2-input"
-                  value={taxConfig.taxInclusivePricing ? "INCLUSIVE" : "EXCLUSIVE"}
-                  onChange={(e) => setTaxConfig({ ...taxConfig, taxInclusivePricing: e.target.value === "INCLUSIVE" })}
-                >
-                  <option value="INCLUSIVE">Tax-inclusive prices</option>
-                  <option value="EXCLUSIVE">Tax-exclusive prices</option>
-                </select>
               </div>
               <div>
                 <label className="v2-text-xs v2-font-bold v2-text-muted">{t("settings.currencyCode")}</label>

@@ -501,22 +501,6 @@ export class PrismaCommercialRepository {
       const originalLines = new Map<string, any>();
       for (const line of original.lines) originalLines.set(line.variantId, line);
 
-      const originalSaleLedgers = await tx.stockLedger.findMany({
-        where: { ...tenantWhere(ctx), referenceType: "SALE", referenceId: original.id },
-        orderBy: { createdAt: "asc" },
-      });
-      const bundleSnapshotByLineId = new Map<string, any>();
-      for (const ledger of originalSaleLedgers) {
-        const note = String(ledger.notes || "");
-        if (!note.startsWith("BUNDLE_SALE:")) continue;
-        try {
-          const snapshot = JSON.parse(note.slice("BUNDLE_SALE:".length));
-          if (snapshot?.parentLineId) bundleSnapshotByLineId.set(String(snapshot.parentLineId), snapshot);
-        } catch {
-          throw new Error("BUNDLE_SALE_SNAPSHOT_INVALID");
-        }
-      }
-
       const lines: any[] = [];
       let total = 0;
       let returnedCost = 0;
@@ -563,98 +547,48 @@ export class PrismaCommercialRepository {
       });
 
       for (const line of lines) {
-        const source = originalLines.get(line.variantId);
-        if (!source) throw new Error("RETURN_VARIANT_NOT_IN_ORIGINAL_SALE");
-
-        const snapshot = bundleSnapshotByLineId.get(String(source.id));
-        const hasParentSaleLedger = originalSaleLedgers.some((ledger: any) =>
-          String(ledger.variantId) === String(source.variantId) && String(ledger.movementType).toUpperCase() === "SALE"
-        );
-
-        const currentVariant = await tx.productVariant.findFirst({
+        const variant = await tx.productVariant.findFirst({
           where: { id: line.variantId, ...tenantWhere(ctx) },
         });
-        if (!currentVariant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
-
-        let inventoryItems: Array<{ variantId: string; productId: string; quantity: number; unitCost: number }>;
-        if (snapshot) {
-          inventoryItems = (Array.isArray(snapshot.components) ? snapshot.components : []).map((component: any) => ({
-            variantId: String(component.variantId),
-            productId: String(component.productId),
-            quantity: Number(line.quantityReturned) * Number(component.quantity),
-            unitCost: Number(component.unitCost || 0),
-          }));
-          if (!inventoryItems.length) throw new Error("BUNDLE_RETURN_SNAPSHOT_INVALID");
-        } else if (!hasParentSaleLedger) {
-          throw new Error("BUNDLE_RETURN_SNAPSHOT_MISSING");
-        } else {
-          inventoryItems = [{
-            variantId: currentVariant.id,
-            productId: currentVariant.productId,
-            quantity: Number(line.quantityReturned),
-            unitCost: Number(source.unitCost || 0),
-          }];
+        if (!variant) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
+        const ledgerRows = await tx.stockLedger.findMany({
+          where: { ...tenantWhere(ctx), variantId: variant.id },
+          orderBy: { occurredAt: "asc" },
+        });
+        const before = calculateAvailableStock(ledgerRows as any);
+        const change = Number(line.quantityReturned);
+        if (before < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
+        const ledgerKey = `RETURN-STOCK-${record.id}-${variant.id}`;
+        const duplicateLedger = await tx.stockLedger.findFirst({
+          where: { ...tenantWhere(ctx), idempotencyKey: ledgerKey },
+        });
+        if (!duplicateLedger) {
+          await tx.stockLedger.create({
+            data: {
+              id: randomUUID(),
+              tenantId: ctx.tenantId,
+              branchId: ctx.branchId,
+              productId: variant.productId,
+              variantId: variant.id,
+              movementType: "SALE_RETURN",
+              quantityChange: change,
+              quantity: change,
+              quantityBefore: before,
+              quantityAfter: before + change,
+              unitCost: Number(originalLines.get(variant.id)?.unitCost || 0),
+              totalCost: change * Number(originalLines.get(variant.id)?.unitCost || 0),
+              referenceType: "RETURN",
+              referenceId: record.id,
+              occurredAt: new Date(),
+              deviceId: req.deviceId || "web",
+              operationId: req.operationId || record.id,
+              idempotencyKey: ledgerKey,
+            },
+          });
         }
-
-        for (let componentIndex = 0; componentIndex < inventoryItems.length; componentIndex++) {
-          const component = inventoryItems[componentIndex];
-          const variant = await tx.productVariant.findFirst({
-            where: { id: component.variantId, ...tenantWhere(ctx) },
-          });
-          if (!variant || variant.productId !== component.productId) throw new Error("RETURN_VARIANT_BOUNDARY_VIOLATION");
-
-          const ledgerRows = await tx.stockLedger.findMany({
-            where: { ...tenantWhere(ctx), variantId: variant.id },
-            orderBy: { occurredAt: "asc" },
-          });
-          const before = calculateAvailableStock(ledgerRows as any);
-          const change = Number(component.quantity);
-          if (!Number.isFinite(change) || change <= 0) throw new Error("INVALID_RETURN_QUANTITY");
-          if (before < 0) throw new Error("INVENTORY_AUTHORITY_NEGATIVE_BALANCE");
-
-          const ledgerKey = `RETURN-STOCK-${record.id}-${line.id}-${variant.id}-${componentIndex}`;
-          const duplicateLedger = await tx.stockLedger.findFirst({
-            where: { ...tenantWhere(ctx), idempotencyKey: ledgerKey },
-          });
-          if (!duplicateLedger) {
-            const notes = snapshot
-              ? `BUNDLE_RETURN:${JSON.stringify({
-                  parentReturnLineId: line.id,
-                  parentSaleLineId: source.id,
-                  parentVariantId: source.variantId,
-                  definitionVersion: snapshot.definitionVersion,
-                  components: snapshot.components,
-                })}`
-              : `POS Sale Return ${record.id}`;
-
-            await tx.stockLedger.create({
-              data: {
-                id: randomUUID(),
-                tenantId: ctx.tenantId,
-                branchId: ctx.branchId,
-                productId: variant.productId,
-                variantId: variant.id,
-                movementType: "SALE_RETURN",
-                quantityChange: change,
-                quantity: change,
-                quantityBefore: before,
-                quantityAfter: before + change,
-                unitCost: component.unitCost,
-                totalCost: change * component.unitCost,
-                referenceType: "RETURN",
-                referenceId: record.id,
-                occurredAt: new Date(),
-                deviceId: req.deviceId || "web",
-                operationId: req.operationId || record.id,
-                idempotencyKey: ledgerKey,
-                notes,
-              },
-            });
-          }
-          await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, variant.id);
-          await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
-          await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
-        }
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, variant.id);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, variant.id, null);
+        await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, variant.productId);
       }
 
       const refundPaymentId = `refund:${record.id}`;

@@ -3,7 +3,7 @@ import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
-import { resolveBundleDefinition } from "./bundleInventory.js";
+import { PricingAuthority } from "./pricingAuthority.js";
 
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
@@ -84,42 +84,51 @@ export class PrismaAtomicCommercialFinanceService {
       const variantProductIds = new Map<string, string>();
       const variantPrices = new Map<string, number>();
       const variantCosts = new Map<string, number>();
-      const bundleResolutions = new Map<string, Awaited<ReturnType<typeof resolveBundleDefinition>>>();
+      const pricingEvidence: any[] = [];
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
+      const nowForPricing = new Date();
       for (const item of req.items) {
-        const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
+        const authoritativeVariant = await tx.productVariant.findUnique({ where: { id: item.variantId } });
+        if (
+          !authoritativeVariant ||
+          authoritativeVariant.tenantId !== ctx.tenantId ||
+          authoritativeVariant.branchId !== ctx.branchId ||
+          authoritativeVariant.productId !== item.productId ||
+          authoritativeVariant.isActive === false
+        ) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
-        const authoritativePrice = Number(v.price);
-        if (authoritativePrice > 0 && Math.abs(Number(item.unitPrice) - authoritativePrice) > 0.005) throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
+        const resolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
+          variantId: item.variantId,
+          productId: item.productId,
+          customerId: req.customerId,
+          quantity: Number(item.quantity),
+          requestedUnitPrice: Number(item.unitPrice),
+          priceListId: req.priceListId,
+          priceOverrideReason: req.priceOverrideReason,
+          now: nowForPricing,
+        });
+        const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
+        if (!v) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
-        const resolution = bundleResolutions.get(item.variantId) || await resolveBundleDefinition(tx, ctx.tenantId, ctx.branchId, item.variantId);
-        if (resolution.isBundle && item.bundleDefinitionVersion) {
-          const serverDefinitionVersion = resolution.definitionVersion;
-          if (String(item.bundleDefinitionVersion) !== String(serverDefinitionVersion)) {
-            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
-          }
-        }
-        if (resolution.isBundle && item.bundleComponents) {
-          const expected = resolution.components.map((component) => ({
-            variantId: component.variantId,
-            productId: component.productId,
-            quantity: component.quantity,
-          }));
-          const actual = item.bundleComponents.map((component: any) => ({
-            variantId: String(component.variantId),
-            productId: String(component.productId),
-            quantity: Number(component.quantity),
-          }));
-          if (JSON.stringify(expected) !== JSON.stringify(actual)) {
-            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
-          }
-        }
-        bundleResolutions.set(item.variantId, resolution);
-        variantProductIds.set(item.variantId, v.productId);
-        variantPrices.set(item.variantId, authoritativePrice);
-        variantCosts.set(item.variantId, resolution.unitCost);
+        variantProductIds.set(item.variantId, resolution.productId);
+        variantPrices.set(item.variantId, resolution.unitPrice);
+        variantCosts.set(item.variantId, Number(v.costPrice || 0));
+        pricingEvidence.push({
+          variantId: resolution.variantId,
+          productId: resolution.productId,
+          source: resolution.source,
+          sourceId: resolution.sourceId ?? null,
+          customerPriceId: resolution.customerPriceId ?? null,
+          priceListItemId: resolution.priceListItemId ?? null,
+          pricingTierId: resolution.pricingTierId ?? null,
+          promotionId: resolution.promotionId ?? null,
+          promotionalBasePrice: resolution.promotionalBasePrice ?? null,
+          resolvedUnitPrice: resolution.unitPrice,
+          requestedUnitPrice: resolution.requestedUnitPrice ?? null,
+          overrideApplied: resolution.overrideApplied,
+          overrideReason: resolution.overrideReason ?? null,
+        });
       }
       if (saleDiscountRequested) {
         const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
@@ -142,41 +151,10 @@ export class PrismaAtomicCommercialFinanceService {
       });
       const taxConfigRow = (taxSettingRows[0]?.value || {}) as any;
       const taxEnabled = Boolean(taxConfigRow.vatEnabled);
-      let authoritativeTax: any = null;
-      if (taxEnabled) {
-        const taxId = typeof taxConfigRow.taxId === "string" ? taxConfigRow.taxId : "";
-        authoritativeTax = taxId
-          ? await tx.tax.findFirst({
-              where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
-            })
-          : null;
-        const taxCode = String(taxConfigRow.taxCode || "VAT").trim().toUpperCase();
-        if (!authoritativeTax) {
-          authoritativeTax = await tx.tax.findFirst({
-            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode, isActive: true },
-          });
-        }
-        if (!authoritativeTax) {
-          const rate = Number(taxConfigRow.vatRatePercent ?? 0);
-          if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("SALE_TAX_RATE_INVALID");
-          authoritativeTax = await tx.tax.upsert({
-            where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode } },
-            create: {
-              id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
-              name: String(taxConfigRow.taxName || "VAT"), code: taxCode, rate,
-              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
-            },
-            update: {
-              name: String(taxConfigRow.taxName || "VAT"), rate,
-              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
-            },
-          });
-        }
-      }
-      const configuredTaxRate = authoritativeTax ? Number(authoritativeTax.rate) : 0;
+      const configuredTaxRate = Number(taxConfigRow.vatRatePercent ?? 0);
       const taxConfig = {
         ratePct: Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && taxEnabled ? configuredTaxRate : 0,
-        isInclusive: authoritativeTax ? Boolean(authoritativeTax.isInclusive) : true,
+        isInclusive: taxConfigRow.taxInclusivePricing !== false,
       };
 
       const lines = req.items.map((item: any) => {
@@ -207,6 +185,7 @@ export class PrismaAtomicCommercialFinanceService {
           taxAmount: l.taxAmount,
         })),
         req.discountTotal || 0,
+        taxConfig,
       );
       if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
@@ -272,7 +251,18 @@ export class PrismaAtomicCommercialFinanceService {
         data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId,
           action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
-          metadata: { operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldAt: occurredAt.toISOString(), isBackdated },
+          metadata: {
+            operationId: req.operationId,
+            idempotencyKey: req.idempotencyKey,
+            soldAt: occurredAt.toISOString(),
+            isBackdated,
+            pricing: pricingEvidence,
+            pricingPolicy: {
+              precedence: ["CUSTOMER","PROMOTION","WHOLESALE","BULK","BRANCH","PRICE_LIST","BASE"],
+              taxRatePct: taxConfig.ratePct,
+              taxInclusive: taxConfig.isInclusive,
+            },
+          },
         },
       });
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
@@ -289,153 +279,109 @@ export class PrismaAtomicCommercialFinanceService {
         drawerOperations.push(operation);
       }
 
-      // Update component inventory and StockLedger atomically. Bundle parents are virtual sale units;
-      // only their resolved physical components affect stock.
+      // Update inventory and stock ledgers atomically
       const ledgers: any[] = [];
       const impactedProductIds = new Set<string>();
 
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
-        const resolution = bundleResolutions.get(l.variantId);
-        const inventoryItems = resolution?.isBundle
-          ? resolution.components.map((component) => ({
-              variantId: component.variantId,
-              productId: component.productId,
-              quantity: Number(l.quantity) * component.quantity,
-              unitCost: component.unitCost,
-            }))
-          : [{
-              variantId: l.variantId,
-              productId: l.productId,
-              quantity: Number(l.quantity),
-              unitCost: Number(l.unitCost || 0),
-            }];
+        const qtySold = Math.abs(l.quantity);
+        if (typeof (tx as any).$queryRawUnsafe === "function") {
+          const lockRows = await (tx as any).$queryRawUnsafe(`SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`, l.variantId, ctx.tenantId, ctx.branchId) as Array<{ id: string }>;
+          if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
+        const variantBefore = await tx.productVariant.findUnique({ where: { id: l.variantId } });
+        if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== l.productId) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        const ledgerRows = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: l.variantId }, orderBy: { occurredAt: "asc" } });
+        const currentStock = calculateAvailableStock(ledgerRows as any);
+        const historicalRows = isBackdated ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime()) : [];
+        const historicalStock = isBackdated ? calculateAvailableStock(historicalRows as any) : currentStock;
+        const qtyBefore = isBackdated ? historicalStock : currentStock;
+        if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
 
-        for (let componentIndex = 0; componentIndex < inventoryItems.length; componentIndex++) {
-          const component = inventoryItems[componentIndex];
-          const qtySold = Math.abs(Number(component.quantity));
-          if (!Number.isFinite(qtySold) || qtySold <= 0) continue;
+        if (isBackdated) {
+          const validation = validateRetroactiveTimeline(ledgerRows as any, occurredAt, -qtySold);
+          if (!validation.valid) throw new Error(`INSUFFICIENT_STOCK: Backdated sale would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`);
+        }
 
-          if (typeof (tx as any).$queryRawUnsafe === "function") {
-            const lockRows = await (tx as any).$queryRawUnsafe(
-              `SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-              component.variantId,
+        const isOversell = !isBackdated && qtyBefore < qtySold;
+        const shortfall = isOversell ? qtySold - qtyBefore : 0;
+        const qtyAfter = isBackdated ? qtyBefore - qtySold : Math.max(0, qtyBefore - qtySold);
+
+        if (isOversell) {
+          const conflictId = `conflict:oversell:${saleId}:${l.variantId}`;
+          try {
+            await tx.$executeRawUnsafe(
+              `INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, 'OPEN')
+               ON CONFLICT (id) DO NOTHING`,
+              conflictId,
               ctx.tenantId,
               ctx.branchId,
-            ) as Array<{ id: string }>;
-            if (!lockRows.length) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+              req.operationId || saleId,
+              "SaleOversell",
+              l.variantId,
+              JSON.stringify({ saleId, variantId: l.variantId, productId: l.productId, qtySold, qtyBefore, shortfall }),
+              JSON.stringify({ currentInventory: qtyBefore }),
+            );
+          } catch {
+            throw new Error("SYNC_CONFLICT_PERSISTENCE_UNAVAILABLE");
           }
-
-          const variantBefore = await tx.productVariant.findUnique({ where: { id: component.variantId } });
-          if (!variantBefore || variantBefore.tenantId !== ctx.tenantId || variantBefore.branchId !== ctx.branchId || variantBefore.productId !== component.productId) {
-            throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-          }
-
-          const ledgerRows = await tx.stockLedger.findMany({
-            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: component.variantId },
-            orderBy: { occurredAt: "asc" },
-          });
-          const currentStock = calculateAvailableStock(ledgerRows as any);
-          const historicalRows = isBackdated ? ledgerRows.filter((row: any) => new Date(row.occurredAt || row.createdAt).getTime() < occurredAt.getTime()) : [];
-          const historicalStock = isBackdated ? calculateAvailableStock(historicalRows as any) : currentStock;
-          const qtyBefore = isBackdated ? historicalStock : currentStock;
-          if (qtyBefore < 0) throw new Error("INSUFFICIENT_STOCK: stock ledger invariant violated");
-
-          if (isBackdated) {
-            const validation = validateRetroactiveTimeline(ledgerRows as any, occurredAt, -qtySold);
-            if (!validation.valid) throw new Error(`INSUFFICIENT_STOCK: Backdated sale would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`);
-          }
-
-          const isOversell = !isBackdated && qtyBefore < qtySold;
-          const shortfall = isOversell ? qtySold - qtyBefore : 0;
-          const qtyAfter = isBackdated ? qtyBefore - qtySold : Math.max(0, qtyBefore - qtySold);
-
-          if (isOversell) {
-            const conflictId = `conflict:oversell:${saleId}:${component.variantId}`;
-            try {
-              await tx.$executeRawUnsafe(
-                `INSERT INTO sync_conflict_record (id, tenant_id, branch_id, operation_id, entity_type, entity_id, local_payload, remote_payload, status)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, 'OPEN')
-                 ON CONFLICT (id) DO NOTHING`,
-                conflictId,
-                ctx.tenantId,
-                ctx.branchId,
-                req.operationId || saleId,
-                "SaleOversell",
-                component.variantId,
-                JSON.stringify({ saleId, variantId: component.variantId, productId: component.productId, qtySold, qtyBefore, shortfall, bundleVariantId: resolution?.isBundle ? l.variantId : null }),
-                JSON.stringify({ currentInventory: qtyBefore }),
-              );
-            } catch {
-              throw new Error("SYNC_CONFLICT_PERSISTENCE_UNAVAILABLE");
-            }
-            await tx.auditEvent.create({
-              data: {
-                id: randomUUID(),
-                tenantId: ctx.tenantId,
-                branchId: ctx.branchId,
-                userId: ctx.userId,
-                deviceId: req.deviceId || "sync-engine",
-                action: "SYNC_CONFLICT_DETECTED",
-                entityType: "SaleOversell",
-                entityId: component.variantId,
-                metadata: {
-                  conflictId,
-                  operationId: req.operationId || saleId,
-                  saleId,
-                  variantId: component.variantId,
-                  qtySold,
-                  qtyBefore,
-                  shortfall,
-                  bundleVariantId: resolution?.isBundle ? l.variantId : null,
-                  source: "oversell",
-                },
-              },
-            });
-            if (resolution?.isBundle) throw new Error(`INSUFFICIENT_BUNDLE_COMPONENT_STOCK:${component.variantId}`);
-          }
-
-          const bundleSnapshot = resolution?.isBundle
-            ? {
-                parentLineId: l.id,
-                parentVariantId: l.variantId,
-                definitionVersion: resolution.definitionVersion,
-                components: resolution.components,
-              }
-            : null;
-          const notes = bundleSnapshot
-            ? `BUNDLE_SALE:${JSON.stringify(bundleSnapshot)}`
-            : (isOversell ? `POS Sale ${saleId} (OVERSELL DETECTED: shortfall ${shortfall})` : `POS Sale ${saleId}`);
-
-          const ledger = await tx.stockLedger.create({
+          await tx.auditEvent.create({
             data: {
               id: randomUUID(),
               tenantId: ctx.tenantId,
               branchId: ctx.branchId,
-              productId: component.productId,
-              variantId: component.variantId,
-              movementType: "SALE",
-              quantityChange: -qtySold,
-              quantity: -qtySold,
-              quantityBefore: qtyBefore,
-              quantityAfter: qtyAfter,
-              unitCost: component.unitCost || 0,
-              totalCost: qtySold * (component.unitCost || 0),
-              referenceType: "SALE",
-              referenceId: sale.id,
-              occurredAt,
-              deviceId: req.deviceId,
-              operationId: req.operationId,
-              idempotencyKey: `${req.idempotencyKey}-${l.id}-${component.variantId}-${componentIndex}`,
-              notes,
+              userId: ctx.userId,
+              deviceId: req.deviceId || "sync-engine",
+              action: "SYNC_CONFLICT_DETECTED",
+              entityType: "SaleOversell",
+              entityId: l.variantId,
+              metadata: {
+                conflictId,
+                operationId: req.operationId || saleId,
+                saleId,
+                variantId: l.variantId,
+                qtySold,
+                qtyBefore,
+                shortfall,
+                source: "oversell",
+              },
             },
           });
-          ledgers.push(ledger);
-
-          await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, component.variantId);
-          await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, component.variantId, null);
-          impactedProductIds.add(component.productId);
         }
+
+        const notes = isOversell
+          ? `POS Sale ${saleId} (OVERSELL DETECTED: shortfall ${shortfall})`
+          : `POS Sale ${saleId}`;
+
+        const ledger = await tx.stockLedger.create({
+          data: {
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            productId: l.productId,
+            variantId: l.variantId,
+            movementType: "SALE",
+            quantityChange: -qtySold,
+            quantity: -qtySold,
+            quantityBefore: qtyBefore,
+            quantityAfter: qtyAfter,
+            unitCost: l.unitCost || 0,
+            totalCost: qtySold * (l.unitCost || 0),
+            referenceType: "SALE",
+            referenceId: sale.id,
+            occurredAt,
+            deviceId: req.deviceId,
+            operationId: req.operationId,
+            idempotencyKey: `${req.idempotencyKey}-${l.variantId}-${i}`,
+            notes,
+          },
+        });
+        ledgers.push(ledger);
+
+        await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, l.variantId);
+        await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, l.variantId, null);
+        impactedProductIds.add(l.productId);
       }
 
       for (const prodId of impactedProductIds) {
