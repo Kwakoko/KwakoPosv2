@@ -696,6 +696,7 @@ model Sale {
   saleNumber     String
   customerId     String?
   cashSessionId  String?
+  employeeId     String?
   subtotal       Decimal      @default(0) @db.Decimal(12, 2)
   discountTotal  Decimal      @default(0) @db.Decimal(12, 2)
   taxTotal       Decimal      @default(0) @db.Decimal(12, 2)
@@ -715,6 +716,7 @@ model Sale {
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   customer       Customer?    @relation(fields: [customerId], references: [id])
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  employee       Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   lines          SaleLine[]
   payments       Payment[]
   returns        Return[]
@@ -914,6 +916,7 @@ model Expense {
   tenantId       String
   branchId       String
   cashSessionId  String?
+  employeeId     String?
   category       String
   amount         Decimal      @db.Decimal(12, 2)
   reason         String
@@ -936,6 +939,7 @@ model Expense {
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  employee       Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, incurredAt])
@@ -1759,6 +1763,8 @@ model Employee {
   schedules          WorkforceSchedule[]
   attendanceRecords  AttendanceRecord[]
   timesheets         Timesheet[]
+  sales              Sale[]
+  staffExpenses      Expense[]
   leaveRequests      LeaveRequest[]
   assignedTasks      WorkforceTask[]
   assignedWorkOrders WorkOrder[]
