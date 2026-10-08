@@ -6,8 +6,8 @@
 UPDATE roles AS legacy
 SET name = 'PLATFORM_SUPER_ADMIN',
     permissions = ARRAY['platform:control'],
-    is_system_role = TRUE,
-    updated_at = NOW()
+    "isSystemRole" = TRUE,
+    "updatedAt" = NOW()
 WHERE legacy.id = (
   SELECT r.id
   FROM roles r
@@ -26,7 +26,7 @@ WHERE legacy.id = (
 
 -- Where the dedicated platform role already exists, move platform users off legacy role records.
 UPDATE users AS u
-SET role_id = platform.id
+SET "roleId" = platform.id
 FROM roles platform
 JOIN tenants t ON t.id = platform."tenantId"
 WHERE t.slug = 'kwakoko-platform'
@@ -56,7 +56,7 @@ WHERE EXISTS (
   SELECT 1
   FROM users u
   JOIN roles r ON r.id = u."roleId"
-  WHERE s."userId" = u.id
+  WHERE s.user_id = u.id
     AND r.name <> 'PLATFORM_SUPER_ADMIN'
 );
 
@@ -67,7 +67,7 @@ SET revoked_at = NOW(),
     status = 'REVOKED',
     revoke_reason = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
 WHERE ds."revokedAt" IS NULL
-  AND ds."userId" IN (
+  AND ds.user_id IN (
     SELECT u.id
     FROM users u
     JOIN roles r ON r.id = u."roleId"
