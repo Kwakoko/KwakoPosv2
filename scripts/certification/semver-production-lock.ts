@@ -17,10 +17,33 @@ const autoSemverWorkflow = read(".github/workflows/auto-semver.yml");
 const productionWorkflow = read(".github/workflows/production-release-exact-main.yml");
 const ciWorkflow = read(".github/workflows/ci.yml");
 
+let latestTag = "";
 try {
-  execSync("npx tsx scripts/release/validate-semver.ts", { cwd: root, stdio: "inherit" });
+  latestTag = execSync(
+    "git tag --merged HEAD --sort=-v:refname",
+    { cwd: root, encoding: "utf8" }
+  )
+    .split(/\r?\n/)
+    .map((v) => v.trim())
+    .find((v) => /^v\d+\.\d+\.\d+$/.test(v)) || "";
 } catch {
-  failures.push("Conventional-commit SemVer validator failed closed.");
+  latestTag = "";
+}
+
+assert(Boolean(latestTag), "No authoritative stable SemVer tag is reachable from HEAD.");
+
+if (latestTag) {
+  const latestVersion = latestTag.slice(1);
+  assert(
+    isValidSemVer(latestVersion),
+    `Authoritative stable tag is not valid SemVer: ${latestTag}`
+  );
+
+  try {
+    execSync(`npx tsx scripts/release/validate-semver.ts "${latestTag}..HEAD"`, { cwd: root, stdio: "inherit" });
+  } catch {
+    failures.push(`Conventional-commit SemVer validator failed closed for release range ${latestTag}..HEAD.`);
+  }
 }
 
 const version = String(packageJson.version || "");
@@ -52,27 +75,6 @@ assert(
   !autoSemverWorkflow.includes('^\\d+\\.\\d+\\.\\d+([-.+].*)?$'),
   "Automatic SemVer workflow must not use the previously loose SemVer regex."
 );
-
-let latestTag = "";
-try {
-  latestTag = execSync(
-    "git tag --merged HEAD --sort=-v:refname",
-    { cwd: root, encoding: "utf8" }
-  )
-    .split(/\r?\n/)
-    .map((v) => v.trim())
-    .find((v) => /^v\d+\.\d+\.\d+$/.test(v)) || "";
-} catch {
-  latestTag = "";
-}
-
-if (latestTag) {
-  const latestVersion = latestTag.slice(1);
-  assert(
-    isValidSemVer(latestVersion),
-    `Authoritative stable tag is not valid SemVer: ${latestTag}`
-  );
-}
 
 const artifactDir = path.join(root, "artifacts", "release-evidence");
 fs.mkdirSync(artifactDir, { recursive: true });
