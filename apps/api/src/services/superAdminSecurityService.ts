@@ -202,13 +202,13 @@ export async function recordSuperAdminFailure(userId: string): Promise<void> {
 }
 
 export async function clearSuperAdminFailureState(userId: string): Promise<void> {
-
-export async function recordSuperAdminFailure(userId: string): Promise<void> {
-  await ensureSuperAdminSecurity(userId);
-  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = failed_login_count + 1, last_failed_at = NOW(), locked_until = CASE WHEN failed_login_count + 1 >= ${MAX_ATTEMPTS} THEN NOW() + make_interval(mins => ${LOCK_MINUTES}::int) ELSE locked_until END, updated_at = NOW() WHERE user_id = ${userId}`;
+  await prisma.$executeRaw`UPDATE platform_super_admin_security SET failed_login_count = 0, last_failed_at = NULL, locked_until = NULL, last_login_at = NOW(), updated_at = NOW() WHERE user_id = ${userId}`;
 }
 
-export async function clearSuperAdminFailureState(userId: string): Promise<void> {
+export function issueSetupToken(userId: string): string {
+  return jwt.sign({ sub: userId, scope: "super_admin_setup" }, getJwtSecret(), {
+    algorithm: "HS256",
+    expiresIn: SETUP_TTL_SECONDS,
     issuer: getJwtIssuer(),
     audience: getJwtAudience(),
   });

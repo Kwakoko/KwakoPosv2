@@ -67,11 +67,11 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   compatibility: {
     databaseSchemaVersion: 4,
     syncProtocolVersion: 2,
-    pwaSchemaVersion: 7,
+    pwaSchemaVersion: 4,
     minSupportedClientVersion: "2.0.0",
-    recommendedClientVersion: "2.13.0",
+    recommendedClientVersion: "0.0.0-dev",
     maximumSupportedClientVersion: "3.0.0",
-    migrationSet: ["1->2", "2->3", "3->4", "4->5", "5->6", "6->5", "6->4", "4->3", "4->2", "3->2", "2->1"],
+    migrationSet: ["1->2", "2->3", "3->4", "4->3", "4->2", "3->2", "2->1"],
   },
   brand: {
     parentBrand: "Kwakoko",
@@ -87,13 +87,13 @@ function isNodeRuntime(): boolean {
     typeof process !== "undefined" &&
     Boolean(process?.versions?.node) &&
     typeof path?.join === "function" &&
-    syncProtocolVersion: 2,
-    pwaSchemaVersion: 4,
-    minSupportedClientVersion: "2.0.0",
-    recommendedClientVersion: "0.0.0-dev",
-    maximumSupportedClientVersion: "3.0.0",
-    migrationSet: ["1->2", "2->3", "3->4", "4->3", "4->2", "3->2", "2->1"],
-  },
+    typeof fs?.existsSync === "function"
+  );
+}
+
+export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIdentity {
+  if (!isNodeRuntime()) {
+    return FALLBACK_AUTHORITATIVE_RELEASE;
   }
   const root = cwd || (typeof process?.cwd === "function" ? process.cwd() : "/");
   // Traverse upwards looking for release-manifest.json
