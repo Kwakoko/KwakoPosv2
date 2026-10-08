@@ -15,17 +15,23 @@ function actorFrom(req: any): string {
 export function supportOperationsRoutes(server: FastifyInstance): void {
   server.post("/api/v1/support/tickets", async (req, reply) => {
     try {
+      const ctx = req.tenantContext;
+      if (!ctx?.tenantId || !ctx.branchId || !ctx.userId) throw new Error("TENANT_BRANCH_CONTEXT_REQUIRED");
       const b = (req.body || {}) as any;
+      const subject = String(b.subject || "").trim();
+      const description = String(b.description || "").trim();
       const priority = String(b.priority || b.severity || "P3").trim().toUpperCase() as SupportSeverity;
+      if (!subject || subject.length > 200 || !description || description.length > 10000) throw new Error("SUPPORT_INPUT_INVALID");
+      if (!["P0","P1","P2","P3","P4"].includes(priority)) throw new Error("SUPPORT_SEVERITY_INVALID");
       const ticket = await globalSupportOperationsService.createTicket({
-        tenantId: tenantFrom(req),
-        branchId: b.branchId,
-        createdByUserId: actorFrom(req),
-        subject: String(b.subject || "").trim(),
-        description: String(b.description || "").trim(),
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        createdByUserId: ctx.userId,
+        subject,
+        description,
         severity: priority,
-        category: b.category,
-        module: b.module,
+        category: b.category ? String(b.category).trim().slice(0,100) : undefined,
+        module: b.module ? String(b.module).trim().slice(0,100) : undefined,
       });
       return reply.status(201).send({ success: true, data: ticket });
     } catch {
