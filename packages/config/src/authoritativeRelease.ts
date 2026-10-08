@@ -43,22 +43,22 @@ export interface AuthoritativeReleaseIdentity {
 }
 
 export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
-  appVersion: "0.0.0-dev",
-  version: "0.0.0-dev",
-  tag: "v0.0.0-dev",
-  gitTag: "v0.0.0-dev",
+  appVersion: "2.13.0",
+  version: "2.13.0",
+  tag: "v2.13.0",
+  gitTag: "v2.13.0",
   gitSha: "",
   buildId: "",
-  buildNumber: 0,
+  buildNumber: 585,
   releaseId: "",
   containerDigest: null,
   cloudRunRevision: null,
   environment: "development",
-  releaseChannel: "stable",
+  releaseChannel: "development",
   releasedAt: "2026-09-15T20:10:00.000Z",
   releaseTimestamp: "2026-09-15T20:10:00.000Z",
-  pwaVersion: "0.0.0-dev",
-  pwaSchemaVersion: 4,
+  pwaVersion: "2.13.0",
+  pwaSchemaVersion: 7,
   syncProtocolVersion: 2,
   databaseSchemaVersion: 4,
   minimumSupportedClientVersion: "2.0.0",
@@ -67,11 +67,11 @@ export const FALLBACK_AUTHORITATIVE_RELEASE: AuthoritativeReleaseIdentity = {
   compatibility: {
     databaseSchemaVersion: 4,
     syncProtocolVersion: 2,
-    pwaSchemaVersion: 4,
+    pwaSchemaVersion: 7,
     minSupportedClientVersion: "2.0.0",
-    recommendedClientVersion: "0.0.0-dev",
+    recommendedClientVersion: "2.13.0",
     maximumSupportedClientVersion: "3.0.0",
-    migrationSet: ["1->2", "2->3", "3->4", "4->3", "4->2", "3->2", "2->1"],
+    migrationSet: ["1->2", "2->3", "3->4", "4->5", "5->6", "6->5", "6->4", "4->3", "4->2", "3->2", "2->1"],
   },
   brand: {
     parentBrand: "Kwakoko",
@@ -128,7 +128,7 @@ export function loadAuthoritativeRelease(cwd?: string): AuthoritativeReleaseIden
     return FALLBACK_AUTHORITATIVE_RELEASE;
   }
   const packagePath = path.join(root, "package.json");
-  let version = "";
+  let version = FALLBACK_AUTHORITATIVE_RELEASE.version;
   if (fs.existsSync(packagePath)) {
     try { version = JSON.parse(fs.readFileSync(packagePath, "utf8")).version || version; } catch {}
   }
