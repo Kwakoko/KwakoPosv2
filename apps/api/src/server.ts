@@ -380,7 +380,7 @@ const BiMetricDefinitionSchema = z.object({
   formula: z.string().trim().min(1).max(2000),
   source: z.string().trim().min(1).max(500),
   dimensions: z.array(z.string().trim().min(1).max(100)).max(50),
-  freshness: z.enum(["REAL_TIME", "SHORT_LIVED_BATCH", "BATCH", "DAILY"]),
+  freshness: z.enum(["REAL_TIME", "SHORT_LIVED_BATCH", "DAILY", "HISTORICAL"]),
   owner: z.string().trim().min(1).max(200),
 }).strict();
 
