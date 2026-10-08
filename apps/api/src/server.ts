@@ -308,8 +308,6 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
-}
-
 function enforceTrustedBrowserOrigin(req: FastifyRequest, config: ReturnType<typeof loadConfig>): void {
   if (!isProductionEnv(config)) return;
   const origin = String(req.headers.origin || "").trim();
@@ -6319,9 +6317,11 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const params = req.params as any;
-    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
-    return reply.status(200).send({ success: true, data: res });
+    const ctx = requireTenantContext(req);
+    const params = req.params as { id: string };
+    const recommendationId = z.string().min(1).max(128).parse(params.id);
+    const res = globalAiOperatingLayerService.explainRecommendation(recommendationId, ctx.tenantId);
+    return reply.status(res.found ? 200 : 404).send({ success: res.found, data: res });
   });
 
   server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
