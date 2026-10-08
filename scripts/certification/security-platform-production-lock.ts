@@ -83,11 +83,11 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes('requireCommercialPermission(req, "inventory.manage")') &&
     server.includes("tenantId: ctx.tenantId") &&
     server.includes("branchId: ctx.branchId") &&
-    server.includes("AiNativeService"),
+    server.includes("globalAiNativeService.requestRecommendation({") &&
     "AI-native recommendations cannot select another tenant or branch.");
   add("SECPLAT-A32", "AI-native emergency kill switch is Super Admin + step-up protected",
     server.includes('"/api/v1/ai-native/kill-switch"') &&
-    server.includes("requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")"),
+    server.includes('requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")'),
     "AI-native emergency control is not user-level self-service.");
   add("SECPLAT-A33", "Autonomous operations are tenant-scoped and emergency controls are step-up protected",
     server.includes("tenantId: ctx.tenantId") &&
