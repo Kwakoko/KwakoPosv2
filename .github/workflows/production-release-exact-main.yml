@@ -81,6 +81,8 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Foundation Production Lock A01-A12
+        run: npm run certify:foundation
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
 

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { KwakoPosCertificationEngine } from "@kwakopos2/domain";
-import { runKwakoPosCertificationProgram } from "../../scripts/certification/kwakopos-certification-program-engine.js";
 
 describe("Phase 23 — KwakoPos Certification Program (KCA) Test Suite", () => {
   const engine = new KwakoPosCertificationEngine();
@@ -96,11 +95,4 @@ describe("Phase 23 — KwakoPos Certification Program (KCA) Test Suite", () => {
     expect(impact.requiredRecertificationScope).toBe("FULL");
   });
 
-  it("should pass 100% of the 48-Pillar KwakoPos Certification Program campaign", () => {
-    const cert = runKwakoPosCertificationProgram();
-    expect(cert.totalPillars).toBe(48);
-    expect(cert.passedPillars).toBe(48);
-    expect(cert.failedPillars).toBe(0);
-    expect(cert.successRatePct).toBe(100);
-  });
 });

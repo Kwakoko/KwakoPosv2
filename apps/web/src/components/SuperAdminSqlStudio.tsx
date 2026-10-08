@@ -275,20 +275,11 @@ export const SuperAdminSqlStudio: React.FC = () => {
   const handleExecuteQuery = async () => {
     if (!sqlQuery.trim()) return;
     setIsExecuting(true);
-    try {
-      const res = await apiFetch<QueryResult>("/api/v1/super-admin/db/query", {
-        method: "POST",
-        body: JSON.stringify({ query: sqlQuery, readOnly }),
-      });
-      setQueryResult(res);
-    } catch (err: any) {
-      setQueryResult({
-        success: false,
-        error: err?.message || "Execution failed.",
-      });
-    } finally {
-      setIsExecuting(false);
-    }
+    setQueryResult({
+      success: false,
+      error: "Direct SQL execution is disabled by the production control-plane policy.",
+    });
+    setIsExecuting(false);
   };
 
   // ── Run Maintenance ──

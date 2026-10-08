@@ -1,12 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import {
+  FOUNDATION_PRODUCTION_LOCK_VERSION,
+  FOUNDATION_PRODUCTION_LOCK_CERTIFICATE,
+  FOUNDATION_REQUIRED_AUTHORITIES,
+  FOUNDATION_REQUIRED_GATES,
+} from "../../packages/config/src/foundationProductionLock.js";
 
 const root = process.cwd();
 const failures: string[] = [];
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
 const json = (p: string) => JSON.parse(read(p));
 const assert = (ok: boolean, msg: string) => { if (!ok) failures.push(msg); };
+const exists = (p: string) => fs.existsSync(path.join(root, p));
 
 const packageJson = json("package.json");
 const manifest = json("release-manifest.json");
@@ -60,9 +67,80 @@ assert(auditMigration.includes('BEFORE UPDATE OR DELETE ON "audit_events"'), "Au
 assert(exactMainWorkflow.includes("actions/checkout@v4") && exactMainWorkflow.includes("fetch-depth: 0"), "Exact-main release workflow must checkout full history.");
 assert(exactMainWorkflow.includes("GITHUB_SHA") || exactMainWorkflow.includes("github.sha"), "Exact-main release workflow must bind artifacts to immutable GitHub SHA.");
 
+// A01-A12 Foundation closure: every pillar must have a canonical authority and be wired into release gates.
+assert(packageJson.scripts["certify:foundation"] === "tsx scripts/certification/foundation-production-lock.ts", "Foundation lock package script is missing.");
+for (const authority of Object.values(FOUNDATION_REQUIRED_AUTHORITIES)) {
+  assert(exists(authority), "Missing foundation authority: " + authority);
+}
+for (const gate of FOUNDATION_REQUIRED_GATES) {
+  assert(Boolean(packageJson.scripts[gate]), "Missing foundation gate script: " + gate);
+}
+
+const ciWorkflow = read(".github/workflows/ci.yml");
+const candidateWorkflow = read(".github/workflows/production-certification.yml");
+assert(ciWorkflow.includes("npm run certify:foundation"), "Foundation lock must run in CI.");
+assert(candidateWorkflow.includes("npm run certify:foundation"), "Foundation lock must run in production candidate certification.");
+assert(exactMainWorkflow.includes("npm run certify:foundation"), "Foundation lock must run in exact-main production certification.");
+
+assert(exists("scripts/release/verify-platform-governance-control-plane.ts"), "Platform governance verifier missing.");
+assert(exists("scripts/release/verify-ai-agent-governance.ts"), "AI governance verifier missing.");
+assert(exists("scripts/release/verify-live-production-evidence.ts"), "Live production evidence verifier missing.");
+assert(exists("scripts/certification/strict-runtime-certification.ts"), "Strict runtime certification missing.");
+assert(exists("scripts/certification/strict-security-runtime-gate.ts"), "Strict security runtime gate missing.");
+assert(exists("tests/browser/five-client-convergence.spec.ts"), "Real browser convergence test missing.");
+
+const tracked = execSync("git ls-files apps packages scripts .github", { cwd: root, encoding: "utf8" })
+  .split(/\r?\n/)
+  .filter(Boolean);
+const forbiddenProductionMarkers = [
+  "/api/v1/super-admin/db/query",
+  "currentOtp",
+  'req.headers["x-admin-id"]',
+  'req.headers["x-admin-email"]',
+  'req.headers["x-admin-role"]',
+];
+for (const file of tracked) {
+  if (
+    file === "scripts/certification/foundation-production-lock.ts" ||
+    /^apps\/web\/dist\//.test(file) ||
+    /^artifacts\//.test(file)
+  ) continue;
+  let source = "";
+  try { source = read(file); } catch { continue; }
+  for (const forbidden of forbiddenProductionMarkers) {
+    assert(!source.includes(forbidden), "Forbidden production security marker remains in " + file + ": " + forbidden);
+  }
+}
+
+const certificationCampaign = packageJson.scripts["certify:campaign"] || "";
+assert(certificationCampaign === "tsx scripts/certification/runFullSystemCertification.ts", "Production certification campaign must use the active full-system evidence engine.");
+const activeFullSystem = read("scripts/certification/full-system-certification-engine.ts");
+assert(!activeFullSystem.includes("Array.from({ length:"), "Active full-system certification engine contains synthetic pillar generation.");
+assert(!read("scripts/certification/runFullSystemCertification.ts").includes("285a98b"), "Active production certification runner contains stale synthetic release evidence.");
+
 if (head && /^[0-9a-f]{40}$/i.test(head) && manifest.gitSha) {
   assert(manifest.gitSha === head, "Non-empty committed release-manifest gitSha must equal current HEAD.");
 }
+
+const foundationCertificate = {
+  certificate: FOUNDATION_PRODUCTION_LOCK_CERTIFICATE,
+  version: FOUNDATION_PRODUCTION_LOCK_VERSION,
+  verdict: failures.length ? "FAIL" : "PASS",
+  releaseVersion: packageJson.version,
+  commitSha: head || null,
+  pillars: [
+    "A01_RELEASE_IDENTITY","A02_AUTH_TRANSPORT","A03_RBAC_TENANT_ISOLATION",
+    "A04_NAVIGATION","A05_PERSISTENCE_INDEXEDDB","A06_SYNC_CONVERGENCE",
+    "A07_CONFLICT_CENTER","A08_DASHBOARD_ANALYTICS","A09_RUNTIME","A10_SECURITY",
+    "A11_RELEASE_AUTHORITY","A12_GOVERNANCE",
+  ],
+  generatedAt: new Date().toISOString(),
+};
+fs.mkdirSync(path.join(root, "artifacts/governance"), { recursive: true });
+fs.writeFileSync(
+  path.join(root, "artifacts/governance/foundation-production-lock-certificate.json"),
+  JSON.stringify(foundationCertificate, null, 2),
+);
 
 if (failures.length) {
   console.error("FOUNDATION PRODUCTION LOCK: FAIL");
@@ -70,4 +148,4 @@ if (failures.length) {
   process.exit(1);
 }
 console.log("FOUNDATION PRODUCTION LOCK: PASS");
-console.log("Release identity, schema convergence, legal bypass isolation, server-authoritative admin identity, destructive step-up enforcement, finance assertion-only hardening, and audit append-only persistence are locked.");
+console.log("A01-A12 Foundation production lock applied: release identity, auth transport, tenant/RBAC isolation, navigation, persistence, sync, conflict center, dashboard analytics, runtime, security, release authority, and governance are fail-closed.");
