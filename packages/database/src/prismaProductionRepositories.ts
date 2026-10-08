@@ -4,7 +4,6 @@ import { prisma } from "./client.js";
 import { PrismaAtomicCommercialFinanceService } from "./atomicCommercialFinance.js";
 import { assertTenantIsolation, EmployeeEngine, FinancialBridge, calculateAvailableStock, ReceivablesPayablesEngine } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
-import { resolveBundleDefinition } from "./bundleInventory.js";
 
 const db: any = prisma;
 const num = (v: unknown) => Number(v ?? 0);
