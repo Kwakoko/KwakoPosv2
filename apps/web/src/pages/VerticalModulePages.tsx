@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from "react";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import { persistFleetFueling } from "../services/verticalMutationService.js";
+import { ProductionStaffHRPage } from "./ProductionStaffHRPage.js";
 import {
   Egg, Truck, Users, Radio, Activity, AlertTriangle, DollarSign,
   Plus, Search, Download, Edit2, Eye, CheckCircle, Clock, BarChart2,
@@ -339,124 +340,11 @@ export const FleetPage: React.FC<{ activeTab?: string }> = ({ activeTab: externa
 // WORKFORCE & PAYROLL MODULE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const WORKFORCE_TABS = ["HR Dashboard", "Employees", "Attendance & Leave", "Payroll Run", "Shifts & Scheduling", "Performance", "HR Reports"] as const;
-type WorkforceTab = typeof WORKFORCE_TABS[number];
+const WORKFORCE_TABS = ["Overview", "Employees", "Org Structure", "Attendance", "Shifts", "Payroll Prep", "Staff Expenses", "Commission", "Activity & Audit", "Permissions"] as const;
 
-const DEMO_EMPLOYEES = [
-  { id: "EMP-001", name: "Alice Njeri",     dept: "Sales",         position: "Senior Cashier",    salary: 1200000, status: "Active",   clockedIn: true },
-  { id: "EMP-002", name: "Bernard Ochieng", dept: "Warehouse",     position: "Stock Controller",  salary: 980000,  status: "Active",   clockedIn: true },
-  { id: "EMP-003", name: "Catherine Juma",  dept: "Management",    position: "Branch Manager",    salary: 2800000, status: "Active",   clockedIn: true },
-  { id: "EMP-004", name: "David Mwangi",    dept: "Delivery",      position: "Delivery Rider",    salary: 750000,  status: "Active",   clockedIn: false },
-  { id: "EMP-005", name: "Esther Kamau",    dept: "Finance",       position: "Accountant",        salary: 1800000, status: "Active",   clockedIn: true },
-  { id: "EMP-006", name: "Francis Hassan",  dept: "IT",            position: "Systems Admin",     salary: 2200000, status: "On Leave", clockedIn: false },
-];
-
-const HRDashboard: React.FC<{ onNav: (t: WorkforceTab) => void }> = ({ onNav }) => {
-  const totalPayroll = DEMO_EMPLOYEES.filter((e) => e.status === "Active").reduce((s, e) => s + e.salary, 0);
-  const clockedIn    = DEMO_EMPLOYEES.filter((e) => e.clockedIn).length;
-  return (
-    <div className="v2-animate-page-enter">
-      <div className="v2-card v2-mb-4" style={{ background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #1a1a2e 100%)", border: "1px solid #818cf833" }}>
-        <div className="v2-card-body v2-flex v2-items-center v2-gap-4">
-          <div style={{ width: 48, height: 48, borderRadius: "var(--radius-xl)", background: "rgba(129,140,248,.15)", border: "1px solid rgba(129,140,248,.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Users size={22} style={{ color: "#a5b4fc" }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <h1 className="v2-text-xl v2-font-black" style={{ color: "#fff", letterSpacing: "-.02em" }}>Workforce Management & Payroll</h1>
-            <p className="v2-text-xs" style={{ color: "#c7d2fe", marginTop: ".2rem" }}>Employee directory · Clock in/out · Payroll runs · Leave management · Performance reviews</p>
-          </div>
-          <span className="badge v2-badge-accent">WORKFORCE</span>
-        </div>
-      </div>
-      <div className="metrics-grid kpi-grid-4 v2-mb-4" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))" }}>
-        <KpiCard label="Total Staff"     value={DEMO_EMPLOYEES.length}                              desc="All departments"       icon={<Users size={18} />}        accent="#818cf8" onClick={() => onNav("Employees")} />
-        <KpiCard label="Clocked In"      value={`${clockedIn}/${DEMO_EMPLOYEES.length}`}            desc="Present today"         icon={<CheckCircle size={18} />}  accent="#4ade80" onClick={() => onNav("Attendance & Leave")} />
-        <KpiCard label="Monthly Payroll" value={money(totalPayroll)}                                desc="Total gross"           icon={<DollarSign size={18} />}   accent="#38bdf8" onClick={() => onNav("Payroll Run")} />
-        <KpiCard label="On Leave"        value={DEMO_EMPLOYEES.filter((e) => e.status === "On Leave").length} desc="Approved leave" icon={<Calendar size={18} />} accent="#fbbf24" />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "1rem" }}>
-        <div className="v2-card">
-          <div className="v2-card-header">
-            <div className="v2-card-title">Employee Directory</div>
-            <div className="v2-flex v2-gap-2">
-              <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={() => onNav("Employees")} type="button">Full Directory <ArrowRight size={13} /></button>
-            </div>
-          </div>
-          <table className="v2-table">
-            <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Position</th><th>Salary</th><th>Status</th></tr></thead>
-            <tbody>
-              {DEMO_EMPLOYEES.map((e) => (
-                <tr key={e.id}>
-                  <td className="v2-mono v2-text-xs">{e.id}</td>
-                  <td className="v2-font-bold">{e.name}</td>
-                  <td><span className="badge v2-badge-muted">{e.dept}</span></td>
-                  <td className="v2-text-xs v2-text-muted">{e.position}</td>
-                  <td className="v2-font-black">{money(e.salary)}</td>
-                  <td><span className={`badge ${e.status === "Active" ? "v2-badge-success" : "v2-badge-warning"}`}>{e.status}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="v2-card">
-          <div className="v2-card-header"><div className="v2-card-title">Today's Attendance</div></div>
-          <div className="v2-card-body" style={{ padding: ".65rem" }}>
-            <div className="v2-space-y-4">
-              {DEMO_EMPLOYEES.map((e) => (
-                <div key={e.id} className="v2-flex v2-items-center v2-gap-2">
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: e.clockedIn ? "var(--accent-muted)" : "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span className="v2-text-xs v2-font-black" style={{ color: e.clockedIn ? "var(--accent)" : "var(--muted)" }}>
-                      {e.name.split(" ").map((n) => n[0]).join("")}
-                    </span>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="v2-text-xs v2-font-black v2-truncate">{e.name}</div>
-                    <div className="v2-text-xs v2-text-muted">{e.dept}</div>
-                  </div>
-                  <span className={`badge ${e.clockedIn ? "v2-badge-success" : e.status === "On Leave" ? "v2-badge-warning" : "v2-badge-muted"}`} style={{ fontSize: ".6rem" }}>
-                    {e.clockedIn ? "IN" : e.status === "On Leave" ? "LEAVE" : "OUT"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const WorkforceStub: React.FC<{ title: string }> = ({ title }) => (
-  <div className="v2-animate-page-enter">
-    <h2 className="v2-text-xl v2-font-black v2-mb-4">{title}</h2>
-    <div className="v2-card"><Empty icon={<Users size={22} />} message={title} action={<span className="badge v2-badge-accent">Workforce Module — Phase 7</span>} /></div>
-  </div>
+export const WorkforcePage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => (
+  <ProductionStaffHRPage activeTab={externalActiveTab} />
 );
-
-export const WorkforcePage: React.FC<{ activeTab?: string }> = ({ activeTab: externalActiveTab }) => {
-  const [activeTab, setActiveTab] = useState<WorkforceTab>("HR Dashboard");
-  useEffect(() => {
-    setActiveTab(resolveSidebarTab(externalActiveTab, WORKFORCE_TABS, [
-      [["employee", "staff"], "Employees"],
-      [["attendance", "leave"], "Attendance & Leave"],
-      [["payroll", "salary"], "Payroll Run"],
-      [["shift", "schedule", "roster"], "Shifts & Scheduling"],
-      [["performance", "review"], "Performance"],
-      [["report", "dashboard", "kpi"], externalActiveTab?.toLowerCase().includes("report") ? "HR Reports" : "HR Dashboard"],
-    ], "HR Dashboard") as WorkforceTab);
-  }, [externalActiveTab]);
-  return (
-    <div className="v2-animate-page-enter">
-      <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap", marginBottom: "1rem", padding: ".5rem .65rem", background: "var(--surface-1)", borderRadius: "var(--radius-xl)", border: "1px solid var(--surface-border)" }}>
-        {WORKFORCE_TABS.map((tab) => (
-          <button key={tab} aria-label={tab} className={`sector-pill${activeTab === tab ? " active" : ""}`} onClick={() => setActiveTab(tab)} type="button">{tab}</button>
-        ))}
-      </div>
-      {activeTab === "HR Dashboard" ? <HRDashboard onNav={setActiveTab} /> : <WorkforceStub title={activeTab} />}
-    </div>
-  );
-};
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TELECOM & AIRTIME MODULE
