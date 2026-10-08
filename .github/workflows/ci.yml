@@ -60,6 +60,8 @@ jobs:
         run: npm run certify:foundation
       - name: Super Admin Production Lock
         run: npm run certify:super-admin
+      - name: Security Platform Production Lock
+        run: npm run certify:security-platform-lock
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
       - name: Lint
