@@ -538,13 +538,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     return "Dashboard";
   });
 
-  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(() => {
-    try {
-      const saved = sessionStorage.getItem("kwakopos:v2:impersonation");
-      if (saved) return JSON.parse(saved);
-    } catch { /* ignore */ }
-    return null;
-  });
+  // Platform tenant inspection is no longer persisted client-side. The Platform Super Admin
+  // stays in the independent control plane; tenant inspection uses the server-side Support Tower.
+  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(null);
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -1044,6 +1040,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   }, []);
 
   const switchTenant = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentTenantId) return;
     if (!availableTenantsList.some((tenant) => tenant.id === id)) return;
     if (!isOnline) return;
@@ -1056,6 +1053,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   };
 
   const switchBranch = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentBranchId) return;
     if (!availableBranchesList.some((branch) => branch.id === id)) return;
     if (!isOnline) return;
