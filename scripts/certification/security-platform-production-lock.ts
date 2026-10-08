@@ -139,7 +139,7 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     dynamicUnsafe.length === 0 ? "No dynamic SQL interpolation found." : dynamicUnsafe.join(", "));
 
   add("SECPLAT-A18", "Static file serving is constrained to resolved asset roots",
-    server.includes("safeRelative.includes("..")") &&
+    server.includes('safeRelative.includes("..")') &&
     server.includes("resolved.startsWith(baseDir + path.sep)"),
     "Traversal segments and absolute paths are rejected before file reads.");
   add("SECPLAT-A19", "Tracked auth/server runtime has no obvious hardcoded JWT/database secret",
