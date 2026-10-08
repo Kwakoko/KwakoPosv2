@@ -75,7 +75,7 @@
     "certify:global": "tsx scripts/certification/runGlobalExpansionCertification.ts",
     "certify:ai": "tsx scripts/certification/runAiNativeCertification.ts",
     "certify:autonomous": "tsx scripts/certification/runAutonomousOperationsCertification.ts",
-    "certify:program": "tsx scripts/certification/runKwakoPosCertificationProgram.ts",
+    "certify:program": "tsx scripts/certification/runFullSystemCertification.ts",
     "certify:governance": "tsx scripts/certification/runPlatformGovernanceCertification.ts",
     "certify:workforce": "tsx scripts/certification/runWorkforceCertification.ts",
     "certify:ui": "tsx scripts/certification/runSystemUiCertification.ts",
