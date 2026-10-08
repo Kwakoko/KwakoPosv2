@@ -5688,9 +5688,9 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     try {
       const ctx = requireCommercialPermission(req, "inventory.manage");
       const body = z.object({
-        domain: z.string().trim().min(1).max(100),
+        domain: z.enum(["SALES", "INVENTORY", "FINANCE", "WORKFORCE", "OPERATIONS", "CUSTOMER_SERVICE", "ENGINEERING", "SAAS_REVENUE", "MARKETPLACE"]),
         proposedAction: z.string().trim().min(1).max(2000),
-        riskLevel: z.string().trim().min(1).max(80),
+        riskLevel: z.enum(["LEVEL_0_INFORMATIONAL", "LEVEL_1_LOW_IMPACT", "LEVEL_2_CONTROLLED_OPERATIONAL", "LEVEL_3_HIGH_IMPACT", "LEVEL_4_RESTRICTED"]),
         confidenceScore: z.number().finite().min(0).max(1),
         evidenceSummary: z.string().trim().min(1).max(5000),
       }).strict().parse(req.body);
