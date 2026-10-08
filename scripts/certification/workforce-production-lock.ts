@@ -29,7 +29,7 @@ assert(server.includes('requireWorkforcePermission(req, "WORKFORCE_VIEW")'), "Wo
 assert(server.includes('requireWorkforcePermission(req, "WORKFORCE_EDIT")'), "Workforce mutation routes must enforce WORKFORCE_EDIT.");
 assert(onboarding.includes('"WORKFORCE_VIEW", "WORKFORCE_EDIT"'), "Tenant onboarding must seed both workforce permissions.");
 
-assert(schema.includes('employeeId     String?') && schema.includes('employee       Employee?'), "Expense must have an employee ownership relation.");
+assert(/model Expense \{[\s\S]*?employeeId\s+String\?[\s\S]*?employee\s+Employee\?/.test(schema), "Expense must have an employee ownership relation.");
 assert(migration.includes('ADD COLUMN "employeeId" TEXT'), "Staff expense employeeId migration must exist.");
 assert(expenseRepo.includes("STAFF_EXPENSE_EMPLOYEE_NOT_FOUND"), "Staff expenses must validate employee ownership.");
 assert(expenseRepo.includes("employeeId: req.employeeId ? String(req.employeeId) : null"), "Staff expense writes must persist employeeId.");
