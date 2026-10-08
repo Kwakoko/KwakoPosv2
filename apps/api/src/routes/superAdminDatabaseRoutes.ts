@@ -177,7 +177,8 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
   server.get("/api/v1/super-admin/system/logs", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       requireSuperAdmin(req);
-      return reply.send({ success: true, logs: [], source: "application_log_stream" });
+      const platformLogs = await prisma.$queryRaw<any[]>\`SELECT id, tenant_id AS "tenantId", actor_id AS "actorId", action, entity_type AS "entityType", entity_id AS "entityId", metadata, created_at AS "createdAt" FROM platform_audit_events ORDER BY created_at DESC LIMIT 200\`;\
+      return reply.send({ success: true, logs: jsonSafe(platformLogs), source: "postgresql" });
     } catch (error: any) {
       return reply.status(403).send({ success: false, error: { code: "SYSTEM_LOGS_FORBIDDEN", message: "System logs unavailable." } });
     }
