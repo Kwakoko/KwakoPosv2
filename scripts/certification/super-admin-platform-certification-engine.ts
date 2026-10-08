@@ -45,7 +45,7 @@ export function runSuperAdminPlatformCertification(cwd = process.cwd()): {
   check("SADM-P14", "Live Super Admin UI", hasAll("apps/web/src/components/SuperAdminLiveControlPlane.tsx", ["/api/v1/super-admin/subscriptions","/api/v1/super-admin/audit","/api/v1/super-admin/security/health"]), "Control tower tabs read live platform APIs.");
   check("SADM-P15", "No fabricated Phase 29 authority", !read("packages/domain/src/superAdminPlatformEngine.ts").includes("Kwako Supermarket Ltd") &&
     !read("packages/domain/src/superAdminPlatformEngine.ts").includes("148500.0") &&
-    !read("scripts/certification/super-admin-platform-certification-engine.ts").includes("passed, true"),
+    !read("scripts/certification/super-admin-platform-certification-engine.ts").includes(["passed", "true"].join(", ")),
     "Legacy engine and certification no longer provide synthetic production truth.");
 
   const passedPillars = results.filter((r) => r.passed).length;
