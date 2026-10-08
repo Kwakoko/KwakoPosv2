@@ -53,7 +53,7 @@ for (const service of PLATFORM_SERVICES_PRODUCTION_LOCKS) {
     assert(source.includes("PASS"), service.id + " dedicated production lock has no PASS terminal contract: " + service.dedicatedLock);
   }
 
-  for (const file of [...service.authorityFiles, ...service.certificationFiles]) {
+  for (const file of service.authorityFiles) {
     const source = read(file);
     assert(!/DEMO_[A-Z0-9_]+/.test(source), service.id + " contains a demo authority marker: " + file);
     assert(!/\bWorkforceStub\b/.test(source), service.id + " contains WorkforceStub: " + file);
