@@ -1,0 +1,36 @@
+name: Support Production Lock v1
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kwakopos-support-production-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  support-production-lock:
+    name: Support Production Lock — invariant certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Support Production Lock
+        run: npm run certify:support-lock
+      - name: Support regression tests
+        run: npx vitest run tests/unit/support-production-lock.test.ts
