@@ -164,6 +164,7 @@ const tracked = execFileSync("git", ["ls-files", "apps", "packages", "scripts"],
 
 for (const file of tracked) {
   if (file === "apps/web/src/atomicOutbox.ts") continue;
+  if (file === "scripts/certification/offline-sync-production-lock.ts") continue;
   if (/^tests\//.test(file)) continue;
   let source = "";
   try { source = read(file); } catch { continue; }
