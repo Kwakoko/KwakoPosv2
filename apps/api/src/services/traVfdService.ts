@@ -83,7 +83,12 @@ function toDateParts(value: unknown): { date: string; time: string } {
   const d = new Date(String(value || new Date().toISOString()));
   return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 19) };
 }
-function buildReceiptInput(row: any, config: any, counters: { dailyCounter: number; globalCounter: number }): TraVfdReceiptInput {
+function buildReceiptInput(
+  row: any,
+  config: any,
+  counters: { dailyCounter: number; globalCounter: number },
+  taxConfig: { ratePct: number; isInclusive: boolean },
+): TraVfdReceiptInput {
   const payload = row.requestPayload || {};
   const parts = toDateParts(payload.createdAt || payload.created_at || new Date().toISOString());
   const items = Array.isArray(payload.items) ? payload.items.map((item: any) => ({
@@ -98,6 +103,7 @@ function buildReceiptInput(row: any, config: any, counters: { dailyCounter: numb
   const amount = Number(payload.paidAmount ?? payload.grandTotal ?? 0);
   return {
     date: parts.date, time: parts.time, receiptNumber: String(payload.receiptNumber || row.transactionId),
+    taxRatePct: taxConfig.ratePct, taxInclusive: taxConfig.isInclusive,
     dailyCounter: counters.dailyCounter, globalCounter: counters.globalCounter,
     zNumber: String(payload.zNumber || parts.date.replaceAll("-", "")),
     receiptVNumber: String(payload.receiptVNumber || payload.rctvnum || ""),
@@ -253,7 +259,29 @@ export class TraVfdService {
     await recordFiscalAudit(ctx as any, "TRA_VFD_SUBMITTING", row.id, { attempt });
     try {
       const counters = await reserveCounters(config.id);
-      const input = buildReceiptInput(row, config, counters);
+      const taxSettingRow = await prisma.setting.findFirst({
+        where: { tenantId: ctx.tenantId, branchId: ctx.branchId, scope: "BRANCH", key: "tax.config", isActive: true },
+        orderBy: { updatedAt: "desc" },
+      });
+      const taxValue = (taxSettingRow?.value || {}) as any;
+      let fiscalTax: any = null;
+      if (Boolean(taxValue.vatEnabled)) {
+        const taxId = typeof taxValue.taxId === "string" ? taxValue.taxId : "";
+        fiscalTax = taxId
+          ? await prisma.tax.findFirst({ where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } })
+          : null;
+        if (!fiscalTax) {
+          fiscalTax = await prisma.tax.findFirst({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: String(taxValue.taxCode || "VAT").trim().toUpperCase(), isActive: true },
+          });
+        }
+        if (!fiscalTax) throw new Error("TRA_VFD_TAX_CONFIG_NOT_FOUND");
+      }
+      const fiscalTaxConfig = {
+        ratePct: fiscalTax ? Number(fiscalTax.rate) : 0,
+        isInclusive: fiscalTax ? Boolean(fiscalTax.isInclusive) : true,
+      };
+      const input = buildReceiptInput(row, config, counters, fiscalTaxConfig);
       const response = await provider.submitReceipt(input);
       const responsePayload = { provider: "TRA", environment: config.environment, verificationUrl: response.verificationUrl, number: response.number, date: response.date, time: response.time, code: response.code, message: response.message };
       await prisma.$transaction([
