@@ -164,7 +164,8 @@
     "certify:expenses-lock": "tsx scripts/certification/finance-production-lock.ts --scope=expenses",
     "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments",
     "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts",
-    "certify:tax-fiscal-lock": "tsx scripts/certification/tax-fiscalization-production-lock.ts"
+    "certify:tax-fiscal-lock": "tsx scripts/certification/tax-fiscalization-production-lock.ts",
+    "certify:workforce-lock": "tsx scripts/certification/workforce-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
