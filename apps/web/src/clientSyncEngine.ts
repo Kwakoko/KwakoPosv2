@@ -89,7 +89,7 @@ export async function applyRevisionedChanges(
     request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
   });
 
-  const tx = db.transaction(KNOWN_STORES as unknown as string[], "readwrite");
+  const availableStores = Array.from(db.objectStoreNames);\n  const transactionStores = (KNOWN_STORES as unknown as string[]).filter((name) => availableStores.includes(name));\n  const tx = db.transaction(transactionStores, "readwrite");
   const revisionKey = scopedSyncKey(tenantId, branchId, "lastSyncRevision");
   const syncTimeKey = scopedSyncKey(tenantId, branchId, "lastSyncTime");
   const syncEpochKey = scopedSyncKey(tenantId, branchId, "syncEpoch");
