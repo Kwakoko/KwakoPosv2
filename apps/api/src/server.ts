@@ -6554,7 +6554,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   server.post("/api/v1/approvals/delegations", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     try {
-      requireAdminContext(req);
+      const ctx = requireAdminContext(req);
       const body = ApprovalDelegationRequestSchema.parse(req.body);
       const result = globalEnterpriseApprovalsService.registerDelegation({
         delegationId: `DEL-${ctx.userId}-${Date.now()}`,
