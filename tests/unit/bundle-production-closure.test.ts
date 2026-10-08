@@ -42,6 +42,9 @@ describe("bundle production invariants", () => {
     };
 
     expect(getBundleAvailableQuantity(db, "bundle", "tenant-1", "branch-1")).toBe(2);
+    expect((await resolveBundleDefinition({
+      productVariant: { findUnique: async ({ where }: any) => db.productVariants.get(where.id) || null },
+    }, "tenant-1", "branch-1", "bundle")).unitCost).toBe(14);
     const expanded = expandBundleSaleItems(db, [
       { productId: "bundle-product", variantId: "bundle", qty: 2, unitCost: 0 } satisfies PosSaleStockItem,
     ], "tenant-1", "branch-1");
@@ -72,3 +75,14 @@ describe("bundle production invariants", () => {
       .rejects.toThrow("BUNDLE_SELF_REFERENCE");
   });
 });
+
+
+  it("rejects a component that crosses tenant or branch scope", async () => {
+    const variants = new Map<string, any>([
+      ["bundle", variant("bundle", "bundle-product", 0, { __bundle: true, bundleComponents: [{ variantId: "foreign", quantity: 1 }] })],
+      ["foreign", { ...variant("foreign", "foreign-product", 2), tenantId: "tenant-2" }],
+    ]);
+    const tx = { productVariant: { findUnique: async ({ where }: any) => variants.get(where.id) || null } };
+    await expect(resolveBundleDefinition(tx, "tenant-1", "branch-1", "bundle"))
+      .rejects.toThrow("BUNDLE_COMPONENT_OUT_OF_SCOPE");
+  });
