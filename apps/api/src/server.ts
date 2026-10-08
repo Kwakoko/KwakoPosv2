@@ -328,16 +328,6 @@ function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VI
   if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
   return ctx;
 }
-function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
-  const ctx = requireTenantContext(req);
-  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
-  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
-  const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
-  const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
-  const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
-  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
-  return ctx;
-}
 
 function requireWorkforcePermission(req: FastifyRequest, permission: "WORKFORCE_VIEW" | "WORKFORCE_EDIT"): TenantContext {
   const ctx = requireTenantContext(req);
