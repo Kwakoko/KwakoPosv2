@@ -401,7 +401,7 @@ const AuthenticatedApp: React.FC = () => {
   const [legalGateNonce, setLegalGateNonce] = useState(0);
 
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || user.email === "admin@kwakoko.co.tz")
+    user && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase())
   );
   const canAdminister = Boolean(
     user && (
@@ -594,7 +594,7 @@ const AuthenticatedApp: React.FC = () => {
             if (typeof window !== "undefined" && window.location.pathname !== "/tenant-onboarding") {
               window.history.pushState({}, "", "/tenant-onboarding");
             }
-          } else if (user?.role === "SUPER_ADMIN" || user?.email === "admin@kwakoko.co.tz") {
+          } else if (user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase())) {
             handleNavigate("/super-admin");
           } else {
             setActiveTab("Dashboard");
