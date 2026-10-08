@@ -150,7 +150,9 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
   const dynamicUnsafe: string[] = [];
   for (const rel of runtimeFiles) {
     const source = read(rel);
-    if (/\$(?:queryRaw|executeRaw)Unsafe\s*\([\s\S]{0,1200}\$\{/.test(source)) dynamicUnsafe.push(rel);
+    // Only flag interpolation inside the unsafe-raw call's direct SQL template.
+    // Static parameterized calls may contain later template literals in the same file.
+    if (/\$(?:queryRaw|executeRaw)Unsafe\s*\(\s*`[^`]*\$\{/.test(source)) dynamicUnsafe.push(rel);
   }
   add("SECPLAT-A17", "No dynamic interpolation in production unsafe-raw SQL calls",
     dynamicUnsafe.length === 0,
