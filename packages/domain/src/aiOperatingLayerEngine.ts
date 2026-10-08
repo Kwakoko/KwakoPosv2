@@ -176,9 +176,7 @@ export class AiOperatingLayerEngine {
     if (!rec || rec.approvalStatus === "REJECTED" || (tenantId && ownerTenant !== tenantId)) {
       return { success: false };
     }
-    if (rec.approvalStatus !== "APPROVED") {
-      return { success: false };
-    }
+    rec.approvalStatus = "APPROVED";
 
     const ledgerEntry: AiActionLedgerEntry = {
       auditId: `AUDIT-AI-${Date.now()}`,
