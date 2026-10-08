@@ -73,16 +73,20 @@ if (manifest.environment === "development" || manifest.releaseChannel === "devel
   assert(manifest.cloudRunRevision === null, "Development source manifest Cloud Run revision must remain null.");
 }
 
+const semverLockWiring = (workflow: string) =>
+  workflow.includes("npm run certify:semver-lock") ||
+  workflow.includes("scripts/certification/semver-production-lock.ts");
+
 assert(
-  autoSemverWorkflow.includes("scripts/certification/semver-production-lock.ts"),
+  semverLockWiring(autoSemverWorkflow),
   "Automatic SemVer workflow must execute the SemVer Production Lock."
 );
 assert(
-  productionWorkflow.includes("scripts/certification/semver-production-lock.ts"),
+  semverLockWiring(productionWorkflow),
   "Exact-main production certification must execute the SemVer Production Lock."
 );
 assert(
-  ciWorkflow.includes("scripts/certification/semver-production-lock.ts"),
+  semverLockWiring(ciWorkflow),
   "CI must execute the SemVer Production Lock."
 );
 assert(
