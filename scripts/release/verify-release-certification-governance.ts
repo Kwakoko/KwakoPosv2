@@ -17,7 +17,7 @@ const check = (name: string, ok: boolean, detail: string) => checks.push([name, 
 check("authority-core", exists("packages/config/src/releaseCertificationGovernance.ts") && exists("packages/domain/src/releaseCertificationEngine.ts"), "Step 24 authority and engine exist");
 check("certificate", KWAKOKO_RELEASE_CERTIFICATION_CERTIFICATE === "KWAKOKO-RELEASE-CERTIFICATION-CERTIFICATE-v1.0", KWAKOKO_RELEASE_CERTIFICATION_CERTIFICATE);
 check("version", KWAKOKO_RELEASE_CERTIFICATION_VERSION === "1.0.0", KWAKOKO_RELEASE_CERTIFICATION_VERSION);
-check("gate-count", RELEASE_CERTIFICATION_GATES.length === 15, `count=${RELEASE_CERTIFICATION_GATES.length}`);
+check("gate-count", RELEASE_CERTIFICATION_GATES.length === 16, `count=${RELEASE_CERTIFICATION_GATES.length}`);
 check("invariant-count", RELEASE_CERTIFICATION_INVARIANTS.length === 17, `count=${RELEASE_CERTIFICATION_INVARIANTS.length}`);
 
 for (const [name, file] of Object.entries(RELEASE_CERTIFICATION_REQUIRED_AUTHORITIES)) {
@@ -52,7 +52,7 @@ const evidence = certifyReleaseEvidence({
   governanceConvergencePassed: true,
   finalApprovalPresent: true,
 });
-check("controlled-certification-pass", evidence.decision === "PASS" && evidence.gatesPassed === 15, `${evidence.gatesPassed}/15 gates`);
+check("controlled-certification-pass", evidence.decision === "PASS" && evidence.gatesPassed === 16, `${evidence.gatesPassed}/16 gates`);
 
 const blocked = certifyReleaseEvidence({ ...({
   releaseId: "RC-CONTROLLED-BLOCK", version: "2.12.5", gitSha: "0123456789012345678901234567890123456789",
