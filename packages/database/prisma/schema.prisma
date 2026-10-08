@@ -75,6 +75,7 @@ model Tenant {
   payrollInputs          PayrollInput[]
   syncOperations         SyncOperation[]
   auditEvents            AuditEvent[]
+  platformAuditEvents    PlatformAuditEvent[]
   priceHistories         ProductPriceHistory[]
   branchStocks           ProductBranchStock[]
   receipts               Receipt[]
@@ -3254,6 +3255,23 @@ model TenantLegalDocument {
 // Used only for billing records that are not yet represented by first-class
 // relational domain models. PostgreSQL remains the sole server authority.
 // ============================================================================
+model PlatformAuditEvent {
+  id         String   @id
+  tenantId   String?  @map("tenant_id")
+  actorId    String   @map("actor_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([tenantId, createdAt])
+  @@index([actorId, createdAt])
+  @@map("platform_audit_events")
+}
+
 model PlatformSuperAdminSecurity {
   userId              String    @id @map("user_id")
   bootstrapPending    Boolean   @default(true) @map("bootstrap_pending")
