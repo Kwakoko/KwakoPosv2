@@ -804,6 +804,7 @@ export class PrismaAtomicCommercialFinanceService {
           status: String(req.status || "PAID").toUpperCase(),
           taxDeductible: Boolean(req.taxDeductible),
           incurredAt: req.incurredAt || null,
+          employeeId: req.employeeId || null,
         });
         const existingFingerprint = JSON.stringify({
           category: existing.category,
@@ -816,6 +817,7 @@ export class PrismaAtomicCommercialFinanceService {
           status: existing.status,
           taxDeductible: Boolean(existing.taxDeductible),
           incurredAt: existing.incurredAt?.toISOString?.() || existing.incurredAt || null,
+          employeeId: existing.employeeId || null,
         });
         if (String(existing.idempotencyKey) === incomingKey && incomingFingerprint !== existingFingerprint) {
           throw new Error("EXPENSE_IDEMPOTENCY_CONFLICT");
@@ -823,6 +825,10 @@ export class PrismaAtomicCommercialFinanceService {
         return existing;
       }
 
+      if (req.employeeId) {
+        const employee = await tx.employee.findFirst({ where: { id: String(req.employeeId), tenantId: ctx.tenantId, OR: [{ branchId: ctx.branchId }, { branchId: null }] } });
+        if (!employee) throw new Error("STAFF_EXPENSE_EMPLOYEE_NOT_FOUND");
+      }
       const paymentMethod = this.normalizeExpensePaymentMethod(req.paymentMethod);
       const status = String(req.status || "PAID").toUpperCase();
       if (!["PENDING", "PAID"].includes(status)) throw new Error("INVALID_EXPENSE_STATUS");
@@ -837,6 +843,7 @@ export class PrismaAtomicCommercialFinanceService {
           id,
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
+          employeeId: req.employeeId ? String(req.employeeId) : null,
           cashSessionId: status === "PAID" && paymentMethod === "CASH" ? (cashSession?.id ?? null) : null,
           category: req.category,
           amount: req.amount,
@@ -871,7 +878,7 @@ export class PrismaAtomicCommercialFinanceService {
           action: "EXPENSE_RECORDED",
           entityType: "Expense",
           entityId: expense.id,
-          metadata: { status, paymentMethod, amount: Number(req.amount), cashSessionId: cashSession?.id || null, idempotencyKey: expense.idempotencyKey },
+          metadata: { status, paymentMethod, amount: Number(req.amount), cashSessionId: cashSession?.id || null, employeeId: expense.employeeId || null, idempotencyKey: expense.idempotencyKey },
         },
       });
       return expense;
