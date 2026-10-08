@@ -194,10 +194,11 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     "Platform-level security events have dedicated storage.");
   add("SECPLAT-A26", "Production security headers are enabled",
     security.includes("@fastify/helmet") &&
-    security.includes("strictTransportSecurity") &&
+    security.includes("hsts: isProduction") &&
+    security.includes("maxAge: 31536000") &&
     security.includes("xFrameOptions: { action: \"deny\" }") &&
     security.includes("xContentTypeOptions: true"),
-    "Helmet config covers transport, framing and content-type hardening.");
+    "Helmet config covers HSTS transport hardening, framing and content-type protections.");
   add("SECPLAT-A27", "Production CSP forbids inline scripts",
     security.includes('scriptSrc: ["\'self\'"]') &&
     !security.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]') &&
