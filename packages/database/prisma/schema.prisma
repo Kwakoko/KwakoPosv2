@@ -18,6 +18,7 @@ model Tenant {
   branches               Branch[]
   users                  User[]
   roles                  Role[]
+  notifications         Notification[]
   rollbackRequests       RollbackRequest[]
   rollbackRecoveryPoints RollbackRecoveryPoint[]
   rollbackExecutionLocks RollbackExecutionLock[]
@@ -96,6 +97,7 @@ model Branch {
   updatedAt            DateTime              @updatedAt
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users                User[]
+  notifications        Notification[]
   rollbackRequests       RollbackRequest[]
   rollbackRecoveryPoints RollbackRecoveryPoint[]
   rollbackAuditEvents    RollbackAuditEvent[]
@@ -190,6 +192,7 @@ model User {
   sessions     DeviceSession[]
   devices      Device[]
   cashSessions CashSession[]
+  notifications Notification[]
 
   @@unique([tenantId, email])
   @@index([tenantId, branchId])
@@ -254,6 +257,42 @@ model DeviceSession {
   @@index([expiresAt])
   @@index([createdAt])
   @@map("device_sessions")
+}
+
+model Notification {
+  id                String    @id @default(uuid())
+  tenantId          String
+  branchId          String?
+  recipientUserId   String
+  scope             String    @default("TENANT")
+  category          String
+  severity          String    @default("INFO")
+  channel           String    @default("IN_APP")
+  title             String
+  description       String
+  actionPath        String?
+  actionLabel       String?
+  status            String    @default("QUEUED")
+  retryCount        Int       @default(0)
+  nextRetryAt       DateTime?
+  lastError         String?
+  dedupeKey         String?
+  readAt            DateTime?
+  queuedAt          DateTime  @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  recipientUser     User      @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, recipientUserId, readAt, createdAt])
+  @@index([tenantId, branchId, createdAt])
+  @@index([tenantId, status, nextRetryAt])
+  @@index([tenantId, category, createdAt])
+  @@unique([tenantId, recipientUserId, dedupeKey])
+  @@map("notifications")
 }
 
 model Category {
