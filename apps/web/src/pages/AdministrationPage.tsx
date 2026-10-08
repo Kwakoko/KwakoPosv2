@@ -176,13 +176,12 @@ export const AdministrationPage: React.FC<{ onNavigate?: (path: string) => void 
         apiFetch<{ success: boolean; data: any[] }>("/api/v1/billing/plans"),
         apiFetch<{ success: boolean; data: SubscriptionRecord }>("/api/v1/billing/subscriptions/current"),
         apiFetch<{ success: boolean; data: InvoiceRecord[] }>("/api/v1/billing/invoices"),
-        apiFetch<{ success: boolean; data: any }>("/api/v1/billing/reports/kpis"),
         apiFetch<{ success: boolean; data: { catalog: ModuleEntry[]; entitlements: ModuleEntry[] } }>("/api/v1/administration/modules"),
         apiFetch<{ success: boolean; data: Record<string, any> }>("/api/v1/settings"),
         apiFetch<{ success: boolean; data: AuditRecord[] }>("/api/v1/administration/audit"),
       ]);
       const failed = [
-        tenantRes, branchRes, usersRes, rolesRes, plansRes, subRes, invoiceRes, kpiRes, moduleRes, settingsRes, auditRes,
+        tenantRes, branchRes, usersRes, rolesRes, plansRes, subRes, invoiceRes, moduleRes, settingsRes, auditRes,
       ].find((result) => !result?.success);
       if (failed) throw new Error("One or more Administration authorities did not return successfully.");
 
@@ -193,7 +192,9 @@ export const AdministrationPage: React.FC<{ onNavigate?: (path: string) => void 
       setPlans(plansRes.data || []);
       setSubscription(subRes.data || null);
       setInvoices(invoiceRes.data || []);
-      setBillingKpis(kpiRes.data || null);
+      setBillingKpis({
+        activeSubscriptions: String(subRes.data?.status || "").toUpperCase() === "ACTIVE" ? 1 : 0,
+      });
       setModuleCatalog(moduleRes.data?.catalog || []);
       setEnabledModules((moduleRes.data?.entitlements || []).map((item: ModuleEntry) => item.id));
       setSettings(settingsRes.data || {});
