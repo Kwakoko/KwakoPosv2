@@ -41,7 +41,8 @@ describe("Super Admin Production Lock", () => {
     expect(server).not.toContain('const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN"');
 
     expect(bootstrap).toContain('name: "PLATFORM_SUPER_ADMIN"');
-    expect(bootstrap).not.toContain('name: "SUPER_ADMIN"');
+    expect(bootstrap).toContain('create: { tenantId: tenant.id, name: "PLATFORM_SUPER_ADMIN"');
+    expect(bootstrap).not.toContain('create: { tenantId: tenant.id, name: "SUPER_ADMIN"');
     expect(bootstrap).not.toContain('permissions: ["*"]');
 
     expect(security).toContain('roleName !== "PLATFORM_SUPER_ADMIN"');
