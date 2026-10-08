@@ -1489,3 +1489,5 @@ export {
 } from "./prismaProductionRepositories.js";
 
 export * from "./inventoryAuthority.js";
+
+export * from "./bundleInventory.js";

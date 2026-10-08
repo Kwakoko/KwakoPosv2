@@ -360,6 +360,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     } catch {}
     return false;
   });
+  const [authoritativeTaxToday, setAuthoritativeTaxToday] = useState<any | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -369,6 +370,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     }).catch(() => { if (!cancelled) setActiveCashSession(null); });
     return () => { cancelled = true; };
   }, [isOnline, tenantId, branchId]);
+  useEffect(() => {
+    if (!isOnline || !tenantId || !branchId) {
+      setAuthoritativeTaxToday(null);
+      return;
+    }
+    void apiFetch<any>("/api/v1/finance/tax-compliance?range=today")
+      .then((response) => setAuthoritativeTaxToday(response?.success ? response.data : null))
+      .catch(() => setAuthoritativeTaxToday(null));
+  }, [isOnline, tenantId, branchId]);
+
 
   const refreshVfdStatus = useCallback(async () => {
     if (!tenantId || !branchId || !isOnline) return;
@@ -3524,16 +3535,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   TAX / VAT BREAKDOWN
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>TAXABLE TURNOVER (18%):</span>
-                  <span>{fmtCcy(Math.round(stats.netSales / 1.18))}</span>
+                  <span>TAXABLE TURNOVER:</span>
+                  <span>{authoritativeTaxToday ? fmtCcy(Number(authoritativeTaxToday.totals?.netAmount ?? 0)) : "—"}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>VAT OUTPUT TAX (18%):</span>
-                  <span>{fmtCcy(Math.round(stats.netSales * 0.18 / 1.18))}</span>
+                  <span>VAT OUTPUT TAX:</span>
+                  <span>{authoritativeTaxToday ? fmtCcy(Number(authoritativeTaxToday.totals?.taxAmount ?? 0)) : "—"}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>EXEMPT / ZERO-RATED:</span>
-                  <span>Tsh 0</span>
+                  <span>See Tax &amp; TRA EFD report</span>
                 </div>
               </div>
 
