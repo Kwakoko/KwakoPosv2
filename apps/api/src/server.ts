@@ -2624,6 +2624,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         customerCode: validated.customerCode || `CUST-${(validated.id || createdId).slice(0, 8).toUpperCase()}`, name: validated.name,
         phone: validated.phone || null, email: validated.email || null, address: validated.address || null,
         creditLimit: validated.creditLimit || 0, currentBalance: validated.openingBalance || 0, openingBalance: validated.openingBalance || 0,
+        customerSegment: validated.customerSegment || null,
         status: "ACTIVE",
       } });
       await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id, metadata: { customerCode: created.customerCode } } });
@@ -2646,7 +2647,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const before = await commercialRepository.getCustomerById(ctx, id);
     const updated = await commercialRepository.updateCustomer(ctx, id, validated);
     if (productionPersistence) {
-      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, customerSegment: before.customerSegment, status: before.status } : null } } });
     }
     return { success: true, data: updated };
   });
@@ -4793,15 +4794,132 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: result[0] });
   });
 
-  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
-    const { globalRetailService } = await import("./services/retailService.js");
-    const ctx = requireTenantContext(req);
-    const body = (req.body as any) || {};
-    const sale = await globalRetailService.processPOSCheckout(ctx, body.items || [], body.payments || [], body.cartDiscountPct || 0, body.customerId);
-    return reply.status(201).send({
-      success: true,
-      data: sale,
+
+  // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
+  server.get("/api/v1/pricing/price-lists", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.priceList.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/price-lists", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(64), currency: z.string().trim().min(3).max(12).default("TZS"), isDefault: z.boolean().optional() }).parse(req.body || {});
+    const row = await prisma.$transaction(async (tx: any) => {
+      if (body.isDefault) await tx.priceList.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, data: { isDefault: false } });
+      const created = await tx.priceList.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, name: body.name, code: body.code, currency: body.currency, isDefault: Boolean(body.isDefault) } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICE_LIST_CREATED", entityType: "PriceList", entityId: created.id, metadata: { name: created.name, code: created.code, currency: created.currency, isDefault: created.isDefault } } });
+      return created;
     });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.post("/api/v1/pricing/price-lists/:priceListId/items", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ variantId: z.string().uuid(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    const priceListId = String((req.params as any).priceListId);
+    const row = await prisma.$transaction(async (tx: any) => {
+      const list = await tx.priceList.findFirst({ where: { id: priceListId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+      if (!list) throw new Error("PRICE_LIST_NOT_FOUND");
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.priceListItem.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, priceListId, productId: variant.productId, variantId: variant.id, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, isActive: body.isActive !== false, effectiveFrom, effectiveTo } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICE_LIST_ITEM_CREATED", entityType: "PriceListItem", entityId: created.id, metadata: { priceListId, variantId: variant.id, unitPrice: body.unitPrice, effectiveFrom, effectiveTo, priority: body.priority } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/customer-prices", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const customerId = String((req.query as any)?.customerId || "");
+    const rows = await prisma.customerPrice.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, ...(customerId ? { customerId } : {}) }, orderBy: [{ priority: "desc" }, { effectiveFrom: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/customer-prices", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ customerId: z.string().uuid(), variantId: z.string().uuid(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    const row = await prisma.$transaction(async (tx: any) => {
+      const customer = await tx.customer.findFirst({ where: { id: body.customerId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" } });
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!customer) throw new Error("PRICING_CUSTOMER_NOT_FOUND");
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.customerPrice.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id, variantId: variant.id, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, effectiveFrom, effectiveTo, isActive: body.isActive !== false } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_PRICE_CREATED", entityType: "CustomerPrice", entityId: created.id, metadata: { customerId: customer.id, variantId: variant.id, unitPrice: body.unitPrice, effectiveFrom, effectiveTo, priority: body.priority } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/tiers", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.pricingTier.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ kind: "asc" }, { minQuantity: "desc" }, { priority: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/tiers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ variantId: z.string().uuid(), kind: z.enum(["BULK","WHOLESALE"]), customerSegment: z.string().trim().min(1).max(64).optional(), minQuantity: z.number().positive(), maxQuantity: z.number().positive().optional(), unitPrice: z.number().nonnegative(), currency: z.string().trim().min(3).max(12).default("TZS"), priority: z.number().int().default(0), effectiveFrom: z.string().datetime().optional(), effectiveTo: z.string().datetime().optional(), isActive: z.boolean().optional() }).parse(req.body || {});
+    if (body.maxQuantity !== undefined && body.maxQuantity < body.minQuantity) throw new Error("PRICING_MAX_QUANTITY_INVALID");
+    const row = await prisma.$transaction(async (tx: any) => {
+      const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true } });
+      if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      const effectiveFrom = body.effectiveFrom ? new Date(body.effectiveFrom) : new Date();
+      const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : null;
+      if (effectiveTo && effectiveTo <= effectiveFrom) throw new Error("PRICING_EFFECTIVE_TO_INVALID");
+      const created = await tx.pricingTier.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: variant.id, kind: body.kind, customerSegment: body.customerSegment || null, minQuantity: body.minQuantity, maxQuantity: body.maxQuantity ?? null, unitPrice: body.unitPrice, currency: body.currency, priority: body.priority, effectiveFrom, effectiveTo, isActive: body.isActive !== false } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PRICING_TIER_CREATED", entityType: "PricingTier", entityId: created.id, metadata: { variantId: variant.id, kind: body.kind, customerSegment: body.customerSegment || null, minQuantity: body.minQuantity, maxQuantity: body.maxQuantity ?? null, unitPrice: body.unitPrice } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.get("/api/v1/pricing/promotions", async (req) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const rows = await prisma.pricingPromotion.findMany({ where: { tenantId: ctx.tenantId, OR: [{ branchId: null }, { branchId: ctx.branchId }] }, orderBy: [{ isActive: "desc" }, { priority: "desc" }, { startAt: "desc" }] });
+    return { success: true, data: rows };
+  });
+
+  server.post("/api/v1/pricing/promotions", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
+    const body = z.object({ branchId: z.string().uuid().nullable().optional(), variantId: z.string().uuid().nullable().optional(), name: z.string().trim().min(1).max(160), kind: z.enum(["PERCENTAGE","FIXED"]), value: z.number().nonnegative(), minQuantity: z.number().positive().optional(), minOrderAmount: z.number().nonnegative().optional(), startAt: z.string().datetime(), endAt: z.string().datetime(), priority: z.number().int().default(0), stackable: z.boolean().default(false), isActive: z.boolean().default(true) }).parse(req.body || {});
+    if (body.kind === "PERCENTAGE" && body.value > 100) throw new Error("PROMOTION_PERCENT_EXCEEDS_100");
+    if (new Date(body.endAt) <= new Date(body.startAt)) throw new Error("PROMOTION_END_BEFORE_START");
+    if (body.branchId && body.branchId !== ctx.branchId) throw new Error("PROMOTION_BRANCH_BOUNDARY_VIOLATION");
+    const row = await prisma.$transaction(async (tx: any) => {
+      if (body.variantId) {
+        const variant = await tx.productVariant.findFirst({ where: { id: body.variantId, tenantId: ctx.tenantId, branchId: body.branchId || ctx.branchId, isActive: true } });
+        if (!variant) throw new Error("PRICING_VARIANT_NOT_FOUND");
+      }
+      const created = await tx.pricingPromotion.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: body.branchId || ctx.branchId, variantId: body.variantId || null, name: body.name, kind: body.kind, value: body.value, minQuantity: body.minQuantity ?? null, minOrderAmount: body.minOrderAmount ?? null, startAt: new Date(body.startAt), endAt: new Date(body.endAt), priority: body.priority, stackable: body.stackable, isActive: body.isActive, requiredPermission: "DISCOUNT_MANAGE", createdById: ctx.userId } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "PROMOTION_CREATED", entityType: "PricingPromotion", entityId: created.id, metadata: { name: created.name, kind: created.kind, value: Number(created.value), variantId: created.variantId, startAt: created.startAt, endAt: created.endAt, stackable: created.stackable } } });
+      return created;
+    });
+    return reply.status(201).send({ success: true, data: row });
+  });
+
+  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
+    const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") ||
+        roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
+      if (!allowed) throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+    }
+    const result = atomicCommercialFinance
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
+    return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {

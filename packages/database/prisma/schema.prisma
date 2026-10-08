@@ -340,6 +340,7 @@ model Customer {
   creditLimit    Decimal      @default(0) @db.Decimal(12, 2)
   currentBalance Decimal      @default(0) @db.Decimal(12, 2)
   openingBalance Decimal      @default(0) @db.Decimal(12, 2)
+  customerSegment String?
   status         String       @default("ACTIVE")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -957,6 +958,89 @@ model PriceList {
 
   @@unique([tenantId, branchId, code])
   @@map("price_lists")
+}
+
+model PriceListItem {
+  id           String   @id @default(uuid())
+  tenantId     String
+  branchId     String
+  priceListId  String
+  productId    String?
+  variantId    String
+  unitPrice    Decimal  @db.Decimal(15, 2)
+  currency     String   @default("TZS")
+  priority     Int      @default(0)
+  isActive     Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  effectiveTo  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([tenantId, branchId, priceListId, variantId, isActive, effectiveFrom])
+  @@index([tenantId, branchId, variantId, isActive, effectiveFrom])
+  @@map("price_list_items")
+}
+
+model CustomerPrice {
+  id            String   @id @default(uuid())
+  tenantId      String
+  branchId      String
+  customerId    String
+  variantId     String
+  unitPrice     Decimal  @db.Decimal(15, 2)
+  currency      String   @default("TZS")
+  priority      Int      @default(0)
+  isActive      Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@index([tenantId, branchId, customerId, variantId, isActive, effectiveFrom])
+  @@map("customer_prices")
+}
+
+model PricingTier {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  variantId       String
+  kind            String
+  customerSegment String?
+  minQuantity     Decimal  @db.Decimal(12, 4)
+  maxQuantity     Decimal? @db.Decimal(12, 4)
+  unitPrice       Decimal  @db.Decimal(15, 2)
+  currency        String   @default("TZS")
+  priority        Int      @default(0)
+  isActive        Boolean  @default(true)
+  effectiveFrom   DateTime @default(now())
+  effectiveTo     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([tenantId, branchId, variantId, kind, isActive, effectiveFrom])
+  @@index([tenantId, branchId, kind, customerSegment, isActive, effectiveFrom])
+  @@map("pricing_tiers")
+}
+
+model PricingPromotion {
+  id                String   @id @default(uuid())
+  tenantId          String
+  branchId          String?
+  variantId         String?
+  name              String
+  kind              String
+  value             Decimal  @db.Decimal(15, 2)
+  minQuantity       Decimal? @db.Decimal(12, 4)
+  minOrderAmount    Decimal? @db.Decimal(15, 2)
+  startAt           DateTime
+  endAt             DateTime
+  isActive          Boolean  @default(true)
+  priority          Int      @default(0)
+  stackable         Boolean  @default(false)
+  requiredPermission String @default("DISCOUNT_MANAGE")
+  createdById        String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([tenantId, branchId, variantId, isActive, startAt, endAt, priority])
+  @@map("pricing_promotions")
 }
 
 model Tax {

@@ -3,6 +3,7 @@ import type { TenantContext } from "@kwakopos2/contracts";
 import { prisma } from "./client.js";
 import { AccountingEngine, FinancialBridge, PricingTaxEngine, PaymentEngine, CashSessionEngine, TransactionNumbering, assertBackdatingThreshold, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
 import { projectProductBranchStock, projectProductStockSummary, projectVariantInventory } from "./inventoryAuthority.js";
+import { PricingAuthority } from "./pricingAuthority.js";
 
 export class PrismaAtomicCommercialFinanceService {
   constructor(private readonly db: any = prisma) {}
@@ -83,18 +84,41 @@ export class PrismaAtomicCommercialFinanceService {
       const variantProductIds = new Map<string, string>();
       const variantPrices = new Map<string, number>();
       const variantCosts = new Map<string, number>();
+      const pricingEvidence: any[] = [];
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
+      const nowForPricing = new Date();
       for (const item of req.items) {
+        const resolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
+          variantId: item.variantId,
+          productId: item.productId,
+          customerId: req.customerId,
+          quantity: Number(item.quantity),
+          requestedUnitPrice: Number(item.unitPrice),
+          priceListId: req.priceListId,
+          priceOverrideReason: req.priceOverrideReason,
+          now: nowForPricing,
+        });
         const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
-          throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        }
-        const authoritativePrice = Number(v.price);
-        if (authoritativePrice > 0 && Math.abs(Number(item.unitPrice) - authoritativePrice) > 0.005) throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
+        if (!v) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
-        variantProductIds.set(item.variantId, v.productId);
-        variantPrices.set(item.variantId, authoritativePrice);
+        variantProductIds.set(item.variantId, resolution.productId);
+        variantPrices.set(item.variantId, resolution.unitPrice);
         variantCosts.set(item.variantId, Number(v.costPrice || 0));
+        pricingEvidence.push({
+          variantId: resolution.variantId,
+          productId: resolution.productId,
+          source: resolution.source,
+          sourceId: resolution.sourceId ?? null,
+          customerPriceId: resolution.customerPriceId ?? null,
+          priceListItemId: resolution.priceListItemId ?? null,
+          pricingTierId: resolution.pricingTierId ?? null,
+          promotionId: resolution.promotionId ?? null,
+          promotionalBasePrice: resolution.promotionalBasePrice ?? null,
+          resolvedUnitPrice: resolution.unitPrice,
+          requestedUnitPrice: resolution.requestedUnitPrice ?? null,
+          overrideApplied: resolution.overrideApplied,
+          overrideReason: resolution.overrideReason ?? null,
+        });
       }
       if (saleDiscountRequested) {
         const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
@@ -151,6 +175,7 @@ export class PrismaAtomicCommercialFinanceService {
           taxAmount: l.taxAmount,
         })),
         req.discountTotal || 0,
+        taxConfig,
       );
       if (Number(totals.grandTotal) <= 0) throw new Error("SALE_TOTAL_ZERO");
       const saleId = req.id || crypto.randomUUID(); const now = new Date();
@@ -216,7 +241,18 @@ export class PrismaAtomicCommercialFinanceService {
         data: {
           id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: req.deviceId,
           action: "SALE_CREATED", entityType: "Sale", entityId: sale.id,
-          metadata: { operationId: req.operationId, idempotencyKey: req.idempotencyKey, soldAt: occurredAt.toISOString(), isBackdated },
+          metadata: {
+            operationId: req.operationId,
+            idempotencyKey: req.idempotencyKey,
+            soldAt: occurredAt.toISOString(),
+            isBackdated,
+            pricing: pricingEvidence,
+            pricingPolicy: {
+              precedence: ["CUSTOMER","PROMOTION","WHOLESALE","BULK","BRANCH","PRICE_LIST","BASE"],
+              taxRatePct: taxConfig.ratePct,
+              taxInclusive: taxConfig.isInclusive,
+            },
+          },
         },
       });
       // Persist drawer intent atomically with the payment. Hardware dispatch happens only after commit.
