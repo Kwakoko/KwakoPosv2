@@ -1435,8 +1435,8 @@ const NotificationsPanel: React.FC<{
   const unreadCount = filtered.filter((n) => !n.readAt).length;
 
   const categories = activeScope === "SUPER_ADMIN"
-    ? ["ALL", "FLEET", "INCIDENT", "SECURITY", "SUPPORT"]
-    : ["ALL", "INVENTORY", "POS", "SYNC", "SUPPORT"];
+    ? ["ALL", "FLEET", "INCIDENT", "SECURITY", "SYSTEM", "SUPPORT"]
+    : ["ALL", "INVENTORY", "PAYMENT", "APPROVAL", "SYNC", "SYSTEM", "POS", "SUPPORT"];
 
   return (
     <div className="dropdown-panel notif-panel" role="dialog" aria-label="Notifications">
