@@ -40,6 +40,9 @@ for (const route of [
 
 // 3. Independent strict Super Admin authorization.
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("SUPER_ADMIN")');
+requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform provisioning role boundary");
+requireAbsent("apps/api/src/routes/tenantOnboardingRoutes.ts", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "platform permission cannot grant provisioning");
+requireText("apps/api/src/services/rbacMutationService.ts", '"PLATFORM_SUPER_ADMIN"', "tenant RBAC protects platform super admin role");
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")');
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.includes("*")', "wildcard cannot grant Super Admin");
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.includes("admin:*")', "admin wildcard cannot grant Super Admin");
