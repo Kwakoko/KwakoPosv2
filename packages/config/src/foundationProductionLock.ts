@@ -20,7 +20,7 @@ export const FOUNDATION_PILLARS = [
 export const FOUNDATION_REQUIRED_AUTHORITIES = {
   releaseIdentity: "packages/config/src/authoritativeRelease.ts",
   authTransportLock: "scripts/release/auth-transport-lock.mjs",
-  rbacContracts: "packages/contracts/src/rbacContracts.ts",
+  rbacContracts: "packages/contracts/src/index.ts",
   indexedDb: "apps/web/src/indexedDb.ts",
   syncEngine: "packages/sync/src/worldStandardPrismaSyncEngine.ts",
   conflictLock: "scripts/certification/conflict-center-production-lock.ts",
