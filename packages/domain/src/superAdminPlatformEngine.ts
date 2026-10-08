@@ -13,26 +13,16 @@ export class SuperAdminPlatformEngine {
   private tenants: Map<string, TenantManagementSummary> = new Map();
 
   constructor() {
-    // Register Default Platform Tenants
-    this.tenants.set("TENANT-001", {
-      tenantId: "TENANT-001",
-      name: "Kwako Supermarket Ltd",
-      status: "ACTIVE",
-      country: "TZ",
-      branchesCount: 5,
-      modulesCount: 8,
-      createdAt: "2026-01-15T00:00:00Z",
-    });
+    // No tenant, revenue, release, or incident fixtures are registered here.
+    // Production truth is owned by PostgreSQL Super Admin routes.
+  }
 
-    this.tenants.set("TENANT-002", {
-      tenantId: "TENANT-002",
-      name: "Kilimanjaro Pharmacy Ltd",
-      status: "ACTIVE",
-      country: "TZ",
-      branchesCount: 3,
-      modulesCount: 4,
-      createdAt: "2026-02-10T00:00:00Z",
-    });
+  public registerTenant(summary: TenantManagementSummary): void {
+    this.tenants.set(summary.tenantId, summary);
+  }
+
+  public clearRegisteredTenants(): void {
+    this.tenants.clear();
   }
 
   /**
@@ -157,8 +147,8 @@ export class SuperAdminPlatformEngine {
   public getHealthSummary(): SuperAdminHealthSummary {
     return {
       activeTenantsCount: this.tenants.size,
-      totalPlatformRevenue: 148500.0,
-      activeReleasesCount: 3,
+      totalPlatformRevenue: 0,
+      activeReleasesCount: 0,
       securityIncidentsCount: 0,
       planeIsolationInvariantPassing: true,
       superAdminControlTowerOperational: true,
