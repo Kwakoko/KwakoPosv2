@@ -69,6 +69,8 @@ assert(exactMainWorkflow.includes("GITHUB_SHA") || exactMainWorkflow.includes("g
 
 // A01-A12 Foundation closure: every pillar must have a canonical authority and be wired into release gates.
 assert(packageJson.scripts["certify:foundation"] === "tsx scripts/certification/foundation-production-lock.ts", "Foundation lock package script is missing.");
+assert(exists("scripts/certification/super-admin-production-lock.ts"), "Independent Super Admin production lock is required.");
+assert(packageJson.scripts["certify:super-admin"] === "tsx scripts/certification/super-admin-production-lock.ts", "Super Admin production lock script is not authoritative.");
 for (const authority of Object.values(FOUNDATION_REQUIRED_AUTHORITIES)) {
   assert(exists(authority), "Missing foundation authority: " + authority);
 }
@@ -88,6 +90,7 @@ assert(exists("scripts/release/verify-live-production-evidence.ts"), "Live produ
 assert(exists("scripts/certification/strict-runtime-certification.ts"), "Strict runtime certification missing.");
 assert(exists("scripts/certification/strict-security-runtime-gate.ts"), "Strict security runtime gate missing.");
 assert(exists("tests/browser/five-client-convergence.spec.ts"), "Real browser convergence test missing.");
+try { execSync("npx tsx scripts/certification/super-admin-production-lock.ts", { cwd: root, stdio: "inherit" }); } catch { failures.push("Super Admin Production Lock failed."); }
 
 const tracked = execSync("git ls-files apps packages scripts .github", { cwd: root, encoding: "utf8" })
   .split(/\r?\n/)
