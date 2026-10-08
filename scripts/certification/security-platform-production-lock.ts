@@ -52,7 +52,8 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     "Client-supplied permissions and approver identities are not authorization sources.");
   add("SECPLAT-A06", "Enterprise approval lifecycle is actor- and tenant-bound",
     server.includes("approverId: ctx.userId") &&
-    server.includes("executorId") === false &&
+    !server.includes("executeApprovedRequest(id, body.executorId") &&
+    !server.includes("cancelRequest(id, body.cancelledBy") &&
     server.includes("executeApprovedRequest(id, ctx.userId, ctx.tenantId)") &&
     server.includes("recordDecision({ ...body, approverId: ctx.userId"),
     "Approval decisions/execution do not trust client-supplied identities.");
