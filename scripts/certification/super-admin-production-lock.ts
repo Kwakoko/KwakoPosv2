@@ -91,6 +91,10 @@ requireAbsent("scripts/certification/super-admin-platform-certification-engine.t
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "platform_super_admin_security", "security posture source");
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "pg_database_size(current_database())", "database diagnostics");
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "getReleaseIdentity(loadConfig())", "release identity");
+requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-admin/support/control-tower", "support control tower");
+requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-admin/support/tenants/:tenantId/health", "support tenant health");
+requireText("packages/database/prisma/schema.prisma", "model PlatformAuditEvent", "platform audit schema model");
+requireText("scripts/certification/foundation-production-lock.ts", "scripts/certification/super-admin-production-lock.ts", "Foundation invokes Super Admin lock");
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'logs: []', "fabricated system logs");
 
 // 11. Live control-plane UI.
