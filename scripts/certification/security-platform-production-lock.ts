@@ -12,7 +12,7 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     const p = path.join(cwd, rel);
     return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
   };
-  const add = (id: string, name: string, passed: boolean, detail: string) => checks.push({ id, name, passed, detail });
+  const add = (id: string, name: string, passed: boolean, detail = "") => checks.push({ id, name, passed, detail });
 
   const server = read("apps/api/src/server.ts");
   const auth = read("packages/auth/src/index.ts");
