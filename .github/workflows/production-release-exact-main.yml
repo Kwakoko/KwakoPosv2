@@ -78,11 +78,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Foundation Production Lock A01-A12
+        run: npm run certify:foundation
+
       - name: Generate Prisma client
         run: npm run db:generate
 
-      - name: Foundation Production Lock A01-A12
-        run: npm run certify:foundation
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
 
@@ -97,6 +98,8 @@ jobs:
 
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock
+      - name: Administration Production Lock
+        run: npm run certify:administration-lock
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
       - name: Pricing / Promotions Production Lock

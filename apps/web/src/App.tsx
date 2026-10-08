@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 const lazyPage = (loader: () => Promise<{ default: React.ComponentType<any> }>): React.ComponentType<any> =>
   lazy(loader) as React.ComponentType<any>;
-import { KwakoPosProvider, useAuth, useModule } from "./context/KwakoPosContexts.js";
+import { KwakoPosProvider, useAuth, useModule, useRbac } from "./context/KwakoPosContexts.js";
 import { apiFetch, getStoredSession } from "./services/applicationApiService.js";
 import { WindowManagerProvider } from "./context/WindowManagerContext.js";
 import { ToastProvider } from "./components/UI/Toast.js";
@@ -60,6 +60,7 @@ const PurchasingPage = lazyWorkspacePage("PurchasingPage");
 const FinancePage = lazyWorkspacePage("FinancePage");
 const ReportsPage = lazyWorkspacePage("ReportsPage");
 const SettingsPage = lazyWorkspacePage("SettingsPage");
+const AdministrationPage = lazyPage(() => import("./pages/AdministrationPage.js").then((m) => ({ default: m.AdministrationPage })));
 const UsersPage = lazyWorkspacePage("UsersPage");
 const SuperAdminPage = lazyWorkspacePage("SuperAdminPage");
 const DiagnosticsPage = lazyWorkspacePage("DiagnosticsPage");
@@ -182,6 +183,7 @@ const TAB_TO_PATH: Record<string, string> = {
   "Demand Forecast": "/ai",
   // Settings
   Settings: "/settings",
+  Administration: "/administration",
   "General Settings": "/settings",
   "Business Profile & Identity": "/settings",
   "POS Configurations": "/settings",
@@ -305,6 +307,7 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/finance": "Finance",
   "/reports": "Reports",
   "/settings": "Settings",
+  "/administration": "Administration",
   "/users": "Users & Roles",
   "/super-admin": "Super Admin",
   "/super-admin/certification": "Super Admin",
@@ -383,6 +386,7 @@ const ALLOWED_SUPER_ADMIN_PATHS = new Set([
 const AuthenticatedApp: React.FC = () => {
   const { user, isAuthenticated, isInitializing, dismissLoading, impersonatedTenant } = useAuth();
   const { activeTab, setActiveTab, manifest } = useModule();
+  const { permissions: rbacPermissions } = useRbac();
   const [currentPath, setCurrentPath] = useState(() =>
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
@@ -398,6 +402,15 @@ const AuthenticatedApp: React.FC = () => {
 
   const isSuperAdmin = Boolean(
     user && (user.role === "SUPER_ADMIN" || user.email === "admin@kwakoko.co.tz")
+  );
+  const canAdminister = Boolean(
+    user && (
+      ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(String(user.role || "").toUpperCase()) ||
+      rbacPermissions.includes("*") ||
+      rbacPermissions.includes("SUPER_ADMIN_OPERATIONS") ||
+      rbacPermissions.includes("ADMIN:PLATFORM") ||
+      rbacPermissions.includes("admin:*")
+    )
   );
 
   // Sync activeTab on initial mount if current pathname matches a canonical tab
@@ -651,6 +664,8 @@ const AuthenticatedApp: React.FC = () => {
         return <ReportsPage activeTab={activeTab} />;
       case "/settings":
         return <SettingsPage activeTab={activeTab} />;
+      case "/administration":
+        return <AdministrationPage onNavigate={handleNavigate} />;
       case "/users":
         return <UsersPage />;
       case "/super-admin":
@@ -705,6 +720,7 @@ const AuthenticatedApp: React.FC = () => {
       >
         <SystemAppShellLayout
           currentPath={currentPath}
+          canAdminister={canAdminister}
           onNavigate={handleNavigate}
           resolveTabPath={(tab: string, parentName?: string) => {
             const crossWorkspaceRoute = SIDEBAR_CROSS_WORKSPACE_ROUTES[tab];

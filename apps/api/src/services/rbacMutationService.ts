@@ -36,6 +36,9 @@ type UserCreateInput = {
   createEmployeeProfile?: boolean;
 };
 
+type BranchCreateInput = { name: string; code: string; isMain?: boolean };
+type BranchUpdateInput = { name?: string; code?: string; isMain?: boolean };
+
 type UserUpdateInput = {
   firstName?: string;
   lastName?: string;
@@ -91,6 +94,22 @@ function normalizePermissions(values: unknown): string[] {
   }
 
   return normalized;
+}
+
+function normalizeBranchName(value: string): string {
+  const name = String(value || "").trim().replace(/\\s+/g, " ");
+  if (name.length < 2 || name.length > 120) {
+    throw new RbacMutationError("BRANCH_NAME_INVALID", "Branch name must be between 2 and 120 characters.");
+  }
+  return name;
+}
+
+function normalizeBranchCode(value: string): string {
+  const code = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  if (code.length < 2 || code.length > 32) {
+    throw new RbacMutationError("BRANCH_CODE_INVALID", "Branch code must be between 2 and 32 letters, numbers, underscores or hyphens.");
+  }
+  return code;
 }
 
 function isOwnerActor(actorRoleName: string): boolean {
@@ -149,7 +168,7 @@ export class PrivilegedRbacMutationService {
     return resolved;
   }
 
-  private async requirePermission(tx: any, actor: Actor, permission: "users.manage" | "roles.manage") {
+  private async requirePermission(tx: any, actor: Actor, permission: "users.manage" | "roles.manage" | "branches.manage") {
     const resolved = await this.resolveActor(tx, actor);
     const allowed =
       isOwnerActor(resolved.roleName) ||
@@ -213,6 +232,70 @@ export class PrivilegedRbacMutationService {
         entityId,
         metadata,
       },
+    });
+  }
+
+  async listBranches(actor: Actor) {
+    await this.requirePermission(this.prisma, actor, "branches.manage");
+    return this.prisma.branch.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: [{ isMain: "desc" }, { name: "asc" }],
+    });
+  }
+
+  async createBranch(actor: Actor, input: BranchCreateInput) {
+    const name = normalizeBranchName(input.name);
+    const code = normalizeBranchCode(input.code);
+    return this.prisma.$transaction(async (tx) => {
+      const actorResolved = await this.requirePermission(tx, actor, "branches.manage");
+      const duplicate = await tx.branch.findFirst({ where: { tenantId: actor.tenantId, code } });
+      if (duplicate) {
+        throw new RbacMutationError("BRANCH_CODE_EXISTS", "A branch with this code already exists in the tenant.", 409);
+      }
+      const existingBranchCount = await tx.branch.count({ where: { tenantId: actor.tenantId } });
+      const makeMain = Boolean(input.isMain) || existingBranchCount === 0;
+      if (makeMain) {
+        await tx.branch.updateMany({ where: { tenantId: actor.tenantId, isMain: true }, data: { isMain: false } });
+      }
+      const branch = await tx.branch.create({
+        data: { id: randomUUID(), tenantId: actor.tenantId, name, code, isMain: makeMain },
+      });
+      await this.audit(tx, actor, actorResolved, "BRANCH_CREATED", "Branch", branch.id, {
+        name: branch.name, code: branch.code, isMain: branch.isMain,
+      });
+      return branch;
+    });
+  }
+
+  async updateBranch(actor: Actor, branchId: string, input: BranchUpdateInput) {
+    return this.prisma.$transaction(async (tx) => {
+      const actorResolved = await this.requirePermission(tx, actor, "branches.manage");
+      const existing = await tx.branch.findFirst({ where: { id: branchId, tenantId: actor.tenantId } });
+      if (!existing) throw new RbacMutationError("BRANCH_NOT_FOUND", "Branch not found.", 404);
+      const nextName = input.name !== undefined ? normalizeBranchName(input.name) : existing.name;
+      const nextCode = input.code !== undefined ? normalizeBranchCode(input.code) : existing.code;
+      const nextIsMain = input.isMain !== undefined ? Boolean(input.isMain) : existing.isMain;
+      const duplicate = await tx.branch.findFirst({
+        where: { tenantId: actor.tenantId, code: nextCode, NOT: { id: branchId } },
+      });
+      if (duplicate) throw new RbacMutationError("BRANCH_CODE_EXISTS", "A branch with this code already exists in the tenant.", 409);
+      if (nextIsMain) {
+        await tx.branch.updateMany({
+          where: { tenantId: actor.tenantId, isMain: true, NOT: { id: branchId } },
+          data: { isMain: false },
+        });
+      } else if (existing.isMain) {
+        throw new RbacMutationError("BRANCH_MAIN_REQUIRED", "The tenant must keep a main branch. Promote another branch before clearing the current main branch.", 409);
+      }
+      const branch = await tx.branch.update({
+        where: { id: branchId },
+        data: { name: nextName, code: nextCode, isMain: nextIsMain },
+      });
+      await this.audit(tx, actor, actorResolved, "BRANCH_UPDATED", "Branch", branch.id, {
+        before: { name: existing.name, code: existing.code, isMain: existing.isMain },
+        after: { name: branch.name, code: branch.code, isMain: branch.isMain },
+      });
+      return branch;
     });
   }
 

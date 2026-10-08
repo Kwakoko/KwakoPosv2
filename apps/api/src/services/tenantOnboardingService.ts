@@ -103,7 +103,7 @@ export class TenantOnboardingService {
 
   async getForActor(tenantId: string, actor: OnboardingActor) {
     if (!actor.isSuperAdmin && actor.tenantId !== tenantId) throw new TenantOnboardingError("FORBIDDEN", "Cross-tenant onboarding access denied", 403);
-    const rows = await this.prisma.$queryRaw<Array<any>>`SELECT id, tenant_id AS "tenantId", status, current_step AS "currentStep", industry, modules, country, currency, timezone, locale, owner_user_id AS "ownerUserId", branch_id AS "branchId", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt" FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1`;
+    const rows = await this.prisma.$queryRaw<Array<any>>`SELECT id, tenant_id AS "tenantId", business_name AS "businessName", branch_name AS "branchName", branch_code AS "branchCode", status, current_step AS "currentStep", industry, modules, country, currency, timezone, locale, owner_user_id AS "ownerUserId", branch_id AS "branchId", created_at AS "createdAt", updated_at AS "updatedAt", completed_at AS "completedAt" FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1`;
     if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
     return this.toSafeResponse(rows[0]);
   }
@@ -115,7 +115,6 @@ export class TenantOnboardingService {
       await this.prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRaw<Array<any>>`SELECT * FROM tenant_onboardings WHERE tenant_id = ${tenantId}::uuid ORDER BY created_at DESC LIMIT 1 FOR UPDATE`;
         if (!rows[0]) throw new TenantOnboardingError("NOT_FOUND", "Tenant onboarding not found", 404);
-        if (rows[0].status === "COMPLETED") throw new TenantOnboardingError("CONFLICT", "Completed onboarding cannot be modified", 409);
         const modules = data.modules ? Array.from(new Set(data.modules.map(canonicalModule))) : undefined;
         const industry = data.industry ? canonicalIndustry(data.industry) : undefined;
         const branchId = rows[0].branch_id;
@@ -128,7 +127,7 @@ export class TenantOnboardingService {
           for (const moduleKey of modules) await tx.$executeRaw`INSERT INTO tenant_module_entitlements (id, tenant_id, module_key, status, source) VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${moduleKey}, 'ACTIVE', 'ONBOARDING')`;
         }
         await tx.$executeRaw`UPDATE tenant_onboardings SET business_name=COALESCE(${data.businessName?.trim() || null}, business_name), branch_name=COALESCE(${data.branchName?.trim() || null}, branch_name), branch_code=COALESCE(${data.branchCode || null}, branch_code), country=COALESCE(${data.country || null}, country), currency=COALESCE(${data.currency || null}, currency), timezone=COALESCE(${data.timezone || null}, timezone), locale=COALESCE(${data.locale || null}, locale), industry=COALESCE(${industry || null}, industry), updated_at=NOW() WHERE tenant_id=${tenantId}::uuid`;
-        await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${rows[0].id}::uuid, ${tenantId}::uuid, ${actor.userId || null}::uuid, 'UPDATE', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
+        await tx.$executeRaw`INSERT INTO tenant_onboarding_audit_events (id, onboarding_id, tenant_id, actor_user_id, transition, result, correlation_id, trace_id, metadata) VALUES (${randomUUID()}::uuid, ${rows[0].id}::uuid, ${tenantId}::uuid, ${actor.userId || null}::uuid, 'ADMINISTRATION_UPDATE', 'SUCCESS', ${actor.correlationId || null}, ${actor.traceId || null}, '{}'::jsonb)`;
       });
     } catch (error: any) {
       if (error instanceof TenantOnboardingError) throw error;
@@ -153,7 +152,7 @@ export class TenantOnboardingService {
 
   private toSafeResponse(value: any) {
     return {
-      id: String(value.id), tenantId: value.tenantId ?? value.tenant_id ?? null, status: value.status, currentStep: value.currentStep ?? value.current_step,
+      id: String(value.id), tenantId: value.tenantId ?? value.tenant_id ?? null, businessName: value.businessName ?? value.business_name ?? "", branchName: value.branchName ?? value.branch_name ?? "", branchCode: value.branchCode ?? value.branch_code ?? "", status: value.status, currentStep: value.currentStep ?? value.current_step,
       industry: value.industry, modules: Array.isArray(value.modules) ? value.modules : [], country: value.country, currency: value.currency,
       timezone: value.timezone, locale: value.locale, ownerUserId: value.ownerUserId ?? value.owner_user_id ?? null,
       branchId: value.branchId ?? value.branch_id ?? null, createdAt: iso(value.createdAt ?? value.created_at), updatedAt: iso(value.updatedAt ?? value.updated_at),

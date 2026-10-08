@@ -38,7 +38,7 @@ function mapRole(role: any) {
 }
 
 function mapUser(user: any) {
-  const [firstName = "Staff", ...lastParts] = String(user.name || "").trim().split(/\s+/).filter(Boolean);
+  const [firstName = "Staff", ...lastParts] = String(user.name || "").trim().split(/s+/).filter(Boolean);
   return {
     id: user.id,
     tenantId: user.tenantId,
@@ -54,6 +54,18 @@ function mapUser(user: any) {
     status: user.status,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+  };
+}
+
+function mapBranch(branch: any) {
+  return {
+    id: branch.id,
+    tenantId: branch.tenantId,
+    name: branch.name,
+    code: branch.code,
+    isMain: Boolean(branch.isMain),
+    createdAt: branch.createdAt,
+    updatedAt: branch.updatedAt,
   };
 }
 
@@ -78,6 +90,14 @@ export async function rbacRoutes(server: FastifyInstance, opts: { service: Privi
   server.get("/api/v1/roles", async (req, reply) => {
     try {
       return { success: true, data: (await service.listRoles(actor(req))).map(mapRole) };
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  server.get("/api/v1/branches", async (req, reply) => {
+    try {
+      return { success: true, data: (await service.listBranches(actor(req))).map(mapBranch) };
     } catch (error) {
       return sendError(reply, error);
     }
@@ -119,6 +139,34 @@ export async function rbacRoutes(server: FastifyInstance, opts: { service: Privi
     try {
       const user = await service.deactivateUser(actor(req), String((req.params as any).id));
       return { success: true, data: mapUser(user) };
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  server.post("/api/v1/branches", async (req, reply) => {
+    try {
+      const body: any = req.body || {};
+      const branch = await service.createBranch(actor(req), {
+        name: String(body.name || ""),
+        code: String(body.code || ""),
+        isMain: Boolean(body.isMain),
+      });
+      return reply.status(201).send({ success: true, data: mapBranch(branch) });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
+  server.put("/api/v1/branches/:id", async (req, reply) => {
+    try {
+      const body: any = req.body || {};
+      const branch = await service.updateBranch(actor(req), String((req.params as any).id), {
+        name: body.name == null ? undefined : String(body.name),
+        code: body.code == null ? undefined : String(body.code),
+        isMain: body.isMain === undefined ? undefined : Boolean(body.isMain),
+      });
+      return { success: true, data: mapBranch(branch) };
     } catch (error) {
       return sendError(reply, error);
     }

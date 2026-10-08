@@ -801,6 +801,7 @@ const SIDEBAR_ICON_COLOR_MAP: Record<string, string> = {
   // ── Universal ──────────────────────────────────────────────────────────────
   "Dashboard":                  "#2563eb", // vivid blue
   "Settings":                   "#64748b", // slate-grey
+  "Administration":              "#0f766e",
   "Employees":                  "#7c3aed", // purple
   "Reports":                    "#0891b2", // cyan
 
@@ -898,7 +899,7 @@ export const Sidebar: React.FC<{
   isMobile?: boolean;
   onCloseMobile?: () => void;
   onOpenInspectModal?: () => void;
-}> = ({ currentPath, onNavigate, user, isMobile = false, onCloseMobile, onOpenInspectModal, resolveTabPath }) => {
+}> = ({ currentPath, onNavigate, user, canAdminister, isMobile = false, onCloseMobile, onOpenInspectModal, resolveTabPath }) => {
   const { sidebarItems, activeTab, setActiveTab, canAccessTab, activeModule, manifest } = useModule();
   const { isSuperAdmin } = useRbac();
   const { impersonatedTenant, stopImpersonation } = useAuth();
@@ -1137,6 +1138,23 @@ export const Sidebar: React.FC<{
               Exit Inspection &amp; Return to CPanel →
             </button>
           </div>
+        )}
+
+        {canAdminister && (!isSuperAdminUser || Boolean(impersonatedTenant)) && (
+          <button
+            className={`sidebar-item${currentPath === "/administration" || activeTab === "Administration" ? " active" : ""}`}
+            onClick={() => {
+              onNavigate("/administration");
+              setActiveTab("Administration");
+              if (isMobile) onCloseMobile?.();
+            }}
+            type="button"
+          >
+            <span className="sidebar-item-icon" style={{ color: "#0f766e" }}>
+              <Shield size={14} />
+            </span>
+            <span className="sidebar-item-label">Administration</span>
+          </button>
         )}
 
         {/* TENANT STORE MODULE TABS (Visible to Tenant Users, OR Super Admin during active tenant inspection) */}
@@ -2403,7 +2421,13 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const authoritativeConflictCount = syncStatus.openConflictCount > 0 ? syncStatus.openConflictCount : 0;
   const effectiveConflictCount = Math.max(syncConflictCount, authoritativeConflictCount);
 
-  const canAdminister = permissions.includes("*") || permissions.includes("SUPER_ADMIN_OPERATIONS");
+  const adminRole = ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(String(user?.role || "").toUpperCase());
+  const canAdminister =
+    adminRole ||
+    permissions.includes("*") ||
+    permissions.includes("SUPER_ADMIN_OPERATIONS") ||
+    permissions.includes("ADMIN:PLATFORM") ||
+    permissions.includes("admin:*");
 
   useEffect(() => {
     let alive = true;

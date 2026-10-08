@@ -19,6 +19,7 @@ import { productionCleanlinessRoutes } from "./routes/productionCleanlinessRoute
 import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
+import { administrationRoutes } from "./routes/administrationRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
@@ -1165,7 +1166,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
       const isWebRoute = [
         "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
-        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
+        "/settings", "/administration", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
         "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
         "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
       ].includes(url) || isHtmlRequest;
@@ -1760,6 +1761,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   traVfdRoutes(server);
   if (rbacMutationService) {
     rbacRoutes(server, { service: rbacMutationService });
+    administrationRoutes(server, { rbacService: rbacMutationService });
   }
 
   server.get("/admin/operations/freeze", async () => {
