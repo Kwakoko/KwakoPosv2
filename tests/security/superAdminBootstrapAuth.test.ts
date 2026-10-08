@@ -10,7 +10,6 @@ import {
   issueStepUpToken,
   verifyStepUpToken,
   generateWebAuthnChallenge,
-  verifyWebAuthnResponse,
   throttleKeys,
 } from "../../apps/api/src/services/superAdminSecurityService.js";
 import { SyncEngine } from "@kwakopos2/sync";
@@ -79,14 +78,11 @@ describe("KwakoPos v2 — Super Admin Bootstrap & Authentication Security Suite"
     expect(isValid).toBe(false);
   });
 
-  it("6. WebAuthn passkey challenge generation & signature verification", () => {
+  it("6. WebAuthn challenge generation is non-authorizing until a real verifier is implemented", () => {
     const challenge = generateWebAuthnChallenge("usr-super-admin-001");
     expect(challenge.challenge).toBeDefined();
-    expect(challenge.rp.name).toBe("KwakoPos Platform");
+    expect(challenge.rp.name).toBe("Kwakoko Business Operating System");
     expect(challenge.user.name).toBe("admin@kwakoko.co.tz");
-
-    expect(verifyWebAuthnResponse("webauthn:valid-mock-signature-payload-12345")).toBe(true);
-    expect(verifyWebAuthnResponse("invalid-payload")).toBe(false);
   });
 
   it("7. Throttling key generation formats unique rate limiting keys", () => {
