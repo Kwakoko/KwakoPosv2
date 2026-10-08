@@ -18,7 +18,7 @@ export async function runSupportAutomationCycle(): Promise<{ scanned: boolean; e
       const existing = await prisma.$queryRawUnsafe<any[]>(`SELECT 1 FROM "SupportEvent" WHERE "ticket_id"=$1 AND "event_type"=$2 AND "created_at">NOW()-INTERVAL '60 minutes' LIMIT 1`, ticket.id, eventType);
       if (existing.length) continue;
       await prisma.$executeRawUnsafe(`INSERT INTO "SupportEvent" ("id","tenant_id","ticket_id","actor_type","actor_id","event_type","payload") VALUES (gen_random_uuid(),$1,$2,'SYSTEM','support-automation',$3,$4::jsonb)`, ticket.tenant_id, ticket.id, eventType, JSON.stringify({ severity: ticket.severity, slaDueAt: new Date(ticket.sla_due_at).toISOString(), notification: "SUPPORT_SLA" }));
-      if (breached) { await prisma.$executeRawUnsafe(`UPDATE "SupportTicket" SET status='ESCALATED',"updated_at"=NOW() WHERE "id"=$1 AND "tenant_id"=$2 AND "status"<>'RESOLVED'`, ticket.id, ticket.tenant_id); escalated++; } else dueSoon++;
+      if (breached) { await prisma.$executeRawUnsafe(`UPDATE "SupportTicket" SET status='ESCALATED',"escalation_level"=GREATEST(COALESCE("escalation_level",0),1),"escalated_at"=COALESCE("escalated_at",NOW()),"escalation_reason"=COALESCE("escalation_reason",'SLA_BREACH'),"updated_at"=NOW() WHERE "id"=$1 AND "tenant_id"=$2 AND "status"<>'RESOLVED'`, ticket.id, ticket.tenant_id); escalated++; } else dueSoon++;
     }
     return { scanned: true, escalated, dueSoon };
   } finally { await prisma.$queryRawUnsafe<any[]>(`SELECT pg_advisory_unlock($1)`, LOCK_KEY); }
