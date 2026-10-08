@@ -24,7 +24,7 @@ describe("session revoke survives API restart", () => {
 
   const startApi = async (): Promise<void> => {
     const tsxCli = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
-    api = spawn(process.execPath, [tsxCli, "apps/api/src/testServerFixed.ts"], {
+    api = spawn(process.execPath, [tsxCli, "apps/api/src/server.ts"], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -115,7 +115,7 @@ describe("session revoke survives API restart", () => {
 
   afterAll(async () => {
     await stopApi();
-    await prisma.tenant.delete({ where: { id: tenantId } });
+    // Test database is ephemeral; audit_events is append-only, so tenant cleanup would cascade into forbidden audit mutations.
   }, 60_000);
 
   it("persists revocation in PostgreSQL and rejects the same token after a fresh API process starts", async () => {
@@ -126,10 +126,27 @@ describe("session revoke survives API restart", () => {
     });
     expect(loginResponse.ok).toBe(true);
     const login = await loginResponse.json() as any;
-    const accessToken = String(login?.data?.accessToken || "");
+    let accessToken = String(login?.data?.accessToken || "");
     const sessionId = String(login?.data?.sessionId || "");
+    const refreshCookie = String(loginResponse.headers.get("set-cookie") || "").split(";")[0];
     expect(accessToken).not.toBe("");
     expect(sessionId).not.toBe("");
+    expect(refreshCookie).toContain("kwakopos_refresh=");
+
+    const refreshResponse = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: refreshCookie,
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+    expect(refreshResponse.status).toBe(200);
+    const refreshed = await refreshResponse.json() as any;
+    accessToken = String(refreshed?.data?.accessToken || "");
+    const rotatedRefreshCookie = String(refreshResponse.headers.get("set-cookie") || "").split(";")[0];
+    expect(accessToken).not.toBe("");
+    expect(rotatedRefreshCookie).toContain("kwakopos_refresh=");
 
     const acceptance = await fetch(`${API_URL}/api/legal/acceptance/accept-all`, {
       method: "POST",
@@ -169,14 +186,14 @@ describe("session revoke survives API restart", () => {
     });
     expect(deniedAfterRestart.status).toBe(401);
 
-    const refreshed = await fetch(`${API_URL}/auth/refresh`, {
+    const deniedRefresh = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${accessToken}`,
+        cookie: rotatedRefreshCookie,
       },
-      body: JSON.stringify({ sessionId, refreshToken: "intentionally-invalid" }),
+      body: JSON.stringify({ sessionId }),
     });
-    expect(refreshed.status).toBe(401);
+    expect(deniedRefresh.status).toBe(401);
   }, TEST_TIMEOUT_MS);
 });

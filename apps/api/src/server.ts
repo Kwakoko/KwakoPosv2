@@ -20,6 +20,7 @@ import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
   const safeRelative = (relativePath || "").replace(/^\/+/, "");
@@ -93,6 +94,7 @@ import {
   OpenCashSessionRequestSchema,
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
+  CashTransferRequestSchema,
   CreateExpenseRequestSchema,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
@@ -133,7 +135,7 @@ import {
   SyncBootstrapRequestSchema,
   SyncStateManifestSchema,
 } from "@kwakopos2/contracts";
-import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager, comparePassword, hashPassword } from "@kwakopos2/auth";
+import { verifyAccessToken, extractTenantContext, generateAccessToken, globalSessionManager, comparePassword, hashPassword, passwordNeedsRehash, sessionPolicyFromSettings, sessionPolicyToMinutes } from "@kwakopos2/auth";
 
 interface InMemoryAuthRecord {
   userId: string;
@@ -205,7 +207,7 @@ import {
 
 
 
-import { SyncEngine, PrismaSyncEngine } from "@kwakopos2/sync";
+import { SyncEngine, PrismaSyncEngine, assertSyncConflictPermission } from "@kwakopos2/sync";
 import { PrivilegedRbacMutationService, RbacMutationError } from "./services/rbacMutationService.js";
 import {
   createTraceContext,
@@ -228,6 +230,30 @@ import {
   PlatformHealthEvaluator,
 } from "@kwakopos2/observability";
 import { randomUUID } from "crypto";
+import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
+import { customerContactRoutes } from "./routes/customerContactRoutes.js";
+import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
+import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
+import {
+  beginSuperAdminSetup,
+  clearLoginFailures,
+  clearSuperAdminFailureState,
+  clientAddress,
+  completeSuperAdminSetup,
+  ensureSuperAdminSecurity,
+  getSuperAdminSecurity,
+  isLoginThrottled,
+  issueSetupToken,
+  issueStepUpToken,
+  logSuperAdminAuditEvent,
+  recordLoginFailure,
+  recordSuperAdminFailure,
+  requireSecuritySecrets,
+  revokeAllSuperAdminSessions,
+  throttleKeys,
+  verifyStepUpToken,
+  verifySuperAdminMfa,
+} from "./services/superAdminSecurityService.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -280,6 +306,18 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+
+function requireCommercialPermission(req: FastifyRequest, ...required: string[]): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = (ctx.roles || []).map((r) => String(r).trim().toUpperCase());
+  const permissions = new Set((ctx.permissions || []).map((p) => String(p).trim().toLowerCase()));
+  const allowed = permissions.has("*") || permissions.has("admin:*") ||
+    roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) ||
+    required.some((p) => permissions.has(p.toLowerCase()));
+  if (!allowed) throw new Error("FORBIDDEN: " + required.join(" or ") + " permission required");
+  return ctx;
+}
+
 function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
@@ -297,6 +335,699 @@ export interface BuildServerOptions {
   config?: ReturnType<typeof loadConfig>;
   /** Override persistence mode explicitly (true = Prisma, false = in-memory). */
   productionPersistence?: boolean;
+}
+
+const REFRESH_COOKIE = "kwakopos_refresh";
+const DEFAULT_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+type LoginRequestBody = { email?: unknown; password?: unknown; deviceId?: unknown; mfaCode?: unknown; rememberMe?: unknown };
+type RefreshRequestBody = { sessionId?: unknown };
+type LogoutRequestBody = { sessionId?: unknown; reason?: unknown };
+type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
+type SuperAdminSetupStartBody = { setupToken?: unknown };
+type StepUpRequestBody = { password?: unknown; mfaCode?: unknown; action?: unknown; deviceId?: unknown };
+
+function configurePersistentSessions() {
+  globalSessionManager.setStoreProvider({
+    create: async (record) => { await prisma.deviceSession.create({ data: record as any }); },
+    get: async (sessionId) => await prisma.deviceSession.findUnique({ where: { id: sessionId } }) as any,
+    update: async (record) => {
+      await prisma.deviceSession.update({
+        where: { id: record.id },
+        data: {
+          refreshTokenHash: record.refreshTokenHash,
+          expiresAt: record.expiresAt,
+          refreshTokenExpiresAt: record.refreshTokenExpiresAt,
+          lastActivityAt: record.lastActivityAt,
+          lastValidatedAt: record.lastValidatedAt,
+          revokedAt: record.revokedAt,
+          revokeReason: record.revokeReason || null,
+          status: record.status,
+          permissionsVersion: record.permissionsVersion,
+          tenantVersion: record.tenantVersion,
+          ipAddress: record.ipAddress || null,
+          userAgent: record.userAgent || null,
+          platform: record.platform || null,
+          rememberMe: Boolean(record.rememberMe),
+          offlineStartedAt: record.offlineStartedAt || null,
+          offlineExpiresAt: record.offlineExpiresAt || null,
+          idleTimeoutMs: record.idleTimeoutMs,
+        },
+      });
+    },
+    revokeAllForUser: async (tenantId, userId, reason = "PASSWORD_CHANGE") =>
+      (await prisma.deviceSession.updateMany({
+        where: { tenantId, userId, revokedAt: null },
+        data: { revokedAt: new Date(), status: "REVOKED", revokeReason: reason },
+      })).count,
+    listForUser: async (tenantId, userId) => await prisma.deviceSession.findMany({
+      where: { tenantId, userId },
+      orderBy: { lastActivityAt: "desc" },
+    }) as any,
+    revokeTokenFamily: async (tokenFamilyId, reason, at = new Date()) =>
+      (await prisma.deviceSession.updateMany({
+        where: { tokenFamilyId, revokedAt: null },
+        data: { revokedAt: at, status: "REVOKED", revokeReason: reason },
+      })).count,
+    atomicRotateRefreshToken: async (sessionId, expectedRefreshTokenHash, replacementRefreshTokenHash, now) =>
+      prisma.$transaction(async (tx) => {
+        const before = await tx.deviceSession.findUnique({ where: { id: sessionId } });
+        if (!before) return { rotated: false, reused: false, session: null };
+        const updated = await tx.deviceSession.updateMany({
+          where: {
+            id: sessionId,
+            refreshTokenHash: expectedRefreshTokenHash,
+            revokedAt: null,
+            status: "ACTIVE",
+            refreshTokenExpiresAt: { gt: now },
+            expiresAt: { gt: now },
+          },
+          data: { refreshTokenHash: replacementRefreshTokenHash, lastValidatedAt: now },
+        });
+        if (updated.count !== 1) {
+          const after = await tx.deviceSession.findUnique({ where: { id: sessionId } });
+          const reused = Boolean(after && after.revokedAt == null && after.status === "ACTIVE" && after.refreshTokenHash !== expectedRefreshTokenHash);
+          return { rotated: false, reused, session: after as any };
+        }
+        const session = await tx.deviceSession.findUnique({ where: { id: sessionId } });
+        return { rotated: true, reused: false, session: session as any };
+      }),
+  });
+}
+
+async function recordSessionAudit(params: {
+  tenantId: string;
+  branchId: string;
+  userId: string;
+  deviceId: string;
+  sessionId: string;
+  action: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await prisma.auditEvent.create({
+      data: {
+        id: randomUUID(),
+        tenantId: params.tenantId,
+        branchId: params.branchId,
+        userId: params.userId,
+        deviceId: params.deviceId,
+        action: params.action,
+        entityType: "DeviceSession",
+        entityId: params.sessionId,
+        metadata: { ip: params.ipAddress || null, userAgent: params.userAgent || null, ...(params.metadata || {}) },
+      },
+    });
+  } catch {
+    // Authentication must not fail solely because audit persistence is unavailable.
+  }
+}
+
+function requestUserAgent(req: FastifyRequest): string {
+  return String(req.headers["user-agent"] || "").slice(0, 2048);
+}
+
+function requestPlatform(req: FastifyRequest): string {
+  return String(req.headers["sec-ch-ua-platform"] || req.headers["user-agent"] || "unknown").slice(0, 256);
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const part of String(header || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index > 0) result[part.substring(0, index).trim()] = decodeURIComponent(part.substring(index + 1).trim());
+  }
+  return result;
+}
+
+function setRefreshCookie(reply: FastifyReply, token: string, secure: boolean, maxAgeSeconds = DEFAULT_COOKIE_MAX_AGE_SECONDS): void {
+  const cookie = REFRESH_COOKIE + "=" + encodeURIComponent(token) + "; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=" + Math.max(0, Math.floor(maxAgeSeconds)) + (secure ? "; Secure" : "");
+  reply.header("Set-Cookie", cookie);
+}
+
+function clearRefreshCookie(reply: FastifyReply, secure: boolean): void {
+  reply.header("Set-Cookie", `${REFRESH_COOKIE}=; Path=/auth; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`);
+}
+
+async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
+  const body = (req.body || {}) as LoginRequestBody;
+  const email = String(body.email || "").trim().toLowerCase();
+  const password = String(body.password || "");
+  const deviceId = String(body.deviceId || "device-client").trim();
+  const mfaCode = String(body.mfaCode || "").trim();
+  const rememberMe = Boolean(body.rememberMe);
+  const config = loadConfig();
+  const ip = clientAddress(req);
+  if (!email || !password) {
+    reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "email and password are required" } });
+    return;
+  }
+
+  const keys = throttleKeys(email, ip, deviceId);
+  if (await isLoginThrottled(keys)) {
+    reply.status(429).send({ success: false, error: { code: "LOGIN_THROTTLED", message: "Too many authentication attempts. Try again later." } });
+    return;
+  }
+
+  let user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+  if (!user && !isProductionEnv(config)) {
+    // In dev / non-prod mode, auto-provision user in Prisma so that subsequent logins permanently persist
+    try {
+      const baseSlug = (email.split("@")[0] || "tenant").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 32);
+      let tenant = await prisma.tenant.findFirst({
+        where: { OR: [{ slug: baseSlug }, { name: `${email.split("@")[0]} Organization` }] },
+        include: { branches: true },
+      });
+      if (!tenant) {
+        const { randomUUID } = await import("crypto");
+        const newTenantId = randomUUID();
+        const newBranchId = randomUUID();
+        tenant = await prisma.tenant.create({
+          data: {
+            id: newTenantId,
+            name: `${email.split("@")[0]} Organization`,
+            slug: baseSlug + "-" + newTenantId.slice(0, 6),
+            status: "ACTIVE",
+            branches: {
+              create: {
+                id: newBranchId,
+                name: "Main Branch",
+                code: "MAIN-" + newTenantId.slice(0, 6).toUpperCase(),
+                isMain: true,
+              },
+            },
+          },
+          include: { branches: true },
+        });
+      }
+      const branchId = tenant.branches[0]?.id;
+      let role = await prisma.role.findFirst({ where: { tenantId: tenant.id, name: "ADMIN" } });
+      if (!role) {
+        role = await prisma.role.create({
+          data: { tenantId: tenant.id, name: "ADMIN", permissions: ["*"] },
+        });
+      }
+      const passwordHash = await hashPassword(password);
+      const { randomUUID } = await import("crypto");
+      await prisma.user.create({
+        data: {
+          id: randomUUID(),
+          email,
+          name: email.split("@")[0] || "Admin User",
+          passwordHash,
+          tenantId: tenant.id,
+          branchId,
+          roleId: role.id,
+          status: "ACTIVE",
+        },
+      });
+      user = (await prisma.user.findMany({ where: { email, status: "ACTIVE" }, include: { tenant: true, branch: true, role: true }, take: 1 }))[0];
+    } catch {
+      // ignore auto-provision failure, will fall through to standard 401
+    }
+  }
+
+  const passwordValid = !!user && await comparePassword(password, user.passwordHash);
+  if (!passwordValid) {
+    await recordLoginFailure(keys);
+    if (user) {
+      const roleName = String(user.role?.name || "").toUpperCase();
+      if (roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN") {
+        await ensureSuperAdminSecurity(user.id);
+        await recordSuperAdminFailure(user.id);
+        await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOGIN_FAILURE", outcome: "FAILURE", metadata: { ip, reason: "INVALID_PASSWORD" } });
+      }
+    }
+    reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid email or password" } });
+    return;
+  }
+
+  const roleName = String(user.role?.name || "ADMIN").toUpperCase();
+  const superAdminState = await getSuperAdminSecurity(user.id);
+  const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN" || !!superAdminState;
+  if (isSuperAdmin) {
+    await ensureSuperAdminSecurity(user.id);
+    const state = await getSuperAdminSecurity(user.id);
+    if (!state) {
+      reply.status(500).send({ success: false, error: { code: "SECURITY_CONFIGURATION_ERROR", message: "Super Admin security state unavailable" } });
+      return;
+    }
+    if (state.lockedUntil && state.lockedUntil > new Date()) {
+      await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOCKED_ACCESS_ATTEMPT", outcome: "DENIED", metadata: { ip } });
+      reply.status(429).send({ success: false, error: { code: "SUPER_ADMIN_LOCKED", message: "Super Admin access is temporarily locked." } });
+      return;
+    }
+    if (state.mustChangePassword || !state.mfaEnrolled) {
+      reply.status(428).send({ success: false, error: { code: "SUPER_ADMIN_SETUP_REQUIRED", message: "Super Admin security setup is required before a normal session can be issued." }, data: { setupToken: issueSetupToken(user.id), passwordChangeRequired: state.mustChangePassword, mfaRequired: state.mfaRequired, mfaEnrolled: state.mfaEnrolled } });
+      return;
+    }
+    if (!(await verifySuperAdminMfa(user.id, mfaCode))) {
+      await recordLoginFailure(keys);
+      await recordSuperAdminFailure(user.id);
+      await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_MFA_FAILURE", outcome: "FAILURE", metadata: { ip } });
+      reply.status(401).send({ success: false, error: { code: "MFA_REQUIRED", message: "Valid Super Admin MFA code is required." } });
+      return;
+    }
+  }
+
+  await clearLoginFailures(keys);
+  if (user && passwordNeedsRehash(user.passwordHash)) {
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } });
+  }
+  if (isSuperAdmin) {
+    await clearSuperAdminFailureState(user.id);
+    await logSuperAdminAuditEvent({ userId: user.id, deviceId, action: "SUPER_ADMIN_LOGIN_SUCCESS", outcome: "SUCCESS", metadata: { ip } });
+  }
+
+  const roles = [String(user.role?.name || "ADMIN")];
+  const permissions = Array.isArray(user.role?.permissions) ? user.role.permissions.map((value) => String(value)) : [];
+  const effectiveSettings = await globalSettingsService.getEffectiveSettings({
+    tenantId: user.tenantId,
+    branchId: user.branchId,
+    userId: user.id,
+    roles,
+    permissions,
+  } as any);
+  const policy = sessionPolicyFromSettings((effectiveSettings["security.config"]?.value || {}) as Record<string, unknown>);
+  const now = new Date();
+  const permissionsVersion = Math.floor(new Date(user.role?.updatedAt || now).getTime() / 1000);
+  const tenantRecord = await prisma.tenant.findUnique({ where: { id: user.tenantId } });
+  const tenantVersion = Math.floor(new Date(tenantRecord?.updatedAt || now).getTime() / 1000);
+
+  const activeSessions = await prisma.deviceSession.findMany({
+    where: { tenantId: user.tenantId, userId: user.id, revokedAt: null, status: "ACTIVE", expiresAt: { gt: now } },
+    orderBy: { lastActivityAt: "asc" },
+  });
+  if (!policy.allowMultipleDevices || policy.singleDeviceLogin) {
+    await prisma.deviceSession.updateMany({
+      where: { tenantId: user.tenantId, userId: user.id, deviceId: { not: deviceId }, revokedAt: null },
+      data: { revokedAt: now, status: "REVOKED", revokeReason: "SINGLE_DEVICE_LOGIN" },
+    });
+  }
+  const eligibleForLimit = activeSessions.filter((s) => !(s.deviceId !== deviceId && (!policy.allowMultipleDevices || policy.singleDeviceLogin)));
+  if (eligibleForLimit.length >= policy.maxConcurrentSessions) {
+    const toRevoke = eligibleForLimit.slice(0, eligibleForLimit.length - policy.maxConcurrentSessions + 1);
+    if (toRevoke.length) {
+      await prisma.deviceSession.updateMany({
+        where: { id: { in: toRevoke.map((s) => s.id) } },
+        data: { revokedAt: now, status: "REVOKED", revokeReason: "CONCURRENT_SESSION_LIMIT" },
+      });
+    }
+  }
+
+  const existingDevice = await prisma.device.findUnique({ where: { deviceId } });
+  if (existingDevice && (existingDevice.tenantId !== user.tenantId || existingDevice.userId !== user.id)) {
+    reply.status(409).send({ success: false, error: { code: "DEVICE_ID_CONFLICT", message: "This device identity is already associated with another account." } });
+    return;
+  }
+  await prisma.device.upsert({
+    where: { deviceId },
+    create: { id: randomUUID(), deviceId, tenantId: user.tenantId, userId: user.id, platform: requestPlatform(req), browser: requestUserAgent(req), lastSeenAt: now, status: "ACTIVE" },
+    update: { platform: requestPlatform(req), browser: requestUserAgent(req), lastSeenAt: now, status: "ACTIVE", revokedAt: null, revokeReason: null },
+  });
+
+  const session = await globalSessionManager.createSession({
+    tenantId: user.tenantId,
+    userId: user.id,
+    branchId: user.branchId,
+    deviceId,
+    permissionsVersion,
+    tenantVersion,
+    ipAddress: ip,
+    userAgent: requestUserAgent(req),
+    platform: requestPlatform(req),
+    rememberMe,
+    idleTimeoutMs: policy.idleTimeoutMs,
+    absoluteLifetimeMs: policy.absoluteTimeoutMs,
+    refreshTokenLifetimeMs: rememberMe ? policy.rememberMeDurationMs : policy.refreshTokenDurationMs,
+  });
+  const payload = { sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, roles, permissions, deviceId, sessionId: session.sessionId, permissionsVersion, tenantVersion };
+  const accessToken = generateAccessToken(payload);
+  setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - now.getTime()) / 1000);
+  await recordSessionAudit({
+    tenantId: user.tenantId,
+    branchId: user.branchId,
+    userId: user.id,
+    deviceId,
+    sessionId: session.sessionId,
+    action: "SESSION_STARTED",
+    ipAddress: ip,
+    userAgent: requestUserAgent(req),
+    metadata: { rememberMe, policy: sessionPolicyToMinutes(policy) },
+  });
+  reply.send({ success: true, data: {
+    accessToken,
+    sessionId: session.sessionId,
+    user: { id: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email, name: user.name, role: roles[0] },
+    session: { status: "AUTHENTICATED_ONLINE", expiresAt: session.expiresAt.toISOString(), refreshTokenExpiresAt: session.refreshTokenExpiresAt.toISOString(), policy: { ...sessionPolicyToMinutes(policy), rememberMe } },
+  } });
+}
+
+function registerCanonicalProductionAuthentication(
+  server: FastifyInstance,
+  config: ReturnType<typeof loadConfig>,
+  productionPersistence: boolean,
+): void {
+  if (productionPersistence) {
+    configurePersistentSessions();
+    requireSecuritySecrets();
+  }
+  const secureCookies = isProductionEnv(config);
+
+    server.addHook("preValidation", async (req, reply) => {
+      if (!productionPersistence) return;
+      const routePath = req.url.split("?")[0];
+  
+      if (routePath === "/auth/login" && req.method === "POST") {
+        await handleProductionLogin(req, reply);
+        return;
+      }
+  
+      if (routePath === "/auth/super-admin/setup/start" && req.method === "POST") {
+        const body = (req.body || {}) as SuperAdminSetupStartBody;
+        try {
+          const data = await beginSuperAdminSetup(String(body.setupToken || ""));
+          reply.send({ success: true, data });
+        } catch {
+          reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
+        }
+        return;
+      }
+  
+      if (routePath === "/auth/super-admin/setup/complete" && req.method === "POST") {
+        const body = (req.body || {}) as SuperAdminSetupBody;
+        const setupToken = String(body.setupToken || "");
+        const newPassword = String(body.newPassword || "");
+        const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
+        const totpCode = String(body.totpCode || "");
+        if (!setupToken || !newPassword || !totpSecret || !totpCode) {
+          reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
+          return;
+        }
+        try {
+          await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
+          reply.send({ success: true, data: { completed: true } });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
+          reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
+        }
+        return;
+      }
+  
+      if (routePath === "/auth/super-admin/step-up" && req.method === "POST") {
+        const body = (req.body || {}) as StepUpRequestBody;
+        const password = String(body.password || "");
+        const mfaCode = String(body.mfaCode || "");
+        const action = String(body.action || "DESTRUCTIVE_OPERATION");
+        const deviceId = String(body.deviceId || "system");
+        
+        const authHeader = String(req.headers.authorization || "");
+        const token = authHeader.replace(/^Bearer\s+/i, "");
+        if (!token) {
+          reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Bearer token required for step-up authentication" } });
+          return;
+        }
+  
+        try {
+          const ctx = verifyAccessToken(token);
+          const userId = (ctx as any).userId || ctx.sub;
+          const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+          const roleName = String(user?.role?.name || "").toUpperCase();
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP"]);
+          if (!allowedStepUpActions.has(action)) {
+            reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
+            return;
+          }
+          if (!user || user.status !== "ACTIVE" || !["SUPER_ADMIN", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(roleName) || !(await comparePassword(password, user.passwordHash))) {
+            await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
+            reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
+            return;
+          }
+  
+          const mfaValid = await verifySuperAdminMfa(userId, mfaCode);
+          if (!mfaValid) {
+            await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_MFA_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
+            reply.status(401).send({ success: false, error: { code: "MFA_REQUIRED", message: "Valid MFA code required for step-up authentication" } });
+            return;
+          }
+  
+          const stepUpToken = issueStepUpToken(userId, action);
+          await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_SUCCESS", outcome: "SUCCESS", metadata: { targetAction: action } });
+          reply.send({ success: true, data: { stepUpToken, expiresAt: new Date(Date.now() + 300 * 1000).toISOString() } });
+        } catch {
+          reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid access token" } });
+        }
+        return;
+      }
+  
+      if (routePath === "/auth/super-admin/revoke-sessions" && req.method === "POST") {
+        const authHeader = String(req.headers.authorization || "");
+        const token = authHeader.replace(/^Bearer\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const userId = (ctx as any).userId || ctx.sub;
+          const count = await revokeAllSuperAdminSessions(userId);
+          await logSuperAdminAuditEvent({ userId, action: "SESSIONS_REVOKED", outcome: "SUCCESS", metadata: { revokedCount: count } });
+          reply.send({ success: true, data: { revokedCount: count } });
+        } catch {
+          reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid access token" } });
+        }
+        return;
+      }
+  
+      if (routePath === "/auth/session/event" && req.method === "POST") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const event = String((req.body as any)?.event || "").toUpperCase();
+          const allowed = new Set(["SESSION_WARNING_SHOWN", "SESSION_RESTORED", "SESSION_REFRESHED", "SESSION_LOGOUT", "SESSION_TIMEOUT", "SESSION_REVOKED"]);
+          if (!allowed.has(event)) return reply.status(400).send({ success: false, error: { code: "INVALID_SESSION_EVENT", message: "Unsupported session event." } });
+          if (!ctx.sessionId) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Session required." } });
+          const validation = await globalSessionManager.validateSession(ctx.sessionId, {
+            tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, deviceId: ctx.deviceId, activity: false,
+          });
+          if (!validation.valid || !validation.session) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Session is not valid." } });
+          await recordSessionAudit({
+            tenantId: ctx.tenantId,
+            branchId: ctx.branchId,
+            userId: ctx.sub,
+            deviceId: ctx.deviceId,
+            sessionId: ctx.sessionId,
+            action: event,
+            ipAddress: clientAddress(req),
+            userAgent: requestUserAgent(req),
+            metadata: (req.body as any)?.metadata || undefined,
+          });
+          return reply.send({ success: true });
+        } catch {
+          return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } });
+        }
+      }
+  
+      if (routePath === "/auth/session" || routePath === "/auth/session/validate" || routePath === "/auth/session/heartbeat") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const sessionId = String(ctx.sessionId || "");
+          if (!sessionId) throw new Error("UNAUTHORIZED");
+          const validation = await globalSessionManager.validateSession(sessionId, {
+            tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, deviceId: ctx.deviceId,
+            activity: routePath.endsWith("heartbeat"),
+          });
+          if (!validation.valid || !validation.session) {
+            const code = validation.code === "SESSION_EXPIRED" ? "SESSION_EXPIRED" : validation.code === "SESSION_REVOKED" ? "SESSION_REVOKED" : "AUTH_REQUIRED";
+            clearRefreshCookie(reply, secureCookies);
+            return reply.status(401).send({ success: false, error: { code, message: code === "SESSION_EXPIRED" ? "Session expired." : "Authentication required." } });
+          }
+          const user = await prisma.user.findFirst({ where: { id: ctx.sub, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" }, include: { role: true, tenant: true } });
+          if (!user) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } });
+          const effective = await globalSettingsService.getEffectiveSettings({ tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, roles: ctx.roles, permissions: ctx.permissions } as any);
+          const policy = sessionPolicyFromSettings((effective["security.config"]?.value || {}) as Record<string, unknown>);
+          const idleRemainingMs = Math.max(0, validation.session.lastActivityAt.getTime() + policy.idleTimeoutMs - Date.now());
+          if (idleRemainingMs <= 0) {
+            await globalSessionManager.revokeSession(sessionId, "SESSION_TIMEOUT");
+            await recordSessionAudit({ tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.sub, deviceId: ctx.deviceId, sessionId, action: "SESSION_TIMEOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
+            clearRefreshCookie(reply, secureCookies);
+            return reply.status(401).send({ success: false, error: { code: "SESSION_EXPIRED", message: "Session expired due to inactivity." } });
+          }
+          await prisma.device.updateMany({ where: { deviceId: ctx.deviceId, tenantId: ctx.tenantId, userId: ctx.sub }, data: { lastSeenAt: new Date(), status: "ACTIVE" } });
+          return reply.send({ success: true, data: {
+            status: validation.session.status,
+            sessionId,
+            deviceId: ctx.deviceId,
+            serverTime: new Date().toISOString(),
+            lastActivityAt: validation.session.lastActivityAt.toISOString(),
+            expiresAt: validation.session.expiresAt.toISOString(),
+            refreshTokenExpiresAt: validation.session.refreshTokenExpiresAt.toISOString(),
+            permissionsVersion: Math.floor(new Date(user.role?.updatedAt || new Date()).getTime() / 1000),
+            tenantVersion: Math.floor(new Date(user.tenant?.updatedAt || new Date()).getTime() / 1000),
+            policy: sessionPolicyToMinutes(policy),
+            idleRemainingMs,
+          } });
+        } catch {
+          return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } });
+        }
+      }
+  
+      if (routePath === "/auth/sessions" && req.method === "GET") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const rows = await prisma.deviceSession.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastActivityAt: "desc" }, select: { id: true, deviceId: true, branchId: true, createdAt: true, lastActivityAt: true, lastValidatedAt: true, expiresAt: true, refreshTokenExpiresAt: true, revokedAt: true, revokeReason: true, status: true, rememberMe: true, ipAddress: true, userAgent: true, platform: true } });
+          return reply.send({ success: true, data: rows });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath.startsWith("/auth/sessions/") && routePath.endsWith("/revoke") && req.method === "POST") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const sessionId = routePath.split("/")[3];
+        try {
+          const ctx = verifyAccessToken(token);
+          const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+          if (!target || target.tenantId !== ctx.tenantId || target.userId !== ctx.sub) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Session not found." } });
+          await globalSessionManager.revokeSession(sessionId, "DEVICE_SESSION_REVOKED");
+          await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: "SESSION_REVOKED", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
+          return reply.send({ success: true, data: { revoked: true, sessionId } });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath === "/auth/sessions/revoke-all" && req.method === "POST") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const count = await globalSessionManager.revokeAllUserSessions(ctx.tenantId, ctx.sub, "REVOKE_ALL");
+          return reply.send({ success: true, data: { revokedCount: count } });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath === "/auth/device/register" && req.method === "POST") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const now = new Date();
+          const existing = await prisma.device.findUnique({ where: { deviceId: ctx.deviceId } });
+          if (existing && (existing.tenantId !== ctx.tenantId || existing.userId !== ctx.sub)) return reply.status(409).send({ success: false, error: { code: "DEVICE_ID_CONFLICT", message: "Device identity conflict." } });
+          const device = await prisma.device.upsert({
+            where: { deviceId: ctx.deviceId },
+            create: { id: randomUUID(), deviceId: ctx.deviceId, tenantId: ctx.tenantId, userId: ctx.sub, platform: requestPlatform(req), browser: requestUserAgent(req), lastSeenAt: now, status: "ACTIVE" },
+            update: { platform: requestPlatform(req), browser: requestUserAgent(req), lastSeenAt: now, status: "ACTIVE", revokedAt: null, revokeReason: null },
+          });
+          return reply.send({ success: true, data: device });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath === "/auth/devices" && req.method === "GET") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        try {
+          const ctx = verifyAccessToken(token);
+          const devices = await prisma.device.findMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub }, orderBy: { lastSeenAt: "desc" } });
+          return reply.send({ success: true, data: devices });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath.startsWith("/auth/devices/") && routePath.endsWith("/revoke") && req.method === "POST") {
+        const token = String(req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+        const deviceId = routePath.split("/")[3];
+        try {
+          const ctx = verifyAccessToken(token);
+          const device = await prisma.device.findUnique({ where: { deviceId } });
+          if (!device || device.tenantId !== ctx.tenantId || device.userId !== ctx.sub) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Device not found." } });
+          const at = new Date();
+          await prisma.device.update({ where: { deviceId }, data: { revokedAt: at, status: "REVOKED", revokeReason: "DEVICE_REVOKED" } });
+          await prisma.deviceSession.updateMany({ where: { tenantId: ctx.tenantId, userId: ctx.sub, deviceId, revokedAt: null }, data: { revokedAt: at, status: "REVOKED", revokeReason: "DEVICE_REVOKED" } });
+          return reply.send({ success: true, data: { revoked: true, deviceId } });
+        } catch { return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required." } }); }
+      }
+  
+      if (routePath === "/auth/refresh" && req.method === "POST") {
+        const body = (req.body || {}) as RefreshRequestBody;
+        const sessionId = String(body.sessionId || "");
+        const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
+        if (!sessionId || !refreshToken) return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Refresh token required." } });
+  
+        const session = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+        if (!session || session.revokedAt || session.status !== "ACTIVE" || session.expiresAt <= new Date() || session.refreshTokenExpiresAt <= new Date()) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(401).send({ success: false, error: { code: session?.revokedAt ? "SESSION_REVOKED" : "SESSION_EXPIRED", message: "Invalid or expired session." } });
+        }
+        const user = await prisma.user.findFirst({ where: { id: session.userId, tenantId: session.tenantId, branchId: session.branchId, status: "ACTIVE" }, include: { role: true } });
+        if (!user) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } });
+        }
+        const rotated = await globalSessionManager.rotateRefreshToken(sessionId, refreshToken, {
+          sub: user.id, tenantId: user.tenantId, branchId: user.branchId, email: user.email,
+          roles: [String(user.role?.name || "ADMIN")],
+          permissions: Array.isArray(user.role?.permissions) ? user.role.permissions.map((v) => String(v)) : [],
+        });
+        if (!rotated) {
+          clearRefreshCookie(reply, secureCookies);
+          return reply.status(401).send({ success: false, error: { code: "TOKEN_INVALID", message: "Invalid or reused refresh token." } });
+        }
+        const updated = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+        const maxAge = updated ? (updated.refreshTokenExpiresAt.getTime() - Date.now()) / 1000 : DEFAULT_COOKIE_MAX_AGE_SECONDS;
+        setRefreshCookie(reply, rotated.refreshToken, secureCookies, maxAge);
+        await recordSessionAudit({ tenantId: user.tenantId, branchId: user.branchId, userId: user.id, deviceId: session.deviceId, sessionId, action: "SESSION_REFRESHED", ipAddress: clientAddress(req), userAgent: requestUserAgent(req) });
+        return reply.send({ success: true, data: { accessToken: rotated.accessToken, sessionId } });
+      }
+  
+      if (routePath === "/auth/logout" && req.method === "POST") {
+        const body = (req.body || {}) as LogoutRequestBody;
+        const sessionId = String(body.sessionId || "");
+        const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
+        if (sessionId) {
+          const target = await prisma.deviceSession.findUnique({ where: { id: sessionId } });
+          if (target) {
+            const revokeReason = reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "USER_LOGOUT";
+            await globalSessionManager.revokeSession(sessionId, revokeReason);
+            await recordSessionAudit({ tenantId: target.tenantId, branchId: target.branchId, userId: target.userId, deviceId: target.deviceId, sessionId, action: reason === "SESSION_TIMEOUT" ? "SESSION_TIMEOUT" : "SESSION_LOGOUT", ipAddress: clientAddress(req), userAgent: requestUserAgent(req), metadata: { reason } });
+          }
+        }
+        clearRefreshCookie(reply, secureCookies);
+        reply.send({ success: true, data: { loggedOut: true, reason } });
+      }
+    })
+
+  customerContactRoutes(server);
+
+  supportOperationsRoutes(server);
+    supportControlTowerRoutes(server);
+  
+    server.post("/auth/super-admin/setup/start", async (req, reply) => {
+      const body = (req.body || {}) as SuperAdminSetupStartBody;
+      try {
+        const data = await beginSuperAdminSetup(String(body.setupToken || ""));
+        return reply.send({ success: true, data });
+      } catch {
+        return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid or expired Super Admin setup token" } });
+      }
+    });
+  
+    server.post("/auth/super-admin/setup/complete", async (req, reply) => {
+      const body = (req.body || {}) as SuperAdminSetupBody;
+      const setupToken = String(body.setupToken || "");
+      const newPassword = String(body.newPassword || "");
+      const totpSecret = String(body.totpSecret || "").toUpperCase().replace(/\s+/g, "");
+      const totpCode = String(body.totpCode || "");
+      if (!setupToken || !newPassword || !totpSecret || !totpCode) {
+        return reply.status(400).send({ success: false, error: { code: "BAD_REQUEST", message: "setupToken, newPassword, totpSecret and totpCode are required" } });
+      }
+      try {
+        await completeSuperAdminSetup(setupToken, newPassword, totpSecret, totpCode);
+        return reply.send({ success: true, data: { completed: true } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to complete Super Admin setup";
+        return reply.status(400).send({ success: false, error: { code: "SETUP_FAILED", message } });
+      }
+    });
+  
+    let supportScheduler: { stop: () => void } | undefined;
+    if (productionPersistence && process.env.KWAKOPOS_DISABLE_SUPPORT_AUTOMATION !== "true") supportScheduler = startSupportAutomationScheduler();
+    server.addHook("onClose", async () => { supportScheduler?.stop(); });
+  
+;
 }
 
 export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
@@ -345,6 +1076,207 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // H-004 + H-006: Register rate-limiting and security headers middleware
   // Must be registered BEFORE route handlers to ensure all routes are protected.
   server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
+
+  // Canonical production authentication boundary + distributed tracing.
+  // Register this shared hook before every route so all protected production endpoints,
+  // including routes registered by modules, inherit the same JWT/session validation.
+  // Explicit public/authentication endpoints are allowlisted inside the hook.
+  server.addHook("onRequest", async (req, reply) => {
+    req.startTime = Date.now();
+    const correlationId = (req.headers["x-correlation-id"] as string) || randomUUID();
+    const traceId = (req.headers["x-trace-id"] as string) || randomUUID().replace(/-/g, "");
+    const spanId = (req.headers["x-span-id"] as string) || randomUUID().slice(0, 16);
+
+    reply.header("x-correlation-id", correlationId);
+    reply.header("x-trace-id", traceId);
+    reply.header("x-span-id", spanId);
+
+    req.traceContext = createTraceContext({
+      requestId: correlationId,
+      traceId,
+      spanId,
+      appVersion: config.APP_VERSION || "2.1.0",
+      cloudRunRevision: config.CLOUD_RUN_REVISION || "kwakopos-production-service",
+      environment: config.NODE_ENV,
+    });
+
+    if (req.url === "/api/v1/commercial/portfolio") {
+      req.raw.url = "/api/v1/commercial/summary";
+    }
+
+    const url = req.routeOptions?.url || req.url.split("?")[0];
+
+    // Dedicated API System & Telemetry Routes (pass through to Fastify API handlers)
+    if (
+      url === "/health" ||
+      url === "/readiness" ||
+      url === "/version" ||
+      url === "/api/system/version" ||
+      url === "/auth/login" ||
+      url === "/auth/refresh" ||
+      url === "/auth/logout" ||
+      url.startsWith("/auth/super-admin/setup/") ||
+      url.startsWith("/telemetry") ||
+      url.startsWith("/api/legal/documents") ||
+      url === "/api/legal/subprocessors" ||
+      url === "/api/legal/oss-notices" ||
+      url === "/api/legal/cookies" ||
+      url === "/api/legal/mock-accept" ||
+      url.startsWith("/api/test/legal/")
+    ) {
+      return;
+    }
+
+    // Static Asset Resolution (serving /assets/*, /fonts/*, /brand/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist/public)
+    if (
+      url.startsWith("/assets/") ||
+      url.startsWith("/fonts/") ||
+      url.startsWith("/brand/") ||
+      url === "/manifest.json" ||
+      url === "/sw.js" ||
+      url === "/favicon.ico" ||
+      url === "/robots.txt" ||
+      url === "/asset-manifest.json" ||
+      url === "/release-manifest.json" ||
+      url === "/kwakopos-logo.png"
+    ) {
+      const relativePath = url.startsWith("/") ? url.slice(1) : url;
+      const assetPath = resolveWebDistFile(relativePath);
+      if (assetPath && fs.existsSync(assetPath)) {
+        reply.type(getMimeType(assetPath)).send(fs.readFileSync(assetPath));
+        return;
+      }
+    }
+
+    // Web PWA SPA Fallback Routing for browser navigation paths
+    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/") || url.startsWith("/sync/");
+    if (!isExplicitApiPrefix && req.method === "GET") {
+      const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
+      const isWebRoute = [
+        "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
+        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
+        "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
+        "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
+      ].includes(url) || isHtmlRequest;
+
+      if (isWebRoute) {
+        const indexPath = resolveWebDistFile("index.html");
+        if (indexPath && fs.existsSync(indexPath)) {
+          reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
+          return;
+        }
+      }
+    }
+
+    const shouldEnforceLegalGate = (userId: string) => process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE !== "true" || userId.toLowerCase().includes("legal");
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      // In production environments, test headers MUST NOT bypass authentication
+      if (!isProductionEnv(config)) {
+        const testTenantId = req.headers["x-tenant-id"] as string;
+        const testBranchId = req.headers["x-branch-id"] as string;
+        const testUserId = req.headers["x-user-id"] as string;
+        if (testTenantId && testBranchId && testUserId) {
+          const isSuperAdmin =
+            testUserId.toLowerCase().includes("super") ||
+            testUserId.toLowerCase().includes("admin") ||
+            req.headers["x-role"] === "SUPER_ADMIN" ||
+            req.headers["x-role"] === "SUPERADMIN";
+          req.tenantContext = {
+            tenantId: testTenantId,
+            branchId: testBranchId,
+            userId: testUserId,
+            roles: isSuperAdmin ? ["ADMIN", "SUPER_ADMIN"] : ["ADMIN"],
+            permissions: ["*", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
+          };
+          if (req.traceContext) {
+            req.traceContext.tenantId = testTenantId;
+            req.traceContext.branchId = testBranchId;
+            req.traceContext.userId = testUserId;
+          }
+          const authenticatedPath = req.url.split("?")[0];
+          if (authenticatedPath.startsWith("/admin/")) {
+            requireAdminContext(req);
+          }
+          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+            if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
+              globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
+            }
+            const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
+            if (!legalStatus.isCompliant && shouldEnforceLegalGate(testUserId)) {
+              return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+            }
+          }
+          return;
+        }
+      }
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization header" } });
+    }
+
+    const token = authHeader.substring(7);
+    try {
+      const payload = verifyAccessToken(token);
+      if (payload.sessionId) {
+        const validation = await globalSessionManager.validateSession(payload.sessionId, {
+          tenantId: payload.tenantId,
+          branchId: payload.branchId,
+          userId: payload.sub,
+          deviceId: payload.deviceId,
+          activity: false,
+        });
+        if (!validation.valid) {
+          const code = validation.code === "SESSION_REVOKED"
+            ? "SESSION_REVOKED"
+            : validation.code === "SESSION_EXPIRED"
+              ? "SESSION_EXPIRED"
+              : validation.code === "DEVICE_MISMATCH"
+                ? "DEVICE_REVOKED"
+                : validation.code === "TENANT_MISMATCH" || validation.code === "BRANCH_MISMATCH"
+                  ? "TENANT_ACCESS_REVOKED"
+                  : "AUTH_REQUIRED";
+          return reply.status(401).send({ success: false, error: { code, message: "Server session validation failed." } });
+        }
+      }
+      req.tenantContext = extractTenantContext(payload);
+      if (req.traceContext) {
+        req.traceContext.tenantId = payload.tenantId;
+        req.traceContext.branchId = payload.branchId;
+        req.traceContext.userId = payload.sub;
+        req.traceContext.deviceId = payload.deviceId;
+      }
+      const authenticatedPath = req.url.split("?")[0];
+      if (authenticatedPath.startsWith("/admin/")) {
+        requireAdminContext(req);
+      }
+      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
+        if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
+          globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
+        }
+        const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
+        if (!legalStatus.isCompliant && shouldEnforceLegalGate(payload.sub)) {
+          return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
+        }
+      }
+      const platformReleasePath =
+        authenticatedPath.startsWith("/api/admin/releases/") ||
+        authenticatedPath.startsWith("/admin/operations/production") ||
+        authenticatedPath.startsWith("/admin/operations/releases") ||
+        authenticatedPath.startsWith("/admin/operations/canary/") ||
+        authenticatedPath.startsWith("/admin/operations/rollback");
+      if (platformReleasePath) {
+        requireSuperAdminContext(req);
+      }
+    } catch (err: any) {
+      const message = err?.message || "Invalid token";
+      if (message.startsWith("FORBIDDEN")) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message } });
+      }
+      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
+    }
+  });
+
+
 
   // H-025: Graceful SIGTERM shutdown — drain in-flight requests before exit
   const gracefulShutdown = async (signal: string) => {
@@ -467,12 +1399,21 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       )
         return [404, "NOT_FOUND", "Resource not found."];
 
-      // Duplicate / already-exists → 409.
+      // Optimistic-concurrency preconditions → 428.
+      // This keeps clients from bypassing the lost-update guard by omitting _baseUpdatedAt.
+      if (code.includes("SYNC_PRECONDITION_REQUIRED") || msg.includes("SYNC_PRECONDITION_REQUIRED"))
+        return [428, "PRECONDITION_REQUIRED", "A fresh concurrency precondition is required."];
+
+      // Duplicate / already-exists / conflict-state errors → 409.
       if (
         code.includes("DUPLICATE") ||
         code.includes("EXISTS") ||
+        code.includes("SYNC_CONFLICT_") ||
         msg.includes("DUPLICATE") ||
         msg.includes("EXISTS") ||
+        msg.includes("SYNC_CONFLICT_CHANGED_SINCE_DETECTION") ||
+        msg.includes("SYNC_CONFLICT_ID_REUSE") ||
+        msg.includes("SYNC_CONFLICT_ID_INVALID") ||
         msg.toLowerCase().includes("already")
       )
         return [409, "CONFLICT", "Resource already exists."];
@@ -480,6 +1421,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       // Financial constraint violations → 409.
       if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
         return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
+
+      // Customer / contact / financial business rules → 400.
+      if ([
+        "CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE",
+        "PAYMENT_EXCEEDS_CUSTOMER_BALANCE",
+        "CASH_SESSION_REQUIRED",
+        "CASH_SESSION_INVALID",
+        "CUSTOMER_NOT_FOUND",
+        "CONTACT_NOT_FOUND",
+        "CONTACT_CUSTOMER_REQUIRED",
+        "SUPPLIER_NOT_FOUND",
+        "PAYMENT_AMOUNT_REQUIRED",
+        "PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED",
+        "PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE",
+      ].includes(code) || msg.toLowerCase().includes("customer_delete_blocked") || msg.toLowerCase().includes("payment_exceeds_customer_balance"))
+        return [400, "BAD_REQUEST", "A customer, contact, or financial business rule was violated."];
 
       // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
       if (
@@ -516,202 +1473,6 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         requestId,
       },
     });
-  });
-
-  // Distributed Tracing & Correlation Hook
-  server.addHook("onRequest", async (req, reply) => {
-    req.startTime = Date.now();
-    const correlationId = (req.headers["x-correlation-id"] as string) || randomUUID();
-    const traceId = (req.headers["x-trace-id"] as string) || randomUUID().replace(/-/g, "");
-    const spanId = (req.headers["x-span-id"] as string) || randomUUID().slice(0, 16);
-
-    reply.header("x-correlation-id", correlationId);
-    reply.header("x-trace-id", traceId);
-    reply.header("x-span-id", spanId);
-
-    req.traceContext = createTraceContext({
-      requestId: correlationId,
-      traceId,
-      spanId,
-      appVersion: config.APP_VERSION || "2.1.0",
-      cloudRunRevision: config.CLOUD_RUN_REVISION || "kwakopos-production-service",
-      environment: config.NODE_ENV,
-    });
-
-    if (req.url === "/api/v1/commercial/portfolio") {
-      req.raw.url = "/api/v1/commercial/summary";
-    }
-
-    const url = req.routeOptions?.url || req.url.split("?")[0];
-
-    // Dedicated API System & Telemetry Routes (pass through to Fastify API handlers)
-    if (
-      url === "/health" ||
-      url === "/readiness" ||
-      url === "/version" ||
-      url === "/api/system/version" ||
-      url === "/auth/login" ||
-      url === "/auth/refresh" ||
-      url === "/auth/logout" ||
-      url.startsWith("/auth/super-admin/setup/") ||
-      url.startsWith("/telemetry") ||
-      url.startsWith("/api/legal/documents") ||
-      url === "/api/legal/subprocessors" ||
-      url === "/api/legal/oss-notices" ||
-      url === "/api/legal/cookies" ||
-      url === "/api/legal/mock-accept" ||
-      url.startsWith("/api/test/legal/")
-    ) {
-      return;
-    }
-
-    // Static Asset Resolution (serving /assets/*, /fonts/*, /brand/*, /manifest.json, /sw.js, /favicon.ico, etc. from web dist/public)
-    if (
-      url.startsWith("/assets/") ||
-      url.startsWith("/fonts/") ||
-      url.startsWith("/brand/") ||
-      url === "/manifest.json" ||
-      url === "/sw.js" ||
-      url === "/favicon.ico" ||
-      url === "/robots.txt" ||
-      url === "/asset-manifest.json" ||
-      url === "/release-manifest.json" ||
-      url === "/kwakopos-logo.png"
-    ) {
-      const relativePath = url.startsWith("/") ? url.slice(1) : url;
-      const assetPath = resolveWebDistFile(relativePath);
-      if (assetPath && fs.existsSync(assetPath)) {
-        reply.type(getMimeType(assetPath)).send(fs.readFileSync(assetPath));
-        return;
-      }
-    }
-
-    // Web PWA SPA Fallback Routing for browser navigation paths
-    const isExplicitApiPrefix = url.startsWith("/api/") || url.startsWith("/auth/") || url.startsWith("/admin/") || url.startsWith("/sync/");
-    if (!isExplicitApiPrefix && req.method === "GET") {
-      const isHtmlRequest = Boolean(req.headers.accept && req.headers.accept.includes("text/html"));
-      const isWebRoute = [
-        "/", "/login", "/dashboard", "/pos", "/inventory", "/customers", "/reports",
-        "/settings", "/super-admin", "/diagnostics", "/purchasing", "/finance", "/users",
-        "/expenses", "/ai", "/cash-drawer", "/receipts", "/trash", "/law-firm", "/pharmacy",
-        "/poultry-livestock", "/fleet", "/workforce", "/telecom", "/help"
-      ].includes(url) || isHtmlRequest;
-
-      if (isWebRoute) {
-        const indexPath = resolveWebDistFile("index.html");
-        if (indexPath && fs.existsSync(indexPath)) {
-          reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8"));
-          return;
-        }
-      }
-    }
-
-    const shouldEnforceLegalGate = (userId: string) => process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE !== "true" || userId.toLowerCase().includes("legal");
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      // In production environments, test headers MUST NOT bypass authentication
-      if (!isProductionEnv(config)) {
-        const testTenantId = req.headers["x-tenant-id"] as string;
-        const testBranchId = req.headers["x-branch-id"] as string;
-        const testUserId = req.headers["x-user-id"] as string;
-        if (testTenantId && testBranchId && testUserId) {
-          const isSuperAdmin =
-            testUserId.toLowerCase().includes("super") ||
-            testUserId.toLowerCase().includes("admin") ||
-            req.headers["x-role"] === "SUPER_ADMIN" ||
-            req.headers["x-role"] === "SUPERADMIN";
-          req.tenantContext = {
-            tenantId: testTenantId,
-            branchId: testBranchId,
-            userId: testUserId,
-            roles: isSuperAdmin ? ["ADMIN", "SUPER_ADMIN"] : ["ADMIN"],
-            permissions: ["*", "SUPER_ADMIN_OPERATIONS", "ADMIN:PLATFORM"],
-          };
-          if (req.traceContext) {
-            req.traceContext.tenantId = testTenantId;
-            req.traceContext.branchId = testBranchId;
-            req.traceContext.userId = testUserId;
-          }
-          const authenticatedPath = req.url.split("?")[0];
-          if (authenticatedPath.startsWith("/admin/")) {
-            requireAdminContext(req);
-          }
-          if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-            if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
-              globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
-            }
-            const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
-            if (!legalStatus.isCompliant && shouldEnforceLegalGate(testUserId)) {
-              return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
-            }
-          }
-          return;
-        }
-      }
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid authorization header" } });
-    }
-
-    const token = authHeader.substring(7);
-    try {
-      const payload = verifyAccessToken(token);
-      if (payload.sessionId) {
-        const validation = await globalSessionManager.validateSession(payload.sessionId, {
-          tenantId: payload.tenantId,
-          branchId: payload.branchId,
-          userId: payload.sub,
-          deviceId: payload.deviceId,
-          activity: false,
-        });
-        if (!validation.valid) {
-          const code = validation.code === "SESSION_REVOKED"
-            ? "SESSION_REVOKED"
-            : validation.code === "SESSION_EXPIRED"
-              ? "SESSION_EXPIRED"
-              : validation.code === "DEVICE_MISMATCH"
-                ? "DEVICE_REVOKED"
-                : validation.code === "TENANT_MISMATCH" || validation.code === "BRANCH_MISMATCH"
-                  ? "TENANT_ACCESS_REVOKED"
-                  : "AUTH_REQUIRED";
-          return reply.status(401).send({ success: false, error: { code, message: "Server session validation failed." } });
-        }
-      }
-      req.tenantContext = extractTenantContext(payload);
-      if (req.traceContext) {
-        req.traceContext.tenantId = payload.tenantId;
-        req.traceContext.branchId = payload.branchId;
-        req.traceContext.userId = payload.sub;
-        req.traceContext.deviceId = payload.deviceId;
-      }
-      const authenticatedPath = req.url.split("?")[0];
-      if (authenticatedPath.startsWith("/admin/")) {
-        requireAdminContext(req);
-      }
-      if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-        if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
-          globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
-        }
-        const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
-        if (!legalStatus.isCompliant && shouldEnforceLegalGate(payload.sub)) {
-          return reply.status(403).send({ success: false, error: { code: "LEGAL_ACCEPTANCE_REQUIRED", message: "Mandatory statutory legal acceptance is required before accessing the workspace.", requiredDocuments: legalStatus.requiredDocuments } });
-        }
-      }
-      const platformReleasePath =
-        authenticatedPath.startsWith("/api/admin/releases/") ||
-        authenticatedPath.startsWith("/admin/operations/production") ||
-        authenticatedPath.startsWith("/admin/operations/releases") ||
-        authenticatedPath.startsWith("/admin/operations/canary/") ||
-        authenticatedPath.startsWith("/admin/operations/rollback");
-      if (platformReleasePath) {
-        requireSuperAdminContext(req);
-      }
-    } catch (err: any) {
-      const message = err?.message || "Invalid token";
-      if (message.startsWith("FORBIDDEN")) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message } });
-      }
-      return reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message } });
-    }
   });
 
   server.addHook("onResponse", async (req, reply) => {
@@ -1199,7 +1960,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       userRole = record.role;
     }
 
-    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+    if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
@@ -1215,11 +1976,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const accessToken = generateAccessToken(tokenPayload);
     const session = await globalSessionManager.createSession({ tenantId, userId, branchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
+    setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
     return reply.send({
       success: true,
       data: {
         accessToken,
-        refreshToken: session.refreshToken,
         sessionId: session.sessionId,
         user: {
           id: userId,
@@ -1242,9 +2003,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // Refresh token rotation. The refresh token is mandatory; session identity alone
   // must never mint a new access token.
   server.post("/auth/refresh", { config: { rateLimit: { max: 30, timeWindow: "15 minutes" } } }, async (req, reply) => {
-    const { sessionId, refreshToken } = (req.body as any) || {};
-    if (!sessionId || !refreshToken) {
-      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "sessionId and refreshToken are required" } });
+    const { sessionId } = (req.body as RefreshRequestBody) || {};
+    const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
+    if (!sessionId) {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "sessionId is required" } });
+    }
+    if (!refreshToken) {
+      return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Refresh cookie required" } });
     }
     try {
       const validation = await globalSessionManager.validateSession(String(sessionId), { activity: false });
@@ -1270,7 +2035,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         permissions,
       });
       if (!rotated) return reply.status(401).send({ success: false, error: { code: "TOKEN_INVALID", message: "Invalid or reused refresh token" } });
-      return reply.send({ success: true, data: { accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, sessionId: session.id } });
+      setRefreshCookie(reply, rotated.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
+      return reply.send({ success: true, data: { accessToken: rotated.accessToken, sessionId: session.id } });
     } catch {
       return reply.status(401).send({ success: false, error: { code: "AUTH_REQUIRED", message: "Invalid or expired session" } });
     }
@@ -1282,6 +2048,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (sessionId) {
       await globalSessionManager.revokeSession(sessionId);
     }
+    clearRefreshCookie(reply, isProductionEnv(config));
     return reply.send({ success: true, data: { loggedOut: true } });
   });
 
@@ -1347,11 +2114,11 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const accessToken = generateAccessToken(tokenPayload);
       const session = await globalSessionManager.createSession({ tenantId: newTenantId, userId, branchId: resolvedBranchId, deviceId: tokenPayload.deviceId, idleTimeoutMs: 30 * 60_000, absoluteLifetimeMs: 8 * 60 * 60_000, refreshTokenLifetimeMs: 14 * 24 * 60 * 60_000 });
 
+      setRefreshCookie(reply, session.refreshToken, isProductionEnv(config), (session.refreshTokenExpiresAt.getTime() - Date.now()) / 1000);
       return reply.send({
         success: true,
         data: {
           accessToken,
-          refreshToken: session.refreshToken,
           sessionId: session.sessionId,
           tenantName: targetTenantName,
           branchName: targetBranchName,
@@ -1722,14 +2489,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/sync/status", async (req) => {
+    const ctx = requireTenantContext(req);
+    const openConflictCount = typeof (syncEngine as any).countOpenConflicts === "function"
+      ? await (syncEngine as any).countOpenConflicts(ctx)
+      : 0;
     return {
       success: true,
       data: {
-        tenantId: req.tenantContext?.tenantId,
-        branchId: req.tenantContext?.branchId,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
         serverVersion: config.APP_VERSION || "2.12.5",
         schemaVersion: 4,
         status: "OPERATIONAL",
+        openConflictCount,
         timestamp: new Date().toISOString(),
       },
     };
@@ -1737,28 +2509,19 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
 
   server.get("/sync/conflicts", async (req) => {
+    const ctx = requireTenantContext(req);
+    assertSyncConflictPermission(ctx, "sync.conflict.read");
     const query = z.object({ status: z.enum(["OPEN", "ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE", "ALL"]).optional() }).parse(req.query || {});
-    const result = await (syncEngine as any).listConflicts(requireTenantContext(req), query.status || "OPEN");
+    const result = await (syncEngine as any).listConflicts(ctx, query.status || "OPEN");
     return { success: true, data: result };
   });
-  server.post("/sync/conflicts/register", async (req) => {
-    const body = z.object({
-      conflictId: z.string().min(1),
-      operationId: z.string().min(1),
-      entityType: z.string().min(1),
-      entityId: z.string().min(1),
-      operationType: z.enum(["CREATE", "UPDATE", "DELETE"]).optional(),
-      localPayload: z.unknown().optional(),
-      remotePayload: z.unknown().optional(),
-      deviceId: z.string().max(128).optional(),
-    }).parse(req.body || {});
-    const result = await (syncEngine as any).registerConflict(requireTenantContext(req), body);
-    return { success: true, data: result };
-  });
+  // Conflict records are generated by the trusted sync engine; no public registration endpoint exists.
   server.post("/sync/conflicts/:conflictId/resolve", async (req) => {
+    const ctx = requireTenantContext(req);
+    assertSyncConflictPermission(ctx, "sync.conflict.resolve");
     const params = z.object({ conflictId: z.string().min(1) }).parse(req.params);
     const body = z.object({ resolution: z.enum(["ACCEPT_SERVER", "ACCEPT_LOCAL", "MERGE"]), mergedPayload: z.record(z.unknown()).optional() }).parse(req.body);
-    const result = await (syncEngine as any).resolveConflict(requireTenantContext(req), params.conflictId, body.resolution, body.mergedPayload);
+    const result = await (syncEngine as any).resolveConflict(ctx, params.conflictId, body.resolution, body.mergedPayload);
     return { success: true, data: result };
   });
 
@@ -1836,51 +2599,102 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: filtered };
   });
 
-  // Customer Management
+  // Customer Management — PostgreSQL authoritative master records.
   server.get("/api/v1/customers", async (req) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customers = await commercialRepository.getCustomers(req.tenantContext!);
     return { success: true, data: customers };
   });
 
   server.post("/api/v1/customers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_CREATE", "customers.write");
     const validated = CreateCustomerRequestSchema.parse(req.body);
-    const customer = await commercialRepository.createCustomer(req.tenantContext!, validated);
+    if (!productionPersistence) {
+      const customer = await commercialRepository.createCustomer(ctx, validated);
+      return reply.status(201).send({ success: true, data: customer });
+    }
+    const createdId = validated.id || randomUUID();
+    const customer = await prisma.$transaction(async (tx: any) => {
+      const existing = validated.id
+        ? await tx.customer.findFirst({ where: { id: validated.id, tenantId: ctx.tenantId, branchId: ctx.branchId } })
+        : null;
+      if (existing) return existing;
+      const created = await tx.customer.create({ data: {
+        id: createdId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: validated.customerCode || `CUST-${(validated.id || createdId).slice(0, 8).toUpperCase()}`, name: validated.name,
+        phone: validated.phone || null, email: validated.email || null, address: validated.address || null,
+        creditLimit: validated.creditLimit || 0, currentBalance: validated.openingBalance || 0, openingBalance: validated.openingBalance || 0,
+        status: "ACTIVE",
+      } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id, metadata: { customerCode: created.customerCode } } });
+      return created;
+    });
     return reply.status(201).send({ success: true, data: customer });
   });
 
   server.get("/api/v1/customers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customer = await commercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
     if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
     return { success: true, data: customer };
   });
 
   server.put("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
     const validated = UpdateCustomerRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
+    const id = (req.params as any).id;
+    const before = await commercialRepository.getCustomerById(ctx, id);
+    const updated = await commercialRepository.updateCustomer(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+    }
+    return { success: true, data: updated };
+  });
+
+  server.delete("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
+    const id = String((req.params as any).id);
+    const customer = await prisma.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+    if (Number(customer.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+    const updated = await prisma.customer.update({ where: { id }, data: { status: "INACTIVE" } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id, metadata: { previousStatus: customer.status } } });
     return { success: true, data: updated };
   });
 
   // Supplier Management
   server.get("/api/v1/suppliers", async (req) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const suppliers = await commercialRepository.getSuppliers(req.tenantContext!);
     return { success: true, data: suppliers };
   });
 
   server.post("/api/v1/suppliers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_CREATE", "suppliers.write");
     const validated = CreateSupplierRequestSchema.parse(req.body);
-    const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
+    const supplier = await commercialRepository.createSupplier(ctx, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: supplier.id, metadata: { supplierCode: supplier.supplierCode } } });
+    }
     return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.get("/api/v1/suppliers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const supplier = await commercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
     if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
     return { success: true, data: supplier };
   });
 
   server.put("/api/v1/suppliers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_EDIT", "suppliers.write");
     const validated = UpdateSupplierRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
+    const id = String((req.params as any).id);
+    const before = await commercialRepository.getSupplierById(ctx, id);
+    const updated = await commercialRepository.updateSupplier(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    }
     return { success: true, data: updated };
   });
 
@@ -1927,39 +2741,90 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // POS Sales Engine
+  const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
+    const ctx = requireTenantContext(req);
+    const raw = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+    const permissions = new Set(raw.map((p) => p.toUpperCase()));
+    const permissionsLower = new Set(raw.map((p) => p.toLowerCase()));
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const manager = roles.some((r: string) => ["MANAGER", "BRANCH_MANAGER"].includes(r));
+    const wildcard = permissions.has("*") || permissionsLower.has("*") || permissionsLower.has("sales.*");
+    const allowedByAction: Record<string, boolean> = {
+      view: permissions.has("SALE_VIEW") || permissions.has("SALE_CREATE") || permissionsLower.has("sales.view") || permissionsLower.has("sales.create"),
+      create: permissions.has("SALE_CREATE") || permissionsLower.has("sales.create"),
+      void: permissions.has("SALE_VOID") || permissionsLower.has("sales.void") || permissionsLower.has("sales.cancel"),
+      return: permissions.has("SALE_RETURN") || permissions.has("PAYMENT_REFUND") || permissionsLower.has("sales.return") || permissionsLower.has("sales.refund"),
+    };
+    if (!(admin || manager || wildcard || allowedByAction[action])) throw new Error(`FORBIDDEN: SALE_${action.toUpperCase()} required`);
+    return ctx;
+  };
+
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = await commercialRepository.getSales(req.tenantContext!);
+    const ctx = assertSalesAuthority(req, "view");
+    const sales = await commercialRepository.getSales(ctx);
     return { success: true, data: sales };
   });
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+      const upperPermissions = new Set(permissions.map((p) => p.toUpperCase()));
+      const lowerPermissions = new Set(permissions.map((p) => p.toLowerCase()));
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+      if (!(manager || upperPermissions.has("*") || lowerPermissions.has("*") || upperPermissions.has("DISCOUNT_MANAGE") || lowerPermissions.has("discount.manage") || lowerPermissions.has("sales.discount"))) {
+        throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      }
+    }
     const result = atomicCommercialFinance
-      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : await commercialRepository.createPosSale(req.tenantContext!, validated);
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    const ctx = assertSalesAuthority(req, "view");
+    const sale = await commercialRepository.getSaleById(ctx, (req.params as any).id);
     if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
     return { success: true, data: sale };
   });
 
+  server.post("/api/v1/pos/sales/:id/void", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "void");
+    if (!atomicCommercialFinance) throw new Error("SALE_VOID_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), operationId: z.string().min(1).max(200).optional(), idempotencyKey: z.string().min(1).max(200).optional(), deviceId: z.string().min(1).max(128).optional() }).parse(req.body);
+    const result = await atomicCommercialFinance.voidSale(ctx, String((req.params as any).id), body.reason, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
+    const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const refundAuthority = rawPermissions.includes("payment_refund") || rawPermissions.includes("sales.refund") || rawPermissions.includes("sales.return") ||
+      roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+    if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
+    const result = await commercialRepository.createSaleReturn(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
-  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+  const assertCashDrawerAuthority = (req: any, permission: "view" | "open" | "close" | "move" | "approve") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const canView = admin || permissions.includes("*") || permissions.includes("cashdrawer.view") || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close") || permissions.includes("cashdrawer.move") || permissions.includes("cashdrawer.approve");
+    const allowed = permission === "view"
+      ? canView
+      : admin || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
@@ -1992,6 +2857,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   };
 
   // Cash Sessions & Drawer Reconciliation
+  server.get("/api/v1/cash-registers", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    return { success: true, data: await commercialRepository.listCashRegisters(req.tenantContext!) };
+  });
+
+  server.get("/api/v1/cash-sessions", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    const query = (req.query as any) || {};
+    return {
+      success: true,
+      data: await commercialRepository.listCashSessions(
+        req.tenantContext!,
+        query.status ? String(query.status) : undefined,
+        Number(query.limit || 100),
+      ),
+    };
+  });
+
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
     const validated = OpenCashSessionRequestSchema.parse(req.body);
@@ -2000,7 +2883,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/cash-sessions/active", async (req) => {
-    const session = await commercialRepository.getActiveCashSession(req.tenantContext!);
+    assertCashDrawerAuthority(req, "view");
+    const registerCode = String((req.query as any)?.registerCode || "").trim() || undefined;
+    const session = await commercialRepository.getActiveCashSession(req.tenantContext!, registerCode);
     return { success: true, data: session || null };
   });
 
@@ -2079,6 +2964,26 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: movement });
   });
 
+  server.post("/api/v1/cash-sessions/:id/transfer", async (req, reply) => {
+    assertCashDrawerAuthority(req, "move");
+    if (!productionPersistence) throw new Error("CASH_TRANSFER_REQUIRES_POSTGRESQL_AUTHORITY");
+    const validated = CashTransferRequestSchema.parse(req.body);
+    const result = await commercialRepository.transferCash(req.tenantContext!, String((req.params as any).id), validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/cash-sessions/:id/payment-channel-reconciliation", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("PAYMENT_CHANNEL_RECONCILIATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getPaymentChannelReconciliation(req.tenantContext!, String((req.params as any).id)) };
+  });
+
+  server.get("/api/v1/cash-sessions/:id/audit-trail", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("CASH_AUDIT_TRAIL_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getCashAuditTrail(req.tenantContext!, String((req.params as any).id)) };
+  });
+
   server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
@@ -2154,7 +3059,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
     if (start >= end) throw new Error("REPORT_INVALID_DATE_RANGE");
 
-    const requestedBranch = query.branchId ? String(query.branchId) : null;
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
     const data = await commercialRepository.getReportsData(ctx, { from: start, to: end, branchId: requestedBranch });
     return { success: true, data };
   });
@@ -2189,6 +3095,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   });
 
+  const assertFinanceAuthority = (req: any, action: "view" | "create" | "reverse" | "close" | "admin" = "view") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = new Set((ctx.permissions || []).map((p: any) => String(p).toLowerCase()));
+    const privileged = roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const wildcard = permissions.has("*") || permissions.has("admin:*");
+    const rules: Record<string,string[]> = {
+      view: ["finance.view","finance.create","financial_reports.view"],
+      create: ["finance.create","finance.manage","journal.create"],
+      reverse: ["finance.manage","journal.reverse"],
+      close: ["finance.manage","finance.period.close"],
+      admin: ["finance.manage"],
+    };
+    if (!(privileged || wildcard || rules[action].some((p) => permissions.has(p)))) throw new Error("FORBIDDEN: Finance permission required");
+    return ctx;
+  };
+
   // ==========================================
   // PHASE 2: Finance & Operational Control REST Routes
   // ==========================================
@@ -2200,12 +3123,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/accounts", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateAccountRequestSchema.parse(req.body);
     const account = await financeRepository.createAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: account });
   });
 
   server.put("/api/v1/finance/accounts/:id", async (req) => {
+    assertFinanceAuthority(req, "admin");
     const validated = UpdateAccountRequestSchema.parse(req.body);
     const updated = await financeRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
@@ -2218,17 +3143,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/periods", async (req, reply) => {
+    assertFinanceAuthority(req, "admin");
     const validated = CreateAccountingPeriodRequestSchema.parse(req.body);
     const period = await financeRepository.createAccountingPeriod(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: period });
   });
 
   server.post("/api/v1/finance/periods/:id/close", async (req) => {
+    assertFinanceAuthority(req, "close");
     const closed = await financeRepository.closePeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: closed };
   });
 
   server.post("/api/v1/finance/periods/:id/reopen", async (req) => {
+    assertFinanceAuthority(req, "close");
     const reopened = await financeRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: reopened };
   });
@@ -2240,6 +3168,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.createJournalEntry(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -2254,6 +3183,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals/:id/reverse", async (req, reply) => {
+    assertFinanceAuthority(req, "reverse");
     const validated = ReverseJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -2266,6 +3196,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/receivables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateCustomerInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createCustomerInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -2283,6 +3214,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/payables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateSupplierInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createSupplierInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -2295,9 +3227,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Payment Allocation
   server.post("/api/v1/finance/payments/allocate", async (req) => {
+    assertFinanceAuthority(req, "create");
     const validated = AllocatePaymentRequestSchema.parse(req.body);
     const result = await financeRepository.allocatePayment(req.tenantContext!, validated);
     return { success: true, data: result };
+  });
+
+  // Tax configuration
+  server.get("/api/v1/finance/taxes", async (req) => {
+    assertFinanceAuthority(req, "view");
+    return { success: true, data: await financeRepository.getTaxes(req.tenantContext!) };
+  });
+  server.post("/api/v1/finance/taxes", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
+    const validated = CreateTaxRequestSchema.parse(req.body);
+    const tax = await financeRepository.createTax(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: tax });
   });
 
   // Bank Accounts & Transactions
@@ -2307,12 +3252,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/banks", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankAccountRequestSchema.parse(req.body);
     const bank = await financeRepository.createBankAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: bank });
   });
 
   server.post("/api/v1/finance/banks/:id/transactions", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankTransactionRequestSchema.parse(req.body);
     const tx = await financeRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: tx });
@@ -2337,26 +3284,43 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Financial Reports
   server.get("/api/v1/finance/reports/trial-balance", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getTrialBalance(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/profit-loss", async (req) => {
+    assertFinanceAuthority(req, "view");
     const { startDate, endDate } = (req.query as any) || {};
     const report = await financeRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
     return { success: true, data: report };
   });
 
+  server.get("/api/v1/finance/reports/cash-flow", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const { startDate, endDate } = (req.query as any) || {};
+    const report = await financeRepository.getCashFlow(req.tenantContext!, startDate, endDate);
+    return { success: true, data: report };
+  });
+
   server.get("/api/v1/finance/reports/balance-sheet", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getBalanceSheet(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/dashboard/executive", async (req) => {
+    assertFinanceAuthority(req, "view");
     const dashboard = await financeRepository.getExecutiveDashboard(req.tenantContext!);
     return { success: true, data: dashboard };
+  });
+
+  server.get("/api/v1/finance/audit-trail", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const events = await financeRepository.getFinancialAuditTrail(req.tenantContext!);
+    return { success: true, data: events };
   });
 
   server.get("/api/v1/finance/anomalies", async (req) => {
@@ -4846,11 +5810,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
-    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
-    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+      const adminId = String(ctx.userId);
+      const email = String((ctx as any).email || "");
+      const role = String(ctx.roles?.[0] || "SUPER_ADMIN");
+      return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Access denied";
+      const status = message.startsWith("UNAUTHORIZED") ? 401 : 403;
+      return reply.status(status).send({ success: false, error: { code: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN", message: status === 401 ? "Authentication required." : "Access denied." } });
+    }
   });
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
@@ -5564,5 +6535,50 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   rollbackAuthorizationRoutes(server);
   tenantExportRoutes(server);
 
+  registerCanonicalProductionAuthentication(server, config, productionPersistence);
   return server;
+}
+
+
+export async function startServer(): Promise<FastifyInstance> {
+  const config = loadConfig();
+  const productionPersistence = isProductionEnv(config)
+    ? true
+    : (process.env.KWAKOPOS_MOCK_AUTH === "true" ? false : true);
+  const server = buildServer({ config, productionPersistence });
+  const port = Number(process.env.PORT || config.PORT || 3000);
+  const host = process.env.HOST || config.HOST || "0.0.0.0";
+
+  let attempts = 0;
+  while (true) {
+    try {
+      await server.listen({ port, host });
+      break;
+    } catch (err: any) {
+      if (err?.code === "EADDRINUSE" && attempts < 5) {
+        attempts++;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  console.log(`KwakoPos 2.0 API listening on ${host}:${port}`);
+  return server;
+}
+
+const isMainModule = () => {
+  if (process.argv[1]) {
+    const p = process.argv[1].replace(/\\/g, "/");
+    if (p.endsWith("server.ts") || p.endsWith("server.js")) return true;
+  }
+  return false;
+};
+
+if (isMainModule()) {
+  void startServer().catch((err) => {
+    console.error("FAILED_TO_START_API_SERVER:", err);
+    process.exit(1);
+  });
 }

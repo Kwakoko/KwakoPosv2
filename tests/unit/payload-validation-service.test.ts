@@ -229,6 +229,20 @@ describe("Payload Validation Service — Offline Queue Convergence", () => {
     });
   });
 
+  describe("Backdated StockAdjustment normalization", () => {
+    it("preserves occurredAt for offline historical stock movements", () => {
+      const occurredAt = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+      const normalized = normalizeStockAdjustmentPayload({
+        variantId: "variant-backdated",
+        adjustmentType: "INCREASE",
+        quantityChange: 20,
+        reason: "Historical receipt",
+        occurredAt,
+      });
+      expect(normalized.occurredAt).toBe(occurredAt);
+    });
+  });
+
   describe("Universal normalizeSyncPayload for SyncPushRequest", () => {
     it("ensures a complete SyncPushRequest with mixed operations passes SyncPushRequestSchema", () => {
       const batch = [

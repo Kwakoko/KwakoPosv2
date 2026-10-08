@@ -25,7 +25,7 @@ describe("Phase 46 production hardening contracts", () => {
   });
 
   it("starts and stops automation with the production server lifecycle", () => {
-    const source = read("apps/api/src/serverFixed.ts");
+    const source = read("apps/api/src/server.ts");
     expect(source).toContain("startSupportAutomationScheduler");
     expect(source).toContain("KWAKOPOS_DISABLE_SUPPORT_AUTOMATION");
     expect(source).toContain("onClose");

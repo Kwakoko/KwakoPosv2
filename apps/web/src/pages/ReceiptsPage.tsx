@@ -18,6 +18,8 @@ import { Receipt as ReceiptIcon, Search, Filter, Printer, Mail, Download, CheckC
   Sliders, Plus, FileText, Send, Copy, AlertTriangle, UserCheck, Sparkles
 } from "lucide-react";
 import { ReceiptDTO, ReceiptTemplateDTO, ReceiptVerificationDTO } from "@kwakopos2/contracts";
+import { apiFetch } from "../services/applicationApiService.js";
+import { isThermalPrinterSupported, printReceiptToThermal } from "../services/receiptPrinterService.js";
 import { useToast } from "../context/ToastContext.js";
 import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { useModule, useSync } from "../context/KwakoPosContexts.js";
@@ -78,6 +80,7 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
   const [showShareModal, setShowShareModal] = useState<boolean>(false);
   const [shareChannel, setShareChannel] = useState<"EMAIL" | "SMS" | "WHATSAPP">("WHATSAPP");
   const [shareRecipient, setShareRecipient] = useState<string>("");
+  const [printBusy, setPrintBusy] = useState(false);
 
   // Verification Tool State
   const [verifyInput, setVerifyInput] = useState<string>("");
@@ -158,27 +161,73 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
     return true;
   });
 
-  const handleReprintSubmit = () => {
-    if (!selectedReceipt) return;
-    const updated = receipts.map((r) => {
-      if (r.id === selectedReceipt.id) {
-        return {
-          ...r,
-          reprintCount: r.reprintCount + 1,
-          lastReprintedAt: new Date().toISOString(),
-        };
-      }
-      return r;
+  const auditPrint = useCallback(async (receipt: ReceiptDTO, printType: "INITIAL" | "REPRINT", printerName: string, paperWidth: string, reason?: string) => {
+    const result = await apiFetch<{ success: boolean; result?: { reprintCount: number } }>("/api/v2/receipts/" + encodeURIComponent(receipt.id) + "/print/audit", {
+      method: "POST",
+      body: JSON.stringify({ printType, printerName, paperWidth, reason }),
     });
-    setReceipts(updated);
-    setSelectedReceipt({
-      ...selectedReceipt,
-      reprintCount: selectedReceipt.reprintCount + 1,
-      lastReprintedAt: new Date().toISOString(),
-    });
-    setShowReprintModal(false);
-    setReprintReason("");
-  };
+    if (!result?.success) throw new Error("RECEIPT_PRINT_AUDIT_FAILED");
+    const count = Number(result.result?.reprintCount ?? receipt.reprintCount);
+    setReceipts((current) => current.map((r) => r.id === receipt.id ? { ...r, reprintCount: count, ...(printType === "REPRINT" ? { lastReprintedAt: new Date().toISOString() } : {}) } : r));
+    setSelectedReceipt((current) => current?.id === receipt.id ? { ...current, reprintCount: count, ...(printType === "REPRINT" ? { lastReprintedAt: new Date().toISOString() } : {}) } : current);
+  }, []);
+
+  const handleBrowserPrint = useCallback(async (printType: "INITIAL" | "REPRINT", reason?: string) => {
+    if (!selectedReceipt || printBusy) return;
+    if (printType === "REPRINT" && !reason?.trim()) {
+      toast.warning("Reprint reason required", "Enter a reason before reprinting.");
+      return;
+    }
+    setPrintBusy(true);
+    try {
+      window.print();
+      await auditPrint(selectedReceipt, printType, "BROWSER_PRINT", renderFormat === "a4" ? "A4" : renderFormat, reason);
+      toast.success("Receipt print recorded", selectedReceipt.receiptNumber + " print audit recorded.");
+      setShowReprintModal(false);
+      setReprintReason("");
+    } catch (error) {
+      toast.error("Receipt print failed", error instanceof Error ? error.message : "Unable to record receipt print.");
+    } finally {
+      setPrintBusy(false);
+    }
+  }, [auditPrint, printBusy, renderFormat, selectedReceipt, toast]);
+
+  const handleThermalPrint = useCallback(async (printType: "INITIAL" | "REPRINT", reason?: string) => {
+    if (!selectedReceipt || printBusy) return;
+    if (!isThermalPrinterSupported()) {
+      toast.warning("Thermal printer unavailable", "Use Chromium on HTTPS/localhost with Web Serial support.");
+      return;
+    }
+    if (printType === "REPRINT" && !reason?.trim()) {
+      toast.warning("Reprint reason required", "Enter a reason before reprinting.");
+      return;
+    }
+    setPrintBusy(true);
+    try {
+      await printReceiptToThermal(selectedReceipt, { paperWidth: renderFormat === "58mm" ? "58mm" : "80mm" });
+      await auditPrint(selectedReceipt, printType, "WEB_SERIAL_ESC_POS", renderFormat === "58mm" ? "58mm" : "80mm", reason);
+      toast.success("Thermal receipt printed", selectedReceipt.receiptNumber + " printer audit recorded.");
+      setShowReprintModal(false);
+      setReprintReason("");
+    } catch (error) {
+      toast.error("Thermal print failed", error instanceof Error ? error.message : "Unable to print receipt.");
+    } finally {
+      setPrintBusy(false);
+    }
+  }, [auditPrint, printBusy, renderFormat, selectedReceipt, toast]);
+
+  const handleReprintSubmit = useCallback(async () => {
+    if (!selectedReceipt || !reprintReason.trim()) {
+      toast.warning("Reprint reason required", "Enter a reason before reprinting.");
+      return;
+    }
+    const reason = reprintReason.trim();
+    if (isThermalPrinterSupported()) {
+      await handleThermalPrint("REPRINT", reason);
+    } else {
+      await handleBrowserPrint("REPRINT", reason);
+    }
+  }, [handleBrowserPrint, handleThermalPrint, reprintReason, selectedReceipt, toast]);
 
   const handleVerify = () => {
     if (!verifyInput.trim()) return;
@@ -512,8 +561,11 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
         width={560}
         footer={
           <>
-            <button className="v2-btn v2-btn-outline v2-btn-sm" onClick={() => window.print()} type="button">
+            <button className="v2-btn v2-btn-outline v2-btn-sm" onClick={() => void handleBrowserPrint("INITIAL")} disabled={printBusy} type="button">
               <Printer size={13} /> Print Direct
+            </button>
+            <button className="v2-btn v2-btn-outline v2-btn-sm" onClick={() => void handleThermalPrint("INITIAL")} disabled={printBusy} type="button">
+              <Printer size={13} /> Thermal Print
             </button>
             <button
               className="v2-btn v2-btn-secondary v2-btn-sm"
@@ -675,27 +727,36 @@ export const ReceiptsPage: React.FC<ReceiptsPageProps> = ({ activeTab: propActiv
               <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setShowShareModal(false)} type="button">Cancel</button>
               <button
                 className="v2-btn v2-btn-primary v2-btn-sm"
-                onClick={() => {
+                onClick={async () => {
                   if (!shareRecipient.trim()) {
                     playWarningTone();
                     toast.warning("Recipient Required", "Please enter a valid phone number or email.");
                     return;
                   }
+                  const recipient = shareRecipient.trim();
+                  const body = "Official KwakoPos receipt " + selectedReceipt.receiptNumber + " — " + money(selectedReceipt.grandTotal, selectedReceipt.currency) + ". " + selectedReceipt.qrCodePayload;
+                  let target = "";
                   if (shareChannel === "WHATSAPP") {
-                    const cleanPhone = shareRecipient.replace(/[^0-9]/g, "");
-                    const msg = encodeURIComponent(
-                      `Hello! Here is your official e-receipt from KwakoPos:\nReceipt #: ${selectedReceipt.receiptNumber}\nTotal: ${money(selectedReceipt.grandTotal, selectedReceipt.currency)}\nThank you for choosing us!`
-                    );
-                    if (typeof window !== "undefined") {
-                      window.open(`https://wa.me/${cleanPhone}?text=${msg}`, "_blank");
-                    }
+                    const cleanPhone = recipient.replace(/[^0-9]/g, "");
+                    target = "https://wa.me/" + cleanPhone + "?text=" + encodeURIComponent(body);
+                  } else if (shareChannel === "EMAIL") {
+                    target = "mailto:" + encodeURIComponent(recipient) + "?subject=" + encodeURIComponent("KwakoPos Receipt " + selectedReceipt.receiptNumber) + "&body=" + encodeURIComponent(body);
+                  } else {
+                    target = "sms:" + encodeURIComponent(recipient) + "?body=" + encodeURIComponent(body);
                   }
-                  playSuccessChime();
-                  toast.success(
-                    "Receipt Dispatched",
-                    `Receipt ${selectedReceipt.receiptNumber} successfully dispatched via ${shareChannel} to ${shareRecipient}!`
-                  );
-                  setShowShareModal(false);
+                  try {
+                    const opened = window.open(target, "_blank", "noopener,noreferrer");
+                    if (!opened && shareChannel === "WHATSAPP") window.location.assign(target);
+                    await apiFetch("/api/v2/receipts/" + encodeURIComponent(selectedReceipt.id) + "/share", {
+                      method: "POST",
+                      body: JSON.stringify({ channel: shareChannel, recipient }),
+                    });
+                    playSuccessChime();
+                    toast.success("Receipt share recorded", "The " + shareChannel + " share composer was opened and the audit was recorded. Delivery occurs in the external app.");
+                    setShowShareModal(false);
+                  } catch (error) {
+                    toast.error("Receipt share audit failed", error instanceof Error ? error.message : "Unable to record the receipt share.");
+                  }
                 }}
                 type="button"
               >

@@ -121,7 +121,6 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       const customerConflictId = String(staleCustomer.results[0].error).slice("SYNC_CONFLICT:".length);
       const mergedCustomer = await sync.resolveConflict(ctx, customerConflictId, "MERGE", {
         name: "Conflict Customer",
-        customerCode: "C-" + customerId.slice(0, 8),
         phone: "+255700000002",
         email: "merged@example.test",
       });
@@ -200,6 +199,56 @@ describe("Conflict resolution lifecycle: PostgreSQL authority", () => {
       expect((await sync.listConflicts(ctx)).some((c: any) => c.id === conversionConflictId)).toBe(true);
       const acceptedConversion = await sync.resolveConflict(ctx, conversionConflictId, "ACCEPT_SERVER");
       expect(acceptedConversion.status).toBe("RESOLVED");
+
+      const revalidateConflictId = "conflict:revalidate-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: revalidateConflictId,
+        operationId: "revalidate-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "UPDATE",
+        localPayload: { name: "Local Again", sku: "SERVER-PROD" },
+        remotePayload: { name: "Local New", sku: "SERVER-PROD", description: null },
+      });
+      await prisma.product.update({ where: { id: productId }, data: { description: "Changed after conflict detection" } });
+      await expect(sync.resolveConflict(ctx, revalidateConflictId, "ACCEPT_LOCAL")).rejects.toThrow("SYNC_CONFLICT_CHANGED_SINCE_DETECTION");
+      expect((await sync.listConflicts(ctx)).some((c: any) => c.id === revalidateConflictId && c.status === "OPEN")).toBe(true);
+
+      await expect(sync.registerConflict(ctx, {
+        conflictId: revalidateConflictId,
+        operationId: "different-operation",
+        entityType: "Product",
+        entityId: productId,
+        operationType: "UPDATE",
+        localPayload: { name: "Different Local" },
+        remotePayload: { name: "Different Remote" },
+      })).rejects.toThrow("SYNC_CONFLICT_ID_REUSE");
+
+      const deleteConflictId = "conflict:delete-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: deleteConflictId,
+        operationId: "delete-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "DELETE",
+        localPayload: { _deleted: true },
+        remotePayload: { id: productId, name: "Local New", sku: "SERVER-PROD", isActive: true },
+      });
+      await sync.resolveConflict(ctx, deleteConflictId, "ACCEPT_SERVER");
+      expect((await prisma.product.findUnique({ where: { id: productId } }))?.isActive).toBe(true);
+
+      const deleteLocalConflictId = "conflict:delete-local-" + productId;
+      await sync.registerConflict(ctx, {
+        conflictId: deleteLocalConflictId,
+        operationId: "delete-local-" + productId,
+        entityType: "Product",
+        entityId: productId,
+        operationType: "DELETE",
+        localPayload: { _deleted: true },
+        remotePayload: { id: productId, name: "Local New", sku: "SERVER-PROD", isActive: true },
+      });
+      await sync.resolveConflict(ctx, deleteLocalConflictId, "ACCEPT_LOCAL");
+      expect((await prisma.product.findUnique({ where: { id: productId } }))?.isActive).toBe(false);
 
       // Client-side conflict state must be durable and must not be replayed after resolution.
       const localDb = new LocalIndexedDbStore();

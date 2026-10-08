@@ -1,0 +1,68 @@
+name: Conflict Center Production Lock v1
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: conflict-center-lock-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  conflict-center-production-lock:
+    name: Conflict Center Production Lock v1
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_conflict_lock
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_conflict_lock"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_conflict_lock?schema=public
+      CI: true
+      NODE_ENV: test
+      KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install Dependencies
+        run: npm ci
+      - name: Database Generation
+        run: npm run db:generate
+      - name: Apply database migrations
+        run: npm run db:migrate
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Static Production Lock
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
+      - name: Conflict Center Unit Contract
+        run: npx vitest run tests/unit/sync-conflict-center-presentation.test.ts tests/unit/sync-status-label.test.ts tests/unit/sync-conflict-authorization.test.ts tests/unit/sync-integrity-preconditions.test.ts --reporter=verbose
+      - name: PostgreSQL Conflict Lifecycle
+        run: npx tsx scripts/certify-sync-conflict-resolution.ts
+      - name: Conflict Hardening Integration
+        run: npx vitest run tests/integration/conflict-resolution-lifecycle.test.ts tests/integration/conflict-hardening-concurrency.test.ts tests/integration/conflict-baseline-immutability.test.ts --reporter=verbose
+      - name: Workspace Build
+        run: npm run build

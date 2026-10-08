@@ -109,14 +109,7 @@ export async function comparePassword(password: string, storedHash: string): Pro
       return false;
     }
   }
-  try {
-    const legacyHash = createHash("sha256").update(password + getJwtSecret()).digest("hex");
-    const expected = Buffer.from(storedHash);
-    const actual = Buffer.from(legacyHash);
-    return expected.length === actual.length && timingSafeEqual(expected, actual);
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export function passwordNeedsRehash(storedHash: string): boolean {

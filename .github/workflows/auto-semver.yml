@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   auto-semver:
@@ -87,9 +88,11 @@ jobs:
           else
             echo "needs_release=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Commit release candidate
+      - name: Prepare protected release branch
         if: steps.guard.outputs.skip != 'true' && steps.candidate.outputs.needs_release == 'true'
         id: commit_release
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -101,17 +104,42 @@ jobs:
             echo "RELEASE_BLOCKED: tag v${VERSION} already exists; refusing duplicate release tag"; exit 1;
           fi
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore(release): v${VERSION}"
-          git push origin HEAD:main
+          RELEASE_BRANCH="release/v${VERSION}"
+          OPEN_PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$OPEN_PR" ]]; then
+            echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "release_pr=$OPEN_PR" >> "$GITHUB_OUTPUT"
+            echo "Release PR #$OPEN_PR already exists for $RELEASE_BRANCH; leaving it untouched."
+            exit 0
+          fi
+          # A stale release branch without an open PR is recoverable.
+          # Recycle it onto the exact main candidate instead of blocking release automation.
+          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
+            echo "STALE_RELEASE_BRANCH: $RELEASE_BRANCH exists without an open release PR; recycling it from $GITHUB_SHA"
+            git fetch origin "$RELEASE_BRANCH"
+            git switch -C "$RELEASE_BRANCH" "$GITHUB_SHA"
+            git add -A
+            git commit -m "chore(release): v${VERSION}"
+            git push --force-with-lease=refs/heads/"$RELEASE_BRANCH":$(git rev-parse "origin/$RELEASE_BRANCH") origin HEAD:"$RELEASE_BRANCH"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$RELEASE_BRANCH"
+            git add -A
+            git commit -m "chore(release): v${VERSION}"
+            git push origin HEAD:"$RELEASE_BRANCH"
+          fi
           RELEASE_SHA="$(git rev-parse HEAD)"
+          echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$RELEASE_BRANCH" --title "chore(release): v${VERSION}" --body "Automated protected release candidate for ${VERSION}. Source main SHA: ${GITHUB_SHA}. Release candidate SHA: ${RELEASE_SHA}. All repository-required gates must pass before merge.")"
+          echo "release_pr=$(gh pr view "$PR_URL" --repo "$GITHUB_REPOSITORY" --json number --jq '.number')" >> "$GITHUB_OUTPUT"
+          echo "Release PR opened: $PR_URL"
       - name: Dispatch exact production certification
-        if: steps.commit_release.outputs.release_sha != ''
+        if: steps.guard.outputs.skip == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.commit_release.outputs.release_sha }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - <<EOF

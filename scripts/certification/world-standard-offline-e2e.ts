@@ -97,7 +97,7 @@ function spawnWeb(port: number): ChildProcess {
 function spawnApi(): ChildProcess {
   return spawn(
     process.execPath,
-    [resolvePath("node_modules/tsx/dist/cli.mjs"), "apps/api/src/serverFixed.ts"],
+    [resolvePath("node_modules/tsx/dist/cli.mjs"), "apps/api/src/server.ts"],
     {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
@@ -342,7 +342,7 @@ async function run(): Promise<void> {
     console.log(JSON.stringify(proof, null, 2));
     await ctxB.close(); await ctxA.close();
   } finally {
-    if (tenantId) await cleanup(tenantId).catch(() => undefined);
+    // CI databases are ephemeral and audit_events is append-only; tenant deletion would cascade into forbidden audit mutations.
     await browser.close();
     await Promise.all([stopChild(web), stopChild(api)]);
   }

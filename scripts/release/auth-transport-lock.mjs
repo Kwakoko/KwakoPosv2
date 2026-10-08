@@ -5,7 +5,7 @@ import path from "node:path";
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const api = read("apps/web/src/services/apiClient.ts");
-const srv = read("apps/api/src/serverFixed.ts");
+const srv = read("apps/api/src/server.ts");
 
 const fail = (message) => { throw new Error("AUTH_TRANSPORT_LOCK_FAILED: " + message); };
 const req = (ok, message) => { if (!ok) fail(message); };
@@ -18,4 +18,5 @@ req(srv.includes("setRefreshCookie(reply, rotated.refreshToken, true,"), "produc
 req(/reply\.send\(\{\s*success:\s*true,\s*data:\s*\{[^}]*\baccessToken\b[^}]*\}\s*\}\);/s.test(srv), "production refresh JSON must contain accessToken");
 req(!/reply\.send\(\{\s*success:\s*true,\s*data:\s*\{[^}]*\brefreshToken\b/s.test(srv), "authentication JSON must never return refreshToken");
 
+console.log("AUTH_TRANSPORT_LOCK: PASS");
 console.log("AUTH_TRANSPORT_LOCK: PASS");

@@ -22,7 +22,7 @@ COPY .env.example ./
 
 # Reconstruct the release manifest inside the build from immutable Cloud Build substitutions.
 # The generated root manifest is intentionally excluded from the upload context because it must not be committed.
-RUN node -e "const fs=require('fs'); const version=process.argv[1]; const gitSha=process.argv[2]; if(!version||!/^\\d+\\.\\d+\\.\\d+$/.test(version)||!/^[0-9a-f]{40}$/.test(gitSha)){throw new Error('RELEASE_MANIFEST_BUILD_INPUT_INVALID')} fs.writeFileSync('/app/release-manifest.json',JSON.stringify({version,tag:'v'+version,gitSha,environment:'production-certification',releaseChannel:'production',releasedAt:new Date().toISOString(),containerDigest:null,cloudRunRevision:null,certification:'PENDING',compatibility:{databaseSchemaVersion:4,syncProtocolVersion:2,pwaSchemaVersion:4,minSupportedClientVersion:'2.0.0',recommendedClientVersion:version}},null,2))" "$RELEASE_VERSION" "$RELEASE_GIT_SHA"
+RUN node -e "const fs=require('fs'); const version=process.argv[1]; const gitSha=process.argv[2]; if(!version||!/^\\d+\\.\\d+\\.\\d+$/.test(version)||!/^[0-9a-f]{40}$/.test(gitSha)){throw new Error('RELEASE_MANIFEST_BUILD_INPUT_INVALID')} fs.writeFileSync('/app/release-manifest.json',JSON.stringify({version,tag:'v'+version,gitSha,environment:'production-certification',releaseChannel:'production',releasedAt:new Date().toISOString(),containerDigest:null,cloudRunRevision:null,certification:'PENDING',compatibility:{databaseSchemaVersion:4,syncProtocolVersion:2,pwaSchemaVersion:7,minSupportedClientVersion:'2.0.0',recommendedClientVersion:version}},null,2))" "$RELEASE_VERSION" "$RELEASE_GIT_SHA"
 
 RUN npm install --include=dev
 
@@ -58,7 +58,6 @@ COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8080
 
-# The TypeScript project emits the API beneath its source-root path.  Always
-# launch the hardened production wrapper; the base server contains development
-# authentication handlers and must never be used as the production entrypoint.
-CMD ["node", "apps/api/dist/apps/api/src/serverFixed.js"]
+# Launch the single canonical API server implementation. Authentication and
+# production hardening are registered directly in server.ts.
+CMD ["node", "apps/api/dist/server.js"]

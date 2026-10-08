@@ -56,8 +56,32 @@ jobs:
         run: npm ci
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
+      - name: Conflict Center Production Lock
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
+      - name: Receivables Audit Production Lock
+        run: npm run certify:receivables-lock
+      - name: Accounts Payable Audit Production Lock
+        run: npm run certify:payables-lock
+      - name: Expenses Production Lock
+        run: npm run certify:expenses-lock
+      - name: Payments Audit Controls Production Lock
+        run: npm run certify:payments-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Generate release manifest
@@ -89,7 +113,7 @@ jobs:
           if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
             exit 0
           fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
           echo $! > /tmp/kwakopos-candidate-security-api.pid
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
@@ -118,7 +142,7 @@ jobs:
           if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
             exit 0
           fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
           echo $! > /tmp/kwakopos-candidate-security-api.pid
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then

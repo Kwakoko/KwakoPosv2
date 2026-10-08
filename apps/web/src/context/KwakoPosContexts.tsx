@@ -1237,9 +1237,36 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
       return result;
     } catch (error) {
       consecutiveFailuresRef.current += 1;
-      setSyncError(error instanceof Error ? error.message : "Synchronization failed");
+      const errorMessage = error instanceof Error ? error.message : "Synchronization failed";
+      setSyncError(errorMessage);
       syncStatusService.failSync(error);
       setSyncStatus(syncStatusService.getSnapshot(syncScope));
+      if (errorMessage.startsWith("SYNC_NOT_VERIFIED:") || errorMessage.startsWith("SYNC_PARTIAL_REJECTION:")) {
+        try {
+          await syncEngine.bootstrapWithServer(
+            async (req) => {
+              const body = await apiFetch<any>("/sync/bootstrap", {
+                method: "POST",
+                headers: {
+                  "x-tenant-id": targetTenantId,
+                  "x-branch-id": targetBranchId,
+                  "x-user-id": targetUserId,
+                },
+                body: JSON.stringify(req),
+              });
+              return body.data || body;
+            },
+            targetTenantId,
+            targetBranchId,
+          );
+          db.purgeOrphanedOutbox(targetTenantId, targetBranchId);
+          await db.refreshStoresFromNative();
+          setPendingOutboxCount(db.getPendingOutbox(targetTenantId, targetBranchId).length);
+          publishDataChanged({ action: "SYNC_RECONCILED_AFTER_REJECTION", tenantId: targetTenantId, branchId: targetBranchId });
+        } catch (reconcileError) {
+          console.warn("[Sync] Authoritative rejection reconciliation failed:", reconcileError);
+        }
+      }
       throw error;
     } finally {
       isSyncInProgressRef.current = false;

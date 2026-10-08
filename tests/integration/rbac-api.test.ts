@@ -151,14 +151,19 @@ describe("Privileged RBAC PostgreSQL API", () => {
     });
     expect(transfer).not.toBeNull();
 
+    await prisma.device.create({ data: { id: randomUUID(), deviceId: "p0-rbac-device", tenantId, userId, name: "RBAC Test Device", platform: "test", browser: "vitest" } });
+
     await prisma.deviceSession.create({
       data: {
         id: randomUUID(),
         tenantId,
+        branchId: secondBranchId,
         userId,
         deviceId: "p0-rbac-device",
         refreshTokenHash: "p0-rbac-refresh-hash",
+        tokenFamilyId: randomUUID(),
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        refreshTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
 

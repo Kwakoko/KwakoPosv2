@@ -11,7 +11,7 @@ describe("KwakoPos v2 — Super Admin Secret Hygiene & Password Policy", () => {
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/seed.ts",
       "apps/api/src/server.ts",
-      "apps/api/src/serverFixed.ts",
+      "apps/api/src/server.ts",
       "apps/web/src/pages/LoginPage.tsx",
       "apps/web/src/pages/SuperAdminPage.tsx",
       "docker-compose.yml",

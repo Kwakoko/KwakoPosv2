@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   const sha = exactSha();
   const loginPage = read("apps/web/src/pages/LoginPage.tsx");
   const apiClient = read("apps/web/src/services/apiClient.ts");
-  const fixedServer = read("apps/api/src/serverFixed.ts");
+  const server = read("apps/api/src/server.ts");
   const context = read("apps/web/src/context/KwakoPosContexts.tsx");
   const securityEngine = read("scripts/certification/security-auth-ux-acceptance-engine.ts");
 
@@ -69,9 +69,9 @@ async function main(): Promise<void> {
   requirePass(!loginPage.includes("POS PIN"), "LoginPage exposes unsupported PIN authentication");
   requirePass(!apiClient.includes("refreshToken?: unknown"), "apiClient contains legacy refresh-token migration typing");
   requirePass(!apiClient.includes("hasOwnProperty.call(parsed, \"refreshToken\")"), "apiClient contains legacy refresh-token migration logic");
-  requirePass(!fixedServer.includes("data: { accessToken, refreshToken"), "Production login returns refreshToken in JSON");
-  requirePass(!fixedServer.includes("data: { accessToken: rotated.accessToken, refreshToken"), "Production refresh returns refreshToken in JSON");
-  requirePass(fixedServer.includes("HttpOnly") && fixedServer.includes("SameSite=Strict"), "Production refresh cookie is not hardened");
+  requirePass(!server.includes("data: { accessToken, refreshToken"), "Production login returns refreshToken in JSON");
+  requirePass(!server.includes("data: { accessToken: rotated.accessToken, refreshToken"), "Production refresh returns refreshToken in JSON");
+  requirePass(server.includes("HttpOnly") && server.includes("SameSite=Strict"), "Production refresh cookie is not hardened");
   requirePass(!context.includes("canAccessModule: () => true"), "Module context has permissive default access");
   requirePass(context.includes("createContext<ModuleContextType | null>(null)"), "Module context does not fail closed outside its provider");
   requirePass(!securityEngine.includes("check: () => true") && !securityEngine.includes("check:()=>true"), "Security engine contains unconditional pass checks");
