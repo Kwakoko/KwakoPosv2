@@ -78,6 +78,8 @@ jobs:
         run: npm run certify:receipts-lock
       - name: Notifications Production Lock v1
         run: npm run certify:notifications-lock
+      - name: Support Production Lock v1
+        run: npm run certify:support-lock
       - name: Tax / Fiscalization Production Lock v1
         run: npm run certify:tax-fiscal-lock
       - name: Cash Management Production Lock v1

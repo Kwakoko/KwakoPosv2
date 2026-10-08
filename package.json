@@ -128,6 +128,7 @@
     "production:browser": "tsx scripts/release/canonical-cross-client-test.ts",
     "synthetic": "tsx scripts/ops/synthetic-monitor.ts",
     "certify:phase46": "tsx scripts/certification/phase46-support-operations-certification.ts",
+    "certify:support-lock": "tsx scripts/certification/support-production-lock.ts",
     "lint": "eslint . --ext .js,.cjs,.mjs",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
