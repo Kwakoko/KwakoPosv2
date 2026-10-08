@@ -420,13 +420,12 @@ const ApprovalActionSchema = z.object({
   reason: z.string().trim().max(2000).optional(),
 }).strict();
 
-const ApprovalDelegationSchema = z.object({
-  delegationId: z.string().trim().min(1).max(128),
+const ApprovalDelegationRequestSchema = z.object({
   delegateId: z.string().trim().min(1).max(128),
   scope: z.string().trim().min(1).max(200),
   validFrom: z.string().datetime(),
   validUntil: z.string().datetime(),
-  isActive: z.boolean(),
+  reason: z.string().trim().min(1).max(2000),
 }).strict();
 
 function configurePersistentSessions() {
@@ -6556,8 +6555,18 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     try {
       requireAdminContext(req);
-      const body = ApprovalDelegationSchema.parse(req.body);
-      const result = globalEnterpriseApprovalsService.registerDelegation(body);
+      const body = ApprovalDelegationRequestSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.registerDelegation({
+        delegationId: `DEL-${ctx.userId}-${Date.now()}`,
+        originalApproverId: ctx.userId,
+        delegateId: body.delegateId,
+        scope: body.scope,
+        validFrom: body.validFrom,
+        validUntil: body.validUntil,
+        isActive: true,
+        reason: body.reason,
+        createdAt: new Date().toISOString(),
+      });
       return reply.status(result.success ? 201 : 422).send(result);
     } catch (error) {
       return reply.status(400).send({ success: false, error: { code: "APPROVAL_DELEGATION_REJECTED", message: error instanceof Error ? error.message : "Approval delegation rejected" } });
