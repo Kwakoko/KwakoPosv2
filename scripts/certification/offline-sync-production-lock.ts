@@ -6,7 +6,7 @@ const LOCK_ID = "OFFLINE-SYNC-PLATFORM-PRODUCTION-LOCK-2026-10-08";
 const repo = process.cwd();
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "apps/web/src/indexedDb.ts": "1893f5704481b7a7178e80622b99a8c4ae42376c0",
+  "apps/web/src/indexedDb.ts": "1893f5704481b7a7178e80622b99a8c4ae42376c",
   "apps/web/src/atomicOutbox.ts": "37b6e5970add752c02f76b811db18c4228f2c6e0",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "apps/web/src/persistence/migrationEngine.ts": "3f7c6b79efed22bce68ea2868500fbd5d84687bb",
@@ -27,7 +27,6 @@ const REQUIRED_MARKERS: Array<[string, string, string[]]> = [
     "nextAttemptAt",
     "OUTBOX_RETRY_JITTER_RATIO",
     "preservedOutboxCount",
-    "tombstone:",
   ]],
   ["migration-authority", "apps/web/src/persistence/migrationEngine.ts", [
     "applySchemaUpgrade",
@@ -48,6 +47,7 @@ const REQUIRED_MARKERS: Array<[string, string, string[]]> = [
     "applyRevisioned",
     "refreshStoresFromNative",
     "syncEpoch",
+    'tombstone:"',
   ]],
   ["sync-engine-server", "packages/sync/src/worldStandardPrismaSyncEngine.ts", [
     "prisma.$transaction(async (tx: any)",
