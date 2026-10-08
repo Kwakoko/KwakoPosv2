@@ -24,7 +24,7 @@ export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOp
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "blob:"],
         connectSrc: ["'self'", "wss:", "https:"],
@@ -49,7 +49,7 @@ export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOp
     global: true,
     max: isProduction ? 200 : 10000,
     timeWindow: "1 minute",
-    allowList: ["127.0.0.1", "::1"],
+    allowList: isProduction ? [] : ["127.0.0.1", "::1"],
     keyGenerator: (req) => {
       const tenantId = (req as any).tenantContext?.tenantId as string | undefined;
       const ip = req.ip;
