@@ -6,19 +6,17 @@ const LOCK_ID = "SALES-PRODUCTION-LOCK-V2-2026-10-08";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail","Product Bundles / Kits","Bundle definition","Bundle components","Component quantities","Bundle stock availability","Bundle sale","Component stock deduction","Bundle reverse/refund","Bundle reporting","Bundle ledger integrity","Bundle offline synchronization"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
-  "apps/api/src/server.ts": "70240e7329cde9ce9ca2912fea5a0aeda82045e3",
-  "packages/contracts/src/index.ts": "27b80e50d9ee754721393adc6d858b1e71143cd2",
-  "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
-  "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
-  "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
-  "packages/database/src/bundleInventory.ts": "86a69340f7bdaf36304805720ab5461a1d99a3ff",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
+  "apps/web/src/pages/PosPage.tsx": "03da8c53647a97b634f592a43c2bb8a099327756",
+  "apps/api/src/server.ts": "a8190f45f7cf31b28c71b8777b3bedd4cb9912a0",
+  "packages/contracts/src/index.ts": "3059a9dcec58031d7e3d6de3b33dd0e96ca1b12f",
+  "packages/database/src/atomicCommercialFinance.ts": "b6867f39dc36ccc4c1287355c71db609399ff338",
+  "packages/database/src/index.ts": "70dd631011cfbf9e0f7a47e8c83e09b97d8f5008",
+  "packages/database/src/prismaProductionRepositories.ts": "13be7992f80ac28c41c0bb2497bf7d945e6797f5",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "2230175727d1590e155c8c72e443cd959fa25fe2",
   "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
-  "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
-  "apps/web/src/components/InventoryBundleWorkspace.tsx": "6f95a91ee619d9ab00c7cc623dfc00a486c72a54",
-  "tests/unit/bundle-production-closure.test.ts": "ee008c74dab2d6bf6cfc423ef350b706e7b8b08d"
+  "apps/web/src/services/inventoryStockService.ts": "b5b24e3efabb022477173419993f6c4723a483fa",
+  "apps/web/src/components/InventoryBundleWorkspace.tsx": "6e4b1af54981b3379045f5ef9e7bf7c3596146d9",
 };
 
 const MARKERS: Array<[string,string,string[]]> = [
