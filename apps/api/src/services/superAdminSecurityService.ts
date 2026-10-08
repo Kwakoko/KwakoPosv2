@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, createHash, randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "@kwakopos2/database";
 import { getJwtAudience, getJwtIssuer, getJwtSecret, hashPassword, validatePasswordStrength } from "@kwakopos2/auth";
