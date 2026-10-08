@@ -401,14 +401,6 @@ export async function logSuperAdminAuditEvent(params: {
 
   if (!tenantId || !branchId) return;
 
-  // Sanitize metadata to guarantee no passwords, secrets, or tokens are logged
-  const sanitizedMeta: Record<string, unknown> = { outcome, timestamp: new Date().toISOString() };
-  for (const [key, val] of Object.entries(metadata)) {
-    if (!/password|secret|token|credential|key|hash|cookie/i.test(key)) {
-      sanitizedMeta[key] = val;
-    }
-  }
-
   try {
     await prisma.auditEvent.create({
       data: {
