@@ -97,6 +97,16 @@ requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-a
 requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-admin/support/tenants/:tenantId/health", "support tenant health");
 requireText("packages/database/prisma/schema.prisma", "model PlatformAuditEvent", "platform audit schema model");
 requireText("scripts/certification/foundation-production-lock.ts", "scripts/certification/super-admin-production-lock.ts", "Foundation invokes Super Admin lock");
+requireText("apps/api/src/server.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform Super Admin route guard");
+requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
+requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")', "emergency kill switch step-up");
+requireAbsent("apps/api/src/server.ts", "body.adminId", "client-supplied Super Admin actor identity");
+requireAbsent("apps/api/src/server.ts", "ADM-001", "fabricated platform actor identity");
+requireAbsent("apps/api/src/server.ts", "ADM-SEC-01", "fabricated emergency actor identity");
+requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isPlatformProvisioner", "platform tenant provisioning authority");
+requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isSuperAdmin: true", "platform provisioning writes authoritative tenant state");
+requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'permissions.includes("*")', "support wildcard privilege bypass");
+requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'permissions.includes("admin:*")', "support admin wildcard privilege bypass");
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'logs: []', "fabricated system logs");
 
 // 11. Live control-plane UI.
