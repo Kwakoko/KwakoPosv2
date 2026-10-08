@@ -6,10 +6,10 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-08";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "182b4714c943fa4bdc752e57baf07c12d7e68eb7",
-  ".github/workflows/ci.yml": "ca475131d6f282976b715db764b9dca3b39be6e8",
-  ".github/workflows/production-certification.yml": "68d10ce2ccee1978b9df21b8cb2ba5d855e995a9",
-  ".github/workflows/production-release-exact-main.yml": "c51c7615e89a662d7a029f4903534f58573078bb",
+  "package.json": "1454467e9f48f666db2f3b26afd98edae67e2c5a",
+  ".github/workflows/ci.yml": "e4a82ad085aea5280937eca5baea0dd726792cdf",
+  ".github/workflows/production-certification.yml": "bab286547270173a81ca213e34b559451f34c940",
+  ".github/workflows/production-release-exact-main.yml": "09fcb5458433b73fdf956f804f1f06842dd91be8",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
   "apps/web/src/pages/PosPage.tsx": "2d1cd007d1ff971ea37d5fa0248edf7e5d0dee6a",
   "apps/web/src/services/payloadValidationService.ts": "9c28e200a6a2175c81d9d900d168936ae3e96f7d",
