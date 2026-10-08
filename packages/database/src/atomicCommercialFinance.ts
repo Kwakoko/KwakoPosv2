@@ -142,10 +142,41 @@ export class PrismaAtomicCommercialFinanceService {
       });
       const taxConfigRow = (taxSettingRows[0]?.value || {}) as any;
       const taxEnabled = Boolean(taxConfigRow.vatEnabled);
-      const configuredTaxRate = Number(taxConfigRow.vatRatePercent ?? 0);
+      let authoritativeTax: any = null;
+      if (taxEnabled) {
+        const taxId = typeof taxConfigRow.taxId === "string" ? taxConfigRow.taxId : "";
+        authoritativeTax = taxId
+          ? await tx.tax.findFirst({
+              where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+            })
+          : null;
+        const taxCode = String(taxConfigRow.taxCode || "VAT").trim().toUpperCase();
+        if (!authoritativeTax) {
+          authoritativeTax = await tx.tax.findFirst({
+            where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode, isActive: true },
+          });
+        }
+        if (!authoritativeTax) {
+          const rate = Number(taxConfigRow.vatRatePercent ?? 0);
+          if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("SALE_TAX_RATE_INVALID");
+          authoritativeTax = await tx.tax.upsert({
+            where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode } },
+            create: {
+              id: crypto.randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              name: String(taxConfigRow.taxName || "VAT"), code: taxCode, rate,
+              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
+            },
+            update: {
+              name: String(taxConfigRow.taxName || "VAT"), rate,
+              isInclusive: taxConfigRow.taxInclusivePricing !== false, isActive: true,
+            },
+          });
+        }
+      }
+      const configuredTaxRate = authoritativeTax ? Number(authoritativeTax.rate) : 0;
       const taxConfig = {
         ratePct: Number.isFinite(configuredTaxRate) && configuredTaxRate >= 0 && taxEnabled ? configuredTaxRate : 0,
-        isInclusive: taxConfigRow.taxInclusivePricing !== false,
+        isInclusive: authoritativeTax ? Boolean(authoritativeTax.isInclusive) : true,
       };
 
       const lines = req.items.map((item: any) => {
