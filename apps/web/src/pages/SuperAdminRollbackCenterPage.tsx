@@ -57,7 +57,7 @@ export const SuperAdminRollbackCenterPage: React.FC = () => {
   const [approvalBusy, setApprovalBusy] = useState(false);
 
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || user.email === "admin@kwakoko.co.tz")
+    user && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase())
   );
 
   const loadData = async () => {
