@@ -75,9 +75,10 @@ function read(file: string) {
 
 function blobSha(content: string) {
   const bytes = Buffer.from(content, "utf8");
-  return createHash("sha1")
-    .update(Buffer.concat([Buffer.from(`blob ${bytes.length}\\0`, "utf8"), bytes]))
-    .digest("hex");
+  const hash = createHash("sha1");
+  hash.update(Buffer.from(`blob ${bytes.length}\0`, "utf8"));
+  hash.update(bytes);
+  return hash.digest("hex");
 }
 
 const failures: string[] = [];
