@@ -167,6 +167,38 @@ export class SettingsService {
           "INSERT INTO sync_change_journal (tenant_id, branch_id, operation_id, entity_type, entity_id, operation_type, record, source) VALUES ($1,$2,$3,'Setting',$4,$5,$6::jsonb,'settings') ON CONFLICT (tenant_id, branch_id, operation_id) DO NOTHING",
           ctx.tenantId, ctx.branchId, operationId, row.id, operationType, JSON.stringify(operationType === "DELETE" ? { ...row, key, scope, _deleted: true } : { ...row, key, scope }),
         );
+        if (key === "tax.config" && scope === "BRANCH" && operationType !== "DELETE") {
+          const rawTax = (record.value || {}) as any;
+          const vatEnabled = Boolean(rawTax.vatEnabled);
+          const rate = Number(rawTax.vatRatePercent ?? 0);
+          if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("TAX_RATE_INVALID");
+          const code = String(rawTax.taxCode || "VAT").trim().toUpperCase();
+          if (!/^[A-Z0-9_-]{1,32}$/.test(code)) throw new Error("TAX_CODE_INVALID");
+          const canonicalTax = await tx.tax.upsert({
+            where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code } },
+            create: {
+              id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+              name: String(rawTax.taxName || "VAT"), code, rate,
+              isInclusive: rawTax.taxInclusivePricing !== false, isActive: vatEnabled,
+            },
+            update: {
+              name: String(rawTax.taxName || "VAT"), rate,
+              isInclusive: rawTax.taxInclusivePricing !== false, isActive: vatEnabled,
+            },
+          });
+          const canonicalValue = {
+            ...(row.value as any),
+            taxId: canonicalTax.id,
+            taxCode: code,
+            vatRatePercent: Number(canonicalTax.rate),
+            taxInclusivePricing: Boolean(canonicalTax.isInclusive),
+            vatEnabled,
+          };
+          row = await tx.setting.update({
+            where: { id: row.id },
+            data: { value: canonicalValue, version: { increment: 1 }, isActive: true },
+          });
+        }
         results.push({ ...row, operationId, operationType });
       }
       return results;
