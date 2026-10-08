@@ -30,6 +30,8 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
       - name: Support Production Lock
         run: npm run certify:support-lock
       - name: Support regression tests
