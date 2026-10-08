@@ -118,6 +118,8 @@ jobs:
 
       - name: Validate version consistency
         run: npx tsx scripts/release/version-consistency-gate.ts
+      - name: SemVer Production Lock
+        run: npm run certify:semver-lock
 
       - name: Build all workspaces
         run: npm run build
