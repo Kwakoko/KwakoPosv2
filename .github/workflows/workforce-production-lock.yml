@@ -32,6 +32,6 @@ jobs:
       - name: Build workspaces
         run: npm run build
       - name: Staff / HR production lock
-        run: npm run certify:workforce-lock
+        run: npx tsx scripts/certification/workforce-production-lock.ts
       - name: Workforce API and payroll tests
         run: npx vitest run tests/integration/workforce-api.test.ts tests/unit/workforce.test.ts tests/unit/commissions-payroll.test.ts --reporter=verbose
