@@ -92,6 +92,7 @@ export const CommercialPermissionEnum = z.enum([
   "PAYMENT_VIEW",
   "PAYMENT_RECONCILE",
   "DISCOUNT_MANAGE",
+  "PRICING_MANAGE",
   "COUPON_MANAGE",
   "REFUND_APPROVE",
   "CREDIT_NOTE_CREATE",
@@ -306,6 +307,7 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
+  customerSegment: z.string().trim().min(1).max(64).nullable().optional(),
   status: z.enum(["ACTIVE", "SUSPENDED", "INACTIVE"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
@@ -321,6 +323,7 @@ export const CreateCustomerRequestSchema = z.object({
   address: z.string().optional(),
   creditLimit: z.number().nonnegative().optional(),
   openingBalance: z.number().optional(),
+  customerSegment: z.string().trim().min(1).max(64).optional(),
 });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequestSchema>;
 
@@ -944,6 +947,8 @@ export const CreatePosSaleRequestSchema = z.object({
   deviceId: z.string().min(1),
   operationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
+  priceListId: z.string().uuid().optional(),
+  priceOverrideReason: z.string().trim().min(3).max(500).optional(),
 });
 export type CreatePosSaleRequest = z.infer<typeof CreatePosSaleRequestSchema>;
 

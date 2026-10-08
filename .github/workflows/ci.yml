@@ -102,6 +102,8 @@ jobs:
         run: npx tsx scripts/certification/customers-contacts-production-lock.ts
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
+      - name: Pricing / Promotions Production Lock
+        run: npm run certify:pricing-lock
       - name: Receipt Store Production Lock v1
         run: npm run certify:receipts-lock
       - name: Tax / Fiscalization Production Lock v1
