@@ -30,7 +30,7 @@ requireMarkers("pricing-schema", "packages/database/prisma/schema.prisma", [
   "model PricingTier {",
   "model PricingPromotion {",
   'customerSegment String?',
-  'customerSegment     String?',
+  'customerSegment String?',
 ]);
 
 requireMarkers("pricing-authority", "packages/database/src/pricingAuthority.ts", [
