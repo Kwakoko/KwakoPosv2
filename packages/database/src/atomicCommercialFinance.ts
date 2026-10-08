@@ -82,24 +82,18 @@ export class PrismaAtomicCommercialFinanceService {
         }
         return { sale: existing, lines: existing.lines, ledgers: await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, referenceType: "SALE", referenceId: existing.id } }), drawerOperations };
       }
+      const pricingEvidence: any[] = [];
       const variantProductIds = new Map<string, string>();
       const variantPrices = new Map<string, number>();
       const variantCosts = new Map<string, number>();
-      const pricingEvidence: any[] = [];
+      const bundleResolutions = new Map<string, Awaited<ReturnType<typeof resolveBundleDefinition>>>();
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
-      const nowForPricing = new Date();
       for (const item of req.items) {
-        const authoritativeVariant = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (
-          !authoritativeVariant ||
-          authoritativeVariant.tenantId !== ctx.tenantId ||
-          authoritativeVariant.branchId !== ctx.branchId ||
-          authoritativeVariant.productId !== item.productId ||
-          authoritativeVariant.isActive === false
-        ) {
+        const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
+        if (!v || v.tenantId !== ctx.tenantId || v.branchId !== ctx.branchId || (item.productId !== undefined && v.productId !== item.productId) || v.isActive === false) {
           throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
         }
-        const resolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
+        const pricingResolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
           variantId: item.variantId,
           productId: item.productId,
           customerId: req.customerId,
@@ -107,29 +101,50 @@ export class PrismaAtomicCommercialFinanceService {
           requestedUnitPrice: Number(item.unitPrice),
           priceListId: req.priceListId,
           priceOverrideReason: req.priceOverrideReason,
-          now: nowForPricing,
         });
-        const v = await tx.productVariant.findUnique({ where: { id: item.variantId } });
-        if (!v) throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
-        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
-        variantProductIds.set(item.variantId, resolution.productId);
-        variantPrices.set(item.variantId, resolution.unitPrice);
-        variantCosts.set(item.variantId, Number(v.costPrice || 0));
+        const authoritativePrice = pricingResolution.unitPrice;
         pricingEvidence.push({
-          variantId: resolution.variantId,
-          productId: resolution.productId,
-          source: resolution.source,
-          sourceId: resolution.sourceId ?? null,
-          customerPriceId: resolution.customerPriceId ?? null,
-          priceListItemId: resolution.priceListItemId ?? null,
-          pricingTierId: resolution.pricingTierId ?? null,
-          promotionId: resolution.promotionId ?? null,
-          promotionalBasePrice: resolution.promotionalBasePrice ?? null,
-          resolvedUnitPrice: resolution.unitPrice,
-          requestedUnitPrice: resolution.requestedUnitPrice ?? null,
-          overrideApplied: resolution.overrideApplied,
-          overrideReason: resolution.overrideReason ?? null,
+          variantId: pricingResolution.variantId,
+          productId: pricingResolution.productId,
+          source: pricingResolution.source,
+          sourceId: pricingResolution.sourceId ?? null,
+          customerPriceId: pricingResolution.customerPriceId ?? null,
+          priceListItemId: pricingResolution.priceListItemId ?? null,
+          pricingTierId: pricingResolution.pricingTierId ?? null,
+          promotionId: pricingResolution.promotionId ?? null,
+          promotionalBasePrice: pricingResolution.promotionalBasePrice ?? null,
+          resolvedUnitPrice: pricingResolution.unitPrice,
+          requestedUnitPrice: pricingResolution.requestedUnitPrice ?? null,
+          overrideApplied: pricingResolution.overrideApplied,
+          overrideReason: pricingResolution.overrideReason ?? null,
         });
+        if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
+        const resolution = bundleResolutions.get(item.variantId) || await resolveBundleDefinition(tx, ctx.tenantId, ctx.branchId, item.variantId);
+        if (resolution.isBundle && item.bundleDefinitionVersion) {
+          const serverDefinitionVersion = resolution.definitionVersion;
+          if (String(item.bundleDefinitionVersion) !== String(serverDefinitionVersion)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
+        if (resolution.isBundle && item.bundleComponents) {
+          const expected = resolution.components.map((component) => ({
+            variantId: component.variantId,
+            productId: component.productId,
+            quantity: component.quantity,
+          }));
+          const actual = item.bundleComponents.map((component: any) => ({
+            variantId: String(component.variantId),
+            productId: String(component.productId),
+            quantity: Number(component.quantity),
+          }));
+          if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
+        bundleResolutions.set(item.variantId, resolution);
+        variantProductIds.set(item.variantId, v.productId);
+        variantPrices.set(item.variantId, authoritativePrice);
+        variantCosts.set(item.variantId, resolution.unitCost);
       }
       if (saleDiscountRequested) {
         const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim().toLowerCase()) : [];
