@@ -10,7 +10,7 @@ const EXPECTED_SUBMENU_GROUPS = 126;
 const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "73a06df9060d30dcc1b7dd7456e7aaa1bfef075c",
+  "package.json": "e62179705a95b3cc5530f263de14a6d37c1f8291",
   "apps/web/src/App.tsx": "544b8daca2f6a02af11cc3672d2c48836a2059b4",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
@@ -21,8 +21,8 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/SettingsPage.tsx": "bae3919e787d81c2a3a8a6e9f9aba3a6e0350a1a",
   "apps/web/src/pages/CashDrawerPage.tsx": "8f57d8586a833d37aee9f37d99efad869fcb607e",
   "apps/web/src/pages/ReceiptsPage.tsx": "d5744e2e5f5f89b78c162727fe6b9978776bf44a",
-  ".github/workflows/production-certification.yml": "017fc14ad1d31f47927fb1ee659a6ab029d6ac05",
-  ".github/workflows/production-release-exact-main.yml": "1e1e7128801944d01c059cf1d75887282fd412e6",
+  ".github/workflows/production-certification.yml": "1661b9e9f2b0841f3f6feb9df9c03d19e2bcea9d",
+  ".github/workflows/production-release-exact-main.yml": "420138f7a5e4f1f8e9f806ec502f2c85bcdf0ef9",
 };
 
 const MARKERS: Array<[string, string, string]> = [
