@@ -157,3 +157,5 @@ if (failures.length) {
 }
 
 console.log("PRICING PRODUCTION LOCK: PASS — " + LOCK_ID);
+
+// PRICING_LOCK_CLOSED_LOOP_RECHECK
