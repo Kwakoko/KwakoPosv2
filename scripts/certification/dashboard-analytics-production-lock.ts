@@ -12,7 +12,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
   "packages/database/src/prismaProductionRepositories.ts": "19be308366d07d0af829ed0dd2052c0447f7fa77",
   "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
-  ".github/workflows/ci.yml": "37f3898b3604f2b41727bfac3e89805a0de98867,
+  ".github/workflows/ci.yml": "37f3898b3604f2b41727bfac3e89805a0de98867",
   ".github/workflows/production-certification.yml": "70524799757a76a8e714191a23bfbe0b92023fa3",
   ".github/workflows/production-release-exact-main.yml": "c824f352d4cac329f5756346a5590590e96aee99"
 };
