@@ -23,7 +23,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",
-  "tests/unit/backdated-pos-ui.test.ts": "4114fa94b152c25d9728ca8bb60d7dc77f760b1a",
+  "tests/unit/backdated-pos-ui.test.ts": "d7f0a945c84dfd3968d038ff9465096986cd9435",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
