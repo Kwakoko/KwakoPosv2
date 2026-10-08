@@ -75,6 +75,7 @@ model Tenant {
   payrollInputs          PayrollInput[]
   syncOperations         SyncOperation[]
   auditEvents            AuditEvent[]
+  platformAuditEvents    PlatformAuditEvent[]
   priceHistories         ProductPriceHistory[]
   branchStocks           ProductBranchStock[]
   receipts               Receipt[]
