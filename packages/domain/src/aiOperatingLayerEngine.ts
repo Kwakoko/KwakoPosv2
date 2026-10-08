@@ -13,6 +13,7 @@ export class AiOperatingLayerEngine {
   private agents: Map<string, AiAgentDefinition> = new Map();
   private tools: Map<string, AiToolDefinition> = new Map();
   private recommendations: Map<string, AiRecommendation> = new Map();
+  private recommendationTenants: Map<string, string> = new Map();
   private actionLedger: AiActionLedgerEntry[] = [];
   private killSwitchStatus: AiKillSwitchStatus = {
     scope: "GLOBAL",
@@ -112,6 +113,7 @@ export class AiOperatingLayerEngine {
     };
 
     this.recommendations.set(recommendationId, recommendation);
+    this.recommendationTenants.set(recommendationId, tenantId);
 
     return {
       insights: [insight],
@@ -146,13 +148,14 @@ export class AiOperatingLayerEngine {
   /**
    * 5. Explain Recommendation (Verifiable Evidence & Business Impact)
    */
-  public explainRecommendation(recommendationId: string): {
+  public explainRecommendation(recommendationId: string, tenantId?: string): {
     found: boolean;
     explanation?: string;
     evidence?: string[];
   } {
     const rec = this.recommendations.get(recommendationId);
-    if (!rec) return { found: false };
+    const ownerTenant = this.recommendationTenants.get(recommendationId);
+    if (!rec || (tenantId && ownerTenant !== tenantId)) return { found: false };
 
     return {
       found: true,
@@ -164,21 +167,23 @@ export class AiOperatingLayerEngine {
   /**
    * 6. Execute Approved Recommendation Action with Independent Verification & Ledger Audit
    */
-  public executeApprovedAction(recommendationId: string, approverId: string): {
+  public executeApprovedAction(recommendationId: string, approverId: string, tenantId?: string): {
     success: boolean;
     ledgerEntry?: AiActionLedgerEntry;
   } {
     const rec = this.recommendations.get(recommendationId);
-    if (!rec || rec.approvalStatus === "REJECTED") {
+    const ownerTenant = this.recommendationTenants.get(recommendationId);
+    if (!rec || rec.approvalStatus === "REJECTED" || (tenantId && ownerTenant !== tenantId)) {
       return { success: false };
     }
-
-    rec.approvalStatus = "APPROVED";
+    if (rec.approvalStatus !== "APPROVED") {
+      return { success: false };
+    }
 
     const ledgerEntry: AiActionLedgerEntry = {
       auditId: `AUDIT-AI-${Date.now()}`,
       recommendationId,
-      tenantId: "TEN-001",
+      tenantId: tenantId || ownerTenant || "UNKNOWN",
       domain: "INVENTORY",
       actionExecuted: "CREATE_PURCHASE_ORDER",
       executedByIdentity: approverId,
