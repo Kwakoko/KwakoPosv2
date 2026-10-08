@@ -1888,37 +1888,29 @@ const now = new Date();
   }
   async getJournalCompactionStats(ctx?: CompactionScopeContext): Promise<JournalCompactionStats[]> {
     await this.ensureInfrastructure();
-    let query: string;
-    const params: any[] = [];
-
-    if (ctx?.tenantId && ctx?.branchId) {
-      query = `
-        SELECT tenant_id, branch_id,
-               COUNT(*)::text AS total_entries,
-               MIN(revision)::text AS min_revision,
-               MAX(revision)::text AS max_revision,
-               MIN(created_at)::text AS oldest_entry_date,
-               MAX(created_at)::text AS newest_entry_date
-          FROM sync_change_journal
-         WHERE tenant_id = $1 AND branch_id = $2
-         GROUP BY tenant_id, branch_id
-      `;
-      params.push(ctx.tenantId, ctx.branchId);
-    } else {
-      query = `
-        SELECT tenant_id, branch_id,
-               COUNT(*)::text AS total_entries,
-               MIN(revision)::text AS min_revision,
-               MAX(revision)::text AS max_revision,
-               MIN(created_at)::text AS oldest_entry_date,
-               MAX(created_at)::text AS newest_entry_date
-          FROM sync_change_journal
-         GROUP BY tenant_id, branch_id
-         ORDER BY tenant_id, branch_id
-      `;
-    }
-
-    const rows: any[] = await prisma.$queryRawUnsafe(query, ...params);
+    const rows: any[] = (ctx?.tenantId && ctx?.branchId)
+      ? await prisma.$queryRaw<any[]>`
+          SELECT tenant_id, branch_id,
+                 COUNT(*)::text AS total_entries,
+                 MIN(revision)::text AS min_revision,
+                 MAX(revision)::text AS max_revision,
+                 MIN(created_at)::text AS oldest_entry_date,
+                 MAX(created_at)::text AS newest_entry_date
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId} AND branch_id = ${ctx.branchId}
+           GROUP BY tenant_id, branch_id
+        `
+      : await prisma.$queryRaw<any[]>`
+          SELECT tenant_id, branch_id,
+                 COUNT(*)::text AS total_entries,
+                 MIN(revision)::text AS min_revision,
+                 MAX(revision)::text AS max_revision,
+                 MIN(created_at)::text AS oldest_entry_date,
+                 MAX(created_at)::text AS newest_entry_date
+            FROM sync_change_journal
+           GROUP BY tenant_id, branch_id
+           ORDER BY tenant_id, branch_id
+        `;
     return rows.map((r) => ({
       tenantId: r.tenant_id,
       branchId: r.branch_id,
@@ -1978,23 +1970,45 @@ const now = new Date();
       };
     }
 
-    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
-    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+    const cutoffDate = typeof maxAgeDays === "number" && maxAgeDays > 0
+      ? new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000)
+      : null;
 
-    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
-      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
-      deleteSql += ` AND created_at < $4`;
-      params.push(cutoffDate);
-    }
-
-    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
-      `SELECT COUNT(*)::text AS count ${deleteSql}`,
-      ...params,
-    );
+    const countRows = cutoffDate
+      ? await prisma.$queryRaw<Array<{ count: string | bigint | number }>>`
+          SELECT COUNT(*)::text AS count
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+             AND created_at < ${cutoffDate}
+        `
+      : await prisma.$queryRaw<Array<{ count: string | bigint | number }>>`
+          SELECT COUNT(*)::text AS count
+            FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+        `;
     const prunedCount = Number(countRows[0]?.count || 0);
 
     if (!dryRun && prunedCount > 0) {
-      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+      if (cutoffDate) {
+        await prisma.$executeRaw`
+          DELETE FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+             AND created_at < ${cutoffDate}
+        `;
+      } else {
+        await prisma.$executeRaw`
+          DELETE FROM sync_change_journal
+           WHERE tenant_id = ${ctx.tenantId}
+             AND branch_id = ${ctx.branchId}
+             AND revision < ${safeRevision}
+        `;
+      }
     }
 
     return {
