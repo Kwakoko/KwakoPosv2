@@ -11,8 +11,9 @@
  *   6. Branch Safe & Bank Transfer Drop Tracker (Drawer -> Branch Safe -> Bank)
  *   7. "No Sale" Opening Audit Log & Reason Tracker
  *   8. Immutable Cash Movement Ledger (Sales, Refunds, Cash In/Out, Petty Cash, Safe Drops)
- *   9. Hardware Abstraction Layer (HAL) Drawer Trigger & Status Inspector (RJ11, USB, Printer)
- *  10. AI Anomaly & Fraud Detection Telemetry
+ *   9. Payment-channel reconciliation + authoritative cash audit trail
+ *   10. Hardware Abstraction Layer (HAL) Drawer Trigger & Status Inspector (RJ11, USB, Printer)
+ *  11. AI Anomaly & Fraud Detection Telemetry
  *
  * Uses V2 CSS variables + semantic utility classes. Zero Tailwind / inline styles.
  * ─────────────────────────────────────────────────────────────────────────────
@@ -38,9 +39,9 @@ const fmtNum = (n: number) => n.toLocaleString();
 export interface CashMovementRecord {
   id: string;
   time: string;
-  type: "OPENING_FLOAT" | "CASH_SALE" | "CASH_REFUND" | "CASH_IN" | "CASH_OUT" | "PETTY_CASH" | "SAFE_DROP" | "BANK_DEPOSIT" | "NO_SALE";
+  type: "OPENING_FLOAT" | "CASH_SALE" | "CASH_REFUND" | "CASH_IN" | "CASH_OUT" | "CASH_TRANSFER_OUT" | "CASH_TRANSFER_IN" | "PETTY_CASH" | "SAFE_DROP" | "BANK_DEPOSIT" | "NO_SALE";
   amount: number;
-  balance: number;
+  balance: number | null;
   reason: string;
   user: string;
   terminal: string;
@@ -138,7 +139,18 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   const [shiftStatus, setShiftStatus] = useState<"OPEN" | "LOCKED" | "CLOSED">("CLOSED");
   const [shiftId, setShiftId] = useState("");
   const [cashSessionId, setCashSessionId] = useState("");
-  const [terminalId] = useState("POS-TERM-01");
+  const [terminalId, setTerminalId] = useState(() => {
+    if (typeof window === "undefined") return "POS-TERM-01";
+    try {
+      return localStorage.getItem("kwakopos:cash-register-id") || "POS-TERM-01";
+    } catch {
+      return "POS-TERM-01";
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("kwakopos:cash-register-id", terminalId); } catch { /* browser identity only */ }
+  }, [terminalId]);
 
   // Operational Cash Metrics (100% Dynamic)
   const [openingFloat, setOpeningFloat] = useState(0);
@@ -211,23 +223,27 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   const canCloseShift = shiftStatus === "OPEN" && blindCountDone && Boolean(blindCountSealedAt);
   const toleranceThreshold = 500; // TZS 500
   const isVarianceAccepted = Math.abs(discrepancy) <= toleranceThreshold;
-  const requiresManagerApproval = Math.abs(discrepancy) > 5000;
+  const requiresManagerApproval = Math.abs(discrepancy) > toleranceThreshold;
 
   // Cash Movement Audit Ledger
   const [ledger, setLedger] = useState<CashMovementRecord[]>([]);
+  const [cashAuditTrail, setCashAuditTrail] = useState<any[]>([]);
+  const [channelReconciliation, setChannelReconciliation] = useState<any | null>(null);
+  const [openSessions, setOpenSessions] = useState<any[]>([]);
 
-  // Shift History
+  // Shift History — authoritative PostgreSQL data only.
   const [shiftHistory, setShiftHistory] = useState<ShiftRecord[]>([]);
 
   // ─── Hydrate Drawer Session & Operational Cash Movements from Local DB ──────
   const loadDrawerData = useCallback(async () => {
     try {
       await db.ready;
-      const activeResponse = await apiFetch<{ success: boolean; data: any | null }>("/api/v1/cash-sessions/active");
+      const activeResponse = await apiFetch<{ success: boolean; data: any | null }>(`/api/v1/cash-sessions/active?registerCode=${encodeURIComponent(terminalId)}`);
       const activeShift = activeResponse?.success ? activeResponse.data : null;
       if (activeShift && activeShift.status !== "CLOSED") {
         setShiftStatus("OPEN");
         setCashSessionId(String(activeShift.id));
+        if (activeShift.registerCode) setTerminalId(String(activeShift.registerCode));
         setShiftId(String(activeShift.sessionNumber || activeShift.id));
         setOpeningFloat(Number(activeShift.openingCash || 0));
         setOpenedAtTime(activeShift.openedAt ? new Date(activeShift.openedAt).toISOString().slice(0, 16).replace("T", " ") : "Today");
@@ -247,33 +263,12 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
           openedAt: activeShift.openedAt ? String(activeShift.openedAt) : null,
         }, { tenantId: currentTenantId || "", branchId: currentBranchId || "" });
 
-        const shiftStartMs = activeShift.openedAt ? new Date(activeShift.openedAt).getTime() : 0;
-        let cSales = 0;
-        let mSales = 0;
-        let aSales = 0;
-        let crdSales = 0;
-        let cIn = 0;
-        let cOut = 0;
-        let sDrops = 0;
-        let cExp = 0;
-
-        for (const s of db.sales.values()) {
-          const sAny = s as any;
-          const sTime = new Date(sAny.createdAt || sAny.soldAt || 0).getTime();
-          if (shiftStartMs > 0 && sTime < shiftStartMs) continue;
-          if (sAny.status === "Voided" || sAny.status === "Cancelled") continue;
-          const method = (sAny.paymentMethod || "Cash").toLowerCase();
-          const amt = Number(sAny.grandTotal || sAny.totalAmount || 0);
-          if (method.includes("mpesa") || method.includes("m-pesa")) mSales += amt;
-          else if (method.includes("airtel")) aSales += amt;
-          else if (method.includes("card")) crdSales += amt;
-          else cSales += amt;
-        }
-
         if (isOnline) {
           try {
             const movementResponse = await apiFetch<{ success: boolean; data: any[] }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/movements`);
-            setLedger(movementResponse?.success && Array.isArray(movementResponse.data) ? movementResponse.data.map((m: any) => ({ id: String(m.id), time: new Date(m.occurredAt).toISOString().replace("T", " ").slice(0, 16), type: m.type, amount: m.type === "CASH_IN" ? Number(m.amount) : -Number(m.amount), balance: 0, reason: String(m.reason || m.type), user: String(m.actorId || ""), terminal: String(m.deviceId || ""), witness: m.witness || undefined, approvalStatus: m.approvalStatus || "APPROVED" })) : []);
+            setLedger(movementResponse?.success && Array.isArray(movementResponse.data) ? movementResponse.data.map((m: any) => ({ id: String(m.id), time: new Date(m.occurredAt).toISOString().replace("T", " ").slice(0, 16), type: m.type,
+              amount: ["CASH_IN", "CASH_TRANSFER_IN"].includes(String(m.type)) ? Number(m.amount) : -Number(m.amount),
+              balance: null, reason: String(m.reason || m.type), user: String(m.actorId || ""), terminal: String(m.deviceId || ""), witness: m.witness || undefined, approvalStatus: m.approvalStatus || "APPROVED" })) : []);
           } catch {
             setLedger([]);
           }
@@ -285,12 +280,10 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setCashSales(Number(activeShift.cashSalesTotal || 0));
         setCashRefunds(Number(activeShift.cashRefundsTotal || 0));
         setCashExpenses(Number(activeShift.cashExpensesTotal || 0));
-        setMpesaSales(mSales);
-        setAirtelSales(aSales);
-        setCardSales(crdSales);
-        setCashIn(cIn);
-        setCashOut(cOut);
-        setSafeDrops(sDrops);
+
+        setCashIn(Number(activeShift.cashInTotal || 0));
+        setCashOut(Number(activeShift.cashOutTotal || 0));
+        setSafeDrops(Number(activeShift.safeDropTotal || 0));
       } else {
         setShiftStatus("CLOSED");
         setShiftId("");
@@ -309,16 +302,69 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
         setLedger([]);
       }
 
-      const savedHist = db.getConfigurationLocal?.("shift_history");
-      if (Array.isArray(savedHist)) {
-        setShiftHistory(savedHist);
-      } else {
+      try {
+        const historyResponse = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/cash-sessions?status=CLOSED&limit=100");
+        if (historyResponse?.success && Array.isArray(historyResponse.data)) {
+          setShiftHistory(historyResponse.data.map((row: any) => ({
+            id: String(row.id),
+            shiftNumber: String(row.sessionNumber || row.id),
+            cashier: String(row.cashierId || ""),
+            terminal: String(row.registerCode || terminalId),
+            openedAt: row.openedAt ? new Date(row.openedAt).toISOString().replace("T"," ").slice(0,16) : "",
+            closedAt: row.closedAt ? new Date(row.closedAt).toISOString().replace("T"," ").slice(0,16) : "",
+            openingFloat: Number(row.openingCash || 0),
+            cashSales: Number(row.cashSalesTotal || 0),
+            mpesaSales: 0,
+            airtelSales: 0,
+            cardSales: 0,
+            cashIn: Number(row.cashInTotal || 0),
+            cashOut: Number(row.cashOutTotal || 0),
+            safeDrops: Number(row.safeDropTotal || 0),
+            expectedCash: Number(row.expectedCash || 0),
+            declaredCash: Number(row.actualCash || 0),
+            variance: Number(row.variance || 0),
+            status: row.status === "OPEN" ? "OPEN" : "CLOSED",
+          })));
+        }
+      } catch {
         setShiftHistory([]);
+      }
+
+      try {
+        const openResponse = await apiFetch<{ success: boolean; data: any[] }>("/api/v1/cash-sessions?status=OPEN&limit=100");
+        setOpenSessions(openResponse?.success && Array.isArray(openResponse.data) ? openResponse.data : []);
+      } catch {
+        setOpenSessions([]);
+      }
+
+      if (isOnline && activeShift?.id) {
+        try {
+          const [reconResponse, auditResponse] = await Promise.all([
+            apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/payment-channel-reconciliation`),
+            apiFetch<{ success: boolean; data: any[] }>(`/api/v1/cash-sessions/${encodeURIComponent(String(activeShift.id))}/audit-trail`),
+          ]);
+          setChannelReconciliation(reconResponse?.success ? reconResponse.data : null);
+          setCashAuditTrail(auditResponse?.success && Array.isArray(auditResponse.data) ? auditResponse.data : []);
+          if (reconResponse?.success) {
+            const channels = Array.isArray(reconResponse.data?.channels) ? reconResponse.data.channels : [];
+            const by = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.net || 0);
+            const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+            setMpesaSales(completedBy("MOBILE_MONEY") || completedBy("MPESA"));
+            setAirtelSales(completedBy("AIRTEL_MONEY"));
+            setCardSales(completedBy("CARD"));
+          }
+        } catch {
+          setChannelReconciliation(null);
+          setCashAuditTrail([]);
+        }
+      } else {
+        setChannelReconciliation(null);
+        setCashAuditTrail([]);
       }
     } catch (err) {
       console.error("[CashDrawer] Failed to hydrate drawer:", err);
     }
-  }, [db, isOnline]);
+  }, [db, isOnline, terminalId]);
 
   useEffect(() => {
     void loadDrawerData();
@@ -328,7 +374,8 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
   }, [loadDrawerData]);
 
   // Modals State
-  const [modalType, setModalType] = useState<"CASH_IN" | "CASH_OUT" | "SAFE_DROP" | "NO_SALE" | "OPEN_SHIFT" | "CLOSE_SHIFT" | null>(null);
+  const [modalType, setModalType] = useState<"CASH_IN" | "CASH_OUT" | "SAFE_DROP" | "CASH_TRANSFER" | "NO_SALE" | "OPEN_SHIFT" | "CLOSE_SHIFT" | null>(null);
+  const [transferDestinationId, setTransferDestinationId] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [reasonInput, setReasonInput] = useState("");
   const [witnessInput, setWitnessInput] = useState("");
@@ -369,24 +416,37 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
 
   // Action Handlers
   const handleOpenDrawerSignal = async (reason: string) => {
-    playBeep(880, 100);
-    toast.info("[HAL] Cash Drawer Signal", `Trigger signal sent to ${halStatus.interface} (${reason})`);
-    setHalStatus((prev) => ({ ...prev, lastTriggered: new Date().toLocaleTimeString() }));
-
-    const noSaleRecord: CashMovementRecord = {
-      id: `CSH-${Date.now()}`,
-      time: new Date().toISOString().replace("T", " ").slice(0, 16),
-      type: "NO_SALE",
-      amount: 0,
-      balance: expectedCash,
-      reason,
-      user: currentUser?.name || "Operator",
-      terminal: terminalId,
-    };
-
-    setLedger((prev) => [noSaleRecord, ...prev]);
+    if (!currentTenantId || !currentBranchId || !cashSessionId) {
+      toast.error("No-Sale Not Recorded", "An authoritative open cash session is required.");
+      return;
+    }
+    if (!isOnline) {
+      toast.error("No-Sale Requires Online Authority", "Drawer-open audit events cannot be recorded in browser-only storage.");
+      return;
+    }
+    try {
+      const response = await apiFetch<{ success: boolean; data: any }>("/api/v1/drawer-operations/no-sale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cashSessionId, deviceId: terminalId, reason, id: `NOSALE-${crypto.randomUUID()}` }),
+      });
+      if (!response?.success || !response.data?.id) throw new Error("PostgreSQL did not acknowledge the no-sale drawer operation");
+      setLedger((prev) => [{
+        id: String(response.data.id),
+        time: new Date(response.data.requestedAt || Date.now()).toISOString().replace("T"," ").slice(0,16),
+        type: "NO_SALE",
+        amount: 0,
+        balance: expectedCash,
+        reason,
+        user: currentUser?.name || "Cashier",
+        terminal: terminalId,
+        approvalStatus: "APPROVED",
+      }, ...prev]);
+      playBeep(880, 100);
+    } catch (error) {
+      toast.error("No-Sale Not Recorded", error instanceof Error ? error.message : "Unable to persist the drawer audit event.");
+    }
   };
-
   const handleAdjustDenomination = (key: keyof DenominationState, delta: number) => {
     setDenominations((prev) => ({
       ...prev,
@@ -407,26 +467,48 @@ export const CashDrawerPage: React.FC<CashDrawerPageProps> = ({ activeTab: propA
     });
   };
 
-  const handleGenerateXReport = () => {
-    setActiveReportSlip({
-      type: "X_REPORT",
-      title: "MID-SHIFT X-READING AUDIT",
-      timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
-      shiftNumber: shiftId,
-      cashier: currentUser?.name || "Cashier",
-      openingFloat,
-      cashSales,
-      mpesaSales,
-      airtelSales,
-      cardSales,
-      cashIn,
-      cashOut,
-      safeDrops,
-      expectedCash,
-      declaredCash,
-      variance: discrepancy,
-      denominations,
-    });
+  const handleGenerateXReport = async () => {
+    if (!isOnline || !cashSessionId) {
+      toast.error("X-Reading Unavailable", "A live PostgreSQL cash session is required for an authoritative mid-shift report.");
+      return;
+    }
+    try {
+      const [sessionResponse, reconResponse] = await Promise.all([
+        apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/active?registerCode=${encodeURIComponent(terminalId)}`),
+        apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/payment-channel-reconciliation`),
+      ]);
+      const active = sessionResponse?.success ? sessionResponse.data : null;
+      if (!active || String(active.id) !== String(cashSessionId)) throw new Error("The live register session could not be verified.");
+      const channels = reconResponse?.success && Array.isArray(reconResponse.data?.channels) ? reconResponse.data.channels : [];
+      const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+      const cashChannel = channels.find((c: any) => String(c.channel).toUpperCase() === "CASH");
+      const authoritativeCashSales = Number(cashChannel?.completed || active.cashSalesTotal || 0);
+      const authoritativeCashIn = Number(active.cashInTotal || 0);
+      const authoritativeCashOut = Number(active.cashOutTotal || 0);
+      const authoritativeSafeDrops = Number(active.safeDropTotal || 0);
+      const authoritativeExpected = Number(active.expectedCash || 0);
+      setActiveReportSlip({
+        type: "X_REPORT",
+        title: "MID-SHIFT X-READING AUDIT",
+        timestamp: new Date().toISOString().replace("T", " ").slice(0, 19),
+        shiftNumber: String(active.sessionNumber || shiftId),
+        cashier: String(active.cashierId || currentUser?.name || "Cashier"),
+        openingFloat: Number(active.openingCash || 0),
+        cashSales: authoritativeCashSales,
+        mpesaSales: completedBy("MOBILE_MONEY") || completedBy("MPESA"),
+        airtelSales: completedBy("AIRTEL_MONEY"),
+        cardSales: completedBy("CARD"),
+        cashIn: authoritativeCashIn,
+        cashOut: authoritativeCashOut,
+        safeDrops: authoritativeSafeDrops,
+        expectedCash: authoritativeExpected,
+        declaredCash: active.actualCash === null || active.actualCash === undefined ? 0 : Number(active.actualCash),
+        variance: active.actualCash === null || active.actualCash === undefined ? 0 : Number(active.actualCash) - authoritativeExpected,
+        denominations,
+      });
+    } catch (error) {
+      toast.error("X-Reading Failed", error instanceof Error ? error.message : "Unable to load authoritative cash report data.");
+    }
   };
 
   const handleGenerateZReport = () => {
@@ -512,10 +594,11 @@ Manager Sign-off:  _____________________
         const response = await apiFetch<{ success: boolean; data: any }>("/api/v1/cash-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ openingCash: flt }),
+          body: JSON.stringify({ openingCash: flt, registerCode: terminalId, deviceId: terminalId }),
         });
         const session = response?.data;
         if (!response?.success || !session?.id) throw new Error("Cash session was not created by PostgreSQL authority");
+        if (session.registerCode) setTerminalId(String(session.registerCode));
         setCashSessionId(String(session.id));
         setShiftId(String(session.sessionNumber || session.id));
         setOpeningFloat(Number(session.openingCash || flt));
@@ -557,41 +640,88 @@ Manager Sign-off:  _____________________
         const closed = response?.data;
         if (!response?.success || closed?.status !== "CLOSED") throw new Error("Cash session was not closed by PostgreSQL authority");
         setShiftStatus("CLOSED");
+        const authoritativeClosedCash = Number(closed.actualCash || 0);
+        const authoritativeExpectedCash = Number(closed.expectedCash || 0);
+        const authoritativeVariance = Number(closed.variance || 0);
+        const reportRecon = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(String(closed.id))}/payment-channel-reconciliation`).catch(() => null);
+        const reportChannels = reportRecon?.success && Array.isArray(reportRecon.data?.channels) ? reportRecon.data.channels : [];
+        const reportAmount = (channel: string) => Number(reportChannels.find((c: any) => String(c.channel).toUpperCase() === channel)?.completed || 0);
         setCashSessionId("");
-        const closeRecord: ShiftRecord = {
-        id: `SFT-${Date.now()}`,
-        shiftNumber: shiftId,
-        cashier: currentUser?.name || "Cashier",
-        terminal: terminalId,
-        openedAt: openedAtTime,
-        closedAt: new Date().toISOString().replace("T", " ").slice(0, 16),
-        openingFloat,
-        cashSales,
-        mpesaSales,
-        airtelSales,
-        cardSales,
-        cashIn,
-        cashOut,
-        safeDrops,
-        expectedCash,
-        declaredCash,
-        variance: discrepancy,
-        status: "CLOSED",
-        closedBy: currentUser?.name || "Cashier",
-        managerSignOff: witnessInput.trim() || undefined,
-      };
-      const updatedHistory = [closeRecord, ...shiftHistory];
-      setShiftHistory(updatedHistory);
-      db.saveConfigurationLocal("shift_history", updatedHistory);
-      setBlindCountDone(false);
-      setBlindCountSealedAt(null);
-      setBlindDeclaredCash(0);
-      setModalType(null);
-      handleGenerateZReport();
+        setActiveReportSlip({
+          type: "Z_REPORT",
+          title: `Z-REPORT SETTLEMENT (${String(closed.sessionNumber || closed.id)})`,
+          timestamp: closed.closedAt ? new Date(closed.closedAt).toISOString().replace("T"," ").slice(0,19) : new Date().toISOString().replace("T"," ").slice(0,19),
+          shiftNumber: String(closed.sessionNumber || closed.id),
+          cashier: String(closed.cashierId || currentUser?.name || "Cashier"),
+          openingFloat: Number(closed.openingCash || 0),
+          cashSales: Number(closed.cashSalesTotal || 0),
+          mpesaSales: reportAmount("MOBILE_MONEY") || reportAmount("MPESA"),
+          airtelSales: reportAmount("AIRTEL_MONEY"),
+          cardSales: reportAmount("CARD"),
+          cashIn: Number(closed.cashInTotal || 0),
+          cashOut: Number(closed.cashOutTotal || 0),
+          safeDrops: Number(closed.safeDropTotal || 0),
+          expectedCash: authoritativeExpectedCash,
+          declaredCash: authoritativeClosedCash,
+          variance: authoritativeVariance,
+          denominations,
+          managerSignOff: Math.abs(authoritativeVariance) > toleranceThreshold ? "Manager Authorized" : "Within Policy Tolerance",
+        });
+        setBlindCountDone(false);
+        setBlindCountSealedAt(null);
+        setBlindDeclaredCash(0);
+        setModalType(null);
+        await loadDrawerData();
       toast.info("Shift Closed", "Register reconciled and Z-Report compiled.");
       playBeep(440, 120);
       } catch (error) {
         toast.error("Shift Close Failed", error instanceof Error ? error.message : "Unable to close the authoritative cash session.");
+      }
+      return;
+    }
+
+    if (modalType === "CASH_TRANSFER") {
+      const amt = Number(amountInput);
+      if (!transferDestinationId || !amt || amt <= 0 || !cashSessionId) return;
+      if (!currentTenantId || !currentBranchId) {
+        toast.error("Cash Transfer Not Saved", "An active tenant and branch are required.");
+        return;
+      }
+      if (!isOnline) {
+        toast.error("Cash Transfer Requires Online Authority", "Inter-register transfers must be committed to PostgreSQL authority.");
+        return;
+      }
+      try {
+        const response = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(cashSessionId)}/transfer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destinationCashSessionId: transferDestinationId,
+            amount: amt,
+            reason: reasonInput.trim() || "Inter-register cash transfer",
+            witness: witnessInput.trim() || undefined,
+            deviceId: terminalId,
+            idempotencyKey: `CASH-TRANSFER-${crypto.randomUUID()}`,
+            occurredAt: new Date().toISOString(),
+          }),
+        });
+        if (!response?.success || !response.data?.sourceMovement) throw new Error("PostgreSQL did not acknowledge the cash transfer");
+        setCashOut((prev) => prev + amt);
+        setLedger((prev) => [{
+          id: String(response.data.sourceMovement.id),
+          time: new Date(response.data.sourceMovement.occurredAt || Date.now()).toISOString().replace("T"," ").slice(0,16),
+          type: "CASH_TRANSFER_OUT",
+          amount: -amt,
+          balance: expectedCash - amt,
+          reason: String(response.data.sourceMovement.reason || reasonInput || "Inter-register cash transfer"),
+          user: String(response.data.sourceMovement.actorId || currentUser?.name || ""),
+          terminal: terminalId,
+          witness: witnessInput.trim() || undefined,
+          approvalStatus: "APPROVED",
+        }, ...prev]);
+        setModalType(null); setAmountInput(""); setReasonInput(""); setWitnessInput(""); setTransferDestinationId("");
+      } catch (error) {
+        toast.error("Cash Transfer Not Saved", error instanceof Error ? error.message : "Unable to persist the cash transfer.");
       }
       return;
     }
@@ -604,15 +734,12 @@ Manager Sign-off:  _____________________
 
     if (modalType === "CASH_IN") {
       movementType = "CASH_IN";
-      setCashIn((prev) => prev + amt);
     } else if (modalType === "CASH_OUT") {
       movementType = "CASH_OUT";
       signedAmt = -amt;
-      setCashOut((prev) => prev + amt);
     } else if (modalType === "SAFE_DROP") {
       movementType = "SAFE_DROP";
       signedAmt = -amt;
-      setSafeDrops((prev) => prev + amt);
     } else if (modalType === "NO_SALE") {
       movementType = "NO_SALE";
       signedAmt = 0;
@@ -824,6 +951,7 @@ Manager Sign-off:  _____________________
                 <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("CASH_IN")} type="button">+ Cash In</button>
                 <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("CASH_OUT")} type="button">- Cash Out</button>
                 <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={shiftStatus !== "OPEN"} onClick={() => setModalType("SAFE_DROP")} type="button">Safe Drop</button>
+                <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={shiftStatus !== "OPEN" || openSessions.filter((s: any) => String(s.id) !== String(cashSessionId)).length === 0} onClick={() => setModalType("CASH_TRANSFER")} type="button">Transfer</button>
               </div>
             </div>
 
@@ -866,7 +994,7 @@ Manager Sign-off:  _____________________
                       <td className={`v2-mono v2-font-bold ${m.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
                         {m.amount > 0 ? `+${money(m.amount)}` : money(m.amount)}
                       </td>
-                      <td className="v2-mono">{money(m.balance)}</td>
+                      <td className="v2-mono">{m.balance === null ? "—" : money(m.balance)}</td>
                       <td className="v2-text-xs">{m.reason}</td>
                       <td className="v2-text-xs v2-text-muted">{m.user}</td>
                     </tr>
@@ -1088,6 +1216,30 @@ Manager Sign-off:  _____________________
               </div>
 
               <div className="v2-card v2-p-4 v2-space-y-3">
+                <h4 className="v2-font-bold v2-text-xs v2-text-muted">PAYMENT-CHANNEL RECONCILIATION</h4>
+                {channelReconciliation ? (
+                  <>
+                    <div className="v2-flex v2-justify-between v2-text-xs"><span>Net sales:</span><span className="v2-mono v2-font-bold">{money(Number(channelReconciliation.saleNetTotal || 0))}</span></div>
+                    <div className="v2-flex v2-justify-between v2-text-xs"><span>Net payments:</span><span className="v2-mono v2-font-bold">{money(Number(channelReconciliation.paymentNetTotal || 0))}</span></div>
+                    <div className="v2-flex v2-justify-between v2-text-xs"><span>Payment delta:</span><span className="v2-mono">{money(Number(channelReconciliation.paymentDelta || 0))}</span></div>
+                    <div className="v2-grid v2-grid-4 v2-gap-2 v2-mt-2">
+                      {(channelReconciliation.channels || []).map((row: any) => (
+                        <div key={String(row.channel)} className="v2-card v2-p-2" style={{ background: "var(--surface-2)" }}>
+                          <div className="v2-text-xs v2-text-muted">{String(row.channel)}</div>
+                          <div className="v2-mono v2-font-bold">{money(Number(row.net || 0))}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="v2-text-xs v2-font-bold" style={{ color: channelReconciliation.balanced ? "var(--success)" : "var(--danger)" }}>
+                      {channelReconciliation.balanced ? "✓ CHANNELS RECONCILED" : "⚠ CHANNEL RECONCILIATION EXCEPTION"}
+                    </div>
+                  </>
+                ) : (
+                  <div className="v2-text-xs v2-text-muted">Authoritative payment-channel reconciliation is unavailable until PostgreSQL authority is online.</div>
+                )}
+              </div>
+
+          <div className="v2-card v2-p-4 v2-space-y-3">
                 <h4 className="v2-font-bold v2-text-xs v2-text-muted">ACTUAL VS EXPECTED VARIANCE</h4>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>Declared Physical Count:</span><span className="v2-mono v2-font-bold">{money(declaredCash)}</span></div>
                 <div className="v2-flex v2-justify-between v2-text-xs"><span>System Expected Count:</span><span className="v2-mono v2-font-bold">{money(expectedCash)}</span></div>
@@ -1178,27 +1330,34 @@ Manager Sign-off:  _____________________
                       <button
                         className="v2-btn v2-btn-outline v2-btn-sm"
                         style={{ padding: "0.2rem 0.5rem", fontSize: "0.72rem" }}
-                        onClick={() => {
-                          setActiveReportSlip({
-                            type: "Z_REPORT",
-                            title: `Z-REPORT SETTLEMENT (${s.shiftNumber})`,
-                            timestamp: s.closedAt || s.openedAt,
-                            shiftNumber: s.shiftNumber,
-                            cashier: s.cashier,
-                            openingFloat: s.openingFloat,
-                            cashSales: s.cashSales,
-                            mpesaSales: s.mpesaSales,
-                            airtelSales: s.airtelSales,
-                            cardSales: s.cardSales,
-                            cashIn: s.cashIn,
-                            cashOut: s.cashOut,
-                            safeDrops: s.safeDrops,
-                            expectedCash: s.expectedCash,
-                            declaredCash: s.declaredCash || s.expectedCash,
-                            variance: s.variance || 0,
-                            denominations,
-                            managerSignOff: s.managerSignOff || "Manager Verified",
-                          });
+                        onClick={async () => {
+                          try {
+                            const recon = await apiFetch<{ success: boolean; data: any }>(`/api/v1/cash-sessions/${encodeURIComponent(s.id)}/payment-channel-reconciliation`);
+                            const channels = recon?.success && Array.isArray(recon.data?.channels) ? recon.data.channels : [];
+                            const completedBy = (name: string) => Number(channels.find((c: any) => String(c.channel).toUpperCase() === name)?.completed || 0);
+                            setActiveReportSlip({
+                              type: "Z_REPORT",
+                              title: `Z-REPORT SETTLEMENT (${s.shiftNumber})`,
+                              timestamp: s.closedAt || s.openedAt,
+                              shiftNumber: s.shiftNumber,
+                              cashier: s.cashier,
+                              openingFloat: s.openingFloat,
+                              cashSales: s.cashSales,
+                              mpesaSales: completedBy("MOBILE_MONEY") || completedBy("MPESA"),
+                              airtelSales: completedBy("AIRTEL_MONEY"),
+                              cardSales: completedBy("CARD"),
+                              cashIn: s.cashIn,
+                              cashOut: s.cashOut,
+                              safeDrops: s.safeDrops,
+                              expectedCash: s.expectedCash,
+                              declaredCash: s.declaredCash || s.expectedCash,
+                              variance: s.variance || 0,
+                              denominations,
+                              managerSignOff: s.managerSignOff || (Math.abs(s.variance || 0) > toleranceThreshold ? "Manager Authorized" : "Within Policy Tolerance"),
+                            });
+                          } catch (error) {
+                            toast.error("Z-Report Reprint Failed", error instanceof Error ? error.message : "Unable to load authoritative payment-channel data.");
+                          }
                         }}
                         type="button"
                       >
@@ -1296,6 +1455,7 @@ Manager Sign-off:  _____________________
             <div className="v2-flex v2-gap-2">
               <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_IN")} type="button">+ In</button>
               <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_OUT")} type="button">- Out</button>
+              <button className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => setModalType("CASH_TRANSFER")} type="button">Transfer</button>
             </div>
           </div>
           <table className="v2-table">
@@ -1324,7 +1484,7 @@ Manager Sign-off:  _____________________
                   <td className={`v2-mono v2-font-bold ${l.amount >= 0 ? "v2-text-success" : "v2-text-danger"}`}>
                     {l.amount > 0 ? `+${money(l.amount)}` : money(l.amount)}
                   </td>
-                  <td className="v2-mono">{money(l.balance)}</td>
+                  <td className="v2-mono">{l.balance === null ? "—" : money(l.balance)}</td>
                   <td className="v2-text-xs">{l.reason}</td>
                   <td className="v2-text-xs v2-text-muted">{l.user}</td>
                   <td>
@@ -1334,6 +1494,23 @@ Manager Sign-off:  _____________________
               ))}
             </tbody>
           </table>
+          <div className="v2-card v2-mt-4">
+            <div className="v2-card-header"><div className="v2-card-title">Authoritative Cash Audit Trail ({cashAuditTrail.length} events)</div></div>
+            <table className="v2-table">
+              <thead><tr><th>Timestamp</th><th>Action</th><th>Entity</th><th>Actor</th><th>Device</th></tr></thead>
+              <tbody>
+                {cashAuditTrail.map((event: any) => (
+                  <tr key={String(event.id)}>
+                    <td className="v2-text-xs v2-text-muted">{event.createdAt ? new Date(event.createdAt).toISOString().replace("T"," ").slice(0,19) : ""}</td>
+                    <td className="v2-text-xs v2-font-bold">{String(event.action || "")}</td>
+                    <td className="v2-text-xs">{String(event.entityType || "")}</td>
+                    <td className="v2-text-xs">{String(event.userId || "")}</td>
+                    <td className="v2-text-xs v2-mono">{String(event.deviceId || "")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1445,6 +1622,32 @@ Manager Sign-off:  _____________________
                     <input className="v2-input" value={currentUser?.name || "Cashier"} disabled />
                   </div>
                 </>
+              ) : modalType === "CASH_TRANSFER" ? (
+                <>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">DESTINATION OPEN REGISTER *</label>
+                    <select className="v2-input" value={transferDestinationId} onChange={(e) => setTransferDestinationId(e.target.value)} required>
+                      <option value="">Select destination register…</option>
+                      {openSessions.filter((session: any) => String(session.id) !== String(cashSessionId)).map((session: any) => (
+                        <option key={String(session.id)} value={String(session.id)}>
+                          {String(session.registerCode || "REGISTER")} · Shift {String(session.sessionNumber || session.id)} · Cashier {String(session.cashierId || "")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">AMOUNT (TSH) *</label>
+                    <input className="v2-input" type="number" min="1" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} required autoFocus />
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">TRANSFER REASON *</label>
+                    <input className="v2-input" placeholder="e.g. Rebalance register float" value={reasonInput} onChange={(e) => setReasonInput(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label className="v2-text-xs v2-font-bold v2-text-muted">WITNESS / MANAGER</label>
+                    <input className="v2-input" placeholder="Optional witness" value={witnessInput} onChange={(e) => setWitnessInput(e.target.value)} />
+                  </div>
+                </>
               ) : modalType === "CLOSE_SHIFT" ? (
                 <>
                   <div className="v2-card v2-p-3 v2-space-y-1" style={{ background: "var(--surface-2)" }}>
@@ -1463,7 +1666,7 @@ Manager Sign-off:  _____________________
                       </span>
                     </div>
                   </div>
-                  {Math.abs(discrepancy) > 500 && (
+                  {requiresManagerApproval && (
                     <div>
                       <label className="v2-text-xs v2-font-bold v2-text-muted">MANAGER OVERRIDE / WITNESS NAME *</label>
                       <input
@@ -1508,7 +1711,7 @@ Manager Sign-off:  _____________________
               <div className="v2-flex v2-justify-end v2-gap-2 v2-pt-3">
                 <button className="v2-btn v2-btn-ghost v2-btn-sm" onClick={() => setModalType(null)} type="button">Cancel</button>
                 <button className="v2-btn v2-btn-primary v2-btn-sm" type="submit">
-                  {modalType === "OPEN_SHIFT" ? "Confirm & Open" : modalType === "CLOSE_SHIFT" ? "Finalize & Settle Shift" : "Submit Entry"}
+                  {modalType === "OPEN_SHIFT" ? "Confirm & Open" : modalType === "CLOSE_SHIFT" ? "Finalize & Settle Shift" : modalType === "CASH_TRANSFER" ? "Transfer & Record" : "Submit Entry"}
                 </button>
               </div>
             </form>

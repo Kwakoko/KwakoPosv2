@@ -215,3 +215,26 @@ export function assertBranchFinancialBoundary(
     );
   }
 }
+
+
+// INVARIANT F013: Posted journal lines must be non-negative and mutually exclusive.
+export function assertJournalLineAmounts(lines: JournalLine[]): void {
+  for (const line of lines || []) {
+    const debit = Number(line.debit);
+    const credit = Number(line.credit);
+    if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 || (debit > 0 && credit > 0)) {
+      throw new Error(`INVARIANT_F013_VIOLATION: Journal line ${line.id || "NEW"} has invalid debit/credit amounts.`);
+    }
+  }
+}
+
+// INVARIANT F014: Referenced posting date must not fall outside an assigned accounting period.
+export function assertEntryDateWithinPeriod(entryDate: string | Date, period?: AccountingPeriod | null): void {
+  if (!period) return;
+  const date = new Date(entryDate).getTime();
+  const start = new Date(period.startDate).getTime();
+  const end = new Date(period.endDate).getTime();
+  if (!Number.isFinite(date) || date < start || date > end) {
+    throw new Error(`INVARIANT_F014_VIOLATION: Entry date falls outside accounting period ${period.name}.`);
+  }
+}

@@ -180,6 +180,16 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
     });
     const varId = prod.variants![0].id;
 
+    serverStockRepo.recordMovement(tenantCtx, {
+      id: randomUUID(),
+      variantId: varId,
+      movementType: "OPENING_STOCK",
+      quantityChange: 10,
+      operationId: "OP-B-OPENING",
+      idempotencyKey: "DEV-B/OP-B-OPENING",
+      deviceId: "server-seed",
+    });
+
     // Both browsers sync initial state
     await browserAEngine.syncWithServer(
       async (req) => syncEngine.processPush(tenantCtx, req),
@@ -227,7 +237,7 @@ describe("Hardened Multi-Device Sync Convergence Test Suite", () => {
     // Both browsers have identical calculated stock
     const stockA = calculateAvailableStock(Array.from(browserADb.stockLedger.values()).filter((l) => l.variantId === varId));
     const stockB = calculateAvailableStock(Array.from(browserBDb.stockLedger.values()).filter((l) => l.variantId === varId));
-    expect(stockA).toBe(-10);
-    expect(stockB).toBe(-10);
+    expect(stockA).toBe(0);
+    expect(stockB).toBe(0);
   });
 });
