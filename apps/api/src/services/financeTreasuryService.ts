@@ -59,16 +59,16 @@ export class FinanceTreasuryService {
     return globalFinanceTreasuryEngine.createPaymentRun(params);
   }
 
-  public performLiquidityCheck(runId: string, availableLiquidity: number) {
-    return globalFinanceTreasuryEngine.performLiquidityCheck(runId, availableLiquidity);
+  public performLiquidityCheck(runId: string, availableLiquidity: number, tenantId?: string) {
+    return globalFinanceTreasuryEngine.performLiquidityCheck(runId, availableLiquidity, tenantId);
   }
 
   public approvePaymentRun(runId: string, approvalRef: string, approvedBy: string) {
     return globalFinanceTreasuryEngine.approvePaymentRun(runId, approvalRef, approvedBy);
   }
 
-  public executePaymentRun(runId: string, executorId: string) {
-    return globalFinanceTreasuryEngine.executePaymentRun(runId, executorId);
+  public executePaymentRun(runId: string, executorId: string, tenantId?: string) {
+    return globalFinanceTreasuryEngine.executePaymentRun(runId, executorId, tenantId);
   }
 
   public registerBeneficiary(params: Omit<Beneficiary, "createdAt" | "updatedAt" | "changeHistory">) {

@@ -6,10 +6,10 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-08";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "73a06df9060d30dcc1b7dd7456e7aaa1bfef075c",
-  ".github/workflows/ci.yml": "810a3c54084d61d0c9b4b4777c08c60c05969e2f",
-  ".github/workflows/production-certification.yml": "017fc14ad1d31f47927fb1ee659a6ab029d6ac05",
-  ".github/workflows/production-release-exact-main.yml": "1e1e7128801944d01c059cf1d75887282fd412e6",
+  "package.json": "1fc2114eca41dfdfed54fbdf477f330371173368",
+  ".github/workflows/ci.yml": "0ae2837081be968306bc13757ac716cab10f51fa",
+  ".github/workflows/production-certification.yml": "947db3a4fb149fbcc701ab5f1cf3da3d1e29701c",
+  ".github/workflows/production-release-exact-main.yml": "eda205e987bde2801a881b902349b869586bd633",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
   "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
   "apps/web/src/services/payloadValidationService.ts": "9c28e200a6a2175c81d9d900d168936ae3e96f7d",
@@ -19,7 +19,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
   "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "6f9e95de79010ea7e40bb683c46f7f56c3c77d65",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",

@@ -70,10 +70,12 @@ export class AiNativeEngine {
    */
   public validatePolicy(
     recommendationId: string,
-    rules: { maxLimitUsd: number; proposedLimitUsd: number }
+    rules: { maxLimitUsd: number; proposedLimitUsd: number },
+    tenantId?: string
   ): AiPolicyValidationResult {
     const rec = this.recommendations.get(recommendationId);
     if (!rec) throw new Error(`Recommendation ${recommendationId} not found.`);
+    if (tenantId && rec.tenantId !== tenantId) throw new Error("Recommendation is outside the authenticated tenant.");
 
     // Invariant: Level 4 actions can NEVER execute autonomously or pass policy
     if (rec.riskLevel === "LEVEL_4_RESTRICTED") {
@@ -197,8 +199,8 @@ export class AiNativeEngine {
     };
   }
 
-  public getLedger(): AiActionLedgerEntry[] {
-    return this.ledgerEntries;
+  public getLedger(tenantId?: string): AiActionLedgerEntry[] {
+    return tenantId ? this.ledgerEntries.filter((entry) => entry.tenantId === tenantId) : this.ledgerEntries;
   }
 }
 

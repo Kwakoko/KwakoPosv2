@@ -51,6 +51,7 @@ export const FOUNDATION_REQUIRED_GATES = [
   "certify:tax-fiscal-lock",
   "certify:backdated-lock",
   "certify:security",
+  "certify:security-platform-lock",
   "production:evidence:verify",
   "platform-governance:verify",
 ] as const;

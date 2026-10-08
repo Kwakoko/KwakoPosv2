@@ -188,10 +188,15 @@ export class EnterpriseApprovalsEngine {
     approverRole: string;
     decision: "APPROVE" | "REJECT" | "REQUEST_CHANGES";
     comments?: string;
+    tenantId?: string;
   }): { success: boolean; updatedRequest?: ApprovalRequest; error?: string } {
     const request = this.requests.get(params.approvalRequestId);
     if (!request) {
       return { success: false, error: `Approval request ${params.approvalRequestId} not found` };
+    }
+
+    if (params.tenantId && request.tenantId !== params.tenantId) {
+      return { success: false, error: "Approval request is outside the authenticated tenant." };
     }
 
     if (request.status === "COMPLETE" || request.status === "CANCELLED" || request.status === "EXPIRED") {
@@ -263,13 +268,16 @@ export class EnterpriseApprovalsEngine {
   // 5. Execute Approved Request (Authorize action to domain service)
   // ─────────────────────────────────────────────────────────
 
-  public executeApprovedRequest(approvalId: string, executorId: string): {
+  public executeApprovedRequest(approvalId: string, executorId: string, tenantId?: string): {
     success: boolean;
     executionRef?: string;
     error?: string;
   } {
     const request = this.requests.get(approvalId);
     if (!request) return { success: false, error: "Approval request not found" };
+    if (tenantId && request.tenantId !== tenantId) return { success: false, error: "Approval request is outside the authenticated tenant." };
+    if (tenantId && request.tenantId !== tenantId) return { success: false, error: "Approval request is outside the authenticated tenant." };
+    if (tenantId && request.tenantId !== tenantId) return { success: false, error: "Approval request is outside the authenticated tenant." };
 
     // Idempotency guard — checked FIRST before status to give the most accurate error
     if (this.executedRequestIds.has(approvalId)) {
@@ -306,7 +314,7 @@ export class EnterpriseApprovalsEngine {
   // 6. Cancel Request
   // ─────────────────────────────────────────────────────────
 
-  public cancelRequest(approvalId: string, cancelledBy: string, reason: string): {
+  public cancelRequest(approvalId: string, cancelledBy: string, reason: string, tenantId?: string): {
     success: boolean;
     error?: string;
   } {
@@ -330,7 +338,7 @@ export class EnterpriseApprovalsEngine {
   // 7. Escalate Request
   // ─────────────────────────────────────────────────────────
 
-  public escalateRequest(approvalId: string, escalatedBy: string, reason: string): {
+  public escalateRequest(approvalId: string, escalatedBy: string, reason: string, tenantId?: string): {
     success: boolean;
     error?: string;
   } {
@@ -376,8 +384,9 @@ export class EnterpriseApprovalsEngine {
   // 9. Approval Request Queries
   // ─────────────────────────────────────────────────────────
 
-  public getRequest(approvalId: string): ApprovalRequest | undefined {
-    return this.requests.get(approvalId);
+  public getRequest(approvalId: string, tenantId?: string): ApprovalRequest | undefined {
+    const request = this.requests.get(approvalId);
+    return request && (!tenantId || request.tenantId === tenantId) ? request : undefined;
   }
 
   public listRequestsByTenant(tenantId: string): ApprovalRequest[] {
@@ -402,7 +411,9 @@ export class EnterpriseApprovalsEngine {
     return this.decisions.filter((d) => d.approvalRequestId === approvalId);
   }
 
-  public getAuditTrail(approvalId: string): ApprovalAuditEntry[] {
+  public getAuditTrail(approvalId: string, tenantId?: string): ApprovalAuditEntry[] {
+    const request = this.requests.get(approvalId);
+    if (tenantId && (!request || request.tenantId !== tenantId)) return [];
     return this.auditLedger.filter((e) => e.approvalRequestId === approvalId);
   }
 

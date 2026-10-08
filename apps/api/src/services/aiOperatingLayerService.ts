@@ -9,12 +9,12 @@ export class AiOperatingLayerService {
     return globalAiOperatingLayerEngine.askAi(queryText, userPermissions);
   }
 
-  public explainRecommendation(recommendationId: string) {
-    return globalAiOperatingLayerEngine.explainRecommendation(recommendationId);
+  public explainRecommendation(recommendationId: string, tenantId?: string) {
+    return globalAiOperatingLayerEngine.explainRecommendation(recommendationId, tenantId);
   }
 
-  public executeAction(recommendationId: string, approverId: string) {
-    return globalAiOperatingLayerEngine.executeApprovedAction(recommendationId, approverId);
+  public executeAction(recommendationId: string, approverId: string, tenantId?: string) {
+    return globalAiOperatingLayerEngine.executeApprovedAction(recommendationId, approverId, tenantId);
   }
 
   public toggleKillSwitch(scope: "GLOBAL" | "AGENT" | "TOOL" | "TENANT", idOrDisabled: string | boolean) {

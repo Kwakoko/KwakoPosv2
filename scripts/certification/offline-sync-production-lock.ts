@@ -10,7 +10,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/atomicOutbox.ts": "37b6e5970add752c02f76b811db18c4228f2c6e0",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "apps/web/src/persistence/migrationEngine.ts": "3f7c6b79efed22bce68ea2868500fbd5d84687bb",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "6f9e95de79010ea7e40bb683c46f7f56c3c77d65",
   "tests/browser/five-client-convergence.spec.ts": "d29dac6fcac5be6245b8fa6f11d92d62de5ec4e0",
   "tests/browser/crash-restart-inflight-outbox.spec.ts": "aae962da35d5263e3507831a17bb132c8dcc8e83",
   "tests/browser/delete-tombstone-nonresurrection.spec.ts": "07d9727d0d2935387a4846b2ea73b179c76fd91e",

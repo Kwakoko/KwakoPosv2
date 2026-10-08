@@ -42,20 +42,21 @@ export class EnterpriseApprovalsService {
     approverRole: string;
     decision: "APPROVE" | "REJECT" | "REQUEST_CHANGES";
     comments?: string;
+    tenantId?: string;
   }) {
     return globalEnterpriseApprovalsEngine.recordDecision(params);
   }
 
-  public executeApprovedRequest(approvalId: string, executorId: string) {
-    return globalEnterpriseApprovalsEngine.executeApprovedRequest(approvalId, executorId);
+  public executeApprovedRequest(approvalId: string, executorId: string, tenantId?: string) {
+    return globalEnterpriseApprovalsEngine.executeApprovedRequest(approvalId, executorId, tenantId);
   }
 
-  public cancelRequest(approvalId: string, cancelledBy: string, reason: string) {
-    return globalEnterpriseApprovalsEngine.cancelRequest(approvalId, cancelledBy, reason);
+  public cancelRequest(approvalId: string, cancelledBy: string, reason: string, tenantId?: string) {
+    return globalEnterpriseApprovalsEngine.cancelRequest(approvalId, cancelledBy, reason, tenantId);
   }
 
-  public escalateRequest(approvalId: string, escalatedBy: string, reason: string) {
-    return globalEnterpriseApprovalsEngine.escalateRequest(approvalId, escalatedBy, reason);
+  public escalateRequest(approvalId: string, escalatedBy: string, reason: string, tenantId?: string) {
+    return globalEnterpriseApprovalsEngine.escalateRequest(approvalId, escalatedBy, reason, tenantId);
   }
 
   public registerDelegation(delegation: ApprovalDelegation) {
@@ -66,8 +67,8 @@ export class EnterpriseApprovalsService {
     return globalEnterpriseApprovalsEngine.getActiveDelegations(approverId);
   }
 
-  public getRequest(approvalId: string) {
-    return globalEnterpriseApprovalsEngine.getRequest(approvalId);
+  public getRequest(approvalId: string, tenantId?: string) {
+    return globalEnterpriseApprovalsEngine.getRequest(approvalId, tenantId);
   }
 
   public listRequestsByTenant(tenantId: string) {
@@ -82,8 +83,8 @@ export class EnterpriseApprovalsService {
     return globalEnterpriseApprovalsEngine.getDecisionHistory(approvalId);
   }
 
-  public getAuditTrail(approvalId: string) {
-    return globalEnterpriseApprovalsEngine.getAuditTrail(approvalId);
+  public getAuditTrail(approvalId: string, tenantId?: string) {
+    return globalEnterpriseApprovalsEngine.getAuditTrail(approvalId, tenantId);
   }
 
   public getDashboardMetrics() {

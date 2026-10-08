@@ -1429,21 +1429,59 @@ const now = new Date();
   }
 
   private async lockConflictEntity(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<void> {
-    const tableByType: Record<string, string> = {
-      Product: "products",
-      ProductVariant: "product_variants",
-      Customer: "customers",
-      Supplier: "suppliers",
-      Category: "categories",
-      Brand: "brands",
-      Expense: "expenses",
-      CustomerContact: "customer_contacts",
-    };
-    const table = tableByType[entityType];
-    if (!table) return;
-    const rows = await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-      entityId, ctx.tenantId, ctx.branchId,
-    ) as Array<{ id: string }>;
+    let rows: Array<{ id: string }> = [];
+    switch (entityType) {
+      case "Product":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM products WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "ProductVariant":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Customer":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM customers WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Supplier":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM suppliers WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Category":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM categories WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Brand":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM brands WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Expense":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM expenses WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "CustomerContact":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM customer_contacts WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      default:
+        return;
+    }
     if (!rows.length) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
   }
 
@@ -1963,23 +2001,36 @@ const now = new Date();
       };
     }
 
-    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
-    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+    const hasAgeLimit = typeof maxAgeDays === "number" && maxAgeDays > 0;
+    const cutoffDate = hasAgeLimit
+      ? new Date(Date.now() - Number(maxAgeDays) * 24 * 60 * 60 * 1000)
+      : null;
 
-    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
-      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
-      deleteSql += ` AND created_at < $4`;
-      params.push(cutoffDate);
-    }
-
-    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
-      `SELECT COUNT(*)::text AS count ${deleteSql}`,
-      ...params,
-    );
-    const prunedCount = Number(countRows[0]?.count || 0);
-
-    if (!dryRun && prunedCount > 0) {
-      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+    let prunedCount = 0;
+    if (hasAgeLimit && cutoffDate) {
+      const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+        "SELECT COUNT(*)::text AS count FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3 AND created_at < $4",
+        ctx.tenantId, ctx.branchId, safeRevision, cutoffDate,
+      );
+      prunedCount = Number(countRows[0]?.count || 0);
+      if (!dryRun && prunedCount > 0) {
+        await prisma.$executeRawUnsafe(
+          "DELETE FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3 AND created_at < $4",
+          ctx.tenantId, ctx.branchId, safeRevision, cutoffDate,
+        );
+      }
+    } else {
+      const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+        "SELECT COUNT(*)::text AS count FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3",
+        ctx.tenantId, ctx.branchId, safeRevision,
+      );
+      prunedCount = Number(countRows[0]?.count || 0);
+      if (!dryRun && prunedCount > 0) {
+        await prisma.$executeRawUnsafe(
+          "DELETE FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3",
+          ctx.tenantId, ctx.branchId, safeRevision,
+        );
+      }
     }
 
     return {
