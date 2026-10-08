@@ -72,8 +72,8 @@ requireText("apps/api/src/services/superAdminSecurityService.ts", "last_totp_cou
 requireText("apps/api/src/services/superAdminSecurityService.ts", 'algorithms: ["HS256"]');
 requireText("apps/api/src/services/superAdminSecurityService.ts", "issuer: getJwtIssuer()");
 requireText("apps/api/src/services/superAdminSecurityService.ts", "audience: getJwtAudience()");
-const currentOtpMarker = ["current","Otp"].join("");
-requireAbsent("apps/api/src/services/superAdminSecurityService.ts", currentOtpMarker);
+const liveTotpLeakMarker = ["current","Otp"].join("");
+requireAbsent("apps/api/src/services/superAdminSecurityService.ts", liveTotpLeakMarker);
 requireAbsent("apps/api/src/services/superAdminSecurityService.ts", "verifyWebAuthnResponse", "mock WebAuthn verification is forbidden in production security paths");
 
 // 8. No client-side email-based platform-root bypass.
