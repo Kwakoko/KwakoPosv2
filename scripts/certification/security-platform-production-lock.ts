@@ -151,8 +151,8 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     security.includes("xContentTypeOptions"),
     "Helmet config covers transport, framing and content-type hardening.");
   add("SECPLAT-A23", "Production CSP forbids inline scripts",
-    security.includes("scriptSrc: ["'self'"]") &&
-    !security.includes("scriptSrc: ["'self'", "'unsafe-inline'"]") &&
+    security.includes('scriptSrc: ["\'self\'"]') &&
+    !security.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]') &&
     indexHtml.includes('<script src="/bootstrap.js"></script>') &&
     !indexHtml.includes("window.process = window.process ||"),
     "Browser bootstrap is externalized so inline script execution is no longer required.");
@@ -164,8 +164,8 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     packageJson.includes("xlsx-0.20.3") && packageLock.includes("xlsx-0.20.3"),
     "The repository is pinned to the 0.20.3 SheetJS package.");
   add("SECPLAT-A26", "Security Platform lock is wired into release gates",
-    packageJson.includes(""certify:security-platform-lock"") &&
-    foundation.includes(""certify:security-platform-lock""),
+    packageJson.includes('"certify:security-platform-lock"') &&
+    foundation.includes('"certify:security-platform-lock"'),
     "The dedicated lock is part of the production release contract.");
 
   const passed = checks.filter((c) => c.passed).length;
