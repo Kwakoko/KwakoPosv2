@@ -55,6 +55,8 @@ jobs:
       - run: npm run build
       - name: Production dependency vulnerability audit
         run: npm audit --omit=dev --audit-level=high
+      - name: Full dependency vulnerability audit
+        run: npm audit --audit-level=high
       - name: Security Platform Production Lock
         run: npm run certify:security-platform-lock
       - name: Security & Trust Governance
