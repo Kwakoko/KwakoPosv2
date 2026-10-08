@@ -1,63 +1,64 @@
 -- KwakoPos v2 — Super Admin Platform Isolation v1
 -- Enforce that platform credentials are structurally distinct from tenant administrators.
 
-DO $$
-DECLARE
-  platform_tenant_id TEXT;
-  platform_role_id TEXT;
-  legacy_role_id TEXT;
-BEGIN
-  SELECT id INTO platform_tenant_id
-  FROM tenants
-  WHERE slug = 'kwakoko-platform'
-  LIMIT 1;
+-- Migrate the platform tenant away from the legacy tenant-admin Super Admin role.
+-- The first statement renames the legacy role only when the dedicated platform role does not exist.
+UPDATE roles AS legacy
+SET name = 'PLATFORM_SUPER_ADMIN',
+    permissions = ARRAY['platform:control'],
+    is_system_role = TRUE,
+    updated_at = NOW()
+WHERE legacy.id = (
+  SELECT r.id
+  FROM roles r
+  JOIN tenants t ON t.id = r.tenant_id
+  WHERE t.slug = 'kwakoko-platform'
+    AND r.name IN ('SUPER_ADMIN', 'SUPERADMIN')
+    AND NOT EXISTS (
+      SELECT 1
+      FROM roles existing_platform
+      WHERE existing_platform.tenant_id = r.tenant_id
+        AND existing_platform.name = 'PLATFORM_SUPER_ADMIN'
+    )
+  ORDER BY CASE r.name WHEN 'SUPER_ADMIN' THEN 0 ELSE 1 END
+  LIMIT 1
+);
 
-  IF platform_tenant_id IS NULL THEN
-    RETURN;
-  END IF;
+-- Where the dedicated platform role already exists, move platform users off legacy role records.
+UPDATE users AS u
+SET role_id = platform.id
+FROM roles platform
+JOIN tenants t ON t.id = platform.tenant_id
+WHERE t.slug = 'kwakoko-platform'
+  AND platform.name = 'PLATFORM_SUPER_ADMIN'
+  AND u.tenant_id = platform.tenant_id
+  AND EXISTS (
+    SELECT 1
+    FROM roles legacy
+    WHERE legacy.id = u.role_id
+      AND legacy.name IN ('SUPER_ADMIN', 'SUPERADMIN')
+      AND legacy.tenant_id = u.tenant_id
+  );
 
-  SELECT id INTO platform_role_id
-  FROM roles
-  WHERE tenant_id = platform_tenant_id
-    AND name = 'PLATFORM_SUPER_ADMIN'
-  LIMIT 1;
+-- Force the dedicated platform role to a non-tenant wildcard permission set.
+UPDATE roles AS platform
+SET permissions = ARRAY['platform:control'],
+    is_system_role = TRUE,
+    updated_at = NOW()
+FROM tenants t
+WHERE platform.tenant_id = t.id
+  AND t.slug = 'kwakoko-platform'
+  AND platform.name = 'PLATFORM_SUPER_ADMIN';
 
-  SELECT id INTO legacy_role_id
-  FROM roles
-  WHERE tenant_id = platform_tenant_id
-    AND name IN ('SUPER_ADMIN', 'SUPERADMIN')
-  ORDER BY CASE name WHEN 'SUPER_ADMIN' THEN 0 ELSE 1 END
-  LIMIT 1;
-
-  IF platform_role_id IS NULL AND legacy_role_id IS NOT NULL THEN
-    UPDATE roles
-    SET name = 'PLATFORM_SUPER_ADMIN',
-        permissions = ARRAY['platform:control'],
-        is_system_role = TRUE,
-        updated_at = NOW()
-    WHERE id = legacy_role_id;
-    platform_role_id := legacy_role_id;
-  ELSIF platform_role_id IS NOT NULL THEN
-    UPDATE roles
-    SET permissions = ARRAY['platform:control'],
-        is_system_role = TRUE,
-        updated_at = NOW()
-    WHERE id = platform_role_id;
-    IF legacy_role_id IS NOT NULL AND legacy_role_id <> platform_role_id THEN
-      UPDATE users
-      SET role_id = platform_role_id
-      WHERE tenant_id = platform_tenant_id
-        AND role_id = legacy_role_id;
-    END IF;
-  END IF;
-
-  -- Any platform security row that does not belong to the platform role is invalid.
-  DELETE FROM platform_super_admin_security s
-  USING users u, roles r
+-- Any platform security row that does not belong to the dedicated platform role is invalid.
+DELETE FROM platform_super_admin_security s
+WHERE EXISTS (
+  SELECT 1
+  FROM users u
+  JOIN roles r ON r.id = u.role_id
   WHERE s.user_id = u.id
-    AND u.role_id = r.id
-    AND r.name <> 'PLATFORM_SUPER_ADMIN';
-END $;
+    AND r.name <> 'PLATFORM_SUPER_ADMIN'
+);
 
 -- Invalidate any pre-lock tenant-scoped sessions so legacy Super Admin credentials
 -- cannot remain usable after the platform role is migrated.
