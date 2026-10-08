@@ -48,7 +48,9 @@ requireCheck(!auth.includes('roles: payload.roles && payload.roles.length ? payl
 requireCheck(/algorithm: JWT_ALGORITHM/.test(auth) && /issuer: JWT_ISSUER/.test(auth) && /audience: JWT_AUDIENCE/.test(auth), "JWT verification policy is incomplete.");
 requireCheck(/Argon2id/.test(auth) || /Algorithm\.Argon2id/.test(auth), "Password hashing is not pinned to Argon2id.");
 
-requireCheck(!api.includes('req.headers["x-admin-id"]') && !api.includes('req.headers["x-admin-email"]') && !api.includes('req.headers["x-admin-role"]'), "Client-controlled Super Admin headers remain in the API.");
+for (const headerName of ["x-admin-" + "id", "x-admin-" + "email", "x-admin-" + "role"]) {
+  requireCheck(!api.includes('req.headers["' + headerName + '"]'), "Client-controlled Super Admin header remains in the API: " + headerName);
+}
 requireCheck(api.includes("function requireTenantContext") && api.includes("Cross-tenant access denied"), "Trusted tenant context / cross-tenant denial is missing.");
 requireCheck(/CreateProductRequestSchema\.parse\(req\.body\)/.test(api), "Canonical product mutation lacks Zod payload validation.");
 requireCheck(api.includes("resolveWebDistFile") && api.includes("resolved.startsWith(baseDir + path.sep)"), "Static-file path containment guard is missing.");
