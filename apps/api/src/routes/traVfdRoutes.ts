@@ -17,7 +17,7 @@ function ctxOf(req: FastifyRequest) {
 function requireFiscalAuthority(
   ctx: ReturnType<typeof ctxOf>,
   reply: FastifyReply,
-  action: "view" | "manage",
+  action: "view" | "queue" | "manage",
 ): boolean {
   const roles = ctx.roles.map((role) => role.toUpperCase());
   const permissions = new Set(ctx.permissions.map((permission) => permission.toLowerCase()));
@@ -25,6 +25,8 @@ function requireFiscalAuthority(
   const allowed = privileged || permissions.has("*") || permissions.has("admin:*") ||
     (action === "view"
       ? ["fiscalization.view", "finance.view", "financial_reports.view", "settings.manage"].some((p) => permissions.has(p))
+      : action === "queue"
+      ? ["fiscalization.manage", "sales.create", "sales.write", "sale.create", "pos.sale.create", "settings.manage", "finance.create"].some((p) => permissions.has(p))
       : ["fiscalization.manage", "settings.manage", "finance.manage"].some((p) => permissions.has(p)));
   if (allowed) return true;
   reply.status(403).send({
@@ -58,7 +60,7 @@ export function traVfdRoutes(server: FastifyInstance) {
   server.post("/api/v1/tra-vfd/queue", async (req, reply) => {
     try {
       const ctx = ctxOf(req);
-      if (!requireFiscalAuthority(ctx, reply, "manage")) return;
+      if (!requireFiscalAuthority(ctx, reply, "queue")) return;
       const input = CreateTraVfdFiscalizationRequestSchema.parse(req.body);
       const fiscalization = await globalTraVfdService.enqueue(ctx, input);
       return reply.status(201).send({ success: true, data: fiscalization });
