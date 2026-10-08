@@ -69,8 +69,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
   const [receivablesAgingReport, setReceivablesAgingReport] = useState<any>(null);
   const [payablesAgingReport, setPayablesAgingReport] = useState<any>(null);
   const [reportBranches, setReportBranches] = useState<any[]>([]);
-  const [taxComplianceRows, setTaxComplianceRows] = useState<any[]>([]);
-  const [taxComplianceSummary, setTaxComplianceSummary] = useState<any | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportMetrics, setReportMetrics] = useState<any>(null);
@@ -163,23 +161,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       setPayablesAgingReport(data.payablesAging || null);
       setReportBranches(Array.isArray(data.branches) ? data.branches : []);
       setReportMetrics(data.metrics || null);
-      try {
-        const taxParams = new URLSearchParams({ range: dateRange });
-        if (branchFilter === "hq") {
-          const main = (Array.isArray(data.branches) ? data.branches : []).find((b: any) => b.isMain);
-          if (main?.id) taxParams.set("branchId", main.id);
-        } else if (branchFilter === "all") {
-          taxParams.set("allBranches", "true");
-        }
-        const taxResponse = await apiFetch<{ success: boolean; data?: any }>(`/api/v1/finance/tax-compliance?${taxParams.toString()}`);
-        if (!taxResponse?.success || !taxResponse.data) throw new Error("TAX_COMPLIANCE_REPORT_UNAVAILABLE");
-        setTaxComplianceRows([...(Array.isArray(taxResponse.data.rows) ? taxResponse.data.rows : []), ...(Array.isArray(taxResponse.data.fiscalQueue) ? taxResponse.data.fiscalQueue.map((r: any) => ({ ...r, id: `fiscal-${r.id}` })) : [])]);
-        setTaxComplianceSummary(taxResponse.data);
-      } catch (taxError) {
-        console.error("[Reports] Tax compliance report load failed", taxError);
-        setTaxComplianceRows([]);
-        setTaxComplianceSummary(null);
-      }
     } catch (e: any) {
       console.error("[Reports] Authoritative report load failed", e);
       setReportError(String(e?.message || e || "REPORT_DATA_UNAVAILABLE"));
@@ -311,7 +292,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       : activeTab === "returns" ? returnedSales
       : activeTab === "customers" ? customers
       : activeTab === "inventory" ? (inventoryValuation.length ? inventoryValuation : products)
-      : activeTab === "tax" ? taxComplianceRows
+      : activeTab === "tax" ? validSales.map((sale: any) => ({
+          receiptNumber: sale.receiptNumber || sale.id,
+          soldAt: sale.soldAt || sale.createdAt,
+          grossAmount: sale.grandTotal,
+          taxAmount: sale.taxTotal,
+          fiscalizationState: sale.fiscalizationState || sale.efdStatus,
+        }))
       : activeTab === "payment" ? Object.entries(reportMetrics?.paymentTotals || {}).map(([method, v]: any) => ({ method, count: v.count, amount: v.amount }))
       : discountedSales;
     const flat = rows.map((row: any) => Object.fromEntries(Object.entries(row).filter(([k]) => !["lines","payments","branchStocks","variants","allocations","items"].includes(k))));
@@ -325,7 +312,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     a.download = `kwakopos-report-${activeTab}-${dateRange}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales, inventoryValuation, payableRows, supplierSummary, salesByCashier, salesByBranch, totalGrossSales, totalCOGS, grossProfit, totalExpensesAmt, netOperatingProfit, marginPct, taxComplianceRows]);
+  }, [activeTab, dateRange, validSales, expenses, purchaseOrders, stockMovements, arAgingCustomers, returnedSales, customers, products, reportMetrics, discountedSales, inventoryValuation, payableRows, supplierSummary, salesByCashier, salesByBranch, totalGrossSales, totalCOGS, grossProfit, totalExpensesAmt, netOperatingProfit, marginPct]);
 
   return (
     <div className="v2-animate-page-enter v2-space-y-4">
@@ -722,37 +709,38 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
       {activeTab === "tax" && (
         <div className="v2-card">
           <div className="v2-card-header"><div className="v2-card-title">Tax & TRA EFD Compliance Ledger</div></div>
-          {taxComplianceRows.length === 0 ? (
-            <EmptyState icon={Scale} title="No Tax Records Available" desc="The authoritative PostgreSQL tax and fiscalization ledger has no records in the selected period." />
+          {validSales.length === 0 ? (
+            <EmptyState icon={Scale} title="No Tax Records Available" desc="VAT and EFD tax data from POS transactions will appear here, organized for TRA compliance reporting and audit submissions." />
           ) : (
-            <>
-              {taxComplianceSummary?.totals && (
-                <div className="v2-grid v2-grid-4 v2-gap-3 v2-mb-3">
-                  <div className="v2-card"><div className="v2-text-xs v2-text-muted">Transactions</div><div className="v2-font-black">{taxComplianceSummary.totals.transactionCount}</div></div>
-                  <div className="v2-card"><div className="v2-text-xs v2-text-muted">Net Taxable</div><div className="v2-font-black">{money(taxComplianceSummary.totals.netAmount)}</div></div>
-                  <div className="v2-card"><div className="v2-text-xs v2-text-muted">Tax Collected</div><div className="v2-font-black">{money(taxComplianceSummary.totals.taxAmount)}</div></div>
-                  <div className="v2-card"><div className="v2-text-xs v2-text-muted">Gross</div><div className="v2-font-black">{money(taxComplianceSummary.totals.grossAmount)}</div></div>
-                </div>
-              )}
-              <table className="v2-table">
-                <thead><tr><th>Receipt Ref</th><th>Date</th><th>Net</th><th>Tax</th><th>Gross</th><th>Rate</th><th>Fiscal State</th><th>Reconcile</th><th>Fiscal Ref</th></tr></thead>
-                <tbody>
-                  {taxComplianceRows.map((row: any) => (
-                    <tr key={row.id}>
-                      <td className="v2-mono v2-text-xs v2-font-bold">{row.receiptRef || row.transactionId}</td>
-                      <td className="v2-text-xs v2-text-muted">{row.date ? new Date(row.date).toLocaleString() : "—"}</td>
-                      <td className="v2-mono">{money(row.netAmount)}</td>
-                      <td className="v2-mono v2-text-warning">{money(row.taxAmount)}</td>
-                      <td className="v2-mono v2-font-bold">{money(row.grossAmount)}</td>
-                      <td className="v2-mono">{row.taxRate}%</td>
-                      <td><span className={["TRA_VERIFIED","TRA_ACCEPTED"].includes(String(row.fiscalState)) ? "badge v2-badge-success" : String(row.fiscalState) === "TRA_REJECTED" ? "badge v2-badge-danger" : "badge v2-badge-warning"}>{row.fiscalState}</span></td>
-                      <td className="v2-text-xs">{row.reconciliationStatus || "—"}</td>
-                      <td className="v2-mono v2-text-xs">{row.fiscalReceiptNumber || row.fiscalCode || "—"}</td>
+            <table className="v2-table">
+              <thead><tr><th>Receipt Ref</th><th>Date</th><th>Gross Amount</th><th>VAT (18%)</th><th>Net Amount</th><th>EFD Status</th></tr></thead>
+              <tbody>
+                {validSales.slice(0, 100).map((s: any, i: number) => {
+                  const gross = Number(s.grandTotal || 0);
+                  const tax = Number(s.taxTotal || 0);
+                  return (
+                    <tr key={s.id || i}>
+                      <td className="v2-mono v2-text-xs v2-font-bold">{s.receiptNumber || s.id || `REC-${i + 1}`}</td>
+                      <td className="v2-text-xs v2-text-muted">{s.createdAt ? new Date(s.createdAt).toLocaleDateString() : "—"}</td>
+                      <td className="v2-mono">{money(gross)}</td>
+                      <td className="v2-mono v2-text-warning">{money(tax)}</td>
+                      <td className="v2-mono v2-font-bold">{money(gross - tax)}</td>
+                      <td>
+                        <span className={
+                          ["TRA_VERIFIED", "TRA_ACCEPTED"].includes(String(s.fiscalizationState))
+                            ? "badge v2-badge-success"
+                            : String(s.fiscalizationState) === "TRA_REJECTED"
+                            ? "badge v2-badge-danger"
+                            : "badge v2-badge-warning"
+                        }>
+                          {s.fiscalizationState || s.efdStatus || "NOT_REPORTED"}
+                        </span>
+                      </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       )}
@@ -935,6 +923,5 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({ activeTab: propActiveT
     </div>
   );
 };
-
 
 
