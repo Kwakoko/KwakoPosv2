@@ -67,8 +67,8 @@ export class FinanceTreasuryService {
     return globalFinanceTreasuryEngine.approvePaymentRun(runId, approvalRef, approvedBy);
   }
 
-  public executePaymentRun(runId: string, executorId: string) {
-    return globalFinanceTreasuryEngine.executePaymentRun(runId, executorId);
+  public executePaymentRun(runId: string, executorId: string, tenantId?: string) {
+    return globalFinanceTreasuryEngine.executePaymentRun(runId, executorId, tenantId);
   }
 
   public registerBeneficiary(params: Omit<Beneficiary, "createdAt" | "updatedAt" | "changeHistory">) {
