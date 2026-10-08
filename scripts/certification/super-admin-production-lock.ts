@@ -83,6 +83,9 @@ requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "Kwako Supermar
 requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "Kilimanjaro Pharmacy Ltd", "default tenant fixture");
 requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "148500.0", "fabricated platform revenue");
 requireText("packages/domain/src/superAdminPlatformEngine.ts", "registerTenant", "test-only explicit registration seam");
+requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "Kwako Supermarket Ltd", "legacy tenant fixture");
+requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "148500.0", "legacy fabricated revenue");
+requireAbsent("scripts/certification/super-admin-platform-certification-engine.ts", "passed, true", "synthetic pillar certification");
 
 // 10. Live security, diagnostics and release surfaces.
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "platform_super_admin_security", "security posture source");
