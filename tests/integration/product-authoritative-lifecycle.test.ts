@@ -25,10 +25,12 @@ describe("Product authoritative persistence lifecycle", () => {
       const stockPush = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "StockAdjustment", entityId: randomUUID(), operationType: "CREATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { variantId: v1, adjustmentType: "INCREASE", quantityChange: 7, reason: "OPENING_STOCK" } }] });
       expect(stockPush.results[0].status).toBe("SUCCESS");
       const beforeEdit = await repo.getProductById(ctx, productId); expect(beforeEdit?.variants.find(v=>v.id===v1)?.stock).toBe(7); expect(beforeEdit?.totalStock).toBe(7);
-      const edit = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "Product", entityId: productId, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { buyingPrice: 125, sellingPrice: 200, hasVariants: true, name: "Authority Product Edited", isActive: true } }] });
+      const productEditBase = (await prisma.product.findUnique({ where: { id: productId } }))!.updatedAt;
+      const edit = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "Product", entityId: productId, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { _baseUpdatedAt: productEditBase.toISOString(), buyingPrice: 125, sellingPrice: 200, hasVariants: true, name: "Authority Product Edited", isActive: true } }] });
       expect(edit.results[0].status).toBe("SUCCESS");
       const persisted = await repo.getProductById(ctx, productId); expect(persisted?.buyingPrice).toBe(125); expect(persisted?.sellingPrice).toBe(200); expect(persisted?.name).toBe("Authority Product Edited");
-      const variantEdit = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "ProductVariant", entityId: v1, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { name: "Small Edited", reorderLevel: 4, attributes: { size: "S" }, price: 210, costPrice: 130, isActive: true } }] });
+      const variantEditBase = (await prisma.productVariant.findUnique({ where: { id: v1 } }))!.updatedAt;
+      const variantEdit = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "ProductVariant", entityId: v1, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { _baseUpdatedAt: variantEditBase.toISOString(), name: "Small Edited", reorderLevel: 4, attributes: { size: "S" }, price: 210, costPrice: 130, isActive: true } }] });
       expect(variantEdit.results[0].status).toBe("SUCCESS");
       const ph = await repo.recordPriceChange(ctx, { productId, newBuyingPrice: 130, newSellingPrice: 210, changeType: "MANUAL_ADJUSTMENT", changeReason: "Lifecycle test", deviceId: "TEST", operationId: randomUUID(), idempotencyKey: randomUUID() });
       expect(ph.newSellingPrice).toBe(210);
@@ -37,7 +39,8 @@ describe("Product authoritative persistence lifecycle", () => {
       const localProduct = client.products.get(productId) as any; expect(localProduct.name).toBe("Authority Product Edited"); expect(Number(localProduct.sellingPrice)).toBe(210); expect((client.productVariants.get(v1) as any).reorderLevel).toBe(4);
       const variantDelete = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "ProductVariant", entityId: v2, operationType: "DELETE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { _baseUpdatedAt: (await prisma.productVariant.findUnique({where:{id:v2}}))!.updatedAt.toISOString() } }] });
       expect(variantDelete.results[0].status).toBe("SUCCESS");
-      const archive = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "Product", entityId: productId, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { isActive: false } }] });
+      const archiveBase = (await prisma.product.findUnique({ where: { id: productId } }))!.updatedAt;
+      const archive = await sync.processPush(ctx, { deviceId: "TEST", operations: [{ operationId: randomUUID(), entityType: "Product", entityId: productId, operationType: "UPDATE", idempotencyKey: randomUUID(), clientCreatedAt: now, payload: { _baseUpdatedAt: archiveBase.toISOString(), isActive: false } }] });
       expect(archive.results[0].status).toBe("SUCCESS");
       const delta = await sync.processDelta(ctx, { since: new Date(Date.now()-60000).toISOString() });
       expect(delta.products.some(p=>p.id===productId && p.isActive===false)).toBe(true);

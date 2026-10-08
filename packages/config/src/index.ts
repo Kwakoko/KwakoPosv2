@@ -84,6 +84,11 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function resolveRealBuildNumber(): number {
+  if (typeof window !== "undefined" || typeof execSync !== "function") return 584;
+  const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
+export type Config = z.infer<typeof ConfigSchema>;
+
+export function resolveRealBuildNumber(): number {
   const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
   return envBuild && /^\d+$/.test(envBuild) ? parseInt(envBuild, 10) : 584;
 }
@@ -94,18 +99,6 @@ export function resolveRealGitSha(): string {
 }
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
-  const gitSha = resolveRealGitSha();
-  const buildNumber = resolveRealBuildNumber();
-  const env = {
-    GIT_SHA: gitSha,
-    BUILD_NUMBER: buildNumber,
-    ...process.env,
-    ...overrideEnv,
-  };
-  const parsed = ConfigSchema.parse(env);
-  if (parsed.NODE_ENV === "production" || parsed.NODE_ENV === "production-certification") {
-    if (!process.env.DATABASE_URL) throw new Error("SECURITY_FATAL: DATABASE_URL environment variable is MANDATORY in production!");
-    if (!process.env.JWT_SECRET) throw new Error("SECURITY_FATAL: JWT_SECRET environment variable is MANDATORY in production!");
     if (!/^[0-9a-f]{40}$/i.test(parsed.GIT_SHA || "")) throw new Error("RELEASE_BLOCKED: authentic GIT_SHA is mandatory in production!");
   }
   return parsed;
@@ -136,16 +129,16 @@ export interface CompatibilityMetadata {
 export const CURRENT_COMPATIBILITY: CompatibilityMetadata = {
   databaseSchemaVersion: 4,
   syncProtocolVersion: 2,
-  pwaSchemaVersion: 4,
+  pwaSchemaVersion: 7,
   minSupportedClientVersion: "2.0.0",
-  recommendedClientVersion: "2.12.5",
+  recommendedClientVersion: "2.13.0",
 };
 
 export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<string, any> {
   const auth = loadAuthoritativeRelease();
   const containerDigest = config.CONTAINER_DIGEST || process.env.CONTAINER_DIGEST || auth.containerDigest;
   const cloudRunRevision = config.CLOUD_RUN_REVISION || process.env.CLOUD_RUN_REVISION || process.env.K_REVISION || auth.cloudRunRevision;
-  const appVersion = config.APP_VERSION || auth.appVersion || "2.12.5";
+  const appVersion = config.APP_VERSION || auth.appVersion || "2.13.0";
   const gitSha = config.GIT_SHA && /^[0-9a-f]{40}$/i.test(config.GIT_SHA) ? config.GIT_SHA : auth.gitSha || resolveRealGitSha();
   const gitTag = config.APP_VERSION ? `v${config.APP_VERSION}` : (auth.gitTag || `v${appVersion}`);
 
@@ -160,7 +153,7 @@ export function getReleaseIdentity(config: Config): ReleaseIdentity & Record<str
     appVersion,
     gitTag,
     gitSha,
-    releaseId: auth.releaseId,
+    releaseId: auth.releaseId || `kwakopos-rel-${appVersion}-${gitSha.slice(0, 7)}`,
     buildId: auth.buildId || gitSha.slice(0, 8),
     buildNumber: Number(config.BUILD_NUMBER || auth.buildNumber || resolveRealBuildNumber()),
     pwaVersion: auth.pwaVersion,

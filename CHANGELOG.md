@@ -4,9 +4,24 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-10-04
+## [2.13.0] - 2026-10-06
 
 ### ✨ New Features
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: add Inventory Production Lock v1 gate
+- **inventory**: wire bundle and kit workspace
+- **inventory**: expand bundle sales and returns into component stock ledger movements
+- **inventory**: add authoritative product bundle and kit builder
+- **inventory**: wire production operational workspaces for transfer count waste alerts sync drilldown
+- **inventory**: add operational stock transfer count wastage alerts sync drilldown workspace
+- **core**: Conflict Center Production Lock v1 — closed-loop hardened
+- **sync**: export conflict authorization helpers
+- **sync**: add explicit conflict authorization policy
 - **session**: expose complete effective session policy metadata
 - **session**: persist session state and audit lifecycle transitions
 - **session**: expose session audit event client
@@ -86,6 +101,53 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #93 from Kwakoko/production-lock/inventory-v1-main-20261006
+- **core**: Merge pull request #91 from Kwakoko/fix/auto-semver-stale-release-recovery
+- **core**: Merge pull request #89 from Kwakoko/fix/inventory-p0-p1-closed-loop
+- **release**: advance navigation lock for canonical inventory remediation
+- **inventory**: remove unused bundle workspace imports
+- **core**: Merge pull request #85 from Kwakoko/fix/inventory-products-p0-p1-closed-loop
+- **lock**: advance InventoryPage production lock after P0/P1 remediation
+- **inventory**: remove duplicate product registration path
+- **sync**: add required mutation preconditions
+- **core**: keep customer identifiers non-mergeable
+- **core**: require revisioned acknowledgement for every conflict resolution
+- **auth**: require dedicated conflict resolution permission
+- **core**: lock public conflict registration removal
+- **core**: finalize dashboard lock workflow hashes
+- **core**: finalize navigation lock workflow hashes
+- **core**: align conflict certification snapshot with authoritative server state
+- **core**: align conflict certification with immutable conflict IDs
+- **core**: align conflict lock checks with direct invocation
+- **core**: invoke conflict production lock directly
+- **core**: invoke conflict production lock directly
+- **core**: invoke conflict production lock directly
+- **core**: refresh release workflow hashes for conflict lock
+- **core**: refresh navigation lock for conflict release hooks
+- **core**: require conflict lock in release workflows
+- **core**: enforce conflict lock quality gate
+- **core**: enforce conflict lock in exact-main production release
+- **core**: enforce conflict lock in production certification
+- **core**: add conflict production-lock command
+- **core**: lock merge and delete conflict semantics
+- **core**: correct delete conflict regression syntax
+- **core**: cover accept-server versus accept-local delete conflict semantics
+- **core**: cover stale resolution and conflict ID reuse
+- **core**: add mandatory conflict center production lock contract
+- **core**: extend conflict final audit with hardening gates
+- **core**: document hardened conflict preconditions
+- **core**: extend conflict final audit with hardening gates
+- **core**: document hardened conflict preconditions
+- **core**: lock conflict center hardening gates
+- **core**: add conflict center production lock
+- **core**: cover concurrent inventory conflict serialization
+- **core**: enforce conflict function authorization
+- **core**: add conflict resolution hardening metadata
+- **core**: Implement reference dashboard visual
+- **core**: Revert dashboard exceptions, cash, and actions (#81)
+- **core**: Elevate dashboard exceptions, cash, and actions (#80)
+- **core**: Refine dashboard freshness metadata (#79)
+- **release**: v2.13.0
 - **core**: Merge pull request #75 from Kwakoko/fix/unify-api-auth-server
 - **audit**: align token storage details with current client
 - **audit**: update current server size in architecture finding
@@ -483,6 +545,46 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **inventory**: correct clean-state lock markers
+- **inventory**: reconcile dashboard lock with shared gates
+- **inventory**: reconcile navigation lock with inventory gates
+- **release**: recover stale automatic SemVer branches
+- **release**: refresh navigation production lock for inventory remediation
+- **inventory**: close stock adjustment persistence and ownership P1
+- **core**: merge Inventory P2 remediation onto current main (#88)
+- **inventory**: production-lock Inventory Overview metrics
+- **inventory**: remove stale catalog reads and random identifiers
+- **inventory**: eliminate fabricated default stock
+- **inventory**: make variant stock ledger-controlled
+- **inventory**: keep product stock fields projection-only
+- **inventory**: keep product stock fields projection-only
+- **inventory**: close P0/P1 isolation and stock projection gaps
+- **release**: use protected PR flow for automatic SemVer
+- **release**: publish SemVer through protected PRs
+- **sync**: preserve inventory mutation rejection precedence
+- **sync**: export conflict precondition contract
+- **sync**: close conflict precondition and baseline gaps
+- **sync**: distinguish invalid conflict IDs from ID reuse
+- **release**: remove duplicate brand object from release manifest
+- **api**: remove public conflict registration endpoint
+- **auth**: require dedicated conflict resolution permission
+- **release**: remove duplicate release manifest brand definition
+- **build**: add observability workspace path to root typecheck
+- **sync**: enforce conservative field-level merge policy
+- **web**: make conflict merge field-aware and conservative
+- **sync**: correct server-wins semantics for delete conflicts
+- **auth**: recognize canonical SaaS branch-manager roles
+- **web**: strip conflict resolution markers before catalog and expense projection
+- **sync**: enforce conflict resolution authorization at service boundary
+- **sync**: make conflict state comparison serialization-safe and non-privileged registration
+- **auth**: add conflict permissions to administrator and manager roles
+- **web**: use minimal authoritative conflict status endpoint
+- **api**: expose minimal authoritative conflict count in sync status
+- **sync**: add authoritative conflict count and preserve resolved operation type
+- **sync**: consume revisioned conflict resolutions and retire local outbox
+- **sync**: harden conflict identity, resolution concurrency and inventory locking
+- **api**: enforce function authorization on conflict endpoints
+- **core**: close Dashboard P0/P1/P2 audit loop
 - **auth**: register production authentication hooks before routes
 - **auth**: remove legacy SHA-256 password fallback
 - **security**: distinguish refresh credential from expiry metadata
@@ -991,7 +1093,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **ui**: integrate localization and governance control surfaces
 
 ### 👥 Contributors
-Credit to: Kwakoko, Jack91186, github-actions[bot], Hilda99-D, Kwakoko1
+Credit to: Kwakoko, github-actions[bot], Jack91186, Hilda99-D, Kwakoko1
 ## [2.12.5] - 2026-09-03
 
 ### 🐛 Bug Fixes

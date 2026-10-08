@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "@kwakopos2/database";
+import { requireStepUpToken } from "../services/stepUpGuard.js";
 
 function requireTenantAdmin(req: any, targetTenantId: string): string {
   const ctx = req.tenantContext;
@@ -115,6 +116,7 @@ export function productionCleanlinessRoutes(server: FastifyInstance): void {
       const tenantId = String(body.tenantId || req.tenantContext?.tenantId || "").trim();
       if (!tenantId) return reply.status(400).send({ success: false, error: { code: "TENANT_REQUIRED", message: "A valid tenantId is required." } });
       const actor = requireTenantAdmin(req, tenantId);
+      requireStepUpToken(req, req.tenantContext!, "TENANT_PURGE");
       const scope = String(body.scope || "all").toLowerCase();
       if (!["all", "products", "sales", "contacts"].includes(scope)) {
         return reply.status(400).send({ success: false, error: { code: "PURGE_SCOPE_INVALID", message: "Unsupported purge scope." } });
@@ -133,6 +135,7 @@ export function productionCleanlinessRoutes(server: FastifyInstance): void {
   server.post("/api/v1/production-cleanup", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const actor = requireSuperAdmin(req);
+      requireStepUpToken(req, req.tenantContext!, "PRODUCTION_CLEANUP");
       const purgedCounts = await purgeAllBusinessData();
       req.log.info({ actor, purgedCounts }, "Authoritative PostgreSQL production cleanup completed");
       return reply.send({

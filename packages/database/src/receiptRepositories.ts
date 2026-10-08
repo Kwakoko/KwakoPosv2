@@ -26,6 +26,7 @@ export interface ScopedReceiptRepository {
   getReceiptByNumber(ctx: TenantContext, receiptNumber: string): Promise<ReceiptDTO | null>;
   getReceiptForPublicVerification(receiptNumber: string): Promise<ReceiptDTO | null>;
   searchReceipts(ctx: TenantContext, filter: ReceiptSearchFilter): Promise<{ receipts: ReceiptDTO[]; total: number; page: number; limit: number }>;
+  recordPrint(ctx: TenantContext, receiptId: string, printedBy: string, options?: { printType?: "INITIAL" | "REPRINT"; printerName?: string; paperWidth?: string; reason?: string }): Promise<{ success: boolean; reprintCount: number }>;
   recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }>;
   recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean>;
   updateReceiptStatus(ctx: TenantContext, receiptId: string, status: string, reason?: string, actorId?: string): Promise<ReceiptDTO>;
@@ -222,50 +223,53 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
     return { receipts: paginated, total, page, limit };
   }
 
-  async recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }> {
+  async recordPrint(ctx: TenantContext, receiptId: string, printedBy: string, options: { printType?: "INITIAL" | "REPRINT"; printerName?: string; paperWidth?: string; reason?: string } = {}): Promise<{ success: boolean; reprintCount: number }> {
     const rcpt = await this.getReceiptById(ctx, receiptId);
     if (!rcpt) throw new Error("RECEIPT_NOT_FOUND");
-
-    rcpt.reprintCount += 1;
-    rcpt.lastReprintedAt = new Date().toISOString();
+    const printType = options.printType === "REPRINT" ? "REPRINT" : "INITIAL";
+    if (printType === "REPRINT") {
+      rcpt.reprintCount += 1;
+      rcpt.lastReprintedAt = new Date().toISOString();
+    }
     rcpt.updatedAt = new Date().toISOString();
     this.receipts.set(rcpt.id, rcpt);
-
     this.printLogs.push({
       id: `PRINT-${Date.now()}`,
       receiptId: rcpt.id,
       printedBy,
-      printType: "REPRINT",
-      reason: reason || "Customer request reprint",
+      printType,
+      printerName: options.printerName,
+      paperWidth: options.paperWidth,
+      reason: options.reason,
       timestamp: new Date().toISOString(),
     });
-
     this.auditLogs.push({
       id: `AUDIT-${Date.now()}`,
       receiptId: rcpt.id,
-      action: "REPRINTED",
+      action: printType === "REPRINT" ? "REPRINTED" : "PRINTED",
       actorId: ctx.userId,
-      reason,
+      reason: options.reason,
       timestamp: new Date().toISOString(),
     });
-
     return { success: true, reprintCount: rcpt.reprintCount };
+  }
+
+  async recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }> {
+    return this.recordPrint(ctx, receiptId, printedBy, { printType: "REPRINT", reason });
   }
 
   async recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean> {
     const rcpt = await this.getReceiptById(ctx, receiptId);
     if (!rcpt) throw new Error("RECEIPT_NOT_FOUND");
-
     this.shareLogs.push({
       id: `SHARE-${Date.now()}`,
       receiptId: rcpt.id,
       channel,
       recipient,
       sharedBy,
-      status: "SENT",
+      status: "OPENED",
       timestamp: new Date().toISOString(),
     });
-
     this.auditLogs.push({
       id: `AUDIT-${Date.now()}`,
       receiptId: rcpt.id,
@@ -274,7 +278,6 @@ export class InMemoryReceiptRepository implements ScopedReceiptRepository {
       details: recipient,
       timestamp: new Date().toISOString(),
     });
-
     return true;
   }
 
@@ -527,7 +530,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async getReceiptById(ctx: TenantContext, id: string): Promise<ReceiptDTO | null> {
     try {
       const found = await this.prisma.receipt.findFirst({
-        where: { id, tenantId: ctx.tenantId },
+        where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId },
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
@@ -539,7 +542,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
   async getReceiptByNumber(ctx: TenantContext, receiptNumber: string): Promise<ReceiptDTO | null> {
     try {
       const found = await this.prisma.receipt.findFirst({
-        where: { receiptNumber, tenantId: ctx.tenantId },
+        where: { receiptNumber, tenantId: ctx.tenantId, branchId: ctx.branchId },
         include: { items: true },
       });
       return found ? this.mapPrismaReceipt(found) : null;
@@ -598,35 +601,36 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
     }
   }
 
+  async recordPrint(ctx: TenantContext, receiptId: string, printedBy: string, options: { printType?: "INITIAL" | "REPRINT"; printerName?: string; paperWidth?: string; reason?: string } = {}): Promise<{ success: boolean; reprintCount: number }> {
+    const printType = options.printType === "REPRINT" ? "REPRINT" : "INITIAL";
+    const owned = await this.prisma.receipt.findFirst({ where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!owned) throw new Error("RECEIPT_NOT_FOUND");
+    const updated = await this.prisma.receipt.update({
+      where: { id: owned.id },
+      data: {
+        ...(printType === "REPRINT" ? { reprintCount: { increment: 1 }, lastReprintedAt: new Date() } : {}),
+        printLogs: { create: {
+          printedBy,
+          printType,
+          printerName: options.printerName,
+          paperWidth: options.paperWidth,
+          reason: options.reason,
+        } },
+        auditLogs: { create: {
+          action: printType === "REPRINT" ? "REPRINTED" : "PRINTED",
+          actorId: ctx.userId,
+          branchId: ctx.branchId,
+          deviceId: owned.deviceId,
+          reason: options.reason,
+          details: JSON.stringify({ printerName: options.printerName || null, paperWidth: options.paperWidth || null }),
+        } },
+      },
+    });
+    return { success: true, reprintCount: updated.reprintCount };
+  }
+
   async recordReprint(ctx: TenantContext, receiptId: string, printedBy: string, reason?: string): Promise<{ success: boolean; reprintCount: number }> {
-    try {
-      const owned = await this.prisma.receipt.findFirst({ where: { id: receiptId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
-      if (!owned) throw new Error("RECEIPT_NOT_FOUND");
-      const updated = await this.prisma.receipt.update({
-        where: { id: owned.id },
-        data: {
-          reprintCount: { increment: 1 },
-          lastReprintedAt: new Date(),
-          printLogs: {
-            create: {
-              printedBy,
-              printType: "REPRINT",
-              reason,
-            },
-          },
-          auditLogs: {
-            create: {
-              action: "REPRINTED",
-              actorId: ctx.userId,
-              reason,
-            },
-          },
-        },
-      });
-      return { success: true, reprintCount: updated.reprintCount };
-    } catch (error) {
-      throw error;
-    }
+    return this.recordPrint(ctx, receiptId, printedBy, { printType: "REPRINT", reason });
   }
 
   async recordShare(ctx: TenantContext, receiptId: string, channel: "EMAIL" | "SMS" | "WHATSAPP", recipient: string, sharedBy: string): Promise<boolean> {
@@ -641,7 +645,7 @@ export class PrismaReceiptRepository implements ScopedReceiptRepository {
               channel,
               recipient,
               sharedBy,
-              status: "SENT",
+              status: "OPENED",
             },
           },
           auditLogs: {

@@ -93,6 +93,23 @@ jobs:
 
       - name: Validate conventional commit
         run: npx tsx scripts/ci/validate-commit-message.ts
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
+
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
+
+      - name: Validate conventional commit
+        run: npx tsx scripts/ci/validate-commit-message.ts
 
       - name: Generate release manifest
         run: npx tsx scripts/release/generate-release-manifest.ts

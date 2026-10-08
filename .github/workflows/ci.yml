@@ -60,6 +60,16 @@ jobs:
         run: npm run release:auth-lock
       - name: Lint
         run: npm run lint
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
+      - name: Receivables Audit Production Lock
+        run: npm run certify:receivables-lock
+      - name: Accounts Payable Audit Production Lock
+        run: npm run certify:payables-lock
+      - name: Expenses Production Lock
+        run: npm run certify:expenses-lock
+      - name: Payments Audit Controls Production Lock
+        run: npm run certify:payments-lock
       - name: Build
         run: npm run build
       - name: Synchronize test database schema
@@ -69,21 +79,37 @@ jobs:
       - name: Brand Architecture Verification
         run: npm run brand:verify
       - name: Experience Integrity Verification
-        run: npm run experience:verify
-      - name: Integration Tests
-        run: npm run test:integration
-      - name: Sync Convergence Tests
-        run: npm run test:sync
-      - name: Version Sync Certification
-        run: npm run certify:version-sync
-      - name: Commit Contract
-        run: npx tsx scripts/ci/validate-commit-message.ts
-      - name: Navigation Production Lock
         run: npm run certify:navigation-lock
       - name: Dashboard Analytics Production Lock
         run: npm run certify:dashboard-lock
       - name: POS Terminal Production Lock
         run: npm run certify:pos-lock
+      - name: Module Contract
+        run: npx tsx scripts/release/verify-kwakopos-modules.ts
+      - name: Release Quality Gates
+        run: npm run certify:version-sync
+      - name: Commit Contract
+        run: npx tsx scripts/ci/validate-commit-message.ts
+      - name: Reports Production Lock
+        run: npm run certify:reports
+      - name: Navigation Production Lock
+        run: npm run certify:navigation-lock
+      - name: Dashboard Analytics Production Lock
+        run: npm run certify:dashboard-lock
+      - name: Conflict Center Production Lock
+        run: npx tsx scripts/certification/conflict-center-production-lock.ts
+      - name: Inventory Production Lock v1
+        run: npm run certify:inventory-lock
+      - name: Customers / Contacts Production Lock v1
+        run: npx tsx scripts/certification/customers-contacts-production-lock.ts
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates

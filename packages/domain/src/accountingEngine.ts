@@ -6,7 +6,7 @@ import type {
   TenantContext,
   CreateAccountRequest,
 } from "@kwakopos2/contracts";
-import { assertJournalBalanced, assertPostedJournalImmutable, assertPeriodAllowsPosting } from "./financeInvariants.js";
+import { assertJournalBalanced, assertPostedJournalImmutable, assertPeriodAllowsPosting, assertJournalLineAmounts } from "./financeInvariants.js";
 import { randomUUID } from "crypto";
 
 export interface DefaultAccountTemplate {
@@ -29,6 +29,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: DefaultAccountTemplate[] = [
   // 2000 — Liabilities
   { accountCode: "2110", name: "Trade Creditors (Accounts Payable)", accountClass: "LIABILITY", accountGroup: "ACCOUNTS_PAYABLE", description: "Supplier liabilities", isSystem: true },
   { accountCode: "2210", name: "VAT Output Payable (18%)", accountClass: "LIABILITY", accountGroup: "TAX_PAYABLE", description: "Tax liability on sales", isSystem: true },
+  { accountCode: "2220", name: "VAT Input Recoverable", accountClass: "ASSET", accountGroup: "TAX_RECEIVABLE", description: "Recoverable input VAT on purchases", isSystem: true },
   { accountCode: "2310", name: "Customer Advances & Deposits", accountClass: "LIABILITY", accountGroup: "CURRENT_LIABILITY", description: "Unearned revenue / deposits", isSystem: false },
   { accountCode: "2410", name: "PAYE & Statutory Payroll Withholding", accountClass: "LIABILITY", accountGroup: "PAYROLL_LIABILITY", description: "Tax and statutory deductions payable", isSystem: true },
   { accountCode: "2420", name: "Accrued Net Salaries & Wages Payable", accountClass: "LIABILITY", accountGroup: "PAYROLL_LIABILITY", description: "Net wages due to employees", isSystem: true },
@@ -127,7 +128,8 @@ export class AccountingEngine {
       exchangeRate,
     }));
 
-    // Enforce Double-Entry Balancing (Invariant F001)
+    // Enforce posting invariants before any persistence occurs.
+    assertJournalLineAmounts(lines);
     assertJournalBalanced({ id, journalNumber: input.journalNumber }, lines);
 
     const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);

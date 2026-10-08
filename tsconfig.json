@@ -22,6 +22,9 @@
       ],
       "@kwakopos2/sync": [
         "packages/sync/src/index.ts"
+      ],
+      "@kwakopos2/observability": [
+        "packages/observability/src/index.ts"
       ]
     }
   },

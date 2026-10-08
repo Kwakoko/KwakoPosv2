@@ -8,6 +8,7 @@ import {
   TenantContext,
 } from "@kwakopos2/contracts";
 import { globalRollbackAuthorizationService } from "../services/rollbackAuthorizationService.js";
+import { requireStepUpToken } from "../services/stepUpGuard.js";
 
 // ============================================================
 // KWAKOPOS V2 — ROLLBACK AUTHORIZATION API ROUTES
@@ -118,7 +119,6 @@ export function rollbackAuthorizationRoutes(server: FastifyInstance): void {
   });
 
   // 6. Execute rollback (Acquires lock, sets sync barrier, creates snapshot, executes reversal, increments sync epoch)
-  server.post("/api/v1/rollback/requests/:id/execute", async (req, reply) => {
     try {
       const ctx = getContext(req);
       const { id } = req.params as { id: string };
@@ -127,6 +127,8 @@ export function rollbackAuthorizationRoutes(server: FastifyInstance): void {
       const verifiedStepUp = await import("../services/superAdminSecurityService.js").then(({ verifyStepUpToken }) => verifyStepUpToken(stepUp, "ROLLBACK_EXECUTE"));
       if (verifiedStepUp.userId !== ctx.userId) throw Object.assign(new Error("STEP_UP_ACTOR_MISMATCH"), { statusCode: 403, code: "STEP_UP_ACTOR_MISMATCH" });
       const parsed = ExecuteRollbackPayloadSchema.parse(req.body);
+      const result = await globalRollbackAuthorizationService.executeRollback(ctx, id, parsed);
+      return reply.status(200).send({
       const result = await globalRollbackAuthorizationService.executeRollback(ctx, id, parsed);
       return reply.status(200).send({
         success: true,
@@ -141,6 +143,10 @@ export function rollbackAuthorizationRoutes(server: FastifyInstance): void {
   server.post("/api/v1/rollback/emergency", async (req, reply) => {
     try {
       const ctx = getContext(req);
+      const parsed = EmergencyRollbackPayloadSchema.parse(req.body);
+  server.post("/api/v1/rollback/emergency", async (req, reply) => {
+    try {
+      const ctx = getContext(req);
       const stepUp = String(req.headers["x-step-up-token"] || "");
       if (!stepUp) throw Object.assign(new Error("STEP_UP_REQUIRED"), { statusCode: 403, code: "STEP_UP_REQUIRED" });
       const verifiedStepUp = await import("../services/superAdminSecurityService.js").then(({ verifyStepUpToken }) => verifyStepUpToken(stepUp, "ROLLBACK_EMERGENCY"));
@@ -148,9 +154,6 @@ export function rollbackAuthorizationRoutes(server: FastifyInstance): void {
       const parsed = EmergencyRollbackPayloadSchema.parse(req.body);
       const result = await globalRollbackAuthorizationService.emergencyRollback(ctx, parsed);
       return reply.status(200).send({
-        success: true,
-        data: result,
-      });
     } catch (error) {
       return formatError(reply, error);
     }

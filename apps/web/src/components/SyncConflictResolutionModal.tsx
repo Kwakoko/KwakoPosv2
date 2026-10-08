@@ -18,6 +18,15 @@ export interface SyncConflictItem {
   operationType?: "CREATE" | "UPDATE" | "DELETE";
 }
 
+const MERGEABLE_CONFLICT_FIELDS: Record<string, string[]> = {
+  Product: ["name", "description", "categoryId", "brandId", "supplierId", "taxId", "category", "isActive"],
+  ProductVariant: ["name", "barcode", "attributes", "reorderLevel", "isActive"],
+  Customer: ["name", "phone", "email", "address"],
+  Supplier: ["name", "phone", "email", "address", "taxPin"],
+  Category: ["name", "code", "parentId", "description", "color", "isActive"],
+  Brand: ["name", "code", "origin", "notes", "isActive"],
+};
+
 interface SyncConflictResolutionModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -116,9 +125,17 @@ export const SyncConflictResolutionModal: React.FC<SyncConflictResolutionModalPr
     try {
       let mergedPayload: Record<string, unknown> | undefined;
       if (action === "MERGE") {
-        const remote = conflict.remoteRecord && typeof conflict.remoteRecord === "object" ? conflict.remoteRecord : {};
-        const local = conflict.localPayload && typeof conflict.localPayload === "object" ? conflict.localPayload : {};
-        mergedPayload = { ...(remote as Record<string, unknown>), ...(local as Record<string, unknown>) };
+        if (conflict.operationType === "DELETE") {
+          throw new Error("Merge is not supported for delete conflicts; choose server or local state.");
+        }
+        const remote = conflict.remoteRecord && typeof conflict.remoteRecord === "object" ? conflict.remoteRecord as Record<string, unknown> : {};
+        const local = conflict.localPayload && typeof conflict.localPayload === "object" ? conflict.localPayload as Record<string, unknown> : {};
+        const allowed = MERGEABLE_CONFLICT_FIELDS[conflict.entityType] || [];
+        mergedPayload = {};
+        for (const field of allowed) {
+          if (Object.prototype.hasOwnProperty.call(local, field)) mergedPayload[field] = local[field];
+          else if (Object.prototype.hasOwnProperty.call(remote, field)) mergedPayload[field] = remote[field];
+        }
       }
       const response = await apiFetch<any>("/sync/conflicts/" + conflict.id + "/resolve", {
         method: "POST",

@@ -337,11 +337,18 @@ export class CrmEngine {
     this.createContact({
       contactId,
       tenantId: lead.tenantId,
+      branchId: lead.branchId || "",
       customerId,
       firstName: lead.contactName.split(" ")[0] ?? lead.contactName,
       lastName: lead.contactName.split(" ").slice(1).join(" ") || "Contact",
-      email: lead.email,
-      phone: lead.phone,
+      email: lead.email || "",
+      phone: lead.phone || "",
+      title: "",
+      role: "",
+      department: "",
+      notes: "",
+      status: "ACTIVE",
+      decisionInfluence: "INFLUENCER",
       isPrimary: true,
     });
 
