@@ -88,6 +88,16 @@ export class PrismaAtomicCommercialFinanceService {
       let saleDiscountRequested = Number(req.discountTotal || 0) > 0;
       const nowForPricing = new Date();
       for (const item of req.items) {
+        const authoritativeVariant = await tx.productVariant.findUnique({ where: { id: item.variantId } });
+        if (
+          !authoritativeVariant ||
+          authoritativeVariant.tenantId !== ctx.tenantId ||
+          authoritativeVariant.branchId !== ctx.branchId ||
+          authoritativeVariant.productId !== item.productId ||
+          authoritativeVariant.isActive === false
+        ) {
+          throw new Error("FINANCE_VARIANT_BOUNDARY_VIOLATION");
+        }
         const resolution = await PricingAuthority.resolveUnitPrice(tx, ctx, {
           variantId: item.variantId,
           productId: item.productId,
