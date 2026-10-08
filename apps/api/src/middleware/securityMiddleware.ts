@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import fp from "fastify-plugin";
 
 export interface SecurityMiddlewareOptions {
   isProduction?: boolean;
+  allowedOrigins?: string[];
 }
 
 /**
@@ -13,18 +15,29 @@ export interface SecurityMiddlewareOptions {
  *   1. H-006 – @fastify/helmet     : Sets security response headers (CSP, HSTS, X-Frame-Options, etc.)
  *   2. H-004 – @fastify/rate-limit : Global IP/tenant rate limiting
  */
-export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOptions> = async (
+export const registerSecurityMiddleware = fp<SecurityMiddlewareOptions>(async (
   server: FastifyInstance,
   opts: SecurityMiddlewareOptions
 ): Promise<void> => {
   const isProduction = opts.isProduction ?? false;
+  const allowedOrigins = new Set((opts.allowedOrigins || []).map((origin) => String(origin).trim()).filter(Boolean));
+
+  // Defense-in-depth CSRF boundary for browser mutations. SameSite=Strict cookies remain the primary control.
+  server.addHook("onRequest", async (req, reply) => {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
+    const origin = String(req.headers.origin || "").trim();
+    if (!origin || allowedOrigins.size === 0) return;
+    if (origin === "null" || !allowedOrigins.has(origin)) {
+      return reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_DENIED", message: "Request origin is not authorized." } });
+    }
+  });
 
   // 1. H-006: HTTP Security Headers
   await server.register(helmet, {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "blob:"],
         connectSrc: ["'self'", "wss:", "https:"],
@@ -63,4 +76,4 @@ export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOp
       },
     }),
   });
-};
+}, { name: "kwakopos-security-middleware" });
