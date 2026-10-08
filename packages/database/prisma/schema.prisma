@@ -815,7 +815,6 @@ model Payment {
 
 model CashSession {
   id                String    @id @default(uuid())
-  registerCode      String?
   tenantId          String
   branchId          String
   sessionNumber     String
@@ -833,9 +832,6 @@ model CashSession {
   cashOutTotal      Decimal   @default(0) @db.Decimal(12, 2)
   safeDropTotal     Decimal   @default(0) @db.Decimal(12, 2)
   variance          Decimal?  @db.Decimal(12, 2)
-  countSealedAt     DateTime?
-  countSealedById   String?
-  countSealedDeviceId String?
   status            String    @default("OPEN") // OPEN, ACTIVE, CLOSE_REQUESTED, CLOSED
   notes             String?
   createdAt         DateTime  @default(now())
@@ -849,7 +845,6 @@ model CashSession {
   cashMovements     CashMovement[]
 
   @@unique([tenantId, branchId, sessionNumber])
-  @@index([tenantId, branchId, registerCode])
   @@index([tenantId, branchId, cashierId])
   @@map("cash_sessions")
 }
@@ -2889,7 +2884,7 @@ model ReceiptShareLog {
   channel   String
   recipient String
   sharedBy  String
-  status    String   @default("OPENED")
+  status    String   @default("SENT")
   timestamp DateTime @default(now())
 
   receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)

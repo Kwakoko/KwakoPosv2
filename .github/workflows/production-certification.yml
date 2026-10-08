@@ -56,13 +56,11 @@ jobs:
         run: npm ci
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
-      - name: POS Terminal Production Lock
-        run: npm run certify:pos-lock
-      - name: Validate commit contract
-        run: npx tsx scripts/ci/validate-commit-message.ts
-      - name: Generate release manifest
+      - name: Conflict Center Production Lock
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock

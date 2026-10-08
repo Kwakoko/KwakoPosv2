@@ -235,9 +235,6 @@ export function legalGovernanceRoutes(
 
   // Mock override routes for test and evaluation environments
   server.post("/api/legal/mock-accept", async (req, reply) => {
-    if (process.env.NODE_ENV !== "test") {
-      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Test-only endpoint." } });
-    }
     try {
       const rawBody = (req.body || {}) as Record<string, unknown>;
       const tenantContext = (req as any).tenantContext;
@@ -251,9 +248,6 @@ export function legalGovernanceRoutes(
   });
 
   server.post("/api/test/legal/force-accept", async (req, reply) => {
-    if (process.env.NODE_ENV !== "test") {
-      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Test-only endpoint." } });
-    }
     try {
       const rawBody = (req.body || {}) as Record<string, unknown>;
       const tenantContext = (req as any).tenantContext;

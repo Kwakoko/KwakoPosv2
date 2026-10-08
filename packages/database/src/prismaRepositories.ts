@@ -23,7 +23,6 @@ import {
   assertBackdatingThreshold,
   validateRetroactiveTimeline,
   assertTenantIsolation,
-  assertBackdatingPermission,
 } from "@kwakopos2/domain";
 import { prisma } from "./client.js";
 import {
@@ -395,26 +394,6 @@ export class PrismaCatalogRepository {
     return { id: row.id, tenantId: row.tenantId, branchId: row.branchId, name: row.name, code: row.code, origin: row.origin ?? null, notes: row.notes ?? null, isActive: row.isActive, createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
-  private async assertValidCategoryParent(
-    db: any,
-    ctx: TenantContext,
-    categoryId: string | undefined,
-    parentId: string | null | undefined,
-  ): Promise<void> {
-    if (!parentId) return;
-    if (categoryId && parentId === categoryId) throw new Error("Category cannot be its own parent");
-    const visited = new Set<string>();
-    let cursorId: string | null = parentId;
-    while (cursorId) {
-      if (visited.has(cursorId)) throw new Error("Category hierarchy contains an existing cycle");
-      visited.add(cursorId);
-      const parent: any = await db.category.findUnique({ where: { id: cursorId } });
-      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
-      if (categoryId && parent.id === categoryId) throw new Error("Category hierarchy cannot contain a circular parent chain");
-      cursorId = parent.parentId ?? null;
-    }
-  }
-
   /** Production tenants start with zero business master data. */
   async ensureDefaults(_ctx: TenantContext): Promise<void> {
     return;
@@ -427,18 +406,25 @@ export class PrismaCatalogRepository {
   }
 
   async createCategory(ctx: TenantContext, req: CreateCategoryRequest): Promise<Category> {
-    await this.assertValidCategoryParent(prisma, ctx, req.id, req.parentId);
+    if (req.parentId) {
+      const parent = await prisma.category.findUnique({ where: { id: req.parentId } });
+      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
+    }
     const row = await prisma.category.create({ data: { id: req.id, tenantId: ctx.tenantId, branchId: ctx.branchId, name: req.name.trim(), code: req.code.trim().toUpperCase(), parentId: req.parentId ?? null, description: req.description?.trim() || null, color: req.color?.trim() || null } });
     return this.categoryShape(row);
   }
 
   async updateCategory(ctx: TenantContext, id: string, req: UpdateCategoryRequest): Promise<Category> {
+    const existing = await prisma.category.findUnique({ where: { id } });
+    if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
+    if (req.parentId) {
+      if (req.parentId === id) throw new Error("Category cannot be its own parent");
+      const parent = await prisma.category.findUnique({ where: { id: req.parentId } });
+      if (!parent || parent.tenantId !== ctx.tenantId || parent.branchId !== ctx.branchId || !parent.isActive) throw new Error("Parent category belongs to another tenant/branch or is inactive");
+    }
     const row = await prisma.$transaction(async (tx: any) => {
-      const existing = await tx.category.findUnique({ where: { id } });
-      if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
-      if (req.parentId !== undefined) await this.assertValidCategoryParent(tx, ctx, id, req.parentId);
       const updated = await tx.category.update({ where: { id }, data: { name: req.name?.trim(), code: req.code?.trim().toUpperCase(), parentId: req.parentId !== undefined ? req.parentId : undefined, description: req.description !== undefined ? (req.description.trim() || null) : undefined, color: req.color !== undefined ? (req.color.trim() || null) : undefined, isActive: req.isActive } });
-      if (req.name !== undefined && req.cascadeAssignedProducts !== false && req.name.trim() !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id }, data: { category: req.name.trim() } });
+      if (req.name !== undefined && req.name.trim() !== existing.name) await tx.product.updateMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id }, data: { category: req.name.trim() } });
       return updated;
     });
     return this.categoryShape(row);
@@ -449,9 +435,7 @@ export class PrismaCatalogRepository {
       const existing = await tx.category.findUnique({ where: { id } });
       if (!existing || existing.tenantId !== ctx.tenantId || existing.branchId !== ctx.branchId) throw new Error("Category not found");
       const count = await tx.product.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, categoryId: id, isActive: true } });
-      const childCount = await tx.category.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, parentId: id, isActive: true } });
       if (count > 0 && !replacementId) throw new Error("Category has assigned products; replacementId is required");
-      if (childCount > 0) throw new Error("Category has active child categories; remove or reassign them before deleting");
       if (replacementId) {
         if (replacementId === id) throw new Error("Replacement category must differ from deleted category");
         const replacement = await tx.category.findUnique({ where: { id: replacementId } });
@@ -503,9 +487,6 @@ export class PrismaStockRepository {
   async recordMovement(ctx: TenantContext, req: any): Promise<StockLedger> {
     if (req.occurredAt) {
       assertBackdatingThreshold(req.occurredAt);
-      if (Math.abs(Date.now() - new Date(req.occurredAt).getTime()) > 5 * 60 * 1000) {
-        assertBackdatingPermission(ctx);
-      }
     }
     const result = await prisma.$transaction(async (tx: any) => {
       const existing = await tx.stockLedger.findFirst({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, idempotencyKey: req.idempotencyKey } });
@@ -515,49 +496,12 @@ export class PrismaStockRepository {
       if (!variant) throw new Error(`Variant ${req.variantId} not found`);
       assertTenantIsolation(ctx, variant.tenantId, variant.branchId);
       const beforeRow = await tx.stockLedger.aggregate({ _sum: { quantityChange: true }, where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId } });
-      const currentQuantityBefore = Number(beforeRow._sum.quantityChange ?? 0);
+      const quantityBefore = Number(beforeRow._sum.quantityChange ?? 0);
       const quantityChange = Number(req.quantityChange ?? req.quantity ?? 0);
-      const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
-      const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - movementTime.getTime()) > 5 * 60 * 1000;
-      if (isBackdated) {
-        assertBackdatingPermission(ctx);
-        const timelineRows = await tx.stockLedger.findMany({
-          where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId },
-          orderBy: { occurredAt: "asc" },
-        });
-        const validation = validateRetroactiveTimeline(timelineRows.map(ledgerShape), movementTime, quantityChange);
-        if (!validation.valid) {
-          throw new Error(
-            `INSUFFICIENT_STOCK: Retroactive movement would cause stock to drop below zero on ${validation.violationDate} (balance: ${validation.lowestIntermediateBalance}).`
-          );
-        }
-        const closedPeriod = await tx.accountingPeriod.findFirst({
-          where: {
-            tenantId: ctx.tenantId,
-            startDate: { lte: movementTime },
-            endDate: { gte: movementTime },
-            status: { in: ["CLOSED", "LOCKED"] },
-          },
-        });
-        if (closedPeriod) {
-          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
-          throw new Error(`${code}: Cannot backdate inventory movement into accounting period "${closedPeriod.name}".`);
-        }
-      }
-      const historicalRows = isBackdated
-        ? (await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: req.variantId, occurredAt: { lt: movementTime } }, orderBy: { occurredAt: "asc" } })).map(ledgerShape)
-        : [];
-      const historicalQuantityBefore = isBackdated ? calculateAvailableStock(historicalRows) : currentQuantityBefore;
-      const quantityBefore = isBackdated ? historicalQuantityBefore : currentQuantityBefore;
       const quantityAfter = quantityBefore + quantityChange;
-      if (quantityAfter < 0) {
-        throw new Error(
-          isBackdated
-            ? "INSUFFICIENT_STOCK: stock cannot become negative at historical movement point"
-            : "INSUFFICIENT_STOCK: stock cannot become negative"
-        );
-      }
+      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
       const unitCost = Number(req.unitCost ?? variant.costPrice ?? 0);
+      const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
       const row = await tx.stockLedger.create({
         data: { tenantId: ctx.tenantId, branchId: ctx.branchId, productId: variant.productId, variantId: req.variantId, warehouseId: req.warehouseId ?? null, movementType: req.movementType, quantityBefore, quantityChange, quantity: quantityChange, quantityAfter, unitCost, totalCost: Math.abs(quantityChange) * unitCost, referenceType: req.referenceType, referenceId: req.referenceId ?? null, occurredAt: movementTime, createdAt: new Date(), deviceId: req.deviceId, operationId: req.operationId, idempotencyKey: req.idempotencyKey },
       });
@@ -626,12 +570,7 @@ export class PrismaStockRepository {
       await tx.$queryRawUnsafe('SELECT id FROM "product_variants" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE', resolvedVariantId, ctx.tenantId, ctx.branchId);
       const ledgerRowsBefore = await tx.stockLedger.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId, variantId: resolvedVariantId }, orderBy: { occurredAt: "asc" } });
       const currentStock = calculateAvailableStock(ledgerRowsBefore.map(ledgerShape));
-      const isBackdated = Boolean(req.occurredAt) && Math.abs(Date.now() - new Date(req.occurredAt!).getTime()) > 5 * 60 * 1000;
-      const historicalRowsBefore = isBackdated
-        ? ledgerRowsBefore.filter((r: any) => new Date(r.occurredAt || r.createdAt).getTime() < new Date(req.occurredAt!).getTime())
-        : [];
-      const historicalStockBefore = isBackdated ? calculateAvailableStock(historicalRowsBefore.map(ledgerShape)) : currentStock;
-      const quantityBefore = isBackdated ? historicalStockBefore : currentStock;
+      const quantityBefore = currentStock;
       let changeQty = req.quantityChange;
 
       if (req.adjustmentType === "DECREASE") {
@@ -639,7 +578,7 @@ export class PrismaStockRepository {
       } else if (req.adjustmentType === "SET") {
         if (req.occurredAt) {
           const historicalRows = ledgerRowsBefore.filter(
-            (r: any) => new Date(r.occurredAt || r.createdAt).getTime() < new Date(req.occurredAt!).getTime()
+            (r: any) => new Date(r.occurredAt || r.createdAt).getTime() <= new Date(req.occurredAt!).getTime()
           );
           const historicalStock = calculateAvailableStock(historicalRows.map(ledgerShape));
           changeQty = calculateBackdatedDiscrepancy(req.quantityChange, historicalStock);
@@ -666,15 +605,13 @@ export class PrismaStockRepository {
             status: { in: ["CLOSED", "LOCKED"] },
           },
         });
-        if (closedPeriod) {
-          const code = closedPeriod.status === "LOCKED" ? "ACCOUNTING_PERIOD_LOCKED" : "ACCOUNTING_PERIOD_CLOSED";
-          throw new Error(`${code}: Cannot backdate inventory adjustment into accounting period "${closedPeriod.name}".`);
+        if (closedPeriod && closedPeriod.status === "LOCKED") {
+          throw new Error(`ACCOUNTING_PERIOD_LOCKED: Cannot backdate inventory adjustment into locked accounting period "${closedPeriod.name}".`);
         }
       }
 
       const quantityAfter = quantityBefore + changeQty;
-      const currentProjectedStock = currentStock + changeQty;
-      if (quantityAfter < 0 || currentProjectedStock < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
+      if (quantityAfter < 0) throw new Error("INSUFFICIENT_STOCK: stock cannot become negative");
 
       const movementTime = req.occurredAt ? new Date(req.occurredAt) : new Date();
 
