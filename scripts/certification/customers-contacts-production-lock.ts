@@ -77,7 +77,8 @@ const REQUIRED: Array<[string, string, string[]]> = [
     "CONTACT_UPDATED",
     "CONTACT_ARCHIVED",
     "CUSTOMER_CREATED",
-    'CustomerContact: "customer_contacts"',
+    'case "CustomerContact":',
+    "customer_contacts",
   ]],
   ["client-sync", "apps/web/src/clientSyncEngine.ts", [
     '"contacts"',
