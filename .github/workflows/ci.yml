@@ -124,6 +124,10 @@ jobs:
         run: npm run certify:cash-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
+      - name: Offline Sync Platform Production Lock
+        run: npm run certify:offline-sync-lock
+      - name: Support Production Lock v1
+        run: npm run certify:support-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates
