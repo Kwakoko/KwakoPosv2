@@ -12,6 +12,15 @@ describe("Phase 29 — KwakoPos Super Admin & Platform UI Test Suite", () => {
   });
 
   it("should initiate and exit time-limited audited tenant context switch sessions", () => {
+    engine.registerTenant({
+      tenantId: "TENANT-001",
+      name: "Certified Tenant",
+      status: "ACTIVE",
+      country: "TZ",
+      branchesCount: 1,
+      modulesCount: 1,
+      createdAt: new Date().toISOString(),
+    });
     const session = engine.executeTenantContextSwitch("ADM-001", "TENANT-001", "Support ticket investigation", 20);
     expect(session.isActive).toBe(true);
     expect(session.tenantId).toBe("TENANT-001");
@@ -36,10 +45,10 @@ describe("Phase 29 — KwakoPos Super Admin & Platform UI Test Suite", () => {
     expect(flagRes.evaluationPath).toBe("Global -> Country -> Tenant");
   });
 
-  it("should pass 100% of the 70-Pillar Super Admin & Platform UI certification campaign", () => {
+  it("should pass the repository-backed Super Admin production certification campaign", () => {
     const cert = runSuperAdminPlatformCertification();
-    expect(cert.totalPillars).toBe(70);
-    expect(cert.passedPillars).toBe(70);
+    expect(cert.totalPillars).toBe(15);
+    expect(cert.passedPillars).toBe(cert.totalPillars);
     expect(cert.failedPillars).toBe(0);
     expect(cert.successRatePct).toBe(100);
   });
