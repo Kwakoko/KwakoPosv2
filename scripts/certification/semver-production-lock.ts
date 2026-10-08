@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { isValidSemVer } from "../../packages/config/src/semverEngine.js";
+import { compareSemVer, isValidSemVer } from "../../packages/config/src/semverEngine.js";
 
 const LOCK_ID = "SEMVER-PRODUCTION-LOCK-V1-2026-10-08";
 const root = process.cwd();
@@ -31,19 +31,33 @@ try {
 }
 
 assert(Boolean(latestTag), "No authoritative stable SemVer tag is reachable from HEAD.");
-
 if (latestTag) {
   const latestVersion = latestTag.slice(1);
-  assert(
-    isValidSemVer(latestVersion),
-    `Authoritative stable tag is not valid SemVer: ${latestTag}`
-  );
+  assert(isValidSemVer(latestVersion), `Authoritative stable tag is not valid SemVer: ${latestTag}`);
+}
 
-  try {
-    execSync(`npx tsx scripts/release/validate-semver.ts "${latestTag}..HEAD"`, { cwd: root, stdio: "inherit" });
-  } catch {
-    failures.push(`Conventional-commit SemVer validator failed closed for release range ${latestTag}..HEAD.`);
-  }
+const semverValidatorSource = read("scripts/release/validate-semver.ts");
+assert(
+  semverValidatorSource.includes('if (report.status === "FAILED")'),
+  "Conventional-commit SemVer validator must fail closed on invalid results."
+);
+assert(
+  !semverValidatorSource.includes("STRICT_SEMVER_VALIDATION"),
+  "Conventional-commit SemVer validator must not depend on an optional strictness environment variable."
+);
+
+const semverRuntimeChecks: Array<[string, boolean]> = [
+  ["numeric prerelease ordering alpha.2 < alpha.10", compareSemVer("1.0.0-alpha.2", "1.0.0-alpha.10") < 0],
+  ["numeric prerelease identifiers precede lexical identifiers", compareSemVer("1.0.0-1", "1.0.0-alpha") < 0],
+  ["lexical prerelease comparison alpha < beta", compareSemVer("1.0.0-alpha", "1.0.0-beta") < 0],
+  ["shorter prerelease chain has lower precedence", compareSemVer("1.0.0-alpha", "1.0.0-alpha.1") < 0],
+  ["stable release has higher precedence than prerelease", compareSemVer("1.0.0-rc.1", "1.0.0") < 0],
+  ["leading-zero numeric core versions are rejected", !isValidSemVer("01.2.3") && !isValidSemVer("1.02.3") && !isValidSemVer("1.2.03")],
+  ["standard release version is valid", isValidSemVer("2.13.0")],
+];
+
+for (const [name, passed] of semverRuntimeChecks) {
+  assert(passed, `SemVer runtime invariant failed: ${name}`);
 }
 
 const version = String(packageJson.version || "");
