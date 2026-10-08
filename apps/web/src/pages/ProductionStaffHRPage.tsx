@@ -87,7 +87,7 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
     setError("");
     try {
       const responses = await Promise.all([
-        getData("/api/v1/workforce/dashboard"),
+        getData<AnyRow>("/api/v1/workforce/dashboard"),
         getData("/api/v1/workforce/employees"),
         getData("/api/v1/workforce/departments"),
         getData("/api/v1/workforce/positions"),
