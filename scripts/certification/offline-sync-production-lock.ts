@@ -30,8 +30,8 @@ const REQUIRED_MARKERS: Array<[string, string, string[]]> = [
     "tombstone:",
   ]],
   ["migration-authority", "apps/web/src/persistence/migrationEngine.ts", [
-    "migrateToVersion",
-    "preservedOutboxCount",
+    "applySchemaUpgrade",
+    "if (toVersion >= 5 && fromVersion < 5)",
     "if (toVersion >= 6 && fromVersion < 6)",
     "if (toVersion >= 7 && fromVersion < 7)",
   ]],
@@ -177,6 +177,8 @@ const docs = [
   "docs/convergence/OUTBOX_SPECIFICATION.md",
   "docs/convergence/BOOTSTRAP_SPECIFICATION.md",
   "docs/convergence/CONVERGENCE_CONTRACT.md",
+  "docs/convergence/DELTA_SYNC_SPECIFICATION.md",
+  "docs/convergence/SYNC_PROTOCOL_SPECIFICATION.md",
 ];
 for (const doc of docs) {
   if (!fs.existsSync(path.join(repo, doc))) failures.push("MISSING_CONVERGENCE_DOC: " + doc);
