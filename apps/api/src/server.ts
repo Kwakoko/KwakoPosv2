@@ -5973,30 +5973,24 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
   server.post("/api/v1/system-ui/navigation", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const permissions = body.permissions || ["pos.access", "inventory.read", "workforce.read"];
-    const nav = globalSystemUiService.generateNavigation(permissions);
+    const ctx = requireTenantContext(req);
+    const nav = globalSystemUiService.generateNavigation(ctx.permissions);
     return reply.status(200).send({ success: true, data: nav });
   });
 
   server.post("/api/v1/system-ui/search", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeGlobalSearch(
-      body.query || "Cement",
-      resolveTenantId(req, body.tenantId),
-      body.branchId || "BR-DSM-01"
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ query: z.string().trim().min(1).max(300).default("Cement") }).strict().parse(req.body ?? {});
+    const res = globalSystemUiService.executeGlobalSearch(body.query, ctx.tenantId, ctx.branchId);
     return reply.status(200).send({ success: true, data: res });
   });
 
   server.post("/api/v1/system-ui/commands/execute", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeCommand(
-      body.actionId || "CMD-CREATE-SALE",
-      body.permissions || ["pos.access"]
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ actionId: z.string().trim().min(1).max(128) }).strict().parse(req.body);
+    const res = globalSystemUiService.executeCommand(body.actionId, ctx.permissions);
     if (!res.success) {
       return reply.status(403).send({ success: false, error: res.error });
     }
@@ -6005,13 +5999,13 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/system-ui/shell-state", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const tenantId = (req.query as any)?.tenantId || "TNT-TZ-001";
-    const branchId = (req.query as any)?.branchId || "BR-DSM-01";
-    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(tenantId, branchId, true) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(ctx.tenantId, ctx.branchId, true) });
   });
 
   server.get("/api/v1/system-ui/dashboard", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
