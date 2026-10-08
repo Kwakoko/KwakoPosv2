@@ -74,7 +74,6 @@ describe("bundle production invariants", () => {
     await expect(resolveBundleDefinition(tx, "tenant-1", "branch-1", "bundle"))
       .rejects.toThrow("BUNDLE_SELF_REFERENCE");
   });
-});
 
   it("rejects a component that crosses tenant or branch scope", async () => {
     const variants = new Map<string, any>([
@@ -85,3 +84,4 @@ describe("bundle production invariants", () => {
     await expect(resolveBundleDefinition(tx, "tenant-1", "branch-1", "bundle"))
       .rejects.toThrow("BUNDLE_COMPONENT_OUT_OF_SCOPE");
   });
+});
