@@ -50,7 +50,8 @@ export const InventoryBundleWorkspace: React.FC = () => {
       seen.add(line.variantId);
     }
     const now = new Date().toISOString();
-    const attributes = { ...(selected.attributes || {}), __bundle: true, bundleComponents: normalized };
+    const bundleDefinitionVersion = `BUNDLE-${selected.id}-${now}`;
+    const attributes = { ...(selected.attributes || {}), __bundle: true, bundleDefinitionVersion, bundleComponents: normalized };
     const updated = { ...selected, attributes, updatedAt: now };
     const operationId = `bundle-update-${selected.id}-${Date.now()}`;
     const idempotencyKey = `BUNDLE-${selected.id}-${Date.now()}`;
