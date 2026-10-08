@@ -95,6 +95,29 @@ export class PrismaAtomicCommercialFinanceService {
         if (authoritativePrice > 0 && Math.abs(Number(item.unitPrice) - authoritativePrice) > 0.005) throw new Error("SALE_PRICE_AUTHORITY_VIOLATION");
         if (Number(item.discountAmount || 0) > 0) saleDiscountRequested = true;
         const resolution = bundleResolutions.get(item.variantId) || await resolveBundleDefinition(tx, ctx.tenantId, ctx.branchId, item.variantId);
+        if (resolution.isBundle && item.bundleDefinitionVersion) {
+          const serverDefinitionVersion = resolution.definitionVersion;
+          if (String(item.bundleDefinitionVersion) !== String(serverDefinitionVersion)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
+        if (resolution.isBundle && item.bundleComponents) {
+          const expected = resolution.components.map((component) => ({
+            variantId: component.variantId,
+            productId: component.productId,
+            quantity: component.quantity,
+            unitCost: component.unitCost,
+          }));
+          const actual = item.bundleComponents.map((component: any) => ({
+            variantId: String(component.variantId),
+            productId: String(component.productId),
+            quantity: Number(component.quantity),
+            unitCost: Number(component.unitCost),
+          }));
+          if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+            throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
+          }
+        }
         bundleResolutions.set(item.variantId, resolution);
         variantProductIds.set(item.variantId, v.productId);
         variantPrices.set(item.variantId, authoritativePrice);
