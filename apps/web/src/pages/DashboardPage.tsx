@@ -138,7 +138,12 @@ interface KPICardProps {
 const KPICard: React.FC<KPICardProps> = ({ title, value, desc, icon, accent, trend, trendLabel, onClick, action }) => (
   <div
     onClick={onClick}
-    className={`relative overflow-hidden rounded-2xl bg-white dark:bg-darkbg-card border border-slate-100 dark:border-darkbg-border p-5 shadow-sm transition-all duration-200 ${onClick ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+    className={`relative overflow-hidden rounded-2xl border p-5 transition-all duration-200 ${onClick ? 'cursor-pointer hover:-translate-y-0.5' : ''}`}
+    style={{
+      background: 'linear-gradient(135deg, ' + accent + '12 0%, rgba(5, 18, 38, 0.96) 72%)',
+      borderColor: accent + 'cc',
+      boxShadow: 'inset 0 0 28px ' + accent + '0d, 0 0 14px ' + accent + '0a',
+    }}
   >
     {/* Decorative accent blob */}
     <div className="absolute -top-4 -right-4 h-20 w-20 rounded-full opacity-10" style={{ background: accent }} />
