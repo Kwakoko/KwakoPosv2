@@ -14,7 +14,7 @@ describe("POS backdated sale UI contract", () => {
     expect(source).toContain('aria-pressed={isBackdatedSale}');
 
     const activationIndex = source.indexOf("Activate Backdated Sale");
-    const mainGridIndex = source.indexOf("/* Main Grid: Products on Left (60%), Cart on Right) */");
+    const mainGridIndex = source.indexOf("/* Main Grid: Products on Left");
     expect(activationIndex).toBeGreaterThan(-1);
     expect(activationIndex).toBeLessThan(mainGridIndex);
 
