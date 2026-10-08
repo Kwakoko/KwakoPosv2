@@ -21,7 +21,7 @@ function requireFiscalAuthority(
 ): boolean {
   const roles = ctx.roles.map((role: string) => role.toUpperCase());
   const permissions = new Set(ctx.permissions.map((permission: string) => permission.toLowerCase()));
-  const privileged = roles.some((role) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const privileged = roles.some((role: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
   const allowed = privileged || permissions.has("*") || permissions.has("admin:*") ||
     (action === "view"
       ? ["fiscalization.view", "finance.view", "financial_reports.view", "settings.manage"].some((p) => permissions.has(p))
