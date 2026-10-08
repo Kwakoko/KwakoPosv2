@@ -67,10 +67,19 @@ assert(manifest.version === version, `release-manifest.json version drift: expec
 assert(manifest.tag === `v${version}`, `release-manifest.json tag drift: expected v${version}, found ${manifest.tag}`);
 
 if (manifest.environment === "development" || manifest.releaseChannel === "development") {
-  assert(manifest.certification !== "PASS", "Development source manifest must never advertise production certification PASS.");
-  assert(manifest.gitSha === null, "Development source manifest Git SHA must remain null until an exact release candidate exists.");
-  assert(manifest.containerDigest === null, "Development source manifest container digest must remain null.");
-  assert(manifest.cloudRunRevision === null, "Development source manifest Cloud Run revision must remain null.");
+  assert(manifest.certification !== "PASS", "Development metadata must never advertise production certification PASS.");
+
+  if (manifest.certification === "PENDING") {
+    assert(manifest.gitSha === null, "Pending development source manifest Git SHA must remain null.");
+    assert(manifest.containerDigest === null, "Pending development source manifest container digest must remain null.");
+    assert(manifest.cloudRunRevision === null, "Pending development source manifest Cloud Run revision must remain null.");
+  }
+
+  if (manifest.certification === "FAIL") {
+    assert(/^[0-9a-f]{40}$/i.test(String(manifest.gitSha || "")), "Pre-production release candidate must bind to an exact 40-character Git SHA.");
+    assert(manifest.containerDigest === null, "Pre-production release candidate must not claim a production container digest.");
+    assert(manifest.cloudRunRevision === null, "Pre-production release candidate must not claim a production Cloud Run revision.");
+  }
 }
 
 const semverLockWiring = (workflow: string) =>
