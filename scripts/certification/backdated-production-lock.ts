@@ -9,7 +9,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "73a06df9060d30dcc1b7dd7456e7aaa1bfef075c",
   ".github/workflows/ci.yml": "810a3c54084d61d0c9b4b4777c08c60c05969e2f",
   ".github/workflows/production-certification.yml": "017fc14ad1d31f47927fb1ee659a6ab029d6ac05",
-  ".github/workflows/production-release-exact-main.yml": "1e1e7128801944d01c059cf1d75887282fd412e6",
+  ".github/workflows/production-release-exact-main.yml": "1e9b16c9843029381da58bf2b3e7f4e6ff4c365c",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
   "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
   "apps/web/src/services/payloadValidationService.ts": "9c28e200a6a2175c81d9d900d168936ae3e96f7d",
