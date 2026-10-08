@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-07";
+const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-08";
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "182b4714c943fa4bdc752e57baf07c12d7e68eb7",
@@ -23,7 +23,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",
-  "tests/unit/backdated-pos-ui.test.ts": "becf52a74f1a56e048914f156477efa362d0be2e",
+  "tests/unit/backdated-pos-ui.test.ts": "4114fa94b152c25d9728ca8bb60d7dc77f760b1a",
 };
 
 const MARKERS: Array<[string, string, ...string[]]> = [
