@@ -73,7 +73,8 @@ export class PricingAuthority {
       if (!customer || customer.tenantId !== ctx.tenantId || customer.branchId !== ctx.branchId || customer.status !== "ACTIVE") {
         throw new Error("PRICING_CUSTOMER_BOUNDARY_VIOLATION");
       }
-      customerPrice = await tx.customerPrice.findFirst({
+      customerPrice = tx.customerPrice
+        ? await tx.customerPrice.findFirst({
         where: {
           tenantId: ctx.tenantId,
           branchId: ctx.branchId,
@@ -84,11 +85,13 @@ export class PricingAuthority {
           OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
         },
         orderBy: [{ priority: "desc" }, { effectiveFrom: "desc" }],
-      });
+      })
+        : null;
     }
 
     let priceListItem: any = null;
     if (input.priceListId) {
+      if (!tx.priceList || !tx.priceListItem) throw new Error("PRICE_LIST_NOT_AVAILABLE");
       const list = await tx.priceList.findFirst({
         where: { id: input.priceListId, tenantId: ctx.tenantId, branchId: ctx.branchId },
       });
@@ -105,7 +108,7 @@ export class PricingAuthority {
         },
         orderBy: [{ priority: "desc" }, { effectiveFrom: "desc" }],
       });
-    } else {
+    } else if (tx.priceList && tx.priceListItem) {
       const defaultList = await tx.priceList.findFirst({
         where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isDefault: true },
         orderBy: { updatedAt: "desc" },
@@ -126,7 +129,8 @@ export class PricingAuthority {
       }
     }
 
-    const bulkTier = await tx.pricingTier.findFirst({
+    const bulkTier = tx.pricingTier
+      ? await tx.pricingTier.findFirst({
       where: {
         tenantId: ctx.tenantId,
         branchId: ctx.branchId,
@@ -137,9 +141,10 @@ export class PricingAuthority {
         AND: [{ OR: [{ maxQuantity: null }, { maxQuantity: { gte: input.quantity } }] }, { effectiveFrom: { lte: now } }, { OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] }],
       },
       orderBy: [{ minQuantity: "desc" }, { priority: "desc" }, { effectiveFrom: "desc" }],
-    });
+    })
+      : null;
 
-    const wholesaleTier = input.customerId
+    const wholesaleTier = input.customerId && tx.pricingTier
       ? await tx.pricingTier.findFirst({
           where: {
             tenantId: ctx.tenantId,
@@ -159,7 +164,8 @@ export class PricingAuthority {
         })
       : null;
 
-    const promotions = await tx.pricingPromotion.findMany({
+    const promotions = tx.pricingPromotion
+      ? await tx.pricingPromotion.findMany({
       where: {
         tenantId: ctx.tenantId,
         OR: [{ branchId: null }, { branchId: ctx.branchId }],
@@ -174,7 +180,8 @@ export class PricingAuthority {
       },
       orderBy: [{ priority: "desc" }, { startAt: "desc" }],
       take: 10,
-    });
+    })
+      : [];
 
     let bestTierPrice = basePrice;
     let source: PricingResolution["source"] = "BASE";
