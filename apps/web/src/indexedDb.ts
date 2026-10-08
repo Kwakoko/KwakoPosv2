@@ -55,6 +55,7 @@ export interface OutboxItem {
     | "ProductPriceHistory"
     | "Sale"
     | "Customer"
+    | "CustomerContact"
     | "Supplier"
     | "Category"
     | "Brand"
@@ -109,8 +110,8 @@ export type NativeStore =
   | "payments"
   | "receipts"
   | "customers"
-  | "customerContacts"
   | "suppliers"
+  | "contacts"
   | "syncOutbox"
   | "traVfdOutbox"
   | "drawerOutbox"
@@ -133,6 +134,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
   "receipts",
   "customers",
   "suppliers",
+  "contacts",
   "syncOutbox",
   "traVfdOutbox",
   "drawerOutbox",
@@ -274,8 +276,8 @@ export class LocalIndexedDbStore {
   payments: QueryableStore<any>;
   receipts: QueryableStore<any>;
   customers: QueryableStore<any>;
-  customerContacts: QueryableStore<any>;
   suppliers: QueryableStore<any>;
+  contacts: QueryableStore<any>;
   syncOutbox: QueryableStore<OutboxItem>;
   traVfdOutbox: QueryableStore<any>;
   drawerOutbox: QueryableStore<DrawerOutboxItem>;
@@ -321,8 +323,8 @@ export class LocalIndexedDbStore {
     this.payments = new QueryableStore<any>("payments", p);
     this.receipts = new QueryableStore<any>("receipts", p);
     this.customers = new QueryableStore<any>("customers", p);
-    this.customerContacts = new QueryableStore<any>("customerContacts", p);
     this.suppliers = new QueryableStore<any>("suppliers", p);
+    this.contacts = new QueryableStore<any>("contacts", p);
     this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
     this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
     this.drawerOutbox = new QueryableStore<DrawerOutboxItem>("drawerOutbox", p);
@@ -473,10 +475,10 @@ export class LocalIndexedDbStore {
         return this.receipts;
       case "customers":
         return this.customers;
-      case "customerContacts":
-        return this.customerContacts;
       case "suppliers":
         return this.suppliers;
+      case "contacts":
+        return this.contacts;
       case "syncOutbox":
         return this.syncOutbox;
       case "traVfdOutbox":
@@ -653,6 +655,7 @@ export class LocalIndexedDbStore {
     this.receipts.clear();
     this.customers.clear();
     this.suppliers.clear();
+    this.contacts.clear();
     this.syncOutbox.clear();
     this.traVfdOutbox.clear();
     this.drawerOutbox.clear();
@@ -706,6 +709,7 @@ export class LocalIndexedDbStore {
     filterTenant(this.receipts, "receipts");
     filterTenant(this.customers, "customers");
     filterTenant(this.suppliers, "suppliers");
+    filterTenant(this.contacts, "contacts");
     filterTenant(this.syncOutbox, "syncOutbox");
     filterTenant(this.traVfdOutbox, "traVfdOutbox");
     filterTenant(this.drawerOutbox, "drawerOutbox");
@@ -859,10 +863,6 @@ export class LocalIndexedDbStore {
     this.persist("customerContacts", contact.id, contact);
   }
 
-  getCustomerContactsLocal(tenantId?: string, branchId?: string): any[] {
-    const all = [...this.customerContacts.values()];
-    return tenantId ? all.filter((contact: any) => contact.tenantId === tenantId && (!branchId || contact.branchId === branchId)) : all;
-  }
 
   saveSupplierLocal(supplier: any, ctx?: TenantScopedContext): void {
     if (ctx?.tenantId && (!supplier.tenantId || supplier.tenantId !== ctx.tenantId)) {
@@ -952,6 +952,7 @@ export class LocalIndexedDbStore {
     const all = [...this.customerContacts.values()];
     return tenantId ? all.filter((contact: any) => contact.tenantId === tenantId && (!branchId || contact.branchId === branchId)) : all;
   }
+
 
   getSuppliersLocal(tenantId?: string, branchId?: string): any[] {
     const all = [...this.suppliers.values()];
@@ -1399,8 +1400,8 @@ export class LocalIndexedDbStore {
     const ledger = Array.isArray(delta.stockLedger) ? delta.stockLedger : [];
     const adjustments = Array.isArray(delta.adjustments) ? delta.adjustments : [];
     const customers = Array.isArray(delta.customers) ? delta.customers : [];
-    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
     const suppliers = Array.isArray(delta.suppliers) ? delta.suppliers : [];
+    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
     const categories = Array.isArray(delta.categories) ? delta.categories : [];
     const brands = Array.isArray(delta.brands) ? delta.brands : [];
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
@@ -1439,14 +1440,15 @@ export class LocalIndexedDbStore {
         this.saveCustomerLocal(customer);
         appliedCount += 1;
       }
-      for (const contact of contacts) {
-        if (this.protectServerRecord("CustomerContact", contact.id)) continue;
-        this.saveCustomerContactLocal(contact);
-        appliedCount += 1;
-      }
       for (const supplier of suppliers) {
         if (this.protectServerRecord("Supplier", supplier.id)) continue;
         this.saveSupplierLocal(supplier);
+        appliedCount += 1;
+      }
+      for (const contact of contacts) {
+        if (this.protectServerRecord("CustomerContact", String(contact.id))) continue;
+        this.contacts.set(String(contact.id), contact);
+        this.persist("contacts", String(contact.id), contact);
         appliedCount += 1;
       }
       if (settings.length) {
@@ -1491,7 +1493,7 @@ export class LocalIndexedDbStore {
       return appliedCount;
     }
 
-    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "configuration"].filter(
+    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "syncMetadata", "configuration"].filter(
       (s) => this.nativeDb!.objectStoreNames.contains(s),
     );
     const tx = this.nativeDb.transaction(txStores, "readwrite");
@@ -1501,6 +1503,7 @@ export class LocalIndexedDbStore {
     const adjustmentsStore = tx.objectStore("stockAdjustments");
     const customersStore = tx.objectStore("customers");
     const suppliersStore = tx.objectStore("suppliers");
+    const contactsStore = this.nativeDb!.objectStoreNames.contains("contacts") ? tx.objectStore("contacts") : null;
     const configStore = this.nativeDb!.objectStoreNames.contains("configuration") ? tx.objectStore("configuration") : null;
 
     for (const product of products) {
@@ -1656,8 +1659,8 @@ export class LocalIndexedDbStore {
     const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
-    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
@@ -1677,7 +1680,7 @@ export class LocalIndexedDbStore {
     const pendingCatalogTypes = new Set<string>();
     const protect = (store: NativeStore, id: string) => { const set = protectedKeys.get(store) || new Set<string>(); set.add(id); protectedKeys.set(store, set); };
     for (const item of pending) {
-      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "CustomerContact" ? "customerContacts" : item.entityType === "Supplier" ? "suppliers" : null;
+      const store = item.entityType === "Product" ? "products" : item.entityType === "ProductVariant" ? "productVariants" : item.entityType === "StockAdjustment" ? "stockAdjustments" : item.entityType === "StockLedger" ? "stockLedger" : item.entityType === "ProductPriceHistory" ? "productPriceHistory" : item.entityType === "Sale" ? "sales" : item.entityType === "Payment" ? "payments" : item.entityType === "PurchaseReceipt" || item.entityType === "Receipt" ? "receipts" : item.entityType === "Customer" ? "customers" : item.entityType === "Supplier" ? "suppliers" : null;
       if (store) protect(store, item.entityId);
       if (item.entityType === "Category" || item.entityType === "Brand") pendingCatalogTypes.add(item.entityType);
       const payload: any = item.payload || {};
@@ -1686,9 +1689,9 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, customerContacts: contacts, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, contacts, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
-    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "customerContacts", "suppliers"];
+    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers", "contacts"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
     const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
     const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
@@ -1738,7 +1741,7 @@ export class LocalIndexedDbStore {
     await Promise.all(hydrateStores.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
     const txStores = [...replaceStores, "configuration", "syncMetadata"].filter((store) => this.nativeDb!.objectStoreNames.contains(store));
     const tx = this.nativeDb.transaction(txStores, "readwrite");
-    for (const store of replaceStores) {
+    for (const store of hydrateStores) {
       const os = tx.objectStore(store);
       const target = this.getTargetMap(store);
       if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
@@ -1810,7 +1813,6 @@ export class LocalIndexedDbStore {
         stockLedger: ledger.length,
         stockAdjustments: adjustments.length,
         customers: customers.length,
-        customerContacts: this.getCustomerContactsLocal(tenantId, branchId).length,
         suppliers: suppliers.length,
         expenses: expenses.length,
         syncOutbox: this.getPendingOutbox(tenantId, branchId).length,

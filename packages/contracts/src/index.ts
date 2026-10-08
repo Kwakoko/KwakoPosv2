@@ -306,8 +306,7 @@ export const CustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   currentBalance: z.number().default(0),
   openingBalance: z.number().default(0),
-  walletBalance: z.number().nonnegative().default(0),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
+  status: z.enum(["ACTIVE", "SUSPENDED", "INACTIVE"]).default("ACTIVE"),
   createdAt: z.string().or(z.date()),
   updatedAt: z.string().or(z.date()),
 });
@@ -334,70 +333,6 @@ export const UpdateCustomerRequestSchema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
 });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequestSchema>;
-
-export const CustomerContactRecordSchema = z.object({
-  id: z.string().uuid(),
-  tenantId: z.string().uuid(),
-  branchId: z.string().uuid(),
-  customerId: z.string().uuid(),
-  contactCode: z.string().min(1),
-  firstName: z.string().min(1),
-  lastName: z.string().default(""),
-  roleTitle: z.string().nullable().optional(),
-  phone: z.string().nullable().optional(),
-  email: z.string().email().nullable().optional(),
-  isPrimary: z.boolean().default(false),
-  notes: z.string().nullable().optional(),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
-  createdAt: z.string().or(z.date()),
-  updatedAt: z.string().or(z.date()),
-});
-export type CustomerContactRecord = z.infer<typeof CustomerContactRecordSchema>;
-
-export const CreateCustomerContactRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  contactCode: z.string().min(1).optional(),
-  customerId: z.string().uuid(),
-  firstName: z.string().min(1),
-  lastName: z.string().optional(),
-  roleTitle: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  isPrimary: z.boolean().optional(),
-  notes: z.string().optional(),
-});
-export type CreateCustomerContactRequest = z.infer<typeof CreateCustomerContactRequestSchema>;
-
-export const UpdateCustomerContactRequestSchema = z.object({
-  firstName: z.string().min(1).optional(),
-  lastName: z.string().optional(),
-  roleTitle: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  isPrimary: z.boolean().optional(),
-  notes: z.string().optional(),
-  status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
-});
-export type UpdateCustomerContactRequest = z.infer<typeof UpdateCustomerContactRequestSchema>;
-
-export const RecordCustomerPaymentRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  amount: z.number().positive(),
-  paymentMethod: z.string().min(1).default("CASH"),
-  provider: z.string().optional(),
-  providerReference: z.string().optional(),
-  payUsingWallet: z.boolean().default(false),
-});
-export type RecordCustomerPaymentRequest = z.infer<typeof RecordCustomerPaymentRequestSchema>;
-
-export const RecordCustomerWalletDepositRequestSchema = z.object({
-  id: z.string().uuid().optional(),
-  amount: z.number().positive(),
-  paymentMethod: z.string().min(1).default("CASH"),
-  provider: z.string().optional(),
-  providerReference: z.string().optional(),
-});
-export type RecordCustomerWalletDepositRequest = z.infer<typeof RecordCustomerWalletDepositRequestSchema>;
 
 export const SupplierSchema = z.object({
   id: z.string().uuid(),
@@ -1099,6 +1034,7 @@ export const CashSessionSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
+  registerCode: z.string().trim().min(1).max(64).nullable().optional(),
   sessionNumber: z.string(),
   cashierId: z.string().uuid(),
   openedAt: z.string().or(z.date()),
@@ -1110,6 +1046,9 @@ export const CashSessionSchema = z.object({
   cashSalesTotal: z.number().default(0),
   cashRefundsTotal: z.number().default(0),
   cashExpensesTotal: z.number().default(0),
+  cashInTotal: z.number().default(0),
+  cashOutTotal: z.number().default(0),
+  safeDropTotal: z.number().default(0),
   variance: z.number().nullable().optional(),
   countSealedAt: z.string().or(z.date()).nullable().optional(),
   countSealedById: z.string().uuid().nullable().optional(),
@@ -1123,7 +1062,8 @@ export type CashSession = z.infer<typeof CashSessionSchema>;
 
 export const OpenCashSessionRequestSchema = z.object({
   openingCash: z.number().nonnegative().default(0),
-  notes: z.string().optional(),
+  registerCode: z.string().trim().min(1).max(64).optional(),
+  notes: z.string().max(500).optional(),
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
 
@@ -1134,9 +1074,21 @@ export const SealCashSessionCountRequestSchema = z.object({
 export type SealCashSessionCountRequest = z.infer<typeof SealCashSessionCountRequestSchema>;
 
 export const CloseCashSessionRequestSchema = z.object({
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
+  managerApprovalReference: z.string().trim().min(1).max(200).optional(),
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;
+
+export const CashTransferRequestSchema = z.object({
+  destinationCashSessionId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(3).max(500),
+  deviceId: z.string().trim().min(1).max(128),
+  witness: z.string().trim().max(200).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  occurredAt: z.string().datetime().optional(),
+});
+export type CashTransferRequest = z.infer<typeof CashTransferRequestSchema>;
 
 export const ExpensePaymentMethodEnum = z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD"]);
 export type ExpensePaymentMethod = z.infer<typeof ExpensePaymentMethodEnum>;
@@ -1257,6 +1209,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "StockAdjustment",
   "StockLedger",
   "Customer",
+  "CustomerContact",
   "Supplier",
   "Sale",
   "Return",
@@ -1342,7 +1295,7 @@ export const SyncDeltaResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
-  contacts: z.array(CustomerContactRecordSchema).optional(),
+  contacts: z.array(z.record(z.unknown())).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1386,7 +1339,7 @@ export const SyncBootstrapResponseSchema = z.object({
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
-  contacts: z.array(CustomerContactRecordSchema).optional(),
+  contacts: z.array(z.record(z.unknown())).optional(),
   expenses: z.array(ExpenseSchema).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
@@ -1897,8 +1850,19 @@ export const CreateBankTransactionRequestSchema = z.object({
   amount: z.number(),
   reference: z.string().min(1),
   description: z.string().optional(),
+  offsetAccountId: z.string().uuid().optional(),
+  offsetAccountCode: z.string().min(1).optional(),
 });
 export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
+
+export const CreateTaxRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  rate: z.number().nonnegative().max(100),
+  isInclusive: z.boolean().default(true),
+});
+export type CreateTaxRequest = z.infer<typeof CreateTaxRequestSchema>;
 
 // Budget
 export const BudgetLineSchema = z.object({
@@ -2020,6 +1984,7 @@ export const BalanceSheetReportSchema = z.object({
     bankBalances: z.number(),
     accountsReceivable: z.number(),
     inventoryValuation: z.number(),
+    inputVatRecoverable: z.number().default(0),
     totalCurrentAssets: z.number(),
     totalAssets: z.number(),
   }),
@@ -2062,6 +2027,20 @@ export const TrialBalanceReportSchema = z.object({
   items: z.array(TrialBalanceReportItemSchema),
 });
 export type TrialBalanceReport = z.infer<typeof TrialBalanceReportSchema>;
+
+export const CashFlowReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  beginningCash: z.number(),
+  operatingCashFlow: z.number(),
+  investingCashFlow: z.number(),
+  financingCashFlow: z.number(),
+  netChangeInCash: z.number(),
+  endingCash: z.number(),
+});
+export type CashFlowReport = z.infer<typeof CashFlowReportSchema>;
 
 export const ExecutiveFinancialDashboardSchema = z.object({
   revenue: z.number(),
