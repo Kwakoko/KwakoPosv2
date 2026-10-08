@@ -39,6 +39,7 @@ const files = {
 
 for (const marker of [
   'model Tax {', 'rate        Decimal', 'isInclusive Boolean',
+  '@@unique([tenantId, branchId, code])',
   'model TraVfdConfig {', 'model TraVfdFiscalization {', 'model TraVfdOutbox {',
 ]) must(files.schema, marker, "database tax/fiscal models");
 
