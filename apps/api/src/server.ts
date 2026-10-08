@@ -20,7 +20,6 @@ import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
-import { prisma } from "@kwakopos2/database";
 import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
