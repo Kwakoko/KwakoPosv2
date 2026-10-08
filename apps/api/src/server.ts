@@ -289,8 +289,8 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
 function requireSuperAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")) {
-    throw new Error("FORBIDDEN: Super Admin privileges required for platform release controls");
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
+    throw new Error("FORBIDDEN: Platform Super Admin privileges required");
   }
   return ctx;
 }
@@ -767,7 +767,7 @@ function registerCanonicalProductionAuthentication(
           const userId = (ctx as any).userId || ctx.sub;
           const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
           const roleName = String(user?.role?.name || "").toUpperCase();
-          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP", "TENANT_SUSPEND", "TENANT_REACTIVATE", "SUBSCRIPTION_CHANGE", "FEATURE_FLAG_CHANGE"]);
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP", "TENANT_SUSPEND", "TENANT_REACTIVATE", "SUBSCRIPTION_CHANGE", "FEATURE_FLAG_CHANGE", "CONTEXT_SWITCH", "PLATFORM_EMERGENCY_KILL_SWITCH"]);
           if (!allowedStepUpActions.has(action)) {
             reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
             return;
@@ -6042,27 +6042,80 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const body = (req.body as any) || {};
-    const adminId = body.adminId || "ADM-001";
-    const tenantId = resolveTenantId(req, body.tenantId);
-    const reason = body.reason || "Audited customer support ticket investigation";
-    const ctx = globalSuperAdminPlatformService.initiateContextSwitch(adminId, tenantId, reason, body.timeLimitMinutes);
-    return reply.status(200).send({ success: true, data: ctx });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "CONTEXT_SWITCH");
+      const body = (req.body as any) || {};
+      const tenantId = String(body.tenantId || "").trim();
+      const reason = String(body.reason || "").trim();
+      const timeLimitMinutes = Number(body.timeLimitMinutes ?? 30);
+      if (!tenantId || reason.length < 3 || !Number.isInteger(timeLimitMinutes) || timeLimitMinutes < 1 || timeLimitMinutes > 60) {
+        return reply.status(400).send({ success: false, error: { code: "CONTEXT_SWITCH_INPUT_INVALID", message: "tenantId, reason and a 1–60 minute time limit are required." } });
+      }
+      const session = globalSuperAdminPlatformService.initiateContextSwitch(String(actor.userId), tenantId, reason, timeLimitMinutes);
+      await prisma.$executeRaw`INSERT INTO platform_audit_events (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
+        VALUES (${randomUUID()},${tenantId},${actor.userId},'SUPER_ADMIN_CONTEXT_SWITCH_STARTED','Tenant',${tenantId},${JSON.stringify({ switchId: session.switchId, reason, timeLimitMinutes })}::jsonb)`;
+      return reply.status(200).send({ success: true, source: "postgresql-audited", data: session });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Context switch denied";
+      const status = message.startsWith("FORBIDDEN") ? 403 : message.includes("STEP_UP") ? 401 : 400;
+      return reply.status(status).send({ success: false, error: { code: "SUPER_ADMIN_CONTEXT_SWITCH_FAILED", message } });
+    }
   });
 
   server.post("/api/v1/super-admin/emergency-kill-switch", async (req, reply) => {
     const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const body = (req.body as any) || {};
-    const target = body.target || "GLOBAL_AI";
-    const reason = body.reason || "Emergency security container isolation";
-    const adminId = body.adminId || "ADM-SEC-01";
-    const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target, reason, adminId);
-    return reply.status(200).send({ success: true, data: ks });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = (req.body as any) || {};
+      const target = String(body.target || "GLOBAL_AI");
+      const reason = String(body.reason || "").trim();
+      const allowedTargets = new Set(["GLOBAL_AI", "RELEASE_ROLLBACK", "PLUGIN_FREEZE", "INTEGRATION_PAUSE", "TENANT_SUSPEND"]);
+      if (!allowedTargets.has(target) || reason.length < 3) {
+        return reply.status(400).send({ success: false, error: { code: "KILL_SWITCH_INPUT_INVALID", message: "A valid target and emergency reason are required." } });
+      }
+      const ks = globalSuperAdminPlatformService.triggerEmergencyKillSwitch(target as any, reason, String(actor.userId));
+      await prisma.$executeRaw`INSERT INTO platform_audit_events (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
+        VALUES (${randomUUID()},NULL,${actor.userId},'SUPER_ADMIN_EMERGENCY_KILL_SWITCH','PlatformEmergencyKillSwitch',${ks.actionId},${JSON.stringify({ target, reason, immutableAuditId: ks.immutableAuditId })}::jsonb)`;
+      return reply.status(200).send({ success: true, source: "postgresql-audited", data: ks });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Emergency action denied";
+      const status = message.startsWith("FORBIDDEN") ? 403 : message.includes("STEP_UP") ? 401 : 400;
+      return reply.status(status).send({ success: false, error: { code: "SUPER_ADMIN_EMERGENCY_ACTION_FAILED", message } });
+    }
   });
 
   server.get("/api/v1/super-admin/dashboard", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getDashboardMetrics() });
+    try {
+      const actor = requireSuperAdminContext(req);
+      const [totalTenants, activeTenants, totalBranches, totalUsers, subscriptionCount, incidentCount] = await Promise.all([
+        prisma.tenant.count(),
+        prisma.tenant.count({ where: { status: "ACTIVE" } }),
+        prisma.branch.count(),
+        prisma.user.count(),
+        prisma.saasDataRecord.count({ where: { entityType: "SUBSCRIPTION" } }),
+        prisma.securityPrivacyIncident.count({ where: { status: { notIn: ["CLOSED", "REMEDIATED"] } } }),
+      ]);
+      return reply.status(200).send({
+        success: true,
+        source: "postgresql",
+        data: {
+          platformName: "Kwakoko Business Operating System",
+          totalTenants,
+          activeTenants,
+          totalBranches,
+          totalUsers,
+          activeSubscriptions: subscriptionCount,
+          activeSecurityIncidents: incidentCount,
+          release: getReleaseIdentity(config),
+          actorId: actor.userId,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Platform dashboard unavailable";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 503).send({ success: false, error: { code: "SUPER_ADMIN_DASHBOARD_FAILED", message } });
+    }
   });
 
   // Super Admin SQL Studio & Live Database Explorer Endpoints
