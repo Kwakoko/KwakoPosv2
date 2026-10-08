@@ -6249,9 +6249,17 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/workflow-automation/approval", async (req, reply) => {
     const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
-    const body = (req.body as any) || {};
-    const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        taskId: z.string().trim().min(1).max(128),
+        decision: z.enum(["APPROVED", "REJECTED"]),
+      }).strict().parse(req.body);
+      const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, ctx.userId, ctx.tenantId);
+      return reply.status(res ? 200 : 409).send({ success: res, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "WORKFLOW_APPROVAL_REJECTED", message: error instanceof Error ? error.message : "Workflow approval rejected" } });
+    }
   });
 
   server.get("/api/v1/workflow-automation/dashboard", async (req, reply) => {
@@ -6590,9 +6598,21 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/treasury/payment-runs", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.createPaymentRun(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const body = (req.body as any) || {};
+      if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 500) throw new Error("PAYMENT_RUN_ITEMS_INVALID");
+      if (!body.idempotencyKey || String(body.idempotencyKey).trim().length > 200) throw new Error("PAYMENT_RUN_IDEMPOTENCY_KEY_INVALID");
+      const result = globalFinanceTreasuryService.createPaymentRun({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        initiatedBy: ctx.userId,
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_REJECTED", message: error instanceof Error ? error.message : "Payment run rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
@@ -6613,10 +6633,15 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/treasury/payment-runs/:id/execute", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.executePaymentRun(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const { id } = req.params as { id: string };
+      z.string().trim().min(1).max(128).parse(id);
+      const result = globalFinanceTreasuryService.executePaymentRun(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Payment run execution rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/beneficiaries", async (req, reply) => {
