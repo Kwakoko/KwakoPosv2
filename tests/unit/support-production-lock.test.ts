@@ -36,14 +36,14 @@ describe("Support Production Lock v1", () => {
   it("exposes lifecycle, assignment, comments, attachments, resolution, escalation and audit APIs", () => {
     const route = read("apps/api/src/routes/supportOperationsRoutes.ts");
     for (const marker of [
-      "/lifecycle",
-      "/priority",
-      "/assign",
-      "/comments",
-      "/attachments",
-      "/escalate",
-      "/resolve",
-      "/audit",
+      "/tickets/:ticketId/lifecycle",
+      "/tickets/:ticketId/priority",
+      "/tickets/:ticketId/assign",
+      "/tickets/:ticketId/comments",
+      "/tickets/:ticketId/attachments",
+      "/tickets/:ticketId/escalate",
+      "/tickets/:ticketId/resolve",
+      "/tickets/:ticketId/audit",
     ]) expect(route).toContain(marker);
   });
 
