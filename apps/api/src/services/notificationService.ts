@@ -196,6 +196,23 @@ export class NotificationService {
     });
   }
 
+  async retryOne(ctx: TenantContext, notificationId: string) {
+    assertContext(ctx);
+    const row = await prisma.$transaction(async (tx) => {
+      await setRlsTenantContext(tx, ctx);
+      return tx.notification.findFirst({
+        where: {
+          id: notificationId,
+          tenantId: ctx.tenantId,
+          status: "FAILED",
+          retryCount: { lt: MAX_RETRY_COUNT },
+        },
+      });
+    });
+    if (!row) throw new Error("NOTIFICATION_NOT_RETRYABLE");
+    return this.deliver({ ...ctx, userId: row.recipientUserId }, row.id);
+  }
+
   async retryDue(ctx: TenantContext, limit = 50) {
     assertContext(ctx);
     const candidates = await prisma.$transaction(async (tx) => {
@@ -251,19 +268,10 @@ export class NotificationService {
 
     const [lowStock, failedPayments, pendingApprovals, failedSyncs] = await Promise.all([
       tx.productVariant.findMany({
-        where: {
-          tenantId: ctx.tenantId,
-          branchId: ctx.branchId,
-          isActive: true,
-          inventoryQuantity: { lte: tx.productVariant.fields.reorderLevel },
-        },
-        select: { id: true, sku: true, name: true, inventoryQuantity: true, reorderLevel: true, updatedAt: true },
-        take: 50,
-      }).catch(async () => tx.productVariant.findMany({
         where: { tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
         select: { id: true, sku: true, name: true, inventoryQuantity: true, reorderLevel: true, updatedAt: true },
-        take: 50,
-      })),
+        take: 100,
+      }),
       tx.payment.findMany({
         where: { tenantId: ctx.tenantId, branchId: ctx.branchId, status: { in: ["FAILED", "PENDING"] } },
         orderBy: { updatedAt: "desc" },
