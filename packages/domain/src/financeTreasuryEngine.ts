@@ -478,7 +478,7 @@ export class FinanceTreasuryEngine {
     return { success: true, run };
   }
 
-  public performLiquidityCheck(runId: string, availableLiquidity: number): {
+  public performLiquidityCheck(runId: string, availableLiquidity: number, tenantId?: string): {
     success: boolean; passed?: boolean; shortfall?: number; error?: string;
   } {
     const run = this.paymentRuns.get(runId);
