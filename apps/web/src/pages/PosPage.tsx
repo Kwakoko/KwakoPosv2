@@ -1664,6 +1664,17 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           </button>
 
           <button
+            className={isBackdatedSale ? "v2-btn v2-btn-primary v2-btn-sm" : "v2-btn v2-btn-ghost v2-btn-sm"}
+            onClick={activateBackdatedSale}
+            type="button"
+            title="Activate Backdated Sale (SALE_BACKDATE permission)"
+            aria-pressed={isBackdatedSale}
+          >
+            <Calendar size={12} />
+            <span>{isBackdatedSale ? "Backdated Sale Active" : "Activate Backdated Sale"}</span>
+          </button>
+
+          <button
             className="v2-btn v2-btn-ghost v2-btn-sm"
             onClick={() => setShiftModal(true)}
             type="button"
@@ -1857,6 +1868,40 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
           </button>
         </div>
       </div>
+
+      {/* Backdated Sale Control Surface — always visible on New Sale */} 
+      {isBackdatedSale && (
+        <div
+          className="v2-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: ".75rem",
+            flexWrap: "wrap",
+            padding: ".75rem 1rem",
+            border: "1px solid var(--accent)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: ".45rem", fontWeight: 800 }}>
+            <Clock size={14} style={{ color: "var(--accent)" }} />
+            <span>Historical Sale Date &amp; Time</span>
+          </div>
+          <input
+            className="v2-input v2-input-sm"
+            type="datetime-local"
+            value={backdatedSaleAt}
+            min={toLocalDateTimeInputValue(new Date(Date.now() - 730 * 24 * 60 * 60 * 1000))}
+            max={toLocalDateTimeInputValue(new Date())}
+            onChange={(e) => setBackdatedSaleAt(e.target.value)}
+            aria-label="Backdated sale date and time"
+            required
+            style={{ minWidth: 230, flex: "1 1 230px" }}
+          />
+          <span className="v2-text-xs v2-text-muted">
+            Up to 730 days back; closed/locked periods and stock timeline rules still apply.
+          </span>
+        </div>
+      )}
 
       {/* Main Grid: Products on Left (60%), Cart on Right (40%) */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 420px", gap: "1rem", alignItems: "start" }}>
@@ -2293,42 +2338,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               </div>
             )}
 
-            <button
-              className={isBackdatedSale ? "v2-btn v2-btn-primary" : "v2-btn v2-btn-secondary"}
-              style={{ width: "100%", justifyContent: "center", padding: ".65rem", fontWeight: 800, marginBottom: ".5rem" }}
-              onClick={activateBackdatedSale}
-              disabled={cart.length === 0}
-              type="button"
-              title="Requires SALE_BACKDATE permission"
-            >
-              <Calendar size={14} />
-              {isBackdatedSale ? "Backdated Sale Active" : "Activate Backdated Sale"}
-            </button>
-
-            {isBackdatedSale && (
-              <div
-                className="v2-p-3 v2-mb-3"
-                style={{ background: "var(--surface-2)", border: "1px solid var(--accent)", borderRadius: "var(--radius-md)" }}
-              >
-                <div className="v2-flex v2-items-center v2-gap-2 v2-mb-2">
-                  <Clock size={14} style={{ color: "var(--accent)" }} />
-                  <span className="v2-text-xs v2-font-black">Historical Sale Date & Time</span>
-                </div>
-                <input
-                  className="v2-input"
-                  type="datetime-local"
-                  value={backdatedSaleAt}
-                  min={toLocalDateTimeInputValue(new Date(Date.now() - 730 * 24 * 60 * 60 * 1000))}
-                  max={toLocalDateTimeInputValue(new Date())}
-                  onChange={(e) => setBackdatedSaleAt(e.target.value)}
-                  aria-label="Backdated sale date and time"
-                  required
-                />
-                <div className="v2-text-xs v2-text-muted v2-mt-2">
-                  Historical sale posting is subject to permission, the 730-day limit, stock timeline validation, and accounting-period controls.
-                </div>
-              </div>
-            )}
             <button
               className="v2-btn v2-btn-primary"
               style={{
