@@ -4,9 +4,8 @@ import { globalSupportOperationsService } from "../services/supportOperationsSer
 function requireSuperAdmin(req: any): string {
   const ctx = req.tenantContext;
   const roles = Array.isArray(ctx?.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
-  const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions.map((p: unknown) => String(p).toLowerCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !permissions.includes("support:global") && !permissions.includes("admin:*") && !permissions.includes("*")) throw new Error("FORBIDDEN: Super Admin support privileges required");
-  return String(ctx?.userId || req.user?.sub || "system");
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) throw new Error("FORBIDDEN: Platform Super Admin support privileges required");
+  return String(ctx?.userId || "");
 }
 
 export function supportControlTowerRoutes(server: FastifyInstance): void {
