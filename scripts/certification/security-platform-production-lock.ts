@@ -63,7 +63,7 @@ requireCheck(middleware.includes("CSRF_ORIGIN_DENIED") && middleware.includes("a
 requireCheck(!api.includes('    : "*";'), "CORS wildcard fallback remains enabled.");
 requireCheck(api.includes('["http://localhost:5173", "http://127.0.0.1:5173"]'), "Non-production CORS fallback is not explicit.");
 requireCheck(/\/auth\/login[\s\S]{0,180}rateLimit/.test(api) && /\/auth\/refresh[\s\S]{0,180}rateLimit/.test(api), "Authentication endpoints are missing route-level rate limits.");
-requireCheck(api.includes("SameSite=Strict") && api.includes("HttpOnly"), "Refresh cookie is not hardened.");
+requireCheck(middleware.includes('CSRF_ORIGIN_DENIED') && api.includes("SameSite=Strict") && api.includes("HttpOnly"), "Refresh cookie / CSRF boundary is not hardened.");
 
 const tracked = (() => {
   try {
