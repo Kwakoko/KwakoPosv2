@@ -1099,6 +1099,7 @@ export const CashSessionSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
   branchId: z.string().uuid(),
+  registerCode: z.string().trim().min(1).max(64).nullable().optional(),
   sessionNumber: z.string(),
   cashierId: z.string().uuid(),
   openedAt: z.string().or(z.date()),
@@ -1110,6 +1111,9 @@ export const CashSessionSchema = z.object({
   cashSalesTotal: z.number().default(0),
   cashRefundsTotal: z.number().default(0),
   cashExpensesTotal: z.number().default(0),
+  cashInTotal: z.number().default(0),
+  cashOutTotal: z.number().default(0),
+  safeDropTotal: z.number().default(0),
   variance: z.number().nullable().optional(),
   countSealedAt: z.string().or(z.date()).nullable().optional(),
   countSealedById: z.string().uuid().nullable().optional(),
@@ -1123,7 +1127,8 @@ export type CashSession = z.infer<typeof CashSessionSchema>;
 
 export const OpenCashSessionRequestSchema = z.object({
   openingCash: z.number().nonnegative().default(0),
-  notes: z.string().optional(),
+  registerCode: z.string().trim().min(1).max(64).optional(),
+  notes: z.string().max(500).optional(),
 });
 export type OpenCashSessionRequest = z.infer<typeof OpenCashSessionRequestSchema>;
 
@@ -1134,9 +1139,21 @@ export const SealCashSessionCountRequestSchema = z.object({
 export type SealCashSessionCountRequest = z.infer<typeof SealCashSessionCountRequestSchema>;
 
 export const CloseCashSessionRequestSchema = z.object({
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
+  managerApprovalReference: z.string().trim().min(1).max(200).optional(),
 });
 export type CloseCashSessionRequest = z.infer<typeof CloseCashSessionRequestSchema>;
+
+export const CashTransferRequestSchema = z.object({
+  destinationCashSessionId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(3).max(500),
+  deviceId: z.string().trim().min(1).max(128),
+  witness: z.string().trim().max(200).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  occurredAt: z.string().datetime().optional(),
+});
+export type CashTransferRequest = z.infer<typeof CashTransferRequestSchema>;
 
 export const ExpensePaymentMethodEnum = z.enum(["CASH", "BANK", "MOBILE_MONEY", "CARD"]);
 export type ExpensePaymentMethod = z.infer<typeof ExpensePaymentMethodEnum>;
@@ -1257,6 +1274,7 @@ export const CommercialEntityTypeEnum = z.enum([
   "StockAdjustment",
   "StockLedger",
   "Customer",
+  "CustomerContact",
   "Supplier",
   "Sale",
   "Return",
@@ -1333,16 +1351,17 @@ export type SyncDeltaRequest = {
   since?: string;
   limit?: number;
 };
-
-export const SyncDeltaResponseSchema = z.object({
-  serverTimestamp: z.string(),
-  products: z.array(ProductSchema),
-  variants: z.array(ProductVariantSchema),
-  stockLedger: z.array(StockLedgerSchema),
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema).optional(),
   suppliers: z.array(SupplierSchema).optional(),
   contacts: z.array(CustomerContactRecordSchema).optional(),
+  categories: z.array(z.record(z.unknown())).optional(),
+  brands: z.array(z.record(z.unknown())).optional(),
+  priceHistories: z.array(ProductPriceHistorySchema).optional(),
+  adjustments: z.array(StockAdjustmentSchema),
+  customers: z.array(CustomerSchema).optional(),
+  suppliers: z.array(SupplierSchema).optional(),
+  contacts: z.array(z.record(z.unknown())).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1382,12 +1401,13 @@ export const SyncBootstrapResponseSchema = z.object({
   entityCounts: z.record(z.number()),
   products: z.array(ProductSchema),
   variants: z.array(ProductVariantSchema),
-  stockLedger: z.array(StockLedgerSchema),
   adjustments: z.array(StockAdjustmentSchema),
   customers: z.array(CustomerSchema),
   suppliers: z.array(SupplierSchema),
   contacts: z.array(CustomerContactRecordSchema).optional(),
   expenses: z.array(ExpenseSchema).optional(),
+  categories: z.array(z.record(z.unknown())).optional(),
+  brands: z.array(z.record(z.unknown())).optional(),
   categories: z.array(z.record(z.unknown())).optional(),
   brands: z.array(z.record(z.unknown())).optional(),
   priceHistories: z.array(ProductPriceHistorySchema).optional(),
@@ -1897,8 +1917,19 @@ export const CreateBankTransactionRequestSchema = z.object({
   amount: z.number(),
   reference: z.string().min(1),
   description: z.string().optional(),
+  offsetAccountId: z.string().uuid().optional(),
+  offsetAccountCode: z.string().min(1).optional(),
 });
 export type CreateBankTransactionRequest = z.infer<typeof CreateBankTransactionRequestSchema>;
+
+export const CreateTaxRequestSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  code: z.string().min(1),
+  rate: z.number().nonnegative().max(100),
+  isInclusive: z.boolean().default(true),
+});
+export type CreateTaxRequest = z.infer<typeof CreateTaxRequestSchema>;
 
 // Budget
 export const BudgetLineSchema = z.object({
@@ -2020,6 +2051,7 @@ export const BalanceSheetReportSchema = z.object({
     bankBalances: z.number(),
     accountsReceivable: z.number(),
     inventoryValuation: z.number(),
+    inputVatRecoverable: z.number().default(0),
     totalCurrentAssets: z.number(),
     totalAssets: z.number(),
   }),
@@ -2062,6 +2094,20 @@ export const TrialBalanceReportSchema = z.object({
   items: z.array(TrialBalanceReportItemSchema),
 });
 export type TrialBalanceReport = z.infer<typeof TrialBalanceReportSchema>;
+
+export const CashFlowReportSchema = z.object({
+  tenantId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  startDate: z.string(),
+  endDate: z.string(),
+  beginningCash: z.number(),
+  operatingCashFlow: z.number(),
+  investingCashFlow: z.number(),
+  financingCashFlow: z.number(),
+  netChangeInCash: z.number(),
+  endingCash: z.number(),
+});
+export type CashFlowReport = z.infer<typeof CashFlowReportSchema>;
 
 export const ExecutiveFinancialDashboardSchema = z.object({
   revenue: z.number(),

@@ -313,6 +313,15 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
   const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierForm.name || !currentTenantId || !currentBranchId) return;
+  // KPIs
+  const totalOutstanding = useMemo(() => suppliers.reduce((sum, s) => sum + (s.balance || 0), 0), [suppliers]);
+  const totalCreditLimit = useMemo(() => suppliers.reduce((sum, s) => sum + (s.creditLimit || 0), 0), [suppliers]);
+  const creditUtil = totalCreditLimit > 0 ? Math.round((totalOutstanding / totalCreditLimit) * 100) : 0;
+
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+  const handleAddSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supplierForm.name || !currentTenantId || !currentBranchId) return;
     const id = safeUUID();
     const payload = { id, supplierCode: undefined, name: supplierForm.name.trim(), phone: supplierForm.phone.trim() || undefined, taxPin: supplierForm.tin.trim() || undefined };
     try {
@@ -774,6 +783,15 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                           <td><span className="badge v2-badge-success">{s.status}</span></td>
                           <td>
                             <div className="v2-flex v2-gap-1">
+                              <button
+                                className="v2-btn v2-btn-secondary v2-btn-sm"
+                                style={{ fontSize: "11px", padding: "2px 8px" }}
+                                onClick={() => void openSupplierHistory(s)}
+                                type="button"
+                                title="View supplier profile and transaction history"
+                              >
+                                <Eye size={12} /> Profile
+                              </button>
                               {s.balance > 0 && (
                                 <button
                                   className="v2-btn v2-btn-primary v2-btn-sm"
@@ -1462,6 +1480,36 @@ export const PurchasingPage: React.FC<PurchasingPageProps> = ({ activeTab: propA
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {supplierHistory && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", display: "grid", placeItems: "center", zIndex: 1050 }}>
+          <div className="v2-card" style={{ width: 900, maxWidth: "96vw", maxHeight: "92vh", overflow: "auto", padding: "1.5rem" }}>
+            <div className="v2-flex v2-items-start v2-justify-between v2-mb-4">
+              <div>
+                <h2 className="v2-text-lg v2-font-black">{supplierHistory.supplier?.name || "Supplier Profile"}</h2>
+                <div className="v2-text-xs v2-text-muted">{supplierHistory.supplier?.supplierCode || supplierHistory.supplier?.id} · Payable {fmt(Number(supplierHistory.supplier?.outstandingBalance || 0))}</div>
+              </div>
+              <button className="v2-btn v2-btn-ghost v2-btn-sm" type="button" onClick={() => setSupplierHistory(null)}>✕</button>
+            </div>
+            <div className="v2-grid v2-grid-3 v2-gap-3 v2-mb-4">
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">PURCHASE ORDERS</div><div className="v2-text-lg v2-font-black">{supplierHistory.purchaseOrders?.length || 0}</div></div>
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">RECEIPTS</div><div className="v2-text-lg v2-font-black">{supplierHistory.purchaseReceipts?.length || 0}</div></div>
+              <div className="v2-card"><div className="v2-text-xs v2-text-muted">PAYMENTS</div><div className="v2-text-lg v2-font-black">{supplierHistory.payments?.length || 0}</div></div>
+            </div>
+            <h3 className="v2-font-black v2-mb-2">Supplier Transactions &amp; Audit</h3>
+            <div className="v2-space-y-1 v2-text-xs">
+              {[...(supplierHistory.purchaseOrders || []).map((x:any)=>({kind:"PO",id:x.orderNumber||x.id,value:fmt(Number(x.totalAmount||0)),date:x.orderedAt})),
+                ...(supplierHistory.purchaseReceipts || []).map((x:any)=>({kind:"GRN",id:x.receiptNumber||x.id,value:x.status||"RECEIVED",date:x.receivedAt})),
+                ...(supplierHistory.payments || []).map((x:any)=>({kind:"Payment",id:x.paymentNumber||x.id,value:fmt(Number(x.amount||0)),date:x.paidAt})),
+                ...(supplierHistory.audits || []).map((x:any)=>({kind:"Audit",id:x.id,value:x.action,date:x.createdAt}))].sort((a,b)=>Date.parse(String(b.date||""))-Date.parse(String(a.date||""))).slice(0,150).map(x =>
+                  <div key={x.kind+"-"+x.id} className="v2-flex v2-items-center v2-justify-between" style={{padding:".55rem .7rem",background:"var(--surface-2)",borderRadius:"var(--radius-md)"}}>
+                    <span className="v2-font-bold">{x.kind}</span><span className="v2-text-muted">{x.id}</span><span>{x.value}</span><span className="v2-text-muted">{x.date ? new Date(x.date).toLocaleString() : ""}</span>
+                  </div>
+                )}
+            </div>
           </div>
         </div>
       )}

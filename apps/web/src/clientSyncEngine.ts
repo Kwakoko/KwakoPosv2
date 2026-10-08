@@ -1,4 +1,4 @@
-import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope } from "./indexedDb.js";
+import { LocalIndexedDbStore, db as defaultDb, outboxMatchesScope, AUTHORITATIVE_SCHEMA_VERSION } from "./indexedDb.js";
 import type {
   SyncPushRequest,
   SyncPushResponse,
@@ -29,6 +29,7 @@ const DB_NAME = "kwakopos-v2";
 const KNOWN_STORES = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "customerContacts", "suppliers", "productPriceHistory", "sales", "payments", "receipts", "configuration", "syncMetadata", "syncOutbox"] as const;
 type KnownStore = typeof KNOWN_STORES[number];
 
+function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
 function scopedSyncKey(tenantId: string, branchId: string, key: string): string {
   if (!tenantId || !branchId) throw new Error("SYNC_CONTEXT_REQUIRED: tenantId and branchId are required");
   return "syncScope:" + tenantId + ":" + branchId + ":" + key;
@@ -84,7 +85,20 @@ export async function applyRevisionedChanges(
 ): Promise<number> {
   if (typeof indexedDB === "undefined") throw new Error("SYNC_LOCAL_STORAGE_UNAVAILABLE");
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(dbName);
+    const request = indexedDB.open(dbName, AUTHORITATIVE_SCHEMA_VERSION);
+    request.onupgradeneeded = (event) => {
+      const tx = request.transaction;
+      if (!tx) {
+        reject(new Error("SYNC_LOCAL_SCHEMA_UPGRADE_TRANSACTION_MISSING"));
+        return;
+      }
+      globalMigrationEngine.applySchemaUpgrade(
+        request.result,
+        tx,
+        event.oldVersion || 0,
+        event.newVersion || AUTHORITATIVE_SCHEMA_VERSION,
+      );
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
   });
@@ -113,18 +127,19 @@ export async function applyRevisionedChanges(
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => resolve("0");
   });
-  let cursor = BigInt(initialRevisionRaw != null ? String(initialRevisionRaw) : "0");
-  const sorted = [...changes].sort((a, b) => BigInt(a.revision) < BigInt(b.revision) ? -1 : 1);
-
-  const storeForEntity = (entityType: string): KnownStore | null => {
-    switch (entityType) {
-      case "Product": return "products";
-      case "ProductVariant": return "productVariants";
       case "StockLedger": return "stockLedger";
       case "StockAdjustment": return "stockAdjustments";
       case "Customer": return "customers";
       case "CustomerContact": return "customerContacts";
       case "Supplier": return "suppliers";
+      case "ProductPriceHistory": return "productPriceHistory";
+      case "Sale": return "sales";
+      case "ProductVariant": return "productVariants";
+      case "StockLedger": return "stockLedger";
+      case "StockAdjustment": return "stockAdjustments";
+      case "Customer": return "customers";
+      case "Supplier": return "suppliers";
+      case "CustomerContact": return "contacts";
       case "ProductPriceHistory": return "productPriceHistory";
       case "Sale": return "sales";
       case "Payment": return "payments";
@@ -663,7 +678,7 @@ export class ClientSyncEngine {
         totalPulled = bootstrapRes.applied;
         await this.localDb.refreshStoresFromNative([
           "products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory",
-          "sales", "payments", "receipts", "customers", "suppliers", "configuration", "syncOutbox", "syncMetadata",
+          "sales", "payments", "receipts", "customers", "suppliers", "contacts", "configuration", "syncOutbox", "syncMetadata",
         ]);
       } else if (typeof deltaRes.serverRevision === "string" && Array.isArray(deltaRes.changes)) {
         totalPulled = await applyRevisionedChanges(

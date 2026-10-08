@@ -5,9 +5,16 @@ import {
 } from "lucide-react";
 import { useBranch, useModule, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch } from "../services/applicationApiService.js";
-import { useToast } from "../context/ToastContext.js";
-import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
-import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
+
+type CustomerRecord = {
+  id: string; tenantId: string; branchId: string; customerCode: string; name: string;
+  phone: string; email: string; address: string; creditLimit: number; currentBalance: number;
+  openingBalance: number; status: string; createdAt?: string; updatedAt?: string;
+};
+
+type ContactRecord = {
+  id: string; customerId: string; tenantId: string; branchId: string; firstName: string; lastName: string;
+  title: string; role: string; department: string; phone: string; email: string; isPrimary: boolean;
 
 export interface CustomerRecord {
   id: string;
@@ -147,8 +154,41 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ activeTab }) => {
   const targetType = useMemo(() => {
     switch (activeModule) {
       case "Pharmacy": return "Patient";
-      case "SACCO": return "Member";
-      case "Law": return "Client";
+export const CustomersPage: React.FC = () => {
+  const { activeModule } = useModule();
+  const { db, isOnline, pendingOutboxCount, syncOutbox } = useSync();
+  const { currentTenantId } = useTenant();
+  const { currentBranchId } = useBranch();
+  const toast = useToast();
+  const noun = activeModule === "Pharmacy" ? "Patient" : activeModule === "SACCO" ? "Member" : activeModule === "Law" ? "Client" : "Customer";
+
+  const [customers,setCustomers] = useState<CustomerRecord[]>([]);
+  const [search,setSearch] = useState("");
+  const [busy,setBusy] = useState(true);
+  const [selected,setSelected] = useState<CustomerRecord|null>(null);
+  const [history,setHistory] = useState<any|null>(null);
+  const [contacts,setContacts] = useState<ContactRecord[]>([]);
+  const [contactSearch,setContactSearch] = useState("");
+  const [contactResults,setContactResults] = useState<ContactRecord[]>([]);
+  const [formOpen,setFormOpen] = useState(false);
+  const [formMode,setFormMode] = useState<"CREATE"|"EDIT">("CREATE");
+  const [form,setForm] = useState({name:"",phone:"",email:"",address:"",creditLimit:0});
+  const [paymentOpen,setPaymentOpen] = useState(false);
+  const [paymentAmount,setPaymentAmount] = useState(0);
+  const [paymentMethod,setPaymentMethod] = useState("BANK");
+  const [paymentPosting,setPaymentPosting] = useState(false);
+  const [contactOpen,setContactOpen] = useState(false);
+  const [editingContact,setEditingContact] = useState<ContactRecord|null>(null);
+  const [contactForm,setContactForm] = useState({
+    firstName:"",lastName:"",title:"",role:"",department:"",phone:"",email:"",isPrimary:false,
+    decisionInfluence:"INFLUENCER",notes:""
+  });
+
+  const loadCustomers = useCallback(async () => {
+    setBusy(true);
+    try {
+      let rows: CustomerRecord[] = [];
+      try {
       case "RealEstate": return "Tenant";
       case "School": return "Student";
       case "Hotel": return "Guest";

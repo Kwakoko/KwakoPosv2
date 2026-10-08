@@ -55,6 +55,7 @@ export interface OutboxItem {
     | "ProductPriceHistory"
     | "Sale"
     | "Customer"
+    | "CustomerContact"
     | "Supplier"
     | "Category"
     | "Brand"
@@ -105,12 +106,13 @@ export type NativeStore =
   | "stockAdjustments"
   | "stockBalance"
   | "productPriceHistory"
-  | "sales"
   | "payments"
   | "receipts"
   | "customers"
   | "customerContacts"
   | "suppliers"
+  | "syncOutbox"
+  | "traVfdOutbox"
   | "syncOutbox"
   | "traVfdOutbox"
   | "drawerOutbox"
@@ -133,6 +135,7 @@ export const ALL_STORE_NAMES: NativeStore[] = [
   "receipts",
   "customers",
   "suppliers",
+  "contacts",
   "syncOutbox",
   "traVfdOutbox",
   "drawerOutbox",
@@ -145,13 +148,13 @@ export const ALL_STORE_NAMES: NativeStore[] = [
 ];
 
 const DB_NAME = "kwakopos-v2";
+];
+
+const DB_NAME = "kwakopos-v2";
 export const AUTHORITATIVE_SCHEMA_VERSION = 7;
 const PRE_V4_MIGRATION_SNAPSHOT_PREFIX = "__migration_snapshot_v4__:";
 
 function localSyncRank(item: { entityType: string; operationType: string }): number {
-  if (item.entityType === "Setting" || item.entityType === "FeatureFlag") return 1;
-  if (item.entityType === "Category" || item.entityType === "Brand") return 5;
-  if (item.entityType === "Product" && item.operationType === "CREATE") return 10;
   if (item.entityType === "Product" && item.operationType === "UPDATE") return 20;
   if (item.entityType === "ProductVariant" && item.operationType === "CREATE") return 30;
   if (item.entityType === "ProductVariant" && item.operationType === "UPDATE") return 40;
@@ -165,12 +168,13 @@ function localSyncRank(item: { entityType: string; operationType: string }): num
   if (item.entityType === "Payment" || item.entityType === "CashSession") return 100;
   if (
     item.entityType.startsWith("Plugin:") ||
-    ["RestaurantTable", "KitchenTicket", "GarageVehicle", "GarageWorkOrder", "PharmacyPrescription", "TelecomSite"].includes(
-      item.entityType,
-    )
-  )
-    return 110;
-  return 120;
+  if (item.entityType === "ProductVariant" && item.operationType === "DELETE") return 50;
+  if (item.entityType === "StockAdjustment") return 60;
+  if (item.entityType === "Customer" || item.entityType === "Supplier") return 70;
+  if (item.entityType === "CustomerContact") return 75;
+  if (item.entityType === "PurchaseOrder") return 80;
+  if (item.entityType === "PurchaseReceipt" || item.entityType === "Sale") return 90;
+  if (item.entityType === "Expense") return 95;
 }
 
 export function orderPendingOutbox(items: OutboxItem[]): OutboxItem[] {
@@ -274,8 +278,8 @@ export class LocalIndexedDbStore {
   payments: QueryableStore<any>;
   receipts: QueryableStore<any>;
   customers: QueryableStore<any>;
-  customerContacts: QueryableStore<any>;
   suppliers: QueryableStore<any>;
+  contacts: QueryableStore<any>;
   syncOutbox: QueryableStore<OutboxItem>;
   traVfdOutbox: QueryableStore<any>;
   drawerOutbox: QueryableStore<DrawerOutboxItem>;
@@ -286,12 +290,13 @@ export class LocalIndexedDbStore {
   recoverySnapshots: QueryableStore<RecoverySnapshot>;
   updateState: QueryableStore<any>;
 
-  get outbox(): QueryableStore<OutboxItem> {
-    return this.syncOutbox;
-  }
-
-  readonly ready: Promise<void>;
-  private nativeDb: IDBDatabase | null = null;
+  payments: QueryableStore<any>;
+  receipts: QueryableStore<any>;
+  customers: QueryableStore<any>;
+  customerContacts: QueryableStore<any>;
+  suppliers: QueryableStore<any>;
+  syncOutbox: QueryableStore<OutboxItem>;
+  traVfdOutbox: QueryableStore<any>;
   readonly dbName: string;
   private persistenceTail: Promise<void> = Promise.resolve();
   private persistenceError: unknown = null;
@@ -321,8 +326,8 @@ export class LocalIndexedDbStore {
     this.payments = new QueryableStore<any>("payments", p);
     this.receipts = new QueryableStore<any>("receipts", p);
     this.customers = new QueryableStore<any>("customers", p);
-    this.customerContacts = new QueryableStore<any>("customerContacts", p);
     this.suppliers = new QueryableStore<any>("suppliers", p);
+    this.contacts = new QueryableStore<any>("contacts", p);
     this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
     this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
     this.drawerOutbox = new QueryableStore<DrawerOutboxItem>("drawerOutbox", p);
@@ -338,12 +343,13 @@ export class LocalIndexedDbStore {
 
   private async initializeNativePersistence(): Promise<void> {
     if (typeof indexedDB === "undefined") return;
-
-    try {
-      const openDb = (ver?: number): Promise<IDBDatabase> => {
-        return new Promise((resolve, reject) => {
-          // IndexedDB upgrades can legitimately take several seconds when multiple
-          // fresh browser contexts initialize concurrently. A short timeout here
+    this.payments = new QueryableStore<any>("payments", p);
+    this.receipts = new QueryableStore<any>("receipts", p);
+    this.customers = new QueryableStore<any>("customers", p);
+    this.customerContacts = new QueryableStore<any>("customerContacts", p);
+    this.suppliers = new QueryableStore<any>("suppliers", p);
+    this.syncOutbox = new QueryableStore<OutboxItem>("syncOutbox", p);
+    this.traVfdOutbox = new QueryableStore<any>("traVfdOutbox", p);
           // incorrectly forced a fail-closed persistence state during normal startup.
           const IDB_OPEN_TIMEOUT_MS = 15_000;
           const timeoutTimer = setTimeout(() => {
@@ -473,10 +479,10 @@ export class LocalIndexedDbStore {
         return this.receipts;
       case "customers":
         return this.customers;
-      case "customerContacts":
-        return this.customerContacts;
       case "suppliers":
         return this.suppliers;
+      case "contacts":
+        return this.contacts;
       case "syncOutbox":
         return this.syncOutbox;
       case "traVfdOutbox":
@@ -495,12 +501,14 @@ export class LocalIndexedDbStore {
         return this.recoverySnapshots;
       case "updateState":
         return this.updateState;
-    }
-  }
-
-  async refreshStoresFromNative(stores: NativeStore[] = ALL_STORE_NAMES): Promise<void> {
-    await this.ready;
-    if (!this.nativeDb) return;
+        return this.receipts;
+      case "customers":
+        return this.customers;
+      case "customerContacts":
+        return this.customerContacts;
+      case "suppliers":
+        return this.suppliers;
+      case "syncOutbox":
     for (const store of stores) {
       if (!this.nativeDb.objectStoreNames.contains(store)) continue;
       const target = this.getTargetMap(store);
@@ -653,6 +661,7 @@ export class LocalIndexedDbStore {
     this.receipts.clear();
     this.customers.clear();
     this.suppliers.clear();
+    this.contacts.clear();
     this.syncOutbox.clear();
     this.traVfdOutbox.clear();
     this.drawerOutbox.clear();
@@ -706,6 +715,7 @@ export class LocalIndexedDbStore {
     filterTenant(this.receipts, "receipts");
     filterTenant(this.customers, "customers");
     filterTenant(this.suppliers, "suppliers");
+    filterTenant(this.contacts, "contacts");
     filterTenant(this.syncOutbox, "syncOutbox");
     filterTenant(this.traVfdOutbox, "traVfdOutbox");
     filterTenant(this.drawerOutbox, "drawerOutbox");
@@ -1399,8 +1409,8 @@ export class LocalIndexedDbStore {
     const ledger = Array.isArray(delta.stockLedger) ? delta.stockLedger : [];
     const adjustments = Array.isArray(delta.adjustments) ? delta.adjustments : [];
     const customers = Array.isArray(delta.customers) ? delta.customers : [];
-    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
     const suppliers = Array.isArray(delta.suppliers) ? delta.suppliers : [];
+    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
     const categories = Array.isArray(delta.categories) ? delta.categories : [];
     const brands = Array.isArray(delta.brands) ? delta.brands : [];
     const priceHistories = Array.isArray(delta.priceHistories) ? delta.priceHistories : [];
@@ -1435,18 +1445,20 @@ export class LocalIndexedDbStore {
         appliedCount += 1;
       }
       for (const customer of customers) {
-        if (this.protectServerRecord("Customer", customer.id)) continue;
-        this.saveCustomerLocal(customer);
+    const ledger = Array.isArray(delta.stockLedger) ? delta.stockLedger : [];
+    const adjustments = Array.isArray(delta.adjustments) ? delta.adjustments : [];
+    const customers = Array.isArray(delta.customers) ? delta.customers : [];
+    const contacts = Array.isArray((delta as any).contacts) ? (delta as any).contacts : [];
+    const suppliers = Array.isArray(delta.suppliers) ? delta.suppliers : [];
+    const categories = Array.isArray(delta.categories) ? delta.categories : [];
+    const brands = Array.isArray(delta.brands) ? delta.brands : [];
+        this.saveSupplierLocal(supplier);
         appliedCount += 1;
       }
       for (const contact of contacts) {
-        if (this.protectServerRecord("CustomerContact", contact.id)) continue;
-        this.saveCustomerContactLocal(contact);
-        appliedCount += 1;
-      }
-      for (const supplier of suppliers) {
-        if (this.protectServerRecord("Supplier", supplier.id)) continue;
-        this.saveSupplierLocal(supplier);
+        if (this.protectServerRecord("CustomerContact", String(contact.id))) continue;
+        this.contacts.set(String(contact.id), contact);
+        this.persist("contacts", String(contact.id), contact);
         appliedCount += 1;
       }
       if (settings.length) {
@@ -1479,19 +1491,24 @@ export class LocalIndexedDbStore {
         const tenantId = String((categories[0] as any).tenantId || "");
         const branchId = String((categories[0] as any).branchId || (delta as any).branchId || "");
         if (tenantId) this.saveCatalogCategoriesLocal(categories, { tenantId, branchId });
+        this.saveCustomerLocal(customer);
+        appliedCount += 1;
       }
-      if (brands.length) {
-        const tenantId = String((brands[0] as any).tenantId || "");
-        const branchId = String((brands[0] as any).branchId || (delta as any).branchId || "");
-        if (tenantId) this.saveCatalogBrandsLocal(brands, { tenantId, branchId });
+      for (const contact of contacts) {
+        if (this.protectServerRecord("CustomerContact", contact.id)) continue;
+        this.saveCustomerContactLocal(contact);
+        appliedCount += 1;
       }
+      for (const supplier of suppliers) {
+        if (this.protectServerRecord("Supplier", supplier.id)) continue;
+        this.saveSupplierLocal(supplier);
       await this.flushPersistence();
       this.setSyncMetadata("lastSyncTime", delta.serverTimestamp);
       await this.flushPersistence();
       return appliedCount;
     }
 
-    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "syncMetadata", "configuration"].filter(
+    const txStores = ["products", "productVariants", "stockLedger", "stockAdjustments", "customers", "suppliers", "contacts", "syncMetadata", "configuration"].filter(
       (s) => this.nativeDb!.objectStoreNames.contains(s),
     );
     const tx = this.nativeDb.transaction(txStores, "readwrite");
@@ -1501,6 +1518,7 @@ export class LocalIndexedDbStore {
     const adjustmentsStore = tx.objectStore("stockAdjustments");
     const customersStore = tx.objectStore("customers");
     const suppliersStore = tx.objectStore("suppliers");
+    const contactsStore = this.nativeDb!.objectStoreNames.contains("contacts") ? tx.objectStore("contacts") : null;
     const configStore = this.nativeDb!.objectStoreNames.contains("configuration") ? tx.objectStore("configuration") : null;
 
     for (const product of products) {
@@ -1656,8 +1674,8 @@ export class LocalIndexedDbStore {
     const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
     const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
     const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
-    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
     const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
     const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
     const priceHistories = Array.isArray(snapshot.priceHistories) ? snapshot.priceHistories : [];
@@ -1686,9 +1704,9 @@ export class LocalIndexedDbStore {
     }
 
     const records: Record<NativeStore, any[]> = {
-      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, customerContacts: contacts, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, suppliers, contacts, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
     };
-    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "customerContacts", "suppliers"];
+    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "suppliers", "contacts"];
     const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
     const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
     const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
@@ -1696,12 +1714,13 @@ export class LocalIndexedDbStore {
     const pendingExpenseItems = pending.filter((item) => item.entityType === "Expense");
     const localExpenses = this.getConfigurationLocal("expenses", { tenantId, branchId });
     const protectedExpenseIds = new Set(pendingExpenseItems.map((item) => String(item.entityId)));
-    const mergedExpenses = new Map<string, any>();
-    for (const row of (Array.isArray(expenses) ? expenses : [])) if (!protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
-    for (const row of (Array.isArray(localExpenses) ? localExpenses : [])) if (protectedExpenseIds.has(String(row.id))) mergedExpenses.set(String(row.id), row);
-    const expenseValue = { key: "expenses", value: Array.from(mergedExpenses.values()), tenantId, branchId, updatedAt: snapshot.snapshotTimestamp };
-    const settingValues = (Array.isArray(settings) ? settings : [])
-      .filter((row: any) => row && row.tenantId === tenantId && row.isActive !== false && (!row.branchId || row.branchId === branchId))
+    const ledger = Array.isArray(snapshot.stockLedger) ? snapshot.stockLedger : [];
+    const adjustments = Array.isArray(snapshot.adjustments) ? snapshot.adjustments : [];
+    const customers = Array.isArray(snapshot.customers) ? snapshot.customers : [];
+    const contacts = Array.isArray((snapshot as any).contacts) ? (snapshot as any).contacts : [];
+    const suppliers = Array.isArray(snapshot.suppliers) ? snapshot.suppliers : [];
+    const categories = Array.isArray(snapshot.categories) ? snapshot.categories : [];
+    const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
       .map((row: any) => ({
         key: String(row.key || ""),
         value: row.value,
@@ -1738,15 +1757,15 @@ export class LocalIndexedDbStore {
     await Promise.all(hydrateStores.map((store) => this.hydrateMap(store, this.getTargetMap(store))));
     const txStores = [...replaceStores, "configuration", "syncMetadata"].filter((store) => this.nativeDb!.objectStoreNames.contains(store));
     const tx = this.nativeDb.transaction(txStores, "readwrite");
-    for (const store of replaceStores) {
-      const os = tx.objectStore(store);
-      const target = this.getTargetMap(store);
-      if (target) for (const [key, value] of Array.from(target.entries())) if (isActiveScope(value) && !isProtected(store, String(key)) && !new Set((records[store] || []).map((row: any) => String(row.id))).has(String(key))) os.delete(key);
-      for (const row of records[store] || []) if (!isProtected(store, String(row.id))) os.put(toIndexedDbCloneable(row), row.id);
     }
-    const configStore = tx.objectStore("configuration");
-    if (!pendingCatalogTypes.has("Category")) configStore.put(toIndexedDbCloneable(categoryValue), tenantId + ":" + branchId + ":inventory_categories_meta");
-    if (!pendingCatalogTypes.has("Brand")) configStore.put(toIndexedDbCloneable(brandValue), tenantId + ":" + branchId + ":inventory_brands_meta");
+
+    const records: Record<NativeStore, any[]> = {
+      products, productVariants: variants, stockLedger: ledger, stockAdjustments: adjustments, stockBalance: [], productPriceHistory: priceHistories, sales, payments, receipts: purchaseReceipts, customers, customerContacts: contacts, suppliers, syncOutbox: [], traVfdOutbox: [], drawerOutbox: [], syncMetadata: [], configuration: [], auditState: [], migrationJournal: [], recoverySnapshots: [], updateState: [],
+    };
+    const replaceStores: NativeStore[] = ["products", "productVariants", "stockLedger", "stockAdjustments", "productPriceHistory", "sales", "payments", "receipts", "customers", "customerContacts", "suppliers"];
+    const isProtected = (store: NativeStore, id: string) => protectedKeys.get(store)?.has(String(id)) === true;
+    const isActiveScope = (value: any) => value && value.tenantId === tenantId && value.branchId === branchId;
+    const categoryValue = { key: "inventory_categories_meta", value: categories.filter((c: any) => c.isActive !== false).map((c: any) => ({ id: c.id, name: c.name, description: c.description ?? undefined, color: c.color || "#10b981", parentId: c.parentId ?? null, isDefault: false })), tenantId, updatedAt: snapshot.snapshotTimestamp };
     configStore.put(toIndexedDbCloneable(expenseValue), tenantId + ":" + branchId + ":expenses");
     for (const setting of settingValues) configStore.put(toIndexedDbCloneable(setting), tenantId + ":" + branchId + ":" + setting.key);
     const md = tx.objectStore("syncMetadata");
