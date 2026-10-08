@@ -16,9 +16,9 @@ export interface TraVfdReceiptInput {
   date: string; time: string; receiptNumber: string; dailyCounter: number; globalCounter: number;
   zNumber: string; receiptVNumber: string; customerId: string; customerName: string;
   customerMobile: string; customerIdType: number;
-  items: Array<{ id: string; description: string; quantity: number; unitPrice: number; discount: number; taxCode: number   taxRatePct?: number;
+  items: Array<{ id: string; description: string; quantity: number; unitPrice: number; discount: number; taxCode: number }>;
+  taxRatePct?: number;
   taxInclusive?: boolean;
-}>;
   payments: Array<{ type: string; amount: number }>;
 }
 
