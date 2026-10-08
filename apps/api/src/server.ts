@@ -3059,7 +3059,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
     if (start >= end) throw new Error("REPORT_INVALID_DATE_RANGE");
 
-    const requestedBranch = query.branchId ? String(query.branchId) : null;
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
     const data = await commercialRepository.getReportsData(ctx, { from: start, to: end, branchId: requestedBranch });
     return { success: true, data };
   });
