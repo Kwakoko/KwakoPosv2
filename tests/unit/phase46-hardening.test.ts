@@ -49,8 +49,9 @@ describe("Phase 46 production hardening contracts", () => {
   it("keeps the Super Admin control tower behind authorization checks", () => {
     const source = read("apps/api/src/routes/supportControlTowerRoutes.ts");
     expect(source).toContain("SUPER_ADMIN");
-    expect(source).toContain("support:global");
-    expect(source).toContain("admin:*");
+    expect(source).toContain("PLATFORM_SUPER_ADMIN");
+    expect(source).not.toContain('permissions.includes("*")');
+    expect(source).not.toContain('permissions.includes("admin:*")');
     expect(source).toContain("/control-tower");
   });
 });
