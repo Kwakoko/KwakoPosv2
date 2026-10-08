@@ -114,6 +114,10 @@ const activeFullSystem = read("scripts/certification/full-system-certification-e
 assert(!activeFullSystem.includes("Array.from({ length:"), "Active full-system certification engine contains synthetic pillar generation.");
 assert(!read("scripts/certification/runFullSystemCertification.ts").includes("285a98b"), "Active production certification runner contains stale synthetic release evidence.");
 
+if (head && /^[0-9a-f]{40}$/i.test(head) && manifest.gitSha) {
+  assert(manifest.gitSha === head, "Non-empty committed release-manifest gitSha must equal current HEAD.");
+}
+
 const foundationCertificate = {
   certificate: FOUNDATION_PRODUCTION_LOCK_CERTIFICATE,
   version: FOUNDATION_PRODUCTION_LOCK_VERSION,
@@ -134,14 +138,10 @@ fs.writeFileSync(
   JSON.stringify(foundationCertificate, null, 2),
 );
 
-if (head && /^[0-9a-f]{40}$/i.test(head) && manifest.gitSha) {
-  assert(manifest.gitSha === head, "Non-empty committed release-manifest gitSha must equal current HEAD.");
-}
-
 if (failures.length) {
   console.error("FOUNDATION PRODUCTION LOCK: FAIL");
   for (const failure of failures) console.error("- " + failure);
   process.exit(1);
 }
 console.log("FOUNDATION PRODUCTION LOCK: PASS");
-console.log("Release identity, schema convergence, legal bypass isolation, server-authoritative admin identity, destructive step-up enforcement, finance assertion-only hardening, and audit append-only persistence are locked.");
+console.log("A01-A12 Foundation production lock applied: release identity, auth transport, tenant/RBAC isolation, navigation, persistence, sync, conflict center, dashboard analytics, runtime, security, release authority, and governance are fail-closed.");
