@@ -207,7 +207,7 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     "Browser bootstrap is externalized so inline script execution is no longer required.");
   add("SECPLAT-A28", "Dependency audit is release-gated",
     fs.existsSync(path.join(cwd, ".github/workflows/security-scan.yml")) &&
-    read(".github/workflows/security-scan.yml").includes("npm audit --audit-level=high"),
+    read(".github/workflows/security-scan.yml").includes("npm audit --omit=dev --audit-level=high"),
     "High/Critical dependency advisories fail CI.");
   add("SECPLAT-A29", "SheetJS dependency is pinned to 0.20.3",
     packageJson.includes("xlsx-0.20.3") && packageLock.includes("xlsx-0.20.3"),
