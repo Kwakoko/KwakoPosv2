@@ -60,6 +60,8 @@ jobs:
         run: npm run certify:super-admin
       - name: Security Platform Production Lock
         run: npm run certify:security-platform-lock
+      - name: Platform Services C01-C11 Production Lock
+        run: npm run certify:platform-services-lock
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
       - name: Reports Production Lock
