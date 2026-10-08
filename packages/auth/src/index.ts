@@ -123,8 +123,10 @@ export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: s
     tenantId: payload.tenantId,
     branchId: payload.branchId,
     email: payload.email || "system@kwakopos.local",
-    roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"],
-    permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"],
+    // Security invariant: omitted role/permission claims MUST fail closed.
+    // Privileged claims are authoritative only when explicitly supplied by the caller.
+    roles: Array.isArray(payload.roles) ? payload.roles.filter((role) => typeof role === "string" && role.length > 0) : [],
+    permissions: Array.isArray(payload.permissions) ? payload.permissions.filter((permission) => typeof permission === "string" && permission.length > 0) : [],
     deviceId: payload.deviceId || "dev_system",
     ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
   };
