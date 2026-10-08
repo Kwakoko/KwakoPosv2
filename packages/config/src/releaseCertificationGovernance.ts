@@ -56,6 +56,7 @@ export const RELEASE_CERTIFICATION_REQUIRED_AUTHORITIES = {
   marketplace: "packages/config/src/marketplacePartnerGovernance.ts",
   enterprise: "packages/config/src/enterpriseCustomerReadinessGovernance.ts",
   commercial: "packages/config/src/commercialProductReadinessGovernance.ts",
+  platformServices: "packages/config/src/platformServicesProductionLock.ts",
 } as const;
 
 export const RELEASE_CERTIFICATION_GATES = [
@@ -74,4 +75,5 @@ export const RELEASE_CERTIFICATION_GATES = [
   "governance-convergence",
   "evidence-classification",
   "final-approval",
+  "platform-services-production-lock",
 ] as const;
