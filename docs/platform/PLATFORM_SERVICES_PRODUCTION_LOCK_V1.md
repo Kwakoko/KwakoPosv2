@@ -38,3 +38,5 @@ A production release is blocked when any C01-C11 authority file is missing, requ
 ## Evidence boundary
 
 This lock certifies repository implementation and release-governance integrity. It does not claim that a live external staging E2E was executed for C01 Tenant Onboarding or that an external provider is currently healthy. Those remain deployment-specific evidence gates.
+
+<!-- Closed-loop gate refresh: C01-C11 umbrella lock is release-blocking. -->
