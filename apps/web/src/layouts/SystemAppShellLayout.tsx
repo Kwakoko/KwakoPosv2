@@ -906,7 +906,7 @@ export const Sidebar: React.FC<{
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const isSuperAdminUser = Boolean(
-    isSuperAdmin || user?.role === "SUPER_ADMIN" || user?.email === "admin@kwakoko.co.tz"
+    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
   );
 
   // Auto-expand the section that contains the active tab
@@ -1873,7 +1873,7 @@ export const TopBar: React.FC<{
   const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
 
   const isSuperAdminUser = Boolean(
-    isSuperAdmin || user?.role === "SUPER_ADMIN" || user?.email === "admin@kwakoko.co.tz"
+    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
   );
 
   const closeAll = () => {
@@ -2359,7 +2359,7 @@ export const SystemAppShellLayout: React.FC<ShellLayoutProps> = ({
   const { isMobileSidebarOpen, setIsMobileSidebarOpen } = useModule();
 
   const isSuperAdminUser = Boolean(
-    isSuperAdmin || user?.role === "SUPER_ADMIN" || user?.email === "admin@kwakoko.co.tz"
+    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
   );
 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
