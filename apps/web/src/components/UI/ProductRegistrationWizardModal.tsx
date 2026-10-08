@@ -474,9 +474,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
       if (hasVariants && variants.length > 0) {
         // --- Multi-Variant Product Registration ---
         const totalOpening = variants.reduce((sum, v) => sum + (Number(v.openingStock) || 0), 0);
-        productRecord.stock = totalOpening;
-        productRecord.totalStock = totalOpening;
-        productRecord.availableStock = totalOpening;
+        productRecord.stock = 0;
+        productRecord.totalStock = 0;
+        productRecord.availableStock = 0;
 
         const variantsToSave = variants.map((v) => {
           const vOpeningStock = Number(v.openingStock) || 0;
@@ -543,9 +543,9 @@ export const ProductRegistrationWizardModal: React.FC<ProductRegistrationWizardM
         await db.executeAtomicMutation({ writes, outboxItems, tenantContext });      } else {
         // --- Non-Variant Product Registration ---
         const numOpeningStock = Number(openingStock) || 0;
-        productRecord.stock = numOpeningStock;
-        productRecord.totalStock = numOpeningStock;
-        productRecord.availableStock = numOpeningStock;
+        productRecord.stock = 0;
+        productRecord.totalStock = 0;
+        productRecord.availableStock = 0;
 
         const defaultVarId = `${prodId}-default`;
         const defaultVariant = {

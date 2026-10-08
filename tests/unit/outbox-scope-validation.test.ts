@@ -16,7 +16,7 @@ describe("pending outbox scope validation", () => {
     entityId: id,
     operationType: "CREATE" as const,
     payload: {},
-    clientCreatedAt: new Date().toISOString(),
+    clientCreatedAt: "2026-01-01T00:00:00.000Z",
     idempotencyKey: id,
     status: "PENDING" as const,
     tenantId,

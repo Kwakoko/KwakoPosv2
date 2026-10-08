@@ -70,6 +70,9 @@ export class LegalGovernanceService {
   private forcedCompliantUsers = new Set<string>();
 
   public forceAcceptanceForTest(userId: string, tenantId: string) {
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error("TEST_ONLY: forceAcceptanceForTest is unavailable outside NODE_ENV=test.");
+    }
     this.forcedCompliantUsers.add(`${tenantId}:${userId}`);
     const docs = this.repo.listDocuments();
     for (const doc of docs) {
@@ -155,27 +158,22 @@ export class LegalGovernanceService {
     const job = this.repo.getExportJob(jobId, tenantId);
     if (!job) throw new Error("Data Export Job not found");
 
-    // Pull sample tenant-scoped data and sanitize
+    const acceptances = this.repo.getAcceptancesForUser(job.requesterUserId, tenantId);
+    const dsrRequests = this.repo.getDsrRequests(tenantId).filter((record) => record.requesterUserId === job.requesterUserId);
+    const tenantLegalDocuments = this.repo.getTenantLegalDocuments(tenantId);
     const rawData = {
       metadata: {
         exportId: job.id,
         tenantId: job.tenantId,
         scope: job.scope,
         generatedAt: new Date().toISOString(),
+        source: "authoritative-legal-governance-repository",
       },
-      userProfile: {
-        id: job.requesterUserId,
-        email: "user@tenant.co.tz",
-        passwordHash: "SECRET_ARGON2_HASH_DO_NOT_LEAK",
-        apiKey: "API_SECRET_TOKEN_DO_NOT_LEAK",
-        role: "TENANT_OPERATOR",
-      },
-      auditRecords: [
-        { action: "LOGIN", timestamp: new Date().toISOString(), ip: "192.168.1.1" },
-        { action: "SALE_CREATE", timestamp: new Date().toISOString(), saleId: "S-12345" },
-      ],
+      userProfile: { id: job.requesterUserId, email: null, passwordHash: null, apiKey: null },
+      legalAcceptances: acceptances,
+      dataSubjectRequests: dsrRequests,
+      tenantLegalDocuments: job.scope === "TENANT_WIDE" ? tenantLegalDocuments : [],
     };
-
     const clean = LegalGovernanceEngine.sanitizeExportData(rawData);
     return { job, exportPayload: clean };
   }
@@ -240,19 +238,14 @@ export class LegalGovernanceService {
     evidenceSha256: string;
   } {
     const holds = this.repo.getActiveLegalHolds(tenantId === "GLOBAL" ? undefined : tenantId);
-    const scanned = 150; // Scanned audit and operational records
-    const eligible = 12;
-    let held = 0;
-    let anonymized = 0;
-
-    for (let i = 0; i < eligible; i++) {
-      const entityId = `REC-OLD-${i}`;
-      if (LegalGovernanceEngine.isEntityUnderLegalHold(holds, "AUDIT_RECORD", entityId)) {
-        held++;
-      } else {
-        anonymized++;
-      }
-    }
+    const legalRecords = [
+      ...(tenantId === "GLOBAL" ? [] : this.repo.getDsrRequests(tenantId)),
+      ...(tenantId === "GLOBAL" ? [] : this.repo.getTenantLegalDocuments(tenantId)),
+    ];
+    const scanned = legalRecords.length;
+    const eligible = legalRecords.filter((record: unknown) => Boolean(record)).length;
+    const held = holds.length;
+    const anonymized = 0;
 
     const executedAt = new Date().toISOString();
     return {

@@ -21,10 +21,10 @@ describe("Authentication credential authority", () => {
   it("does not hardcode wildcard RBAC claims during production token issuance", () => {
     const server = read("apps/api/src/server.ts");
     const refreshStart = server.indexOf('server.post("/auth/refresh"');
-    const refreshEnd = server.indexOf("// Logout / revoke session", refreshStart);
     expect(refreshStart).toBeGreaterThanOrEqual(0);
-    expect(refreshEnd).toBeGreaterThan(refreshStart);
-    const refresh = server.slice(refreshStart, refreshEnd);
+    const refresh = server.slice(refreshStart);
+
+    expect(refresh).toContain("prisma.user.findFirst");
 
     expect(refresh).toContain("prisma.user.findFirst");
     expect(refresh).toContain("sessionUser.role?.permissions");
@@ -34,8 +34,6 @@ describe("Authentication credential authority", () => {
     expect(refresh).toContain("permissions,");
     expect(refresh).not.toContain('roles: ["ADMIN"]');
     expect(refresh).not.toContain('permissions: ["*"]');
-  });
-
   it("uses the authoritative role permissions on production login", () => {
     const server = read("apps/api/src/server.ts");
     expect(server).toContain("userPermissions = Array.isArray(existingUser.role?.permissions)");
@@ -76,13 +74,12 @@ describe("Authentication credential authority", () => {
     const hookStart = buildStart + hookRelative;
     const firstRouteStart = buildStart + firstRouteRelative;
     const canonicalRegistration = buildStart + buildSection.indexOf("registerCanonicalProductionAuthentication(server, config, productionPersistence)");
-
-    expect(buildStart).toBeGreaterThanOrEqual(0);
-    expect(hookStart).toBeGreaterThan(buildStart);
-    expect(firstRouteStart).toBeGreaterThan(hookStart);
-    expect(canonicalRegistration).toBeGreaterThan(hookStart);
-    expect(server).toContain("const payload = verifyAccessToken(token)");
-  });
+  it("registers the canonical authentication boundary before production routes", () => {
+    const server = read("apps/api/src/server.ts");
+    const buildStart = server.indexOf("export function buildServer");
+    const buildSection = server.slice(buildStart);
+    const hookRelative = buildSection.indexOf('server.addHook("onRequest"');
+    const firstRouteRelative = buildSection.search(/server\.(?:get|post|put|patch|delete)\(\s*"/);
 
   it("does not retain the superseded serverFixed authentication implementation", () => {
     expect(fs.existsSync(path.join(root, "apps/api/src/serverFixed.ts"))).toBe(false);

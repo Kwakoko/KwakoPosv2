@@ -159,8 +159,17 @@ export class SyncStatusService {
       let openConflictCount = 0;
       if (tenantId && branchId) {
         try {
-          const conflictResponse = await apiFetch<any>("/sync/conflicts?status=OPEN");
-          openConflictCount = Array.isArray(conflictResponse?.data) ? conflictResponse.data.length : 0;
+          const statusResponse = await apiFetch<any>("/sync/status");
+          const authority = statusResponse?.data;
+          if (
+            authority?.tenantId !== tenantId ||
+            authority?.branchId !== branchId ||
+            !Number.isInteger(Number(authority?.openConflictCount)) ||
+            Number(authority.openConflictCount) < 0
+          ) {
+            throw new Error("SYNC_CONFLICT_AUTHORITY_MALFORMED_RESPONSE");
+          }
+          openConflictCount = Number(authority.openConflictCount);
         } catch {
           openConflictCount = -1;
         }

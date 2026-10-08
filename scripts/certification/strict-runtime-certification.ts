@@ -34,7 +34,7 @@ sourceContains("packages/sync/src/worldStandardPrismaSyncEngine.ts", "PurchaseRe
 sourceContains("packages/database/src/atomicCommercialFinance.ts", "createSale");
 sourceContains("packages/database/src/atomicCommercialFinance.ts", "stockLedger");
 sourceContains("apps/api/package.json", "server.js");
-sourceContains("index.js", "apps/api/dist/apps/api/src/server.js");
+sourceContains("index.js", "apps/api/dist/server.js");
 
 const readJson = (relative: string): any => { try { return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8")); } catch { return null; } };
 const rootPkg = readJson("package.json");

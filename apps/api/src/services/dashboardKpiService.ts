@@ -108,6 +108,11 @@ export async function getDashboardKpiSnapshot(
   }
 
   return prisma.$transaction(async (tx) => {
+    // Dashboard reporting uses UTC as its canonical reporting timezone. Pin the
+    // transaction timezone so CURRENT_DATE, DATE(timestamp), and EXTRACT(HOUR)
+    // all describe the same UTC calendar/hour used by the application window.
+    await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'UTC'`);
+
     const revisionRows = await tx.$queryRawUnsafe<Array<{ revision: bigint | number | string | null }>>(
       `SELECT COALESCE(MAX(revision), 0) AS revision
          FROM sync_change_journal
@@ -197,11 +202,12 @@ export async function getDashboardKpiSnapshot(
     // as the core KPIs. Browser/IndexedDB state is never used for online analytics.
     const now = new Date();
     const windowDays = timeframe === "today" ? 1 : timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : now.getUTCDate();
-    // PostgreSQL DATE("soldAt") is date-based; build the reporting window in UTC
-    // so application-local timezone offsets cannot shift the chart day keys.
+    // PostgreSQL is pinned to UTC above, and the application window is UTC.
+    // Keep both sides on the same calendar/hour boundary; never depend on the
+    // database session or Node process local timezone for reporting semantics.
     const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (windowDays - 1)));
     const priorStart = new Date(windowStart);
-    priorStart.setDate(priorStart.getDate() - windowDays);
+    priorStart.setUTCDate(priorStart.getUTCDate() - windowDays);
 
     const [dailyRows, returnDailyRows, paymentRows, paymentSummaryRows, topProductRows, hourlyRows] = await Promise.all([
       tx.$queryRawUnsafe<Array<{ day: Date; revenue: unknown; profit: unknown; cogs: unknown; orders_count: bigint | number | string }>>(
@@ -375,10 +381,10 @@ export async function getDashboardKpiSnapshot(
     const chartPoints: DashboardRevenuePoint[] = [];
     let totalRevenue = 0, totalCOGS = 0, totalProfit = 0, priorTotalRevenue = 0, priorTotalProfit = 0;
     for (let i = 0; i < windowDays; i++) {
-      const d = new Date(windowStart); d.setDate(d.getDate() + i);
+      const d = new Date(windowStart); d.setUTCDate(d.getUTCDate() + i);
       const key = d.toISOString().slice(0,10);
       const row = dayMap.get(key);
-      const prior = new Date(d); prior.setDate(prior.getDate() - windowDays);
+      const prior = new Date(d); prior.setUTCDate(prior.getUTCDate() - windowDays);
       const priorRow = priorDayMap.get(prior.toISOString().slice(0,10));
       const returned = returnDayMap.get(key);
       const priorReturned = priorReturnDayMap.get(prior.toISOString().slice(0,10));
@@ -391,8 +397,8 @@ export async function getDashboardKpiSnapshot(
       totalRevenue += revenue; totalCOGS += cogs; totalProfit += profit;
       priorTotalRevenue += priorRevenue; priorTotalProfit += priorProfit;
       chartPoints.push({
-        name: timeframe === "today" ? "Today" : timeframe === "month" ? String(d.getDate()) : `${d.getDate()} ${d.toLocaleString("en", { month: "short" })}`,
-        fullLabel: d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" }),
+        name: timeframe === "today" ? "Today" : timeframe === "month" ? String(d.getDate()) : `${d.getDate()} ${d.toLocaleString("en", { month: "short", timeZone: "UTC" })}`,
+        fullLabel: d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
         Revenue: revenue, Profit: profit, COGS: cogs, PriorRevenue: priorRevenue,
         ordersCount: numberValue(row?.orders_count),
         marginPct: revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : "0.0",

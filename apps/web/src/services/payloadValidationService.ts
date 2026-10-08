@@ -38,6 +38,7 @@ export interface NormalizedStockAdjustmentPayload {
   deviceId?: string;
   operationId?: string;
   idempotencyKey?: string;
+  occurredAt?: string;
 }
 
 /**
@@ -191,6 +192,7 @@ export function normalizeStockAdjustmentPayload(
     deviceId: String(payload.deviceId || context?.deviceId || "web-client"),
     operationId: String(payload.operationId || context?.operationId || ""),
     idempotencyKey: String(payload.idempotencyKey || context?.idempotencyKey || context?.operationId || ""),
+    occurredAt: payload.occurredAt ? new Date(payload.occurredAt).toISOString() : undefined,
   };
 }
 
@@ -329,6 +331,8 @@ export function normalizeSalePayload(
     taxTotal: Number(payload.taxTotal || payload.tax || payload.taxAmount || 0),
     grandTotal,
     totalAmount: grandTotal,
+    occurredAt: payload.occurredAt ? new Date(payload.occurredAt).toISOString() : undefined,
+    isBackdated: Boolean(payload.isBackdated),
   };
 }
 

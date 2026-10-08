@@ -17,6 +17,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { InventoryValuationEngine } from "@kwakopos2/domain";
 import { runUiAction } from "../services/uiActionRegistry.js";
 import {
   Package, Layers, BarChart3, Tag, Clock, Plus, Search, Edit2, Trash2,
@@ -36,6 +37,8 @@ import { safeUUID } from "../services/applicationApiService.js";
 import { buildStockBalanceProjection, queueStockAdjustment, calculateLocalStockAsOfDate, STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalOutbox, commitLocalOutboxes } from "../persistence/commitLocalMutation.js";
+import { InventoryOperationalWorkspace } from "../components/InventoryOperationalWorkspace.js";
+import { InventoryBundleWorkspace } from "../components/InventoryBundleWorkspace.js";
 
 const money = (v: number) => `Tsh ${Math.round(v).toLocaleString()}`;
 const fmtNum = (n: number) => n.toLocaleString();
@@ -47,6 +50,7 @@ export interface CategoryRecord {
   name: string;
   description?: string;
   color: string;
+  parentId?: string | null;
   isDefault?: boolean;
 }
 
@@ -101,7 +105,9 @@ export interface InventoryItem {
   name: string;
   sku: string;
   category: string;
+  categoryId?: string;
   brand: string;
+  brandId?: string;
   buyingPrice: number;
   sellingPrice: number;
   stock: number;
@@ -115,7 +121,8 @@ export interface InventoryItem {
 
 export type InventoryTab =
   | "dashboard" | "products" | "categories" | "ledger"
-  | "transfers" | "count" | "recipes" | "wastage" | "reports";
+  | "transfers" | "count" | "recipes" | "wastage" | "reports"
+  | "alerts" | "sync" | "drilldown";
 
 export interface InventoryPageProps {
   activeTab?: string;
@@ -143,6 +150,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "recipes": "Product Bundles & Kits",
       "wastage": "Wastage & Spillage",
       "reports": "Inventory Reports",
+      "alerts": "Stock Alerts",
+      "sync": "Stock Sync Engine",
+      "drilldown": "Ledger Drilldown",
     };
     setGlobalActiveTab(globalTab[tab]);
   }, [setGlobalActiveTab]);
@@ -155,11 +165,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       "Categories & Brands": "categories",
       "Stock Adjustment": "ledger",
       "Stock Transfer": "transfers",
-      "Stock Alerts": "dashboard",
-      "Stock Sync Engine": "ledger",
+      "Stock Alerts": "alerts",
+      "Stock Sync Engine": "sync",
       "Product Bundles & Kits": "recipes",
       "Stock Count": "count",
-      "Ledger Drilldown": "ledger",
+      "Ledger Drilldown": "drilldown",
       "Wastage & Spillage": "wastage",
       "Inventory Reports": "reports",
     };
@@ -207,6 +217,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryDesc, setNewCategoryDesc] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState("#10b981");
+  const [newCategoryParentId, setNewCategoryParentId] = useState("");
   const [categoryCascadeRename, setCategoryCascadeRename] = useState(true);
 
   // Add / Edit Brand State
@@ -219,15 +230,15 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
   // Delete Safeguard Modals
   const [deleteCategorySafeguard, setDeleteCategorySafeguard] = useState<{
-    category: string;
+    categoryId: string;
     assignedCount: number;
-    fallbackCategory: string;
+    replacementCategoryId: string;
   } | null>(null);
 
   const [deleteBrandSafeguard, setDeleteBrandSafeguard] = useState<{
-    brand: string;
+    brandId: string;
     assignedCount: number;
-    fallbackBrand: string;
+    replacementBrandId: string;
   } | null>(null);
 
   // Variant Builder Modal State
@@ -235,7 +246,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [newVarAttrKey, setNewVarAttrKey] = useState("Size");
   const [newVarAttrVal, setNewVarAttrVal] = useState("");
   const [newVarPrice, setNewVarPrice] = useState(0);
-  const [newVarStock, setNewVarStock] = useState(10);
+  const [newVarStock, setNewVarStock] = useState(0);
 
   // In-Flow Variant Builder State (for Add Product Modal)
   const [hasVariantsToggle, setHasVariantsToggle] = useState(false);
@@ -252,7 +263,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const [singleVarBarcode, setSingleVarBarcode] = useState("");
   const [singleVarBuying, setSingleVarBuying] = useState<number | "">("");
   const [singleVarSelling, setSingleVarSelling] = useState<number | "">("");
-  const [singleVarStock, setSingleVarStock] = useState<number | "">(10);
+  const [singleVarStock, setSingleVarStock] = useState<number | "">(0);
   const [singleVarReorder, setSingleVarReorder] = useState<number | "">(5);
   const [studioMatrixOpt1, setStudioMatrixOpt1] = useState("Size");
   const [studioMatrixVals1, setStudioMatrixVals1] = useState("Small, Medium, Large");
@@ -332,8 +343,12 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         variantsByProduct.set(variant.productId, list);
       }
 
-      const categoryById = new Map(categoriesMeta.map((c) => [c.id, c.name]));
-      const brandById = new Map(brandsMeta.map((b) => [b.id, b.name]));
+      const persistedCategories = db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId });
+      const persistedBrands = db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId, branchId: currentBranchId });
+      const effectiveCategories = Array.isArray(persistedCategories) ? persistedCategories as CategoryRecord[] : categoriesMeta;
+      const effectiveBrands = Array.isArray(persistedBrands) ? persistedBrands as BrandRecord[] : brandsMeta;
+      const categoryById = new Map(effectiveCategories.map((c) => [c.id, c.name]));
+      const brandById = new Map(effectiveBrands.map((b) => [b.id, b.name]));
       const loaded: InventoryItem[] = [];
       for (const prod of db.products.values()) {
         if (prod.tenantId !== currentTenantId || prod.branchId !== currentBranchId) continue;
@@ -349,7 +364,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: prod.id,
           name: prod.name,
           sku: prod.sku,
+          categoryId: pAny.categoryId || undefined,
           category: (pAny.categoryId && categoryById.get(pAny.categoryId)) || pAny.category || "",
+          brandId: pAny.brandId || undefined,
           brand: (pAny.brandId && brandById.get(pAny.brandId)) || pAny.brand || "",
           buyingPrice: Number(pAny.buyingPrice || pAny.costPrice || 0),
           sellingPrice: Number(pAny.sellingPrice || pAny.price || 0),
@@ -394,7 +411,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           setCategoriesMeta(savedCatsMeta);
         } else {
           // Backward compatibility fallback to legacy string array
-          const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          const legacyCats = db.getConfigurationLocal("inventory_custom_categories", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
           if (Array.isArray(legacyCats) && legacyCats.length > 0) {
             const merged: CategoryRecord[] = [];
             let cIdx = 0;
@@ -416,7 +433,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         if (Array.isArray(savedBrandsMeta) && savedBrandsMeta.length > 0) {
           setBrandsMeta(savedBrandsMeta);
         } else {
-          const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId ? { tenantId: currentTenantId } : undefined);
+          const legacyBrands = db.getConfigurationLocal("inventory_custom_brands", currentTenantId && currentBranchId ? { tenantId: currentTenantId, branchId: currentBranchId } : undefined);
           if (Array.isArray(legacyBrands) && legacyBrands.length > 0) {
             const merged: BrandRecord[] = [];
             let bIdx = 0;
@@ -493,6 +510,27 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     return Array.from(metaMap.values());
   }, [brandsMeta, items]);
 
+  const categoryParentOptions = useMemo(() => {
+    const invalid = new Set<string>();
+    if (editingCategory?.id) {
+      const byParent = new Map<string, string[]>();
+      for (const category of allCategories) {
+        if (!category.parentId) continue;
+        const children = byParent.get(category.parentId) || [];
+        children.push(category.id);
+        byParent.set(category.parentId, children);
+      }
+      const queue = [editingCategory.id];
+      while (queue.length) {
+        const currentId = queue.shift()!;
+        if (invalid.has(currentId)) continue;
+        invalid.add(currentId);
+        for (const childId of byParent.get(currentId) || []) queue.push(childId);
+      }
+    }
+    return allCategories.filter((category) => isUuid(category.id) && !invalid.has(category.id)).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCategories, editingCategory]);
+
   const filteredCategories = useMemo(() => {
     const q = categorySearchQuery.toLowerCase().trim();
     if (!q) return allCategories;
@@ -513,7 +551,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     if (allCategories.length === 0) return null;
     let best = { name: allCategories[0].name, valuation: 0, skus: 0 };
     for (const cat of allCategories) {
-      const catItems = items.filter((i) => i.category.toLowerCase() === cat.name.toLowerCase());
+      const catItems = items.filter((i) => (i.categoryId && isUuid(cat.id) ? i.categoryId === cat.id : i.category.toLowerCase() === cat.name.toLowerCase()));
       const val = catItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
       if (val >= best.valuation) {
         best = { name: cat.name, valuation: val, skus: catItems.length };
@@ -526,7 +564,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     if (allBrands.length === 0) return null;
     let best = { name: allBrands[0].name, units: 0, valuation: 0 };
     for (const b of allBrands) {
-      const brandItems = items.filter((i) => i.brand.toLowerCase() === b.name.toLowerCase());
+      const brandItems = items.filter((i) => (i.brandId && isUuid(b.id) ? i.brandId === b.id : i.brand.toLowerCase() === b.name.toLowerCase()));
       const units = brandItems.reduce((acc, i) => acc + i.stock, 0);
       const val = brandItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
       if (units >= best.units) {
@@ -555,33 +593,34 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     });
   }, [items, categoryFilter, searchQuery]);
 
-  // ─── Production Inventory Valuation Metrics (Weighted Average Cost Basis) ────
-  const totalUniqueSkus = items.length;
-  const totalStockUnits = items.reduce((sum, i) => sum + i.stock, 0);
+  // ─── Authoritative Overview Metrics ────────────────────────────────────────
+  // Inventory truth is variant + branch scoped. Parent products are catalog
+  // definitions; sellable SKUs and quantities come from branch variants/ledger.
+  const activeVariants = useMemo(() => items.flatMap((item) => item.variants || []), [items]);
+  const totalUniqueSkus = useMemo(() => {
+    const variantSkus = new Set(activeVariants.map((v) => v.sku.trim()).filter(Boolean));
+    const parentOnlySkus = items.filter((i) => !i.variants?.length && i.sku.trim()).map((i) => i.sku.trim());
+    for (const sku of parentOnlySkus) variantSkus.add(sku);
+    return variantSkus.size;
+  }, [activeVariants, items]);
+  const totalStockUnits = useMemo(
+    () => items.reduce((sum, i) => sum + Number(i.stock || 0), 0),
+    [items],
+  );
 
   // Inventory valuation is derived from ledger purchase/receipt costs, not the
   // mutable catalog buyingPrice. This keeps the UI aligned with server WAC.
   const authoritativeWacByVariant = useMemo(() => {
     const result = new Map<string, number>();
-    const rowsByVariant = new Map<string, any[]>();
-    for (const row of db.stockLedger.values()) {
-      const r = row as any;
-      if (r.tenantId !== currentTenantId || r.branchId !== currentBranchId || !r.variantId) continue;
-      const rows = rowsByVariant.get(String(r.variantId)) || [];
-      rows.push(r);
-      rowsByVariant.set(String(r.variantId), rows);
-    }
-    for (const [variantId, rows] of rowsByVariant) {
-      let positiveQty = 0;
-      let positiveValue = 0;
-      for (const row of rows) {
-        const change = Number(row.quantityChange ?? row.quantity ?? 0);
-        if (change > 0) {
-          positiveQty += change;
-          positiveValue += change * Number(row.unitCost ?? 0);
-        }
-      }
-      result.set(variantId, positiveQty > 0 ? positiveValue / positiveQty : 0);
+    const variants = Array.from(db.productVariants.values()).filter((v: any) =>
+      v.tenantId === currentTenantId && v.branchId === currentBranchId
+    ) as any[];
+    const ledgers = Array.from(db.stockLedger.values()).filter((l: any) =>
+      l.tenantId === currentTenantId && l.branchId === currentBranchId
+    ) as any[];
+    for (const variant of variants) {
+      const summary = InventoryValuationEngine.calculateBranchInventoryValuation([variant], ledgers);
+      result.set(variant.id, Number(summary.variantSummaries[0]?.unitCost || 0));
     }
     return result;
   }, [db, currentTenantId, currentBranchId]);
@@ -603,9 +642,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
   const stockSellingValue = items.reduce((sum, i) => sum + i.stock * i.sellingPrice, 0);
   const potentialProfit = stockSellingValue - stockBuyingValue;
   const avgMarginPct = stockSellingValue > 0 ? Math.round((potentialProfit / stockSellingValue) * 100) : 0;
-  const lowStockCount = items.filter((i) => i.stock > 0 && i.stock <= i.reorderLevel).length;
-  const outOfStockCount = items.filter((i) => i.stock === 0).length;
-  const overstockCount = items.filter((i) => i.stock > 100).length;
+  // Alert counts are SKU/variant based. Parent-only products remain supported.
+  const stockTrackedRows = activeVariants.length > 0
+    ? activeVariants.map((v) => ({ stock: Number(v.stock || 0), reorderLevel: Number(v.reorderLevel || 0) }))
+    : items.map((i) => ({ stock: Number(i.stock || 0), reorderLevel: Number(i.reorderLevel || 0) }));
+  const lowStockCount = stockTrackedRows.filter((r) => r.stock > 0 && r.stock <= r.reorderLevel).length;
+  const outOfStockCount = stockTrackedRows.filter((r) => r.stock === 0).length;
+  const overstockCount = stockTrackedRows.filter((r) => r.stock > 100).length;
   const expiringCount = useMemo(() => {
     const now = Date.now();
     const limit30Days = 86400000 * 30;
@@ -616,7 +659,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       return diff > 0 && diff <= limit30Days;
     }).length;
   }, [items]);
-  const healthScore = totalUniqueSkus === 0 ? 100 : Math.max(0, 100 - (outOfStockCount * 12 + lowStockCount * 5));
+  // Availability health is normalized; an empty catalog is neutral, not healthy.
+  const healthScore = stockTrackedRows.length === 0
+    ? 0
+    : Math.round(Math.max(0, 100 - ((outOfStockCount / stockTrackedRows.length) * 70) - ((lowStockCount / stockTrackedRows.length) * 30)));
 
   // Valuation Date Snapshot Filter
   const [valuationDateFilter, setValuationDateFilter] = useState("Today");
@@ -628,54 +674,55 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       ? availableBranches
       : [{ id: currentBranchId || "main", name: currentBranchName || "Main HQ" }];
 
-    // If single branch, 100% of the active inventory belongs to this branch
-    if (branches.length === 1) {
-      const b = branches[0];
-      const profit = stockSellingValue - stockBuyingValue;
-      const margin = stockSellingValue > 0 ? Math.round((profit / stockSellingValue) * 100) : 0;
-      return [{
-        id: b.id,
-        branch: b.name,
-        skus: totalUniqueSkus,
-        units: totalStockUnits,
-        buyingVal: stockBuyingValue,
-        sellingVal: stockSellingValue,
-        profit,
-        margin,
-      }];
-    }
-
-    // For multi-branch setups, allocate products by branchId or assign unallocated to primary HQ
-    const rawProducts = Array.from(db.products.values()).filter((p: any) => !p.deletedAt && !p.deleted_at && p.status !== "Inactive");
-
     return branches.map((b) => {
-      const branchProds = rawProducts.filter((p: any) => {
-        const pBranch = p.branchId || p.branch_id;
-        if (!pBranch || pBranch === "all" || pBranch === "default") {
-          return b.id === branches[0].id;
+      const projection = buildStockBalanceProjection(db, currentTenantId, b.id);
+      const branchProducts = Array.from(db.products.values()).filter((p: any) =>
+        (p.tenantId === currentTenantId || p.tenant_id === currentTenantId) &&
+        !p.deletedAt && !p.deleted_at && p.status !== "Inactive"
+      );
+
+      let skus = 0;
+      let units = 0;
+      let buyingVal = 0;
+      let sellingVal = 0;
+
+      for (const p of branchProducts) {
+        const variants = Array.from(db.productVariants.values()).filter((v: any) =>
+          v.productId === p.id && v.tenantId === currentTenantId && v.branchId === b.id
+        ) as any[];
+
+        if (variants.length > 0) {
+          for (const v of variants) {
+            skus += 1;
+            const qty = Number(projection.byVariant.get(v.id) || 0);
+            units += qty;
+            const cost = Number(authoritativeWacByVariant.get(v.id) ?? v.buyingPrice ?? v.costPrice ?? 0);
+            const price = Number(v.price ?? v.sellingPrice ?? p.sellingPrice ?? 0);
+            buyingVal += qty * cost;
+            sellingVal += qty * price;
+          }
+        } else {
+          const qty = Number(projection.byProduct.get(p.id) || 0);
+          if (p.sku) skus += 1;
+          units += qty;
+          buyingVal += qty * Number(p.buyingPrice ?? 0);
+          sellingVal += qty * Number(p.sellingPrice ?? 0);
         }
-        return pBranch === b.id || (b.name && String(pBranch).toLowerCase().includes(b.name.toLowerCase()));
-      });
+      }
 
-      const bSkus = branchProds.length;
-      const bUnits = branchProds.reduce((sum: number, p: any) => sum + Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0), 0);
-      const bBuying = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.buyingPrice ?? p.costPrice ?? 0)), 0);
-      const bSelling = branchProds.reduce((sum: number, p: any) => sum + (Number(p.availableStock ?? p.totalStock ?? p.stock ?? 0) * Number(p.sellingPrice ?? p.price ?? 0)), 0);
-      const bProfit = bSelling - bBuying;
-      const bMargin = bSelling > 0 ? Math.round((bProfit / bSelling) * 100) : 0;
-
+      const profit = sellingVal - buyingVal;
       return {
         id: b.id,
         branch: b.name,
-        skus: bSkus,
-        units: bUnits,
-        buyingVal: bBuying,
-        sellingVal: bSelling,
-        profit: bProfit,
-        margin: bMargin,
+        skus,
+        units,
+        buyingVal,
+        sellingVal,
+        profit,
+        margin: sellingVal > 0 ? Math.round((profit / sellingVal) * 100) : 0,
       };
     });
-  }, [availableBranches, currentBranchId, currentBranchName, totalUniqueSkus, totalStockUnits, stockBuyingValue, stockSellingValue, db]);
+  }, [availableBranches, currentBranchId, currentBranchName, currentTenantId, db, authoritativeWacByVariant]);
 
   const generateInflowCombinations = (
     opt1Name = varOption1Name,
@@ -691,7 +738,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
     const baseName = newProd.name.trim() || "Item";
     const prefix = baseName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "SKU";
-    const baseSku = `SKU-${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const baseSku = `SKU-${prefix}-${safeUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
 
     const generated: ProductVariantData[] = [];
     for (const v1 of list1) {
@@ -702,11 +749,11 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
           id: safeUUID(),
           name: `${baseName} (${label})`,
           sku: `${baseSku}-${suffix}`,
-          barcode: `890${Math.floor(100000000 + Math.random() * 900000000)}`,
+          barcode: `890${safeUUID().replace(/-/g, "").slice(0, 9)}`,
           attributes: { [opt1Name]: v1, ...(opt2Name.trim() && v2 ? { [opt2Name]: v2 } : {}) },
           buyingPrice: Number(newProd.buyingPrice) || 0,
           sellingPrice: Number(newProd.sellingPrice) || 0,
-          stock: 10,
+          stock: 0,
           reorderLevel: 5,
         });
       }
@@ -714,276 +761,10 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setInflowVariants(generated);
   };
 
-  const handleCreateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentTenantId || !currentBranchId) { toast.error("Tenant Context Required", "Select an active tenant and branch before changing inventory."); return; }
-    if (!newProd.name.trim()) return;
-
-    const autoSku = `SKU-${newProd.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const prodId = safeUUID();
-
-    const pendingOutboxes: any[] = [];
-
-    const isVariantProduct = hasVariantsToggle && inflowVariants.length > 0;
-    const computedStock = isVariantProduct
-      ? inflowVariants.reduce((sum, v) => sum + Number(v.stock || 0), 0)
-      : Number(newProd.stock);
-    const computedSelling = isVariantProduct
-      ? (inflowVariants[0]?.sellingPrice || Number(newProd.sellingPrice))
-      : Number(newProd.sellingPrice);
-    const computedBuying = isVariantProduct
-      ? (inflowVariants[0]?.buyingPrice || Number(newProd.buyingPrice))
-      : Number(newProd.buyingPrice);
-
-    const status: InventoryItem["status"] = computedStock === 0 ? "Out of Stock" : computedStock <= Number(newProd.reorderLevel) ? "Low Stock" : "Active";
-
-    const selectedCategory = categoriesMeta.find((c) => c.name.toLowerCase() === newProd.category.toLowerCase());
-    const selectedBrand = brandsMeta.find((b) => b.name.toLowerCase() === newProd.brand.trim().toLowerCase());
-    const newProductRecord = {
-      id: prodId,
-      name: newProd.name.trim(),
-      sku: autoSku,
-      category: newProd.category,
-      categoryId: selectedCategory && isUuid(selectedCategory.id) ? selectedCategory.id : undefined,
-      brand: newProd.brand.trim(),
-      brandId: selectedBrand && isUuid(selectedBrand.id) ? selectedBrand.id : undefined,
-      sellingPrice: computedSelling,
-      costPrice: computedBuying,
-      buyingPrice: computedBuying,
-      stock: 0,
-      totalStock: 0,
-      availableStock: 0,
-      reorderLevel: Number(newProd.reorderLevel),
-      status,
-      hasVariants: isVariantProduct,
-      batchNumber: newProd.batchNumber ? newProd.batchNumber.trim() : undefined,
-      expiryDate: newProd.expiryDate ? newProd.expiryDate : undefined,
-      tenantId: currentTenantId || undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (isVariantProduct) {
-      const variantsToSave = inflowVariants.map((v) => ({
-        id: v.id,
-        productId: prodId,
-        name: v.name,
-        sku: v.sku,
-        barcode: v.barcode || "",
-        attributes: v.attributes || {},
-        buyingPrice: Number(v.buyingPrice || 0),
-        costPrice: Number(v.buyingPrice || 0),
-        sellingPrice: Number(v.sellingPrice || 0),
-        price: Number(v.sellingPrice || 0),
-        inventoryQuantity: 0,
-        stock: 0,
-        reorderLevel: Number(v.reorderLevel || 5),
-        isActive: true,
-        tenantId: currentTenantId || undefined,
-      }));
-
-      db.saveProductWithVariantsLocal(newProductRecord as any, variantsToSave as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      pendingOutboxes.push({
-        entityType: "Product",
-        entityId: prodId,
-        operationType: "CREATE",
-        payload: {
-          id: prodId,
-          name: newProductRecord.name,
-          sku: autoSku,
-          category: newProductRecord.category,
-          categoryId: (newProductRecord as any).categoryId,
-          brand: newProductRecord.brand,
-          brandId: (newProductRecord as any).brandId,
-          buyingPrice: Number(newProd.buyingPrice),
-          sellingPrice: Number(newProd.sellingPrice),
-          hasVariants: true,
-          variants: variantsToSave.map((v) => ({
-            id: v.id,
-            name: v.name,
-            sku: v.sku,
-            barcode: v.barcode || undefined,
-            price: Number(v.sellingPrice || 0),
-            costPrice: Number(v.buyingPrice || 0),
-            inventoryQuantity: 0,
-            stock: 0,
-            reorderLevel: Number(v.reorderLevel || 5),
-            attributes: v.attributes || {},
-            isActive: true,
-          })),
-        },
-        idempotencyKey: `PROD-CREATE-${prodId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      for (const v of variantsToSave) {
-        pendingOutboxes.push({
-          entityType: "ProductVariant",
-          entityId: v.id,
-          operationType: "CREATE",
-          payload: {
-            id: v.id,
-            productId: prodId,
-            name: v.name,
-            sku: v.sku,
-            barcode: v.barcode || undefined,
-            price: Number(v.sellingPrice || 0),
-            costPrice: Number(v.buyingPrice || 0),
-            inventoryQuantity: 0,
-            stock: 0,
-            reorderLevel: Number(v.reorderLevel || 5),
-            attributes: v.attributes || {},
-            isActive: true,
-          },
-          idempotencyKey: `VAR-CREATE-${v.id}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
-        });
-
-        if (Number(v.stock) > 0) {
-          db.saveStockLedgerLocal({
-            id: `led-${v.id}`,
-            productId: prodId,
-            variantId: v.id,
-            sku: v.sku,
-            name: v.name,
-            quantity: Number(v.stock),
-            balanceAfter: Number(v.stock),
-            reason: "MANUAL_VARIANT_CREATION",
-            movementType: "OPENING_STOCK",
-            timestamp: new Date().toISOString(),
-            tenantId: currentTenantId || "default",
-          } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-          pendingOutboxes.push({
-            entityType: "StockAdjustment",
-            entityId: `adj-${v.id}`,
-            operationType: "CREATE",
-            payload: {
-              productId: prodId,
-              variantId: v.id,
-              sku: v.sku,
-              adjustmentType: "INCREASE",
-              movementType: "OPENING_STOCK",
-              quantityChange: Number(v.stock),
-              reason: "MANUAL_VARIANT_CREATION",
-              deviceId: "web-client",
-              operationId: `adj-${v.id}`,
-              idempotencyKey: `ADJ-${v.id}`,
-            },
-            idempotencyKey: `ADJ-${v.id}`,
-            tenantId: currentTenantId || undefined,
-            branchId: currentBranchId || undefined,
-          });
-        }
-      }
-    } else {
-      const defaultVarId = safeUUID();
-      const defaultVariant = {
-        id: defaultVarId,
-        productId: prodId,
-        name: "Standard",
-        sku: `${autoSku}-STD`,
-        barcode: "",
-        price: Number(newProd.sellingPrice),
-        costPrice: Number(newProd.buyingPrice),
-        buyingPrice: Number(newProd.buyingPrice),
-        sellingPrice: Number(newProd.sellingPrice),
-        inventoryQuantity: 0,
-        stock: 0,
-        reorderLevel: Number(newProd.reorderLevel || 5),
-        isActive: true,
-        tenantId: currentTenantId || undefined,
-      };
-
-      db.saveProductLocal(newProductRecord as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-      db.saveVariantLocal(defaultVariant as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-      pendingOutboxes.push({
-        entityType: "Product",
-        entityId: prodId,
-        operationType: "CREATE",
-        payload: {
-          id: prodId,
-          name: newProductRecord.name,
-          sku: autoSku,
-          category: newProductRecord.category,
-          categoryId: (newProductRecord as any).categoryId,
-          brand: newProductRecord.brand,
-          brandId: (newProductRecord as any).brandId,
-          buyingPrice: Number(newProd.buyingPrice),
-          sellingPrice: Number(newProd.sellingPrice),
-          hasVariants: false,
-          variants: [{ ...defaultVariant, inventoryQuantity: 0, stock: 0 }],
-        },
-        idempotencyKey: `PROD-CREATE-${prodId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      pendingOutboxes.push({
-        entityType: "ProductVariant",
-        entityId: defaultVarId,
-        operationType: "CREATE",
-        payload: { ...defaultVariant, inventoryQuantity: 0, stock: 0 },
-        idempotencyKey: `VAR-CREATE-${defaultVarId}`,
-        tenantId: currentTenantId || undefined,
-        branchId: currentBranchId || undefined,
-      });
-
-      if (Number(newProd.stock) > 0) {
-        db.saveStockLedgerLocal({
-          id: `led-${defaultVarId}`,
-          productId: prodId,
-          variantId: defaultVarId,
-          sku: `${autoSku}-STD`,
-          name: newProductRecord.name,
-          quantity: Number(newProd.stock),
-          balanceAfter: Number(newProd.stock),
-          reason: "MANUAL_PRODUCT_CREATION",
-          movementType: "OPENING_STOCK",
-          timestamp: new Date().toISOString(),
-          tenantId: currentTenantId || "default",
-        } as any, currentTenantId ? { tenantId: currentTenantId } : undefined);
-
-        pendingOutboxes.push({
-          entityType: "StockAdjustment",
-          entityId: `adj-${defaultVarId}`,
-          operationType: "CREATE",
-          payload: {
-            productId: prodId,
-            variantId: defaultVarId,
-            sku: `${autoSku}-STD`,
-            adjustmentType: "INCREASE",
-            movementType: "OPENING_STOCK",
-            quantityChange: Number(newProd.stock),
-            reason: "MANUAL_PRODUCT_CREATION",
-            deviceId: "web-client",
-            operationId: `adj-${defaultVarId}`,
-            idempotencyKey: `ADJ-${defaultVarId}`,
-          },
-          idempotencyKey: `ADJ-${defaultVarId}`,
-          tenantId: currentTenantId || undefined,
-          branchId: currentBranchId || undefined,
-        });
-      }
-    }
-
-    if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    void loadInventory();
-    setNewProd({ name: "", category: "", brand: "", buyingPrice: 0, sellingPrice: 0, stock: 0, reorderLevel: 10, batchNumber: "", expiryDate: "" });
-    setHasVariantsToggle(false);
-    setInflowVariants([]);
-    setAddProductModal(false);
-    toast.success("Product Created", isVariantProduct ? `Product "${newProductRecord.name}" created with ${inflowVariants.length} variants.` : `Product "${newProductRecord.name}" added to inventory.`);
-    playSuccessChime();
-    publishDataChanged({ action: "INVENTORY_CHANGED" });
-    void syncOutbox?.().catch(() => {});
-  };
-
-  // ─── Product Edit Handlers ───────────────────────────────────────────────────
+  // Product creation is intentionally owned by ProductRegistrationWizardModal.
+  // Keeping a second registration implementation here would bypass the canonical
+  // atomic Product + Variant + StockLedger + Outbox transaction.
+  
   const handleOpenEditModal = (item: InventoryItem) => {
     setEditingItem(item);
     setEditProd({
@@ -1097,7 +878,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     setDeleteConfirmModal(true);
   };
 
-  const handleConfirmArchiveDelete = async (softDelete = true) => {
+  const handleConfirmArchive = async () => {
     if (!itemToDelete) return;
     const target = itemToDelete;
 
@@ -1111,7 +892,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
       }
     }
 
-    if (softDelete && existing) {
+    if (existing) {
       // Standard SaaS Archival: hides product from POS counter while preserving historical sales and audit ledgers
       const archived = {
         ...existing,
@@ -1165,39 +946,41 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
 
   const handleOpenEditCategory = (cat: CategoryRecord) => {
     if (!isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; }
-    setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setCategoryCascadeRename(true); setAddCategoryModal(true);
+    setEditingCategory(cat); setNewCategoryName(cat.name); setNewCategoryDesc(cat.description || ""); setNewCategoryColor(cat.color || "#10b981"); setNewCategoryParentId(cat.parentId || ""); setCategoryCascadeRename(true); setAddCategoryModal(true);
   };
 
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault(); const name = newCategoryName.trim(); if (!name || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingCategory?.id && isUuid(editingCategory.id) ? editingCategory.id : safeUUID();
-    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
-    const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId }) : categoriesMeta;
-    const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId }); setCategoriesMeta(next);
-    pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, description: record.description, color: record.color, isActive: true, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    const parentId = newCategoryParentId && isUuid(newCategoryParentId) ? newCategoryParentId : null;
+    if (parentId === id) { toast.error("Invalid Parent", "A category cannot be its own parent."); return; }
+    const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), parentId, description: newCategoryDesc.trim() || undefined, color: newCategoryColor, isActive: true, updatedAt: now, createdAt: (editingCategory as any)?.createdAt || now };
+    const current = Array.isArray(db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId })) ? db.getConfigurationLocal("inventory_categories_meta", { tenantId: currentTenantId, branchId: currentBranchId }) : categoriesMeta;
+    const next = [...current.filter((c: any) => c.id !== id && c.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId }); setCategoriesMeta(next);
+    pendingOutboxes.push({ entityType: "Category", entityId: id, operationType: editingCategory ? "UPDATE" : "CREATE", payload: { name, code: record.code, parentId, description: record.description, color: record.color, isActive: true, cascadeAssignedProducts: categoryCascadeRename, _baseUpdatedAt: (editingCategory as any)?.updatedAt }, idempotencyKey: `CAT-${editingCategory ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     if (editingCategory && categoryCascadeRename && editingCategory.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.categoryId === id || String(p.category || "").toLowerCase() === editingCategory.name.toLowerCase())) { db.saveProductLocal({ ...p, categoryId: id, category: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: id, category: name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setAddCategoryModal(false); setEditingCategory(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
+    setAddCategoryModal(false); setEditingCategory(null); setNewCategoryParentId(""); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Category Sync Rejected", "The server rejected the category change. Local catalog has been reconciled to the authoritative server state."); return; } toast.success(editingCategory ? "Category Updated" : "Category Added", `Category "${name}" saved.`);
   };
-  const handleOpenDeleteCategory = (name: string, assignedCount: number) => {
-    const cat = allCategories.find((c) => c.name.toLowerCase() === name.toLowerCase()); const fallback = allCategories.find((c) => c.id !== cat?.id && isUuid(c.id));
+  const handleOpenDeleteCategory = (categoryId: string, assignedCount: number) => {
+    const cat = allCategories.find((c) => c.id === categoryId); const fallback = allCategories.find((c) => c.id !== categoryId && isUuid(c.id));
     if (!cat || !isUuid(cat.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement category first."); return; }
-    setDeleteCategorySafeguard({ category: cat.name, assignedCount, fallbackCategory: fallback?.name || "" });
+    setDeleteCategorySafeguard({ categoryId: cat.id, assignedCount, replacementCategoryId: fallback?.id || "" });
   };
 
   const handleConfirmDeleteCategory = async () => {
     if (!deleteCategorySafeguard || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
-    const cat = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.category.toLowerCase()); const replacement = allCategories.find((c) => c.name.toLowerCase() === deleteCategorySafeguard.fallbackCategory.toLowerCase());
+    const cat = allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId); const replacement = deleteCategorySafeguard.replacementCategoryId ? allCategories.find((c) => c.id === deleteCategorySafeguard.replacementCategoryId) : undefined;
     const replacementId = deleteCategorySafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!cat || !isUuid(cat.id) || (replacementId && !isUuid(replacementId))) return;
-    const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId });
+    const next = categoriesMeta.filter((c) => c.id !== cat.id); setCategoriesMeta(next); db.saveConfigurationLocal("inventory_categories_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
     if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.categoryId === cat.id) { db.saveProductLocal({ ...p, categoryId: replacementId, category: replacement?.name, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { categoryId: replacementId, category: replacement?.name, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-CAT-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Category", entityId: cat.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `CAT-DELETE-${cat.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setDeleteCategorySafeguard(null); void loadInventory(); void syncOutbox?.().catch(() => {});
+    setDeleteCategorySafeguard(null); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Category Sync Rejected", "The server rejected the category deletion. Local catalog has been reconciled to the authoritative server state."); }
   };
 
   const handleOpenEditBrand = (brand: BrandRecord) => { if (!isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before editing this legacy record."); return; } setEditingBrand(brand); setNewBrandName(brand.name); setNewBrandOrigin(brand.origin || ""); setNewBrandNotes(brand.notes || ""); setBrandCascadeRename(true); setAddBrandModal(true); };
@@ -1206,26 +989,27 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
     const pendingOutboxes: any[] = [];
     const now = new Date().toISOString(); const id = editingBrand?.id && isUuid(editingBrand.id) ? editingBrand.id : safeUUID();
     const record: any = { id, tenantId: currentTenantId, branchId: currentBranchId, name, code: catalogCode(name), origin: newBrandOrigin.trim() || undefined, notes: newBrandNotes.trim() || undefined, isActive: true, updatedAt: now, createdAt: (editingBrand as any)?.createdAt || now };
-    const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId }) : brandsMeta;
-    const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId }); setBrandsMeta(next);
-    pendingOutboxes.push({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    const current = Array.isArray(db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId, branchId: currentBranchId })) ? db.getConfigurationLocal("inventory_brands_meta", { tenantId: currentTenantId, branchId: currentBranchId }) : brandsMeta;
+    const next = [...current.filter((b: any) => b.id !== id && b.name.toLowerCase() !== name.toLowerCase()), record]; db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId, branchId: currentBranchId }); setBrandsMeta(next);
+    pendingOutboxes.push({ entityType: "Brand", entityId: id, operationType: editingBrand ? "UPDATE" : "CREATE", payload: { name, code: record.code, origin: record.origin, notes: record.notes, isActive: true, cascadeAssignedProducts: brandCascadeRename, _baseUpdatedAt: (editingBrand as any)?.updatedAt }, idempotencyKey: `BR-${editingBrand ? "U" : "C"}-${id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
+    if (editingBrand && brandCascadeRename && editingBrand.name.toLowerCase() !== name.toLowerCase()) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && (p.brandId === id || String(p.brand || "").toLowerCase() === editingBrand.name.toLowerCase())) { db.saveProductLocal({ ...p, brandId: id, brand: name, updatedAt: now }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: id, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
-    setAddBrandModal(false); setEditingBrand(null); void loadInventory(); void syncOutbox?.().catch(() => {}); toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
+    setAddBrandModal(false); setEditingBrand(null); void loadInventory(); try { await syncOutbox?.({ quiet: true, force: true }); } catch { toast.error("Brand Sync Rejected", "The server rejected the brand change. Local catalog has been reconciled to the authoritative server state."); return; } toast.success(editingBrand ? "Brand Updated" : "Brand Added", `Brand "${name}" saved.`);
   };
 
-  const handleOpenDeleteBrand = (name: string, assignedCount: number) => {
-    const brand = allBrands.find((b) => b.name.toLowerCase() === name.toLowerCase()); const fallback = allBrands.find((b) => b.id !== brand?.id && isUuid(b.id));
+  const handleOpenDeleteBrand = (brandId: string, assignedCount: number) => {
+    const brand = allBrands.find((b) => b.id === brandId); const fallback = allBrands.find((b) => b.id !== brandId && isUuid(b.id));
     if (!brand || !isUuid(brand.id)) { toast.warning("Catalog Sync Required", "Synchronize catalog before deleting this legacy record."); return; }
     if (assignedCount > 0 && !fallback) { toast.warning("Replacement Required", "Create an active replacement brand first."); return; }
-    setDeleteBrandSafeguard({ brand: brand.name, assignedCount, fallbackBrand: fallback?.name || "" });
+    setDeleteBrandSafeguard({ brandId: brand.id, assignedCount, replacementBrandId: fallback?.id || "" });
   };
 
   const handleConfirmDeleteBrand = async () => {
     if (!deleteBrandSafeguard || !currentTenantId || !currentBranchId) return;
     const pendingOutboxes: any[] = [];
-    const brand = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.brand.toLowerCase()); const replacement = allBrands.find((b) => b.name.toLowerCase() === deleteBrandSafeguard.fallbackBrand.toLowerCase()); const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
+    const brand = allBrands.find((b) => b.id === deleteBrandSafeguard.brandId); const replacement = deleteBrandSafeguard.replacementBrandId ? allBrands.find((b) => b.id === deleteBrandSafeguard.replacementBrandId) : undefined; const replacementId = deleteBrandSafeguard.assignedCount > 0 ? replacement?.id : undefined;
     if (!brand || !isUuid(brand.id) || (replacementId && !isUuid(replacementId))) return;
-    const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId });
+    const next = brandsMeta.filter((b) => b.id !== brand.id); setBrandsMeta(next); db.saveConfigurationLocal("inventory_brands_meta", next, { tenantId: currentTenantId, branchId: currentBranchId });
     if (replacementId) for (const p of [...db.products.values()] as any[]) if (p.tenantId === currentTenantId && p.branchId === currentBranchId && p.brandId === brand.id) { db.saveProductLocal({ ...p, brandId: replacementId, updatedAt: new Date().toISOString() }, { tenantId: currentTenantId, branchId: currentBranchId }); pendingOutboxes.push({ entityType: "Product", entityId: p.id, operationType: "UPDATE", payload: { brandId: replacementId, _baseUpdatedAt: p.updatedAt }, idempotencyKey: `PROD-BR-R-${p.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId }); }
     pendingOutboxes.push({ entityType: "Brand", entityId: brand.id, operationType: "DELETE", payload: { replacementId }, idempotencyKey: `BR-DELETE-${brand.id}-${Date.now()}`, tenantId: currentTenantId, branchId: currentBranchId });
     await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
@@ -1561,7 +1345,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                           <button
                             className="v2-btn v2-btn-ghost v2-btn-icon-sm"
                             onClick={() => handleOpenDeleteModal(item)}
-                            title="Archive / Delete Product"
+                            title="Archive / Archive Product"
                             type="button"
                             style={{ color: "var(--danger)" }}
                           >
@@ -1597,6 +1381,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   setNewCategoryName("");
                   setNewCategoryDesc("");
                   setNewCategoryColor("#10b981");
+                  setNewCategoryParentId("");
                   setAddCategoryModal(true);
                 }}
                 type="button"
@@ -1670,6 +1455,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     setNewCategoryName("");
                     setNewCategoryDesc("");
                     setNewCategoryColor("#10b981");
+                    setNewCategoryParentId("");
                     setAddCategoryModal(true);
                   }}
                   type="button"
@@ -1722,7 +1508,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                       </tr>
                     ) : (
                       filteredCategories.map((cat) => {
-                        const catItems = items.filter((i) => i.category.toLowerCase() === cat.name.toLowerCase());
+                        const catItems = items.filter((i) => (i.categoryId && isUuid(cat.id) ? i.categoryId === cat.id : i.category.toLowerCase() === cat.name.toLowerCase()));
                         const catSkus = catItems.length;
                         const catUnits = catItems.reduce((acc, i) => acc + i.stock, 0);
                         const catVal = catItems.reduce((acc, i) => acc + i.stock * i.sellingPrice, 0);
@@ -1782,7 +1568,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteCategory(cat.name, catSkus)}
+                                  onClick={() => handleOpenDeleteCategory(cat.id, catSkus)}
                                   title="Delete or Reassign Category"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
@@ -1916,7 +1702,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 <button
                                   type="button"
                                   className="v2-btn v2-btn-ghost v2-btn-xs"
-                                  onClick={() => handleOpenDeleteBrand(brand.name, brandSkus)}
+                                  onClick={() => handleOpenDeleteBrand(brand.id, brandSkus)}
                                   title="Delete or Reassign Brand"
                                   style={{ padding: "3px 6px", fontSize: "11px", color: "var(--danger)" }}
                                 >
@@ -2037,6 +1823,13 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         </div>
       )}
 
+      {activeTab === "recipes" && <InventoryBundleWorkspace />}\n      {activeTab === "transfers" && <InventoryOperationalWorkspace mode="transfers" />}
+      {activeTab === "count" && <InventoryOperationalWorkspace mode="count" />}
+      {activeTab === "wastage" && <InventoryOperationalWorkspace mode="wastage" />}
+      {activeTab === "alerts" && <InventoryOperationalWorkspace mode="alerts" />}
+      {activeTab === "sync" && <InventoryOperationalWorkspace mode="sync" />}
+      {activeTab === "drilldown" && <InventoryOperationalWorkspace mode="drilldown" />}
+
       {/* ─── TAB 9: VALUATION REPORTS & MULTI-BRANCH SUMMARY ────────────────────── */}
       {activeTab === "reports" && (
         <div className="v2-space-y-4">
@@ -2131,7 +1924,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         onClose={() => setAddProductModal(false)}
         allCategories={allCategories}
         allBrands={allBrands}
-        onOpenAddCategory={() => setAddCategoryModal(true)}
+        onOpenAddCategory={() => {
+          setEditingCategory(null);
+          setNewCategoryName("");
+          setNewCategoryDesc("");
+          setNewCategoryColor("#10b981");
+          setNewCategoryParentId("");
+          setAddCategoryModal(true);
+        }}
         onOpenAddBrand={() => {
           setEditingBrand(null);
           setNewBrandName("");
@@ -2190,7 +1990,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   onChange={(e) => setEditProd({ ...editProd, category: e.target.value })}
                 >
                   {allCategories.map((c) => (
-                    <option key={c.id || c.name} value={c.name}>{c.name}</option>
+                    <option key={c.id || c.name} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>
@@ -2221,7 +2021,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   {allBrands
                     .filter((b) => b.name.toLowerCase() !== "general")
                     .map((b) => (
-                      <option key={b.id || b.name} value={b.name}>{b.name}</option>
+                      <option key={b.id || b.name} value={b.id}>{b.name}</option>
                     ))}
                   {editProd.brand && editProd.brand !== "General" && !allBrands.some((b) => b.name.toLowerCase() === editProd.brand.toLowerCase()) && (
                     <option value={editProd.brand}>{editProd.brand}</option>
@@ -2314,7 +2114,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
         )}
       </Sheet>
 
-      {/* --- Archive / Delete SKU Confirmation Modal --- */}
+      {/* --- Archive Product Confirmation Modal --- */}
       {deleteConfirmModal && itemToDelete && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", display: "grid", placeItems: "center", zIndex: 1000 }}>
           <div className="v2-card" style={{ width: 440, padding: "1.5rem" }}>
@@ -2363,7 +2163,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </button>
               <button
                 className="v2-btn v2-btn-danger v2-btn-sm"
-                onClick={() => handleConfirmArchiveDelete(true)}
+                onClick={() => handleConfirmArchive()}
                 type="button"
               >
                 Archive SKU
@@ -2391,6 +2191,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                 onClick={async () => {
                   setAddCategoryModal(false);
                   setEditingCategory(null);
+                  setNewCategoryParentId("");
                 }}
                 type="button"
               >
@@ -2419,6 +2220,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   value={newCategoryDesc}
                   onChange={(e) => setNewCategoryDesc(e.target.value)}
                 />
+              </div>
+
+              <div>
+                <label className="v2-text-xs v2-font-bold v2-text-muted">PARENT CATEGORY (OPTIONAL)</label>
+                <select className="v2-input" value={newCategoryParentId} onChange={(e) => setNewCategoryParentId(e.target.value)}>
+                  <option value="">No parent — top-level category</option>
+                  {categoryParentOptions.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
               </div>
 
               {/* Square Register Style Color Swatches */}
@@ -2493,6 +2302,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   onClick={async () => {
                     setAddCategoryModal(false);
                     setEditingCategory(null);
+                    setNewCategoryParentId("");
                   }}
                   type="button"
                 >
@@ -2642,7 +2452,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     ACTIVE PRODUCTS ASSIGNED
                   </div>
                   <div className="v2-text-xs v2-mt-1">
-                    There are currently <strong>{deleteCategorySafeguard.assignedCount} active products</strong> assigned to category <strong>"{deleteCategorySafeguard.category}"</strong>.
+                    There are currently <strong>{deleteCategorySafeguard.assignedCount} active products</strong> assigned to category <strong>"{allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId)?.name || "Unknown category"}"</strong>.
                   </div>
                 </div>
 
@@ -2652,18 +2462,18 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   </label>
                   <select
                     className="v2-input v2-mt-1"
-                    value={deleteCategorySafeguard.fallbackCategory}
+                    value={deleteCategorySafeguard.replacementCategoryId}
                     onChange={(e) =>
                       setDeleteCategorySafeguard({
                         ...deleteCategorySafeguard,
-                        fallbackCategory: e.target.value,
+                        replacementCategoryId: e.target.value,
                       })
                     }
                   >
                     {allCategories
-                      .filter((c) => c.name.toLowerCase() !== deleteCategorySafeguard.category.toLowerCase())
+                      .filter((c) => c.name.toLowerCase() !== deleteCategorySafeguard.categoryId)
                       .map((c) => (
-                        <option key={c.id || c.name} value={c.name}>
+                        <option key={c.id || c.name} value={c.id}>
                           {c.name}
                         </option>
                       ))}
@@ -2676,7 +2486,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </div>
             ) : (
               <p className="v2-text-sm">
-                Are you sure you want to delete category <strong>"{deleteCategorySafeguard.category}"</strong>?
+                Are you sure you want to delete category <strong>"{allCategories.find((c) => c.id === deleteCategorySafeguard.categoryId)?.name || "Unknown category"}"</strong>?
                 No active catalog products are assigned to this category.
               </p>
             )}
@@ -2743,7 +2553,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                     ACTIVE PRODUCTS ASSIGNED
                   </div>
                   <div className="v2-text-xs v2-mt-1">
-                    There are currently <strong>{deleteBrandSafeguard.assignedCount} active products</strong> assigned to brand <strong>"{deleteBrandSafeguard.brand}"</strong>.
+                    There are currently <strong>{deleteBrandSafeguard.assignedCount} active products</strong> assigned to brand <strong>"{allBrands.find((b) => b.id === deleteBrandSafeguard.brandId)?.name || "Unknown brand"}"</strong>.
                   </div>
                 </div>
 
@@ -2753,18 +2563,18 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                   </label>
                   <select
                     className="v2-input v2-mt-1"
-                    value={deleteBrandSafeguard.fallbackBrand}
+                    value={deleteBrandSafeguard.replacementBrandId}
                     onChange={(e) =>
                       setDeleteBrandSafeguard({
                         ...deleteBrandSafeguard,
-                        fallbackBrand: e.target.value,
+                        replacementBrandId: e.target.value,
                       })
                     }
                   >
                     {allBrands
-                      .filter((b) => b.name.toLowerCase() !== deleteBrandSafeguard.brand.toLowerCase())
+                      .filter((b) => b.name.toLowerCase() !== deleteBrandSafeguard.brandId)
                       .map((b) => (
-                        <option key={b.id || b.name} value={b.name}>
+                        <option key={b.id || b.name} value={b.id}>
                           {b.name}
                         </option>
                       ))}
@@ -2777,7 +2587,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
               </div>
             ) : (
               <p className="v2-text-sm">
-                Are you sure you want to delete brand <strong>"{deleteBrandSafeguard.brand}"</strong>?
+                Are you sure you want to delete brand <strong>"{allBrands.find((b) => b.id === deleteBrandSafeguard.brandId)?.name || "Unknown brand"}"</strong>?
                 No active catalog products are assigned to this brand.
               </p>
             )}
@@ -3412,7 +3222,7 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                   attributes: { [studioMatrixOpt1]: v1, ...(studioMatrixOpt2 && v2 ? { [studioMatrixOpt2]: v2 } : {}) },
                                   buyingPrice: variantModalProduct.buyingPrice,
                                   sellingPrice: variantModalProduct.sellingPrice,
-                                  stock: 10,
+                                  stock: 0,
                                   reorderLevel: 5,
                                 });
                               }
@@ -3769,15 +3579,9 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                 />
                               </td>
                               <td>
-                                <NumberStepper
-                                  size="xs"
-                                  min={0}
-                                  step={1}
-                                  width="80px"
-                                  value={inlineVariantEdit.stock}
-                                  ariaLabel="Stock quantity"
-                                  onChange={(val) => setInlineVariantEdit({ ...inlineVariantEdit, stock: val })}
-                                />
+                                <span className="v2-mono v2-text-xs v2-font-bold" title="Stock is ledger-controlled; use Add Stock / Physical Count">
+                                  {Number(inlineVariantEdit.stock || 0).toLocaleString()}
+                                </span>
                               </td>
                               <td>
                                 <NumberStepper
@@ -3852,20 +3656,6 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ activeTab: propAct
                                         attributes: existingVariant?.attributes || v.attributes || {}, isActive: true,
                                         _baseUpdatedAt: existingVariant?.updatedAt || v.updatedAt,
                                       }, idempotencyKey: `VAR-UPDATE-${v.id}-${Date.now()}`, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      const stockDiff = Number(inlineVariantEdit.stock) - Number(v.stock || 0);
-                                      if (stockDiff !== 0) {
-                                        const adjOpId = `adj-variant-edit-${Date.now()}-${v.id}`;
-                                        db.saveStockLedgerLocal({ id: adjOpId, productId: variantModalProduct.id, variantId: v.id,
-                                          sku: inlineVariantEdit.sku.trim(), name: inlineVariantEdit.name.trim(), quantity: stockDiff, quantityChange: stockDiff,
-                                          balanceAfter: Number(inlineVariantEdit.stock), reason: "VARIANT_INLINE_EDIT", movementType: "ADJUSTMENT",
-                                          timestamp: new Date().toISOString(), tenantId: currentTenantId || "default", branchId: currentBranchId || "default" } as any,
-                                          { tenantId: currentTenantId || "default", branchId: currentBranchId || "default" });
-                                        pendingOutboxes.push({ entityType: "StockAdjustment", entityId: adjOpId, operationType: "CREATE",
-                                          payload: { productId: variantModalProduct.id, variantId: v.id, sku: inlineVariantEdit.sku.trim(),
-                                            adjustmentType: stockDiff > 0 ? "INCREASE" : "DECREASE", movementType: "ADJUSTMENT", quantityChange: stockDiff,
-                                            reason: "VARIANT_INLINE_EDIT", deviceId: "web-client", operationId: adjOpId },
-                                          idempotencyKey: adjOpId, tenantId: currentTenantId || undefined, branchId: currentBranchId || undefined });
-                                      }
                                       if (pendingOutboxes.length) await commitLocalOutboxes(db, pendingOutboxes, { tenantId: currentTenantId, branchId: currentBranchId });
                                       setEditingVariantRowId(null);
                                       playSuccessChime();

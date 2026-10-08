@@ -152,7 +152,17 @@
     "production:evidence:verify": "tsx scripts/release/verify-live-production-evidence.ts",
     "production:evidence:execute": "tsx scripts/release/prove-production-release.ts",
     "certify:conflicts": "tsx scripts/certify-sync-conflict-resolution.ts",
-    "certify:campaign": "tsx scripts/certification/runKwakoPosCertificationProgram.ts"
+    "certify:campaign": "tsx scripts/certification/runKwakoPosCertificationProgram.ts",
+    "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
+    "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
+    "certify:sales-lock": "tsx scripts/certification/sales-production-lock.ts",
+    "certify:cash-lock": "tsx scripts/certification/cash-management-production-lock.ts",
+    "certify:finance-lock": "tsx scripts/certification/finance-production-lock.ts",
+    "certify:receivables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=receivables",
+    "certify:payables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payables",
+    "certify:expenses-lock": "tsx scripts/certification/finance-production-lock.ts --scope=expenses",
+    "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments",
+    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",

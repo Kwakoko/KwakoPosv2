@@ -13,12 +13,11 @@ export interface ReleaseManifest {
   releaseChannel: string;
   releasedAt: string;
   brand: {
-    parentBrand: "Kwakoko";
-    platform: "Kwakoko Business Operating System";
-    pos: "KwakoPos";
+    parentBrand: string;
+    platform: string;
+    posCapability: string;
   };
   certification: "PASS" | "FAIL";
-  brand: { parentBrand: string; platform: string; posCapability: string; };
   compatibility: {
     databaseSchemaVersion: number;
     syncProtocolVersion: number;
@@ -69,17 +68,12 @@ export function generateReleaseManifest(options?: {
     environment,
     releaseChannel,
     releasedAt: new Date().toISOString(),
-    brand: {
-      parentBrand: "Kwakoko",
-      platform: "Kwakoko Business Operating System",
-      pos: "KwakoPos",
-    },
     certification,
     brand: { parentBrand: "Kwakoko", platform: "Kwakoko Business Operating System", posCapability: "KwakoPos" },
     compatibility: {
       databaseSchemaVersion: 4,
       syncProtocolVersion: 2,
-      pwaSchemaVersion: 4,
+      pwaSchemaVersion: 7,
       minSupportedClientVersion: "2.0.0",
       recommendedClientVersion: targetVersion,
     },

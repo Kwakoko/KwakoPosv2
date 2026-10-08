@@ -39,3 +39,8 @@ The certification asserts:
 
 ## Remaining operational distinction
 Device-local sync queue and active cash-shift state remain device/terminal operational state; they are not treated as enterprise business KPIs.
+
+
+## Reporting-time authority
+
+Dashboard financial reporting uses **UTC as the canonical reporting timezone**. The KPI transaction pins PostgreSQL with `SET LOCAL TIME ZONE 'UTC'`, while application windows, calendar-day keys, prior-period arithmetic, and displayed analytics labels are also UTC-based. This prevents database-session or Node-process local timezone differences from moving sales, refunds, or peak-hour metrics across Dashboard day boundaries.

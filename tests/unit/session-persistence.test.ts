@@ -55,7 +55,7 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
 
     setStoredSession(session);
 
-    // Default sessions are browser-session scoped unless rememberMe is enabled.
+    // Default non-remembered sessions stay in sessionStorage only.
     expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeNull();
     expect(mockSessionStorage.getItem("kwakopos:v2:session")).toBeTruthy();
 
@@ -66,14 +66,14 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     // Refresh-token credentials are intentionally not persisted in browser storage.
     // The sessionId is the durable refresh handle for the HTTP-only server session.
     expect((retrieved as any)?.refreshToken).toBeUndefined();
-    const raw = mockSessionStorage.getItem("kwakopos:v2:session");
-    expect(raw).toBeTruthy();
-    expect(raw).not.toContain("refresh-xyz");
-    expect(retrieved?.user.name).toBe("Amina Cashier");
-  });
 
-  it("restores a durable session through the server refresh handle", async () => {
-    const session: StoredSession = {
+    setStoredSession(session);
+
+    // Default sessions are browser-session scoped unless rememberMe is enabled.
+    expect(mockLocalStorage.getItem("kwakopos:v2:session")).toBeNull();
+    expect(mockSessionStorage.getItem("kwakopos:v2:session")).toBeTruthy();
+
+    const retrieved = getStoredSession();
       sessionId: "sess-valid-refresh",
       user: {
         id: "usr-01",
@@ -85,13 +85,13 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
       },
     };
 
-    setStoredSession(session);
-
-    const refreshedJwt = "header.payload.signature";
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, data: { accessToken: refreshedJwt } }),
+    // Refresh-token credentials are intentionally not persisted in browser storage.
+    // The sessionId is the durable refresh handle for the HTTP-only server session.
+    expect((retrieved as any)?.refreshToken).toBeUndefined();
+    const raw = mockSessionStorage.getItem("kwakopos:v2:session");
+    expect(raw).toBeTruthy();
+    expect(raw).not.toContain("refresh-xyz");
+    expect(retrieved?.user.name).toBe("Amina Cashier");
     });
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -124,9 +124,9 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     };
 
     setStoredSession(session);
-    vi.stubGlobal("navigator", { onLine: false });
 
     // Mock network failure (e.g. offline POS terminal)
+    vi.stubGlobal("navigator", { onLine: false });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
 
     const user = await restoreSession();
@@ -138,3 +138,11 @@ describe("Session Persistence & Refresh Resilience Engine", () => {
     expect(getStoredSession()?.user.email).toBe("cashier@kwakopos.com");
   });
 });
+
+    };
+
+    setStoredSession(session);
+    vi.stubGlobal("navigator", { onLine: false });
+
+    // Mock network failure (e.g. offline POS terminal)
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));

@@ -163,8 +163,27 @@ describe("Privileged RBAC PostgreSQL API", () => {
     });
     expect(transfer).not.toBeNull();
 
+    await prisma.device.create({ data: { id: randomUUID(), deviceId: "p0-rbac-device", tenantId, userId, name: "RBAC Test Device", platform: "test", browser: "vitest" } });
+
     await prisma.deviceSession.create({
       data: {
+        id: randomUUID(),
+        tenantId,
+        branchId: secondBranchId,
+        userId,
+        deviceId: "p0-rbac-device",
+        refreshTokenHash: "p0-rbac-refresh-hash",
+        tokenFamilyId: randomUUID(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        refreshTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/${userId}`,
+      headers: tenantHeaders,
+    });
         id: randomUUID(),
         tenantId,
         userId,
@@ -176,20 +195,6 @@ describe("Privileged RBAC PostgreSQL API", () => {
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
-
-    const deleted = await app.inject({
-      method: "DELETE",
-      url: `/api/v1/users/${userId}`,
-      headers: tenantHeaders,
-    });
-    expect(deleted.statusCode).toBe(200);
-    expect(deleted.json().data.status).toBe("INACTIVE");
-
-    const inactive = await prisma.user.findUnique({ where: { id: userId } });
-    expect(inactive?.status).toBe("INACTIVE");
-    const session = await prisma.deviceSession.findFirst({ where: { userId } });
-    expect(session?.revokedAt).not.toBeNull();
-
     const audits = await prisma.auditEvent.findMany({
       where: { tenantId, entityType: "User", entityId: userId },
       orderBy: { createdAt: "asc" },

@@ -100,10 +100,10 @@ export interface AuditLogRecord {
 
 const SYSTEM_ROLES: CustomRoleRecord[] = [
   { id: "role-owner", name: "Tenant Owner", slug: "tenant-owner", description: "Full administrative control across all tenant branches", isSystemRole: true, isCustom: false, permissions: ["*"] },
-  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.read", "settings.manage", "reports.view"] },
-  { id: "role-manager", name: "Branch Manager", slug: "branch-manager", description: "Branch operations, stock adjustments, purchase orders, and shift approvals", isSystemRole: true, isCustom: false, permissions: ["sales.*", "inventory.*", "purchase.*", "staff.view", "reports.branch"] },
+  { id: "role-admin", name: "Business Administrator", slug: "business-admin", description: "Users, roles, branches, settings, and high-level financial reports", isSystemRole: true, isCustom: false, permissions: ["users.manage", "roles.manage", "branches.manage", "settings.read", "settings.manage", "sync.conflict.read", "sync.conflict.resolve", "reports.view"] },
+  { id: "role-manager", name: "Branch Manager", slug: "branch-manager", description: "Branch operations, stock adjustments, purchase orders, and shift approvals", isSystemRole: true, isCustom: false, permissions: ["sales.*", "inventory.*", "purchase.*", "sync.conflict.read", "staff.view", "reports.branch"] },
   { id: "role-cashier", name: "Cashier / POS Operator", slug: "cashier", description: "Point of sale registers, receipts, customer creation, and cash collection", isSystemRole: true, isCustom: false, permissions: ["sales.create", "payment.receive", "customer.create", "receipt.print"] },
-  { id: "role-inventory", name: "Inventory Officer", slug: "inventory-officer", description: "Stock intake, FEFO batching, supplier purchase orders, stock adjustments", isSystemRole: true, isCustom: false, permissions: ["product.manage", "stock.adjust", "purchase.manage", "supplier.manage"] },
+  { id: "role-inventory", name: "Inventory Officer", slug: "inventory-officer", description: "Stock intake, FEFO batching, supplier purchase orders, stock adjustments", isSystemRole: true, isCustom: false, permissions: ["product.manage", "stock.adjust", "purchase.manage", "supplier.manage", "sync.conflict.read"] },
   { id: "role-accountant", name: "Accountant", slug: "accountant", description: "General ledger, operating expenses, tax filings, financial statements", isSystemRole: true, isCustom: false, permissions: ["expense.manage", "payment.manage", "financial_reports.view"] },
 ];
 
@@ -158,6 +158,8 @@ export const UsersRolesPage: React.FC = () => {
     { id: "inventory.adjust", name: "Stock Adjustment & Waste Logging", category: "Level 3 — Branch Scope", desc: "Adjust inventory quantities, log breakage and expiry", level: 3 },
     { id: "purchase.create", name: "Purchase Orders & Goods Intake", category: "Level 3 — Branch Scope", desc: "Receive inventory shipments, post supplier GRNs", level: 3 },
     { id: "cashdrawer.close", name: "Cash Drawer Reconciliation", category: "Level 3 — Branch Scope", desc: "Perform shift closing cash count and safe drops", level: 3 },
+    { id: "sync.conflict.read", name: "Review Sync Conflicts", category: "Level 3 — Branch Scope", desc: "View authoritative synchronization conflicts for the active branch", level: 3 },
+    { id: "sync.conflict.resolve", name: "Resolve Sync Conflicts", category: "Level 2 — Tenant Scope", desc: "Accept authoritative state or apply governed sync merges", level: 2 },
   ], []);
 
   const loadUsersAndSecurity = useCallback(async () => {

@@ -110,6 +110,7 @@ export class FinancialBridge {
       sourceId: sale.id,
       description: `POS Sale ${sale.saleNumber}`,
       idempotencyKey: `jrn-sale-${sale.id}`,
+      entryDate: (() => { const d = sale.soldAt ? new Date(sale.soldAt) : new Date(); return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString(); })(),
       lines,
     });
   }
