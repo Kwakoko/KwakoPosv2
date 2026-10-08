@@ -227,17 +227,6 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
     }
   });
 
-  async function writePlatformAudit(tenantId:string|null, actorId:string, action:string, entityType:string, entityId:string, metadata:Record<string,unknown>) {
-    await prisma.$executeRaw`CREATE TABLE IF NOT EXISTS platform_audit_events (
-      id TEXT PRIMARY KEY, tenant_id TEXT NULL REFERENCES tenants(id) ON DELETE SET NULL, actor_id TEXT NOT NULL,
-      action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`;
-    await prisma.$executeRaw`INSERT INTO platform_audit_events
-      (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
-      VALUES (${randomUUID()},${tenantId},${actorId},${action},${entityType},${entityId},${JSON.stringify(metadata)}::jsonb)`;
-  }
-
   server.post("/api/v1/super-admin/tenants/:tenantId/suspend", async (req, reply) => {
     try {
       const actor=requireSuperAdmin(req); const ctx=req.tenantContext!;
@@ -365,11 +354,6 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
     try {
       requireSuperAdmin(req);
       const limit=Math.min(500,Math.max(1,Number.parseInt(String(((req.query||{}) as any).limit||"200"),10)||200));
-      await prisma.$executeRaw`CREATE TABLE IF NOT EXISTS platform_audit_events (
-        id TEXT PRIMARY KEY, tenant_id TEXT NULL REFERENCES tenants(id) ON DELETE SET NULL, actor_id TEXT NOT NULL,
-        action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )`;
       const platform=await prisma.$queryRaw<any[]>`SELECT id,tenant_id AS "tenantId",actor_id AS "actorId",action,entity_type AS "entityType",entity_id AS "entityId",metadata,created_at AS "createdAt"
         FROM platform_audit_events ORDER BY created_at DESC LIMIT ${limit}`;
       const tenant=await prisma.auditEvent.findMany({orderBy:{createdAt:"desc"},take:limit});
