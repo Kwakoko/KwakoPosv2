@@ -22,7 +22,9 @@ export interface SemverValidationReport {
 }
 
 const CONVENTIONAL_COMMIT_REGEX =
-  /^(?<type>feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s(?<subject>.+)$/i;
+  /^(?<type>[a-z][a-z0-9-]*)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s(?<subject>.+)$/i;
+
+const SCOPE_ONLY_COMMIT_REGEX = /^(?<type>[a-z][a-z0-9-]*):\s(?<subject>.+)$/i;
 
 export function validateCommitMessage(commitMsg: string): CommitValidationResult {
   const trimmed = commitMsg.trim();
@@ -35,27 +37,40 @@ export function validateCommitMessage(commitMsg: string): CommitValidationResult
     return { commit: commitMsg, isValid: true, type: "chore", scope: "merge", isBreaking: false, subject: trimmed };
   }
 
-  const match = trimmed.match(CONVENTIONAL_COMMIT_REGEX);
-  if (!match || !match.groups) {
+  const conventionalMatch = trimmed.match(CONVENTIONAL_COMMIT_REGEX);
+  if (conventionalMatch && conventionalMatch.groups) {
+    const { type, scope, breaking, subject } = conventionalMatch.groups;
+    const isBreaking = Boolean(breaking) || trimmed.includes("BREAKING CHANGE:");
+
     return {
       commit: commitMsg,
-      isValid: false,
-      isBreaking: false,
-      error:
-        "Commit does not follow Conventional Commits format 'type(scope): subject'. Example: 'feat(pos): add barcode scanner support'",
+      isValid: true,
+      type: type.toLowerCase(),
+      scope: scope || undefined,
+      isBreaking,
+      subject,
     };
   }
 
-  const { type, scope, breaking, subject } = match.groups;
-  const isBreaking = Boolean(breaking) || trimmed.includes("BREAKING CHANGE:");
+  const scopeOnlyMatch = trimmed.match(SCOPE_ONLY_COMMIT_REGEX);
+  if (scopeOnlyMatch && scopeOnlyMatch.groups) {
+    const { type, subject } = scopeOnlyMatch.groups;
+    return {
+      commit: commitMsg,
+      isValid: true,
+      type: type.toLowerCase(),
+      scope: type.toLowerCase(),
+      isBreaking: false,
+      subject,
+    };
+  }
 
   return {
     commit: commitMsg,
-    isValid: true,
-    type: type.toLowerCase(),
-    scope: scope || undefined,
-    isBreaking,
-    subject,
+    isValid: false,
+    isBreaking: false,
+    error:
+      "Commit does not follow the project release format. Expected 'type(scope): subject' or 'scope: subject'. Example: 'feat(pos): add barcode scanner support'",
   };
 }
 
