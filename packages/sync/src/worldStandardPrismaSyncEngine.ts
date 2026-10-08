@@ -1429,21 +1429,59 @@ const now = new Date();
   }
 
   private async lockConflictEntity(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<void> {
-    const tableByType: Record<string, string> = {
-      Product: "products",
-      ProductVariant: "product_variants",
-      Customer: "customers",
-      Supplier: "suppliers",
-      Category: "categories",
-      Brand: "brands",
-      Expense: "expenses",
-      CustomerContact: "customer_contacts",
-    };
-    const table = tableByType[entityType];
-    if (!table) return;
-    const rows = await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-      entityId, ctx.tenantId, ctx.branchId,
-    ) as Array<{ id: string }>;
+    let rows: Array<{ id: string }> = [];
+    switch (entityType) {
+      case "Product":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM products WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "ProductVariant":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM product_variants WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Customer":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM customers WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Supplier":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM suppliers WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Category":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM categories WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Brand":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM brands WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "Expense":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM expenses WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      case "CustomerContact":
+        rows = await tx.$queryRawUnsafe(
+          'SELECT id FROM customer_contacts WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE',
+          entityId, ctx.tenantId, ctx.branchId,
+        ) as Array<{ id: string }>;
+        break;
+      default:
+        return;
+    }
     if (!rows.length) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
   }
 
