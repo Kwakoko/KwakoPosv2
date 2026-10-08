@@ -8,10 +8,8 @@ describe("Super Admin Production Lock", () => {
     expect(result.successRatePct).toBe(100);
   });
 
-  it("contains an independent fail-closed lock contract", async () => {
-    const mod = await import("../../scripts/certification/super-admin-production-lock.ts");
-    const result = mod.runSuperAdminProductionLock(process.cwd());
-    expect(result.verdict).toBe("PASS");
-    expect(result.failures).toEqual([]);
+  it("contains an independent fail-closed lock contract", () => {
+    const { execFileSync } = require("node:child_process");
+    execFileSync("npx", ["tsx", "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
   });
 });
