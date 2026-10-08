@@ -156,14 +156,14 @@
     "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
     "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
     "certify:sales-lock": "tsx scripts/certification/sales-production-lock.ts",
-    "certify:customers-lock": "tsx scripts/certification/customers-contacts-production-lock.ts"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.42.0",
+    "certify:cash-lock": "tsx scripts/certification/cash-management-production-lock.ts",
+    "certify:finance-lock": "tsx scripts/certification/finance-production-lock.ts",
+    "certify:receivables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=receivables",
     "certify:payables-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payables",
     "certify:expenses-lock": "tsx scripts/certification/finance-production-lock.ts --scope=expenses",
     "certify:payments-lock": "tsx scripts/certification/finance-production-lock.ts --scope=payments",
-    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts"
+    "certify:receipts-lock": "tsx scripts/certification/receipt-production-lock.ts",
+    "certify:customers-lock": "tsx scripts/certification/customers-contacts-production-lock.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.42.0",
