@@ -4879,7 +4879,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.send({ success: true, data: result[0] });
   });
 
-  // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
+    // Authoritative pricing configuration. All mutations are tenant+branch scoped and audited.
   server.get("/api/v1/pricing/price-lists", async (req) => {
     const ctx = requireCommercialPermission(req, "PRICING_MANAGE", "pricing.manage");
     const rows = await prisma.priceList.findMany({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId }, orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }] });
@@ -4989,7 +4989,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: row });
   });
 
-  server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
+server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
     const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
@@ -4998,13 +4998,13 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
       const allowed = permissions.includes("*") || permissions.includes("discount.manage") || permissions.includes("sales.discount") ||
         roles.some((r: string) => ["ADMIN","OWNER","SUPER_ADMIN","SUPERADMIN","MANAGER","BRANCH_MANAGER"].includes(r));
-      if (!allowed) throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      if (!allowed) throw new Error("DISCOUNT_MANAGE_REQUIRED");
     }
     const result = atomicCommercialFinance
       ? await atomicCommercialFinance.createSale(ctx, validated)
       : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
-  });
+  });;
 
   server.get("/api/v1/retail/replenishment", async (req, reply) => {
     const { globalRetailService } = await import("./services/retailService.js");
