@@ -59,15 +59,36 @@ jobs:
           }
           console.log(`RELEASE_RECOVERY_OK: version=${p.version}, latestTag=${latest}`);
           NODE
-      - name: Skip release commits
+      - name: Detect release commit state
         id: guard
         shell: bash
         run: |
           set -euo pipefail
           subject="$(git log -1 --pretty=%s)"
+          version="$(node -p "require('./package.json').version")"
+          release_commit=false
+
+          # Direct release commit.
           if [[ "$subject" =~ ^chore\(release\):\ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            release_commit=true
+          else
+            # Release PRs merge as "Merge pull request #N ...". Treat the
+            # merge commit as the authoritative release commit when its
+            # second parent is the generated chore(release) commit.
+            parents="$(git rev-list --parents -n 1 HEAD)"
+            if [[ "$(echo "$parents" | awk '{print NF-1}')" -ge 2 ]]; then
+              release_parent="$(echo "$parents" | awk '{print $3}')"
+              release_subject="$(git log -1 --pretty=%s "$release_parent")"
+              if [[ "$release_subject" == "chore(release): v${version}" ]]; then
+                release_commit=true
+              fi
+            fi
+          fi
+
+          if [[ "$release_commit" == "true" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Release commit detected: $subject"
+            echo "release_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "Release state detected for $GITHUB_SHA: $subject"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -135,11 +156,40 @@ jobs:
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$RELEASE_BRANCH" --title "chore(release): v${VERSION}" --body "Automated protected release candidate for ${VERSION}. Source main SHA: ${GITHUB_SHA}. Release candidate SHA: ${RELEASE_SHA}. All repository-required gates must pass before merge.")"
           echo "release_pr=$(gh pr view "$PR_URL" --repo "$GITHUB_REPOSITORY" --json number --jq '.number')" >> "$GITHUB_OUTPUT"
           echo "Release PR opened: $PR_URL"
+      - name: Wait for required CI gates before production certification
+        if: steps.guard.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.guard.outputs.release_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml security-scan.yml; do
+            echo "Waiting for $workflow to complete successfully for $RELEASE_SHA"
+            passed=false
+            for attempt in $(seq 1 90); do
+              state="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$RELEASE_SHA" --limit 1 --json status,conclusion --jq 'if length == 0 then "MISSING" elif .[0].status != "completed" then ("RUNNING:" + (.[0].status // "")) else ("COMPLETED:" + (.[0].conclusion // "")) end')"
+              echo "[$workflow] attempt $attempt/90 -> $state"
+              case "$state" in
+                COMPLETED:success)
+                  passed=true
+                  break
+                  ;;
+                COMPLETED:*)
+                  echo "RELEASE_BLOCKED: $workflow completed unsuccessfully: $state"
+                  exit 1
+                  ;;
+              esac
+              sleep 10
+            done
+            [[ "$passed" == "true" ]] || { echo "RELEASE_BLOCKED: timeout waiting for $workflow to pass for $RELEASE_SHA"; exit 1; }
+          done
+
       - name: Dispatch exact production certification
         if: steps.guard.outputs.skip == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ steps.guard.outputs.release_sha || github.sha }}
         run: |
           set -euo pipefail
           gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input - <<EOF

@@ -7,6 +7,8 @@ All notable changes to KwakoPos will be documented in this file.
 ## [2.13.0] - 2026-10-08
 
 ### ✨ New Features
+- **tax**: apply Tax and Fiscalization Production Lock v1
+- **bundle**: carry bundle definition version in sale contract
 - **receipts**: expose print audit authority
 - **receipts**: add production thermal printer driver
 - **finance**: enforce Finance Production Lock in exact-main certification
@@ -130,6 +132,21 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **tax**: enforce POS tax authority in production lock
+- **tax**: refresh backdated-production-lock.ts PosPage lock hash
+- **tax**: refresh sales-production-lock.ts PosPage lock hash
+- **bundle**: refresh inventory lock for bundle stock and sync
+- **bundle**: fix async bundle production invariant
+- **bundle**: refresh authoritative sale hash after offline check hardening
+- **bundle**: update CASH-MANAGEMENT lock for production repository hash
+- **bundle**: update DASHBOARD-ANALYTICS lock for production repository hash
+- **bundle**: refresh bundle closure test lock hash
+- **bundle**: cover component scope and bundle COGS snapshot
+- **bundle**: refresh offline bundle production lock
+- **bundle**: lock sync-side bundle definition validation hashes
+- **bundle**: export bundle resolver from database package
+- **bundle**: extend sales production lock to bundles and kits
+- **bundle**: lock availability expansion and refund safety invariants
 - **release**: v2.13.0 (#96)
 - **ci**: refresh backdated lock workflow hashes
 - **ci**: refresh shared production lock hashes
@@ -700,6 +717,23 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **tax**: close final POS tax-authority loophole
+- **tax**: make POS tax rate configuration-authoritative
+- **bundle**: keep authoritative component cost on offline sync
+- **bundle**: reject stale offline bundle definitions deterministically
+- **bundle**: use stable definition version for offline sales
+- **bundle**: version bundle definitions for offline synchronization
+- **bundle**: snapshot bundle definition version in offline sales
+- **bundle**: use exported bundle validator in sync authority
+- **bundle**: enforce bundle definition integrity during sync
+- **bundle**: remove unused bundle resolver import
+- **bundle**: validate definitions at the sync authority boundary
+- **bundle**: validate bundle definitions and show availability
+- **bundle**: make offline POS stock deductions component-aware
+- **bundle**: enforce local bundle availability and recursive-safe expansion
+- **bundle**: reverse refunds from immutable bundle sale snapshots
+- **bundle**: expand authoritative sales into component stock ledger
+- **bundle**: add authoritative bundle definition resolver
 - **pos**: close backdated sale UI visibility loop (#118)
 - **reports**: apply production report lock
 - **reports**: apply verified production-lock remediation to current mainline
