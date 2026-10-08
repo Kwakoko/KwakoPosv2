@@ -9,8 +9,8 @@ function ctxOf(req: FastifyRequest) {
     tenantId: String(ctx.tenantId),
     branchId: String(ctx.branchId),
     userId: String(ctx.userId),
-    roles: Array.isArray(ctx.roles) ? ctx.roles.map(String) : [],
-    permissions: Array.isArray(ctx.permissions) ? ctx.permissions.map(String) : [],
+    roles: Array.isArray(ctx.roles) ? ctx.roles.map((role: any) => String(role)) : [],
+    permissions: Array.isArray(ctx.permissions) ? ctx.permissions.map((permission: any) => String(permission)) : [],
   };
 }
 
