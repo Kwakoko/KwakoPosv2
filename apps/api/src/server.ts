@@ -328,6 +328,27 @@ function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VI
   if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
   return ctx;
 }
+function requireEmployeePermission(req: FastifyRequest, permission: "EMPLOYEE_VIEW" | "EMPLOYEE_CREATE" | "EMPLOYEE_EDIT" | "EMPLOYEE_ARCHIVE"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toLowerCase()));
+  const isOwner = roles.some((role) => ["OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const compatiblePermissions = permission === "EMPLOYEE_VIEW" ? ["staff.view", "users.manage"] : ["users.manage"];
+  const allowed = isOwner || permissions.has("*") || permissions.has(permission.toLowerCase()) || compatiblePermissions.some((value) => permissions.has(value)) || permissions.has("admin:*");
+  if (!allowed) throw new Error(`FORBIDDEN: ${permission} permission required`);
+  return ctx;
+}
+
+function requireWorkforcePermission(req: FastifyRequest, permission: "WORKFORCE_VIEW" | "WORKFORCE_EDIT"): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).trim().toUpperCase()) : [];
+  const permissions = new Set((Array.isArray(ctx.permissions) ? ctx.permissions : []).map((value) => String(value).trim().toUpperCase()));
+  const isAdmin = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+  const canView = isAdmin || permissions.has("*") || permissions.has("ADMIN:*") || permissions.has("WORKFORCE_VIEW") || permissions.has("USERS.MANAGE") || permissions.has("STAFF.VIEW");
+  const canEdit = canView && (permission === "WORKFORCE_VIEW" || isAdmin || permissions.has("WORKFORCE_EDIT") || permissions.has("USERS.MANAGE") || permissions.has("STAFF.MANAGE"));
+  if (!(permission === "WORKFORCE_VIEW" ? canView : canEdit)) throw new Error("FORBIDDEN: " + permission + " permission required");
+  return ctx;
+}
 
 /** Options accepted by buildServer for test injection and programmatic use. */
 export interface BuildServerOptions {
@@ -2835,6 +2856,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return {
       ...expense,
       amount: Number(expense.amount),
+      employeeId: expense.employeeId || null,
       incurredAt: expense.incurredAt instanceof Date ? expense.incurredAt.toISOString() : expense.incurredAt,
       createdAt: expense.createdAt instanceof Date ? expense.createdAt.toISOString() : expense.createdAt,
       updatedAt: expense.updatedAt instanceof Date ? expense.updatedAt.toISOString() : expense.updatedAt,
@@ -3421,25 +3443,25 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Departments
   server.get("/api/v1/workforce/departments", async (req) => {
-    const departments = await workforceRepository.getDepartments(req.tenantContext!);
+    const departments = await workforceRepository.getDepartments(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: departments };
   });
 
   server.post("/api/v1/workforce/departments", async (req, reply) => {
     const validated = CreateDepartmentRequestSchema.parse(req.body);
-    const department = await workforceRepository.createDepartment(req.tenantContext!, validated);
+    const department = await workforceRepository.createDepartment(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: department });
   });
 
   // Job Positions
   server.get("/api/v1/workforce/positions", async (req) => {
-    const positions = await workforceRepository.getJobPositions(req.tenantContext!);
+    const positions = await workforceRepository.getJobPositions(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: positions };
   });
 
   server.post("/api/v1/workforce/positions", async (req, reply) => {
     const validated = CreateJobPositionRequestSchema.parse(req.body);
-    const position = await workforceRepository.createJobPosition(req.tenantContext!, validated);
+    const position = await workforceRepository.createJobPosition(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: position });
   });
 
@@ -3487,59 +3509,59 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Shift Templates & Schedules
   server.get("/api/v1/workforce/shifts/templates", async (req) => {
-    const templates = await workforceRepository.getShiftTemplates(req.tenantContext!);
+    const templates = await workforceRepository.getShiftTemplates(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: templates };
   });
 
   server.post("/api/v1/workforce/shifts/templates", async (req, reply) => {
     const validated = CreateShiftTemplateRequestSchema.parse(req.body);
-    const template = await workforceRepository.createShiftTemplate(req.tenantContext!, validated);
+    const template = await workforceRepository.createShiftTemplate(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: template });
   });
 
   server.get("/api/v1/workforce/schedules", async (req) => {
-    const schedules = await workforceRepository.getSchedules(req.tenantContext!);
+    const schedules = await workforceRepository.getSchedules(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: schedules };
   });
 
   server.post("/api/v1/workforce/schedules", async (req, reply) => {
     const validated = CreateWorkforceScheduleRequestSchema.parse(req.body);
-    const schedule = await workforceRepository.createSchedule(req.tenantContext!, validated);
+    const schedule = await workforceRepository.createSchedule(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: schedule });
   });
 
   // Attendance & Time Tracking
   server.get("/api/v1/workforce/attendance", async (req) => {
-    const records = await workforceRepository.getAttendanceRecords(req.tenantContext!);
+    const records = await workforceRepository.getAttendanceRecords(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: records };
   });
 
   server.post("/api/v1/workforce/attendance/clock-in", async (req, reply) => {
     const validated = ClockInRequestSchema.parse(req.body);
-    const record = await workforceRepository.clockIn(req.tenantContext!, validated);
+    const record = await workforceRepository.clockIn(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/attendance/:id/clock-out", async (req) => {
     const validated = ClockOutRequestSchema.parse(req.body);
-    const record = await workforceRepository.clockOut(req.tenantContext!, (req.params as any).id, validated);
+    const record = await workforceRepository.clockOut(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id, validated);
     return { success: true, data: record };
   });
 
   // Timesheets
   server.get("/api/v1/workforce/timesheets", async (req) => {
-    const timesheets = await workforceRepository.getTimesheets(req.tenantContext!);
+    const timesheets = await workforceRepository.getTimesheets(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: timesheets };
   });
 
   server.post("/api/v1/workforce/timesheets", async (req, reply) => {
     const validated = CreateTimesheetRequestSchema.parse(req.body);
-    const timesheet = await workforceRepository.generateTimesheet(req.tenantContext!, validated);
+    const timesheet = await workforceRepository.generateTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: timesheet });
   });
 
   server.post("/api/v1/workforce/timesheets/:id/approve", async (req) => {
-    const approved = await workforceRepository.approveTimesheet(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
@@ -3646,47 +3668,47 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Commissions
   server.get("/api/v1/workforce/commissions", async (req) => {
-    const commissions = await workforceRepository.getCommissions(req.tenantContext!);
+    const commissions = await workforceRepository.getCommissions(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: commissions };
   });
 
   server.post("/api/v1/workforce/commissions", async (req, reply) => {
     const validated = CreateCommissionRecordRequestSchema.parse(req.body);
-    const record = await workforceRepository.recordCommission(req.tenantContext!, validated);
+    const record = await workforceRepository.recordCommission(requireWorkforcePermission(req, "WORKFORCE_EDIT"), validated);
     return reply.status(201).send({ success: true, data: record });
   });
 
   server.post("/api/v1/workforce/commissions/:id/approve", async (req) => {
-    const approved = await workforceRepository.approveCommission(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approveCommission(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Payroll Inputs
   server.get("/api/v1/workforce/payroll-inputs", async (req) => {
-    const inputs = await workforceRepository.getPayrollInputs(req.tenantContext!);
+    const inputs = await workforceRepository.getPayrollInputs(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: inputs };
   });
 
   server.post("/api/v1/workforce/payroll-inputs/from-timesheet", async (req, reply) => {
     const { employeeId, timesheetId } = (req.body as any) || {};
-    const input = await workforceRepository.generatePayrollInputFromTimesheet(req.tenantContext!, employeeId, timesheetId);
+    const input = await workforceRepository.generatePayrollInputFromTimesheet(requireWorkforcePermission(req, "WORKFORCE_EDIT"), employeeId, timesheetId);
     return reply.status(201).send({ success: true, data: input });
   });
 
   server.post("/api/v1/workforce/payroll-inputs/:id/approve", async (req) => {
-    const approved = await workforceRepository.approvePayrollInput(req.tenantContext!, (req.params as any).id);
+    const approved = await workforceRepository.approvePayrollInput(requireWorkforcePermission(req, "WORKFORCE_EDIT"), (req.params as any).id);
     return { success: true, data: approved };
   });
 
   // Workforce Dashboard & Analytics
   server.get("/api/v1/workforce/dashboard", async (req) => {
-    const dashboard = await workforceRepository.getDashboardSummary(req.tenantContext!);
+    const dashboard = await workforceRepository.getDashboardSummary(requireWorkforcePermission(req, "WORKFORCE_VIEW"));
     return { success: true, data: dashboard };
   });
 
   server.get("/api/v1/workforce/analytics", async (req) => {
     const period = (req.query as any)?.period || "2026-08";
-    const report = await workforceRepository.getAnalyticsReport(req.tenantContext!, period);
+    const report = await workforceRepository.getAnalyticsReport(requireWorkforcePermission(req, "WORKFORCE_VIEW"), period);
     return { success: true, data: report };
   });
 
