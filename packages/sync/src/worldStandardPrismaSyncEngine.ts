@@ -2001,23 +2001,36 @@ const now = new Date();
       };
     }
 
-    let deleteSql = `FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3`;
-    const params: any[] = [ctx.tenantId, ctx.branchId, safeRevision];
+    const hasAgeLimit = typeof maxAgeDays === "number" && maxAgeDays > 0;
+    const cutoffDate = hasAgeLimit
+      ? new Date(Date.now() - Number(maxAgeDays) * 24 * 60 * 60 * 1000)
+      : null;
 
-    if (typeof maxAgeDays === "number" && maxAgeDays > 0) {
-      const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
-      deleteSql += ` AND created_at < $4`;
-      params.push(cutoffDate);
-    }
-
-    const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
-      `SELECT COUNT(*)::text AS count ${deleteSql}`,
-      ...params,
-    );
-    const prunedCount = Number(countRows[0]?.count || 0);
-
-    if (!dryRun && prunedCount > 0) {
-      await prisma.$executeRawUnsafe(`DELETE ${deleteSql}`, ...params);
+    let prunedCount = 0;
+    if (hasAgeLimit && cutoffDate) {
+      const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+        "SELECT COUNT(*)::text AS count FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3 AND created_at < $4",
+        ctx.tenantId, ctx.branchId, safeRevision, cutoffDate,
+      );
+      prunedCount = Number(countRows[0]?.count || 0);
+      if (!dryRun && prunedCount > 0) {
+        await prisma.$executeRawUnsafe(
+          "DELETE FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3 AND created_at < $4",
+          ctx.tenantId, ctx.branchId, safeRevision, cutoffDate,
+        );
+      }
+    } else {
+      const countRows = await prisma.$queryRawUnsafe<Array<{ count: string | bigint | number }>>(
+        "SELECT COUNT(*)::text AS count FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3",
+        ctx.tenantId, ctx.branchId, safeRevision,
+      );
+      prunedCount = Number(countRows[0]?.count || 0);
+      if (!dryRun && prunedCount > 0) {
+        await prisma.$executeRawUnsafe(
+          "DELETE FROM sync_change_journal WHERE tenant_id = $1 AND branch_id = $2 AND revision < $3",
+          ctx.tenantId, ctx.branchId, safeRevision,
+        );
+      }
     }
 
     return {
