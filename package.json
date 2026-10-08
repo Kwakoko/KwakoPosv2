@@ -96,6 +96,7 @@
     "certify:integration": "tsx scripts/certification/runIntegrationCertification.ts",
     "certify:documents": "tsx scripts/certification/runDocumentCertification.ts",
     "certify:security-risk": "tsx scripts/certification/runSecurityCertification.ts",
+    "certify:security-platform-lock": "tsx scripts/certification/security-platform-production-lock.ts",
     "certify:notifications": "tsx scripts/certification/runNotificationCertification.ts",
     "certify:notifications-lock": "tsx scripts/certification/notification-production-lock.ts",
     "certify:compliance-risk": "tsx scripts/certification/runComplianceCertification.ts",
