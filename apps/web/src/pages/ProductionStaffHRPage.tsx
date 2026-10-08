@@ -21,8 +21,8 @@ const Field: React.FC<{ label: string; value: string; onChange: (v: string) => v
   <label className="v2-flex v2-flex-col v2-gap-1 v2-text-xs"><span className="v2-text-muted">{label}</span><input className="v2-input" type={type} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} /></label>
 );
 
-const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "ghost" | "danger" }> = ({ tone = "ghost", className = "", children, ...props }) => (
-  <button {...props} className={"v2-btn v2-btn-sm " + (tone === "primary" ? "v2-btn-primary" : tone === "danger" ? "v2-btn-danger" : "v2-btn-ghost") + " " + className}>{children}</button>
+const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "primary" | "ghost" | "danger" }> = ({ tone = "ghost", className = "", children, onClick, type = "button", ...props }) => (
+  <button {...props} type={type} onClick={onClick} aria-label={props["aria-label"] || "Staff HR action"} title={props.title || "Staff HR action"} className={"v2-btn v2-btn-sm " + (tone === "primary" ? "v2-btn-primary" : tone === "danger" ? "v2-btn-danger" : "v2-btn-ghost") + " " + className}>{children}</button>
 );
 
 export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ activeTab }) => {
@@ -227,7 +227,7 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
       {error && <div className="v2-alert v2-alert-danger v2-mb-4"><AlertTriangle size={16} /> {error}</div>}
       <div className="v2-flex v2-gap-1 v2-flex-wrap v2-mb-4" style={{ overflowX: "auto" }}>
         {(["Overview","Employees","Org Structure","Attendance","Shifts","Payroll Prep","Staff Expenses","Commission","Activity & Audit","Permissions"] as Tab[]).map((t) => (
-          <button key={t} type="button" className={"sector-pill" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>{t}</button>
+          <button key={t} type="button" className={"sector-pill" + (tab === t ? " active" : "")} onClick={() => setTab(t)} aria-label={t} title={t}>{t}</button>
         ))}
       </div>
 
