@@ -6416,7 +6416,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     try {
       const ctx = requireTenantContext(req);
-      const body = ApprovalRequestSchema.parse(req.body);
+      const body = ApprovalRequestSchema.parse(req.body) as any;
       const result = globalEnterpriseApprovalsService.submitRequest({
         ...body,
         tenantId: ctx.tenantId,
@@ -6434,7 +6434,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     try {
       const ctx = requireAdminContext(req);
-      const body = ApprovalDecisionSchema.parse(req.body);
+      const body = ApprovalDecisionSchema.parse(req.body) as any;
       const result = globalEnterpriseApprovalsService.recordDecision({ ...body, approverId: ctx.userId, approverRole: String(ctx.roles?.[0] || "ADMIN"), tenantId: ctx.tenantId });
       return reply.status(result.success ? 200 : 422).send(result);
     } catch (error) {
