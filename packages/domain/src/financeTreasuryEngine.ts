@@ -478,11 +478,12 @@ export class FinanceTreasuryEngine {
     return { success: true, run };
   }
 
-  public performLiquidityCheck(runId: string, availableLiquidity: number): {
+  public performLiquidityCheck(runId: string, availableLiquidity: number, tenantId?: string): {
     success: boolean; passed?: boolean; shortfall?: number; error?: string;
   } {
     const run = this.paymentRuns.get(runId);
     if (!run) return { success: false, error: "Payment run not found" };
+    if (tenantId && run.tenantId !== tenantId) return { success: false, error: "Payment run is outside the authenticated tenant." };
 
     const policy = this._getEffectivePolicy("LIQUIDITY", run.currency);
     const minimumBuffer = policy?.minimumLiquidityBuffer ?? 0;
@@ -523,7 +524,7 @@ export class FinanceTreasuryEngine {
     return { success: true };
   }
 
-  public executePaymentRun(runId: string, executorId: string): {
+  public executePaymentRun(runId: string, executorId: string, tenantId?: string): {
     success: boolean; executionRef?: string; error?: string;
   } {
     const run = this.paymentRuns.get(runId);
