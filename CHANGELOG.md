@@ -4,9 +4,38 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-10-06
+## [2.13.0] - 2026-10-08
 
 ### ✨ New Features
+- **receipts**: expose print audit authority
+- **receipts**: add production thermal printer driver
+- **finance**: enforce Finance Production Lock in exact-main certification
+- **audit**: wire finance audit locks 5 6 7 and 9
+- **audit**: wire finance audit locks into certification gates
+- **audit**: wire finance audit locks into certification gates
+- **audit**: register finance audit lock commands
+- **audit**: add scoped finance audit lock gates
+- **finance**: apply Finance Accounting Production Lock v1
+- **finance**: add Finance Accounting Production Lock v1
+- **cash**: apply Cash Management Production Lock v1 on current main (#111)
+- **customers**: show contact audit history in customer profile
+- **sync**: complete customer supplier contact lifecycle on current main
+- **sync**: add durable CustomerContact IndexedDB replica on current main
+- **sync**: register CustomerContact and contact snapshots
+- **customers**: add authoritative customer contacts API to current main
+- **customers**: port customer contacts lock artifact
+- **customers**: add customer contacts lock artifact
+- **customers**: add customer contacts lock artifact
+- **customers**: add customer contacts lock artifact
+- **customers**: port customer contacts lock artifact
+- **customers**: add customer contacts lock artifact
+- **sync**: port contact IndexedDB migration
+- **suppliers**: port supplier profile history workspace
+- **customers**: port customer contacts workspace onto current main
+- **pos**: add first-class backdated sales workflow
+- **pos**: carry certified backdated sales onto current main
+- **cert**: add foundation production lock gate
+- **security**: add production destructive-operation step-up guard
 - **inventory**: add Inventory Production Lock v1 gate
 - **inventory**: add Inventory Production Lock v1 gate
 - **inventory**: add Inventory Production Lock v1 gate
@@ -101,6 +130,132 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **release**: v2.13.0 (#96)
+- **ci**: refresh backdated lock workflow hashes
+- **ci**: refresh shared production lock hashes
+- **ci**: refresh shared production lock hashes
+- **ci**: refresh shared production lock hashes
+- **ci**: refresh shared production lock hashes
+- **ci**: refresh shared production lock hashes for report authority
+- **ci**: refresh shared production lock hashes for report authority
+- **ci**: refresh shared production lock hashes for report authority
+- **ci**: refresh shared production lock hashes for report authority
+- **reports**: enforce Reports production lock in production workflows
+- **reports**: enforce Reports production lock in production workflows
+- **reports**: enforce Reports production lock in release workflows
+- **reports**: lock historical scope isolation and production gates
+- **receipts**: assert printer facade contract
+- **receipts**: add offline sync acceptance coverage
+- **receipts**: include sync and schema authority checks
+- **certification**: enforce Receipt Store production lock in CI
+- **certification**: enforce Receipt Store production lock in CI
+- **certification**: enforce Receipt Store production lock in CI
+- **certification**: register Receipt Store production lock
+- **receipts**: add Receipt Store production lock gate
+- **receipts**: add production lock acceptance tests
+- **lock**: refresh exact-main workflow pin
+- **lock**: refresh exact-main workflow pin
+- **lock**: refresh exact-main workflow pin
+- **lock**: refresh exact-main workflow pin
+- **lock**: refresh exact-main workflow pin
+- **lock**: refresh shared pins after finance audit gate wiring
+- **lock**: refresh shared pins after finance audit gate wiring
+- **lock**: refresh shared pins after finance audit gate wiring
+- **lock**: refresh CI quality gate pin
+- **lock**: refresh CI quality gate pin
+- **lock**: refresh shared Finance source pins
+- **lock**: refresh shared Finance source pins
+- **lock**: refresh shared Finance source pins
+- **lock**: refresh shared server pin after finance compile fix
+- **lock**: refresh shared server pin after finance compile fix
+- **lock**: refresh backdated contracts pin after finance contract hardening
+- **lock**: refresh cash finance invariant pin
+- **lock**: refresh shared server and contracts pins after finance authority hardening
+- **lock**: refresh shared server and contracts pins after finance authority hardening
+- **finance**: refresh shared production-lock pins
+- **finance**: refresh shared production-lock pins
+- **finance**: refresh shared production-lock pins
+- **finance**: enforce Finance Production Lock gate
+- **finance**: enforce Finance Production Lock gate
+- **finance**: add Finance Production Lock command
+- **core**: Merge pull request #108 from Kwakoko/fix/customers-contacts-production-lock-v2
+- **lock**: refresh sync-engine pin after customer contact SQL fix
+- **lock**: refresh sync-engine pin after customer contact SQL fix
+- **lock**: refresh sync-engine pin after customer contact SQL fix
+- **customers**: cast contact id regression query
+- **lock**: refresh shared sync-engine pin after customer remediation
+- **lock**: refresh shared sync-engine pin after customer remediation
+- **lock**: refresh inventory sync-engine pin after customer sync remediation
+- **core**: refresh server lock after test-mode repository boundary fix
+- **core**: align IndexedDB lock with current canonical blob
+- **core**: align IndexedDB lock with current canonical blob
+- **core**: refresh IndexedDB lock after legacy bootstrap fix
+- **core**: refresh IndexedDB lock after legacy bootstrap fix
+- **release**: update PWA schema expectation to v7
+- **core**: refresh server lock after test-mode boundary fix
+- **core**: refresh client sync lock after final migration import fix
+- **core**: refresh client sync lock after final migration import fix
+- **core**: refresh client sync lock after import fix
+- **core**: refresh client sync lock after import fix
+- **core**: refresh client sync lock after legacy DB migration fix
+- **core**: refresh client sync lock after legacy DB migration fix
+- **core**: refresh sync-core lock after type fixes
+- **core**: refresh sync-core lock after type fixes
+- **core**: refresh sync-core lock after type fixes
+- **core**: advance sales and backdated shared lock pins
+- **core**: advance sales and backdated shared lock pins
+- **core**: advance shared sync lock pins for customer contact sync
+- **core**: advance shared sync lock pins for customer contact sync
+- **core**: advance shared sync lock pins for customer contact sync
+- **core**: refresh shared CI lock after customer gate wiring
+- **core**: refresh shared CI lock after customer gate wiring
+- **navigation**: pin intentional supplier history surface change
+- **customers**: align lock gate with current sales financial authority
+- **customers**: enforce Customers Contacts Production Lock v1
+- **release**: set manifest PWA schema to v7
+- **customers**: align production lock with migration implementation
+- **customers**: run lock regression against PostgreSQL mode
+- **release**: align authoritative PWA schema to v7
+- **customers**: add Customers Contacts production lock command
+- **release**: extend foundation lock for contact schema v7
+- **release**: generate manifests with PWA schema v7
+- **customers**: promote PWA schema authority to v7
+- **release**: port PWA schema v7 compatibility
+- **customers**: port lock changes onto current main
+- **customers**: port lock changes onto current main
+- **customers**: port lock changes onto current main
+- **customers**: port lock changes onto current main
+- **core**: Merge PR #99: close Foundation P0/P1 and apply Production Lock
+- **release**: update PWA schema expectation to v6
+- **cert**: keep navigation lock package surface unchanged
+- **cert**: enforce foundation production lock on every main change
+- **cert**: register foundation production lock
+- **catalog**: account for cascade control fixture reassignments
+- **catalog**: close branch isolation fixture
+- **core**: Merge pull request #97 from Kwakoko/remediation/backdated-closed-loop-20261006
+- **backdated**: refresh inventory lock evidence
+- **backdated**: refresh backdated lock evidence
+- **backdated**: correct PostgreSQL historical lookup and period fixture
+- **backdated**: align lock marker with scoped invariant
+- **sync**: align reverse-flow expected convergence with non-negative stock
+- **backdated**: refresh inventory evidence hashes
+- **backdated**: refresh backdated evidence hashes
+- **sync**: seed valid stock for non-negative convergence scenario
+- **backdated**: bind client timestamp preservation into lock
+- **backdated**: preserve occurredAt through payload normalization
+- **backdated**: refresh unit regression evidence hash
+- **backdated**: close permission, insertion, and lineage regressions
+- **backdated**: refresh lock after accounting-period parity fix
+- **backdated**: refresh Prisma lock evidence hash
+- **backdated**: refresh lock evidence after invariant fixes
+- **backdated**: refresh production lock evidence hashes
+- **backdated**: lock closed-period sync protection
+- **backdated**: add Backdated Inventory Production Lock v1
+- **backdated**: require backdated lock in exact-main release
+- **backdated**: require backdated lock in candidate certification
+- **backdated**: gate CI with dedicated production lock
+- **backdated**: add production lock certification command
+- **backdated**: certify historical sync and governance boundaries
 - **core**: Merge pull request #93 from Kwakoko/production-lock/inventory-v1-main-20261006
 - **core**: Merge pull request #91 from Kwakoko/fix/auto-semver-stale-release-recovery
 - **core**: Merge pull request #89 from Kwakoko/fix/inventory-p0-p1-closed-loop
@@ -545,6 +700,135 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **pos**: close backdated sale UI visibility loop (#118)
+- **reports**: apply production report lock
+- **reports**: apply verified production-lock remediation to current mainline
+- **reports**: apply verified production-lock remediation to current mainline
+- **reports**: apply verified production-lock remediation to current mainline
+- **reports**: apply verified production-lock remediation to current mainline
+- **receipts**: close Receipt Store production blockers
+- **certification**: rebaseline navigation lock for Receipt facade import
+- **receipts**: route UI API calls through application facade
+- **certification**: rebaseline cash lock for Receipt share default
+- **certification**: stabilize Receipt lock contract markers
+- **certification**: close Backdated lock hash literals
+- **certification**: close Dashboard lock hash literal
+- **certification**: rebaseline backdated lock for Receipt hooks
+- **certification**: rebaseline dashboard lock for Receipt certification hooks
+- **certification**: rebaseline navigation lock for Receipt changes
+- **receipts**: provide audited browser fallback for reprint
+- **certification**: correct Receipt lock marker syntax
+- **receipts**: align persisted share log default status
+- **receipts**: align ReceiptShareLog default status
+- **receipts**: enforce branch isolation on retrieval
+- **receipts**: restore test-double share implementation
+- **receipts**: use authoritative print and honest share flows
+- **receipts**: add truthful print audit and sharing routes
+- **receipts**: make print share audit authoritative
+- **finance**: enforce Finance lock in exact-main certification
+- **finance**: add Finance lock to exact-main production certification
+- **finance**: bind Finance Production Lock to exact-main certification
+- **ci**: repair Finance gate insertion and required quality workflow
+- **finance**: finalize contracts imports
+- **finance**: export tax creation contract
+- **finance**: remove duplicate Prisma invoice getters
+- **finance**: repair API contract import syntax
+- **finance**: repair Prisma finance repository duplicate and aging methods
+- **finance**: import authoritative tax request contract
+- **finance**: contract input VAT balance sheet field
+- **finance**: bind Finance workspace to authoritative statements
+- **finance**: close allocation and account-seeding gaps
+- **finance**: include input VAT in balance sheet
+- **finance**: enforce finance RBAC and expose cash flow, tax, audit APIs
+- **finance**: add authoritative cash flow statement
+- **finance**: make PostgreSQL finance authority atomic and auditable
+- **finance**: add tax, bank offset, and cash flow contracts
+- **finance**: add VAT input account and posting validation
+- **finance**: harden journal amount and period invariants
+- **customers**: search contacts by role and department
+- **sync**: align contact foreign-key SQL types
+- **customers**: align contact foreign-key SQL types
+- **sync**: cast customer contact UUID parameters
+- **customers**: cast contact UUID SQL parameters
+- **sync**: preserve legacy IndexedDB bootstrap compatibility
+- **api**: preserve test repository mode while auditing production mutations
+- **sync**: import authoritative IndexedDB schema version
+- **sync**: migrate legacy client DBs before revisioned contact apply
+- **cert**: preserve v5-v6 and v6-v7 migration guarantees
+- **crm-cert**: align contact fixture with production contract
+- **customers**: restore payment posting state declaration
+- **sync**: type raw query result collections explicitly
+- **customers**: align contact query and receipt history types
+- **crm**: supply complete authoritative contact defaults
+- **customers**: declare payment state and label icon controls
+- **customers**: close UI accessibility and payment-state gaps
+- **ci**: run customer lock certification without package script drift
+- **certification**: avoid breaking established package lock pin
+- **customers**: close export route handler syntax
+- **release**: align PWA asset builder with schema v7
+- **sync**: remove invalid generic arguments on untyped raw queries
+- **crm**: satisfy contact branch and non-null contact fields
+- **customers**: align contact customer FK with text customer IDs
+- **sync**: include contacts in authoritative bootstrap replacement
+- **customers**: classify customer business-rule errors as 400
+- **sync**: deliver contacts through revision and timestamp delta paths
+- **sync**: include CustomerContact in authoritative snapshot and delta streams
+- **sync**: route CustomerContact changes into local replica
+- **sales**: close Sales Production Lock P0/P1 lifecycle (#101)
+- **cert**: make cleanup step-up lock assertion syntax-safe
+- **sync**: complete PWA schema 5-to-6 compatibility
+- **ci**: invoke foundation lock without package manifest drift
+- **ci**: bind PWA build to immutable CI commit SHA
+- **build**: make destructive cleanup step-up context type-safe
+- **ci**: make finance hardening assertion workspace-safe
+- **release**: remove stale committed production certification metadata
+- **security**: make finance hardener assertion-only
+- **security**: gate destructive cleanup with step-up
+- **security**: gate destructive rollback execution with step-up
+- **legal**: confine login test bypass to test runtime
+- **security**: enforce server-authoritative admin identity and step-up scope
+- **legal**: isolate test-only acceptance endpoints
+- **legal**: remove synthetic compliance data
+- **tenant**: remove production legal test bypass
+- **release**: update container manifest schema
+- **release**: update manifest PWA schema authority
+- **foundation**: bind PWA build to exact release metadata
+- **foundation**: converge browser release compatibility
+- **foundation**: converge authoritative PWA schema
+- **foundation**: harden release identity
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: advance lifecycle test lock hash
+- **catalog**: advance backdated inventory lock
+- **catalog**: advance inventory production lock
+- **catalog**: advance navigation lock for hardened Inventory
+- **catalog**: repair category brand delete callback syntax
+- **catalog**: close hierarchy guard in sync
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **catalog**: close Categories and Brands lifecycle loop
+- **backdated**: preserve baseline Prisma stock invariant for normal movements
+- **backdated**: scope Prisma generic negative guard to retroactive movements
+- **backdated**: scope non-negative guard to retroactive movements only
+- **backdated**: preserve occurredAt through offline payload normalization
+- **release-lock**: reconcile Inventory lock with Backdated remediation
+- **backdated**: reject closed accounting periods on direct adjustment path
+- **release-lock**: reconcile dashboard lock with current certification hooks
+- **release-lock**: reconcile navigation lock with certification hooks
+- **backdated**: restore generic movement unit cost declaration
+- **backdated**: align sync period protection with authoritative repository
+- **backdated**: restore convergence test closure
+- **backdated**: keep current projection correct after retroactive movement
+- **backdated**: close in-memory retroactive movement governance
+- **backdated**: close generic movement governance path
+- **backdated**: preserve historical timestamps and enforce server invariants
+- **backdated**: enforce server invariants and correct historical lineage
+- **backdated**: enforce permission and historical ledger lineage
+- **backdated**: close retroactive balance validation gap
+- **backdated**: add explicit inventory backdate permission
 - **inventory**: correct clean-state lock markers
 - **inventory**: reconcile dashboard lock with shared gates
 - **inventory**: reconcile navigation lock with inventory gates
