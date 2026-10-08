@@ -1439,11 +1439,36 @@ const now = new Date();
       Expense: "expenses",
       CustomerContact: "customer_contacts",
     };
-    const table = tableByType[entityType];
-    if (!table) return;
-    const rows = await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = $1 AND "tenantId" = $2 AND "branchId" = $3 FOR UPDATE`,
-      entityId, ctx.tenantId, ctx.branchId,
-    ) as Array<{ id: string }>;
+    const queryArgs = [entityId, ctx.tenantId, ctx.branchId] as const;
+    let rows: Array<{ id: string }>;
+    switch (entityType) {
+      case "Product":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "products" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "ProductVariant":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "product_variants" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Customer":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "customers" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Supplier":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "suppliers" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Category":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "categories" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Brand":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "brands" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "Expense":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "expenses" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      case "CustomerContact":
+        rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "customer_contacts" WHERE id = ${queryArgs[0]} AND "tenantId" = ${queryArgs[1]} AND "branchId" = ${queryArgs[2]} FOR UPDATE`;
+        break;
+      default:
+        return;
+    }
     if (!rows.length) throw new Error("SYNC_CONFLICT_ENTITY_NOT_FOUND");
   }
 
