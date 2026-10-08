@@ -87,15 +87,15 @@ export function verifyTotpCode(secret: string, code: string, timestamp = Date.no
 
 async function consumeSuperAdminTotp(userId: string, code: string): Promise<boolean> {
   await ensureSuperAdminSecurity(userId);
-  const rows = await prisma.$queryRaw<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean }[]>\`SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required FROM platform_super_admin_security WHERE user_id = ${userId}\`;
+  const rows = await prisma.$queryRaw<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean }[]>`SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required FROM platform_super_admin_security WHERE user_id = ${userId}`;
   const state = rows[0];
   if (!state || !state.mfa_required) return true;
   if (!state.mfa_enrolled || !state.mfa_secret_ciphertext) return false;
   const counter = findValidTotpCounter(decryptSecret(state.mfa_secret_ciphertext), code);
   if (counter === null) return false;
-  const updated = await prisma.$executeRaw\`UPDATE platform_super_admin_security
+  const updated = await prisma.$executeRaw`UPDATE platform_super_admin_security
     SET last_totp_counter = ${counter}, updated_at = NOW()
-    WHERE user_id = ${userId} AND (last_totp_counter IS NULL OR last_totp_counter < ${counter})\`;
+    WHERE user_id = ${userId} AND (last_totp_counter IS NULL OR last_totp_counter < ${counter})`;
   return Number(updated) === 1;
 }
 
