@@ -86,6 +86,8 @@ jobs:
         run: npm run test:sync
       - name: Version Sync Certification
         run: npm run certify:version-sync
+      - name: SemVer Production Lock
+        run: npm run certify:semver-lock
       - name: Commit Contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Reports Production Lock
