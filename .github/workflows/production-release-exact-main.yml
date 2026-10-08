@@ -141,8 +141,38 @@ jobs:
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
 
+      - name: Start local API for executable security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-exact-main-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-exact-main-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-exact-main-security-api.log
+          exit 1
       - name: Execute Phase 12 Security & Compliance Certification Engine
+        env:
+          KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"
         run: npm run certify:security
+      - name: Stop local API
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/kwakopos-exact-main-security-api.pid ]]; then
+            kill "$(cat /tmp/kwakopos-exact-main-security-api.pid)" 2>/dev/null || true
+          fi
+          pkill -P "$(cat /tmp/kwakopos-exact-main-security-api.pid 2>/dev/null)" 2>/dev/null || true
 
       - name: Run synthetic monitoring
         run: npx tsx scripts/ops/synthetic-monitor.ts
