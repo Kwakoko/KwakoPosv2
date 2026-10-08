@@ -168,7 +168,7 @@ export const AdministrationPage: React.FC<{ onNavigate?: (path: string) => void 
     setLoading(true);
     setError(null);
     try {
-      const [tenantRes, branchRes, usersRes, rolesRes, plansRes, subRes, invoiceRes, kpiRes, moduleRes, settingsRes, auditRes] = await Promise.all([
+      const [tenantRes, branchRes, usersRes, rolesRes, plansRes, subRes, invoiceRes, moduleRes, settingsRes, auditRes] = await Promise.all([
         apiFetch<{ success: boolean; data: TenantState }>(`/api/v1/onboarding/tenants/${currentTenantId}`),
         apiFetch<{ success: boolean; data: BranchRecord[] }>("/api/v1/branches"),
         apiFetch<{ success: boolean; data: UserRecord[] }>("/api/v1/users"),
