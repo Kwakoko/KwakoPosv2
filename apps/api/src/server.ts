@@ -6665,10 +6665,66 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     });
   });
 
+  server.get("/api/v1/notifications", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const query = (req.query as any) || {};
+    const scope = query.scope === "super-admin" ? "SUPER_ADMIN" : "TENANT";
+    if (scope === "SUPER_ADMIN") requireSuperAdminContext(req);
+    const data = await globalNotificationService.list(ctx, scope, Number(query.limit || 100));
+    return reply.status(200).send({ success: true, data: { notifications: data } });
+  });
+
+  server.post("/api/v1/notifications/:id/read", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const { id } = req.params as { id: string };
+    const data = await globalNotificationService.markRead(ctx, id);
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications/read-all", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireTenantContext(req);
+    const scope = (req.body as any)?.scope;
+    const data = await globalNotificationService.markAllRead(ctx, scope === "SUPER_ADMIN" || scope === "TENANT" ? scope : undefined);
+    return reply.status(200).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireAdminContext(req);
+    const body = z.object({
+      recipientUserId: z.string().uuid().optional(),
+      branchId: z.string().uuid().nullable().optional(),
+      scope: z.enum(["TENANT", "SUPER_ADMIN"]).default("TENANT"),
+      category: z.enum(["SYSTEM","INVENTORY","PAYMENT","APPROVAL","SYNC","POS","SUPPORT","SECURITY","FLEET"]),
+      severity: z.enum(["CRITICAL","WARNING","INFO"]).default("INFO"),
+      channel: z.enum(["SMS","EMAIL","PUSH","WHATSAPP","IN_APP"]).default("IN_APP"),
+      title: z.string().trim().min(1).max(200),
+      description: z.string().trim().min(1).max(2000),
+      actionPath: z.string().trim().optional(),
+      actionLabel: z.string().trim().optional(),
+      dedupeKey: z.string().trim().min(1).max(300).optional(),
+    }).parse(req.body);
+    if (body.scope === "SUPER_ADMIN") requireSuperAdminContext(req);
+    const data = await globalNotificationService.publish(ctx, body);
+    return reply.status(201).send({ success: true, data });
+  });
+
+  server.post("/api/v1/notifications/:id/retry", async (req, reply) => {
+    const { globalNotificationService } = await import("./services/notificationService.js");
+    const ctx = requireAdminContext(req);
+    const { id } = req.params as { id: string };
+    const data = await globalNotificationService.retryOne(ctx, id);
+    return reply.status(200).send({ success: true, data });
+  });
+
   server.get("/api/v1/notifications/health", async (req, reply) => {
     const { globalNotificationService } = await import("./services/notificationService.js");
-    const tenantId = resolveTenantId(req, (req.query as any)?.tenantId);
-    return reply.status(200).send({ success: true, data: globalNotificationService.getHealthSummary(tenantId) });
+    const ctx = requireTenantContext(req);
+    const data = await globalNotificationService.getHealthSummary(ctx);
+    return reply.status(200).send({ success: true, data });
   });
 
   server.get("/api/v1/compliance/health", async (req, reply) => {

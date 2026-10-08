@@ -1338,110 +1338,8 @@ export interface ShellNotification {
   timeAgo: string;
   actionPath?: string;
   actionLabel?: string;
-  read?: boolean;
+  readAt?: string | null;
 }
-
-const SUPER_ADMIN_FALLBACK_NOTIFICATIONS: ShellNotification[] = [
-  {
-    id: "sa-fleet-bravados",
-    scope: "SUPER_ADMIN",
-    category: "FLEET",
-    severity: "INFO",
-    title: "Tenant Fleet: Bravados PUB",
-    description: "Status: ACTIVE • Core bar, pos, inventory entitlements registered in cloud DB.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "5 min ago",
-    actionPath: "/tenant-onboarding",
-    actionLabel: "View Fleet",
-  },
-  {
-    id: "sa-incident-sync",
-    scope: "SUPER_ADMIN",
-    category: "INCIDENT",
-    severity: "CRITICAL",
-    title: "Autonomous Signal: Sync Failures Monitor",
-    description: "Real-time background scanner operating across multi-tenant fleet.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "15 min ago",
-    actionPath: "/super-admin/support",
-    actionLabel: "Support Tower",
-  },
-  {
-    id: "sa-sec-compliance",
-    scope: "SUPER_ADMIN",
-    category: "SECURITY",
-    severity: "WARNING",
-    title: "Super Admin Step-Up Shield Active",
-    description: "Multi-factor authentication & step-up policies enforced for platform controls.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "Active",
-    actionPath: "/super-admin/compliance",
-    actionLabel: "Compliance",
-  },
-  {
-    id: "sa-telemetry-mig",
-    scope: "SUPER_ADMIN",
-    category: "SYSTEM",
-    severity: "INFO",
-    title: "Cluster Migrations 0001-0005 Verified",
-    description: "Support operations, idempotency & fleet tables verified in cloud DB.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "Healthy",
-    actionPath: "/diagnostics",
-    actionLabel: "Telemetry",
-  },
-];
-
-const TENANT_FALLBACK_NOTIFICATIONS: ShellNotification[] = [
-  {
-    id: "tn-stock-alert",
-    scope: "TENANT",
-    category: "INVENTORY",
-    severity: "WARNING",
-    title: "Low Stock Alert: Panadol 500mg",
-    description: "8 units remaining in branch inventory, below reorder threshold (10 units).",
-    timestamp: new Date().toISOString(),
-    timeAgo: "2 min ago",
-    actionPath: "/inventory",
-    actionLabel: "Restock",
-  },
-  {
-    id: "tn-sync-ledger",
-    scope: "TENANT",
-    category: "SYNC",
-    severity: "INFO",
-    title: "Branch Ledger Synchronized",
-    description: "All local offline transactions pushed and verified by cloud ledger.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "20 min ago",
-    actionPath: "/pos",
-    actionLabel: "Sync Status",
-  },
-  {
-    id: "tn-new-cust",
-    scope: "TENANT",
-    category: "POS",
-    severity: "INFO",
-    title: "New Customer: John Mbeki",
-    description: "Customer profile registered and available on POS terminals.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "1 hr ago",
-    actionPath: "/customers",
-    actionLabel: "View Customer",
-  },
-  {
-    id: "tn-cash-reconcile",
-    scope: "TENANT",
-    category: "POS",
-    severity: "INFO",
-    title: "Register Float & Session Active",
-    description: "Opening float verified. Cash drawer ready for transactions.",
-    timestamp: new Date().toISOString(),
-    timeAgo: "2 hr ago",
-    actionPath: "/pos",
-    actionLabel: "Register",
-  },
-];
 
 const NotificationsPanel: React.FC<{
   onClose: () => void;
@@ -1466,14 +1364,6 @@ const NotificationsPanel: React.FC<{
   const [activeCategory, setActiveCategory] = useState<string>("ALL");
   const [notifications, setNotifications] = useState<ShellNotification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [readIds, setReadIds] = useState<Set<string>>(() => {
-    try {
-      const stored = localStorage.getItem("kwakopos_read_notifications");
-      return stored ? new Set(JSON.parse(stored)) : new Set<string>();
-    } catch {
-      return new Set<string>();
-    }
-  });
 
   // Fetch notifications from API with fallback
   useEffect(() => {
@@ -1484,14 +1374,14 @@ const NotificationsPanel: React.FC<{
       try {
         const scopeParam = activeScope === "SUPER_ADMIN" ? "super-admin" : "tenant";
         const res = await apiFetch<any>(`/api/v1/notifications?scope=${scopeParam}`);
-        if (isMounted && res?.data?.notifications && Array.isArray(res.data.notifications)) {
+        if (isMounted && Array.isArray(res?.data?.notifications)) {
           setNotifications(res.data.notifications);
         } else if (isMounted) {
-          setNotifications(activeScope === "SUPER_ADMIN" ? SUPER_ADMIN_FALLBACK_NOTIFICATIONS : TENANT_FALLBACK_NOTIFICATIONS);
+          setNotifications([]);
         }
       } catch {
         if (isMounted) {
-          setNotifications(activeScope === "SUPER_ADMIN" ? SUPER_ADMIN_FALLBACK_NOTIFICATIONS : TENANT_FALLBACK_NOTIFICATIONS);
+          setNotifications([]);
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -1504,29 +1394,31 @@ const NotificationsPanel: React.FC<{
 
   // Update parent unread count
   useEffect(() => {
-    const unread = notifications.filter((n) => !readIds.has(n.id)).length;
+    const unread = notifications.filter((n) => !n.readAt).length;
     onUnreadCountChange?.(unread);
-  }, [notifications, readIds, onUnreadCountChange]);
+  }, [notifications, onUnreadCountChange]);
 
-  const markAllRead = () => {
-    const updated = new Set(readIds);
-    notifications.forEach((n) => updated.add(n.id));
-    setReadIds(updated);
+  const markAllRead = async () => {
     try {
-      localStorage.setItem("kwakopos_read_notifications", JSON.stringify(Array.from(updated)));
+      await apiFetch("/api/v1/notifications/read-all", {
+        method: "POST",
+        body: JSON.stringify({ scope: activeScope }),
+      });
+      const readAt = new Date().toISOString();
+      setNotifications((current) => current.map((n) => ({ ...n, readAt })));
     } catch {
-      // localStorage fallback
+      // Keep server-backed state authoritative on the next refresh.
     }
   };
 
-  const handleNotificationClick = (item: ShellNotification) => {
-    const updated = new Set(readIds);
-    updated.add(item.id);
-    setReadIds(updated);
-    try {
-      localStorage.setItem("kwakopos_read_notifications", JSON.stringify(Array.from(updated)));
-    } catch {
-      // localStorage fallback
+  const handleNotificationClick = async (item: ShellNotification) => {
+    if (!item.readAt) {
+      try {
+        await apiFetch(`/api/v1/notifications/${encodeURIComponent(item.id)}/read`, { method: "POST" });
+      } catch {
+        return;
+      }
+      setNotifications((current) => current.map((n) => n.id === item.id ? { ...n, readAt: new Date().toISOString() } : n));
     }
     if (item.actionPath) {
       onNavigate(item.actionPath);
@@ -1540,11 +1432,11 @@ const NotificationsPanel: React.FC<{
     return notifications.filter((n) => n.category === activeCategory);
   }, [notifications, activeCategory]);
 
-  const unreadCount = filtered.filter((n) => !readIds.has(n.id)).length;
+  const unreadCount = filtered.filter((n) => !n.readAt).length;
 
   const categories = activeScope === "SUPER_ADMIN"
-    ? ["ALL", "FLEET", "INCIDENT", "SECURITY", "SUPPORT"]
-    : ["ALL", "INVENTORY", "POS", "SYNC", "SUPPORT"];
+    ? ["ALL", "FLEET", "INCIDENT", "SECURITY", "SYSTEM", "SUPPORT"]
+    : ["ALL", "INVENTORY", "PAYMENT", "APPROVAL", "SYNC", "SYSTEM", "POS", "SUPPORT"];
 
   return (
     <div className="dropdown-panel notif-panel" role="dialog" aria-label="Notifications">
@@ -1645,7 +1537,7 @@ const NotificationsPanel: React.FC<{
           </div>
         ) : (
           filtered.map((item) => {
-            const isRead = readIds.has(item.id);
+            const isRead = Boolean(item.readAt);
             const iconName = item.category === "FLEET" ? "Building"
               : item.category === "INCIDENT" ? "AlertTriangle"
               : item.category === "SECURITY" ? "Shield"
