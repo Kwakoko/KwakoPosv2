@@ -22,8 +22,8 @@ export class AiNativeService {
     return globalAiNativeEngine.generateRecommendation(input);
   }
 
-  public validatePolicy(recommendationId: string, rules: { maxLimitUsd: number; proposedLimitUsd: number }): AiPolicyValidationResult {
-    return globalAiNativeEngine.validatePolicy(recommendationId, rules);
+  public validatePolicy(recommendationId: string, rules: { maxLimitUsd: number; proposedLimitUsd: number }, tenantId?: string): AiPolicyValidationResult {
+    return globalAiNativeEngine.validatePolicy(recommendationId, rules, tenantId);
   }
 
   public executeAction(
@@ -42,8 +42,8 @@ export class AiNativeService {
     return globalAiNativeEngine.getAiCommandCenterSummary();
   }
 
-  public getLedger(): AiActionLedgerEntry[] {
-    return globalAiNativeEngine.getLedger();
+  public getLedger(tenantId?: string): AiActionLedgerEntry[] {
+    return globalAiNativeEngine.getLedger(tenantId);
   }
 }
 
