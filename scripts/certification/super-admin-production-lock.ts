@@ -71,6 +71,7 @@ requireText("apps/api/src/services/superAdminSecurityService.ts", "issuer: getJw
 requireText("apps/api/src/services/superAdminSecurityService.ts", "audience: getJwtAudience()");
 const currentOtpMarker = ["current","Otp"].join("");
 requireAbsent("apps/api/src/services/superAdminSecurityService.ts", currentOtpMarker);
+requireAbsent("apps/api/src/services/superAdminSecurityService.ts", "verifyWebAuthnResponse", "mock WebAuthn verification is forbidden in production security paths");
 
 // 8. No client-side email-based platform-root bypass.
 for (const file of [
@@ -96,7 +97,11 @@ requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "getReleaseIdenti
 requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-admin/support/control-tower", "support control tower");
 requireText("apps/api/src/routes/supportControlTowerRoutes.ts", "/api/v1/super-admin/support/tenants/:tenantId/health", "support tenant health");
 requireText("packages/database/prisma/schema.prisma", "model PlatformAuditEvent", "platform audit schema model");
+for (const workflow of [".github/workflows/ci.yml", ".github/workflows/production-certification.yml", ".github/workflows/production-release-exact-main.yml"]) {
+  requireText(workflow, "npm run certify:super-admin", "Super Admin lock release gate");
+}
 requireText("scripts/certification/foundation-production-lock.ts", "scripts/certification/super-admin-production-lock.ts", "Foundation invokes Super Admin lock");
+requireText("packages/database/prisma/migrations/202610080004_super_admin_production_lock/migration.sql", "BEFORE UPDATE OR DELETE ON platform_audit_events", "append-only platform audit ledger");
 requireText("apps/api/src/server.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform Super Admin route guard");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")', "emergency kill switch step-up");
