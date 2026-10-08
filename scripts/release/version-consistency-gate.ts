@@ -36,9 +36,11 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
 
   // 2. Check release-manifest.json synchronization
   let manifestSync = false;
+  let manifestCertificationStatus = "UNKNOWN";
   const manifestPath = path.resolve(process.cwd(), "release-manifest.json");
   if (fs.existsSync(manifestPath)) {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    manifestCertificationStatus = manifest.certification || "UNKNOWN";
     if (manifest.version === targetVersion && manifest.tag === targetTag) {
       manifestSync = true;
     } else {
@@ -47,7 +49,6 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
       );
     }
   } else {
-    // If not existing yet, create or warn
     errors.push("release-manifest.json does not exist. Must be generated before promotion.");
   }
 
@@ -97,10 +98,13 @@ export async function runVersionConsistencyGate(targetUrl?: string): Promise<Ver
   console.log(` [1/3] package.json valid SemVer: ${checks.packageJsonVersionValid}`);
   console.log(` [2/3] release-manifest.json synchronized: ${checks.releaseManifestSynchronized}`);
   console.log(` [3/3] Runtime config synchronized: ${checks.runtimeConfigSynchronized}`);
+  console.log(`[INFO] Release Manifest Certification Status: ${manifestCertificationStatus}`);
 
   if (passed) {
     console.log("========================================================================");
     console.log(` 🎉 VERSION CONSISTENCY GATE: 100% SUCCESS (${targetVersion})`);
+    console.log(`    ⚠️  NOTE: Manifest certification status is "${manifestCertificationStatus}"`);
+    console.log(`    This is a version consistency check only. Certification must be granted via exact-main gate.`);
     console.log("========================================================================");
   } else {
     console.error("========================================================================");
