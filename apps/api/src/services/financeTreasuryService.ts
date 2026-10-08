@@ -59,8 +59,8 @@ export class FinanceTreasuryService {
     return globalFinanceTreasuryEngine.createPaymentRun(params);
   }
 
-  public performLiquidityCheck(runId: string, availableLiquidity: number) {
-    return globalFinanceTreasuryEngine.performLiquidityCheck(runId, availableLiquidity);
+  public performLiquidityCheck(runId: string, availableLiquidity: number, tenantId?: string) {
+    return globalFinanceTreasuryEngine.performLiquidityCheck(runId, availableLiquidity, tenantId);
   }
 
   public approvePaymentRun(runId: string, approvalRef: string, approvedBy: string) {
