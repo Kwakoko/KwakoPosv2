@@ -98,6 +98,16 @@ jobs:
         run: npx tsx scripts/certification/conflict-center-production-lock.ts
       - name: Inventory Production Lock v1
         run: npm run certify:inventory-lock
+      - name: Customers / Contacts Production Lock v1
+        run: npx tsx scripts/certification/customers-contacts-production-lock.ts
+      - name: Sales Production Lock v1
+        run: npm run certify:sales-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Backdated Inventory Production Lock
+        run: npm run certify:backdated-lock
       - name: Module Contract
         run: npx tsx scripts/release/verify-kwakopos-modules.ts
       - name: Release Quality Gates
