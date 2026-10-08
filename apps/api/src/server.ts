@@ -5707,9 +5707,18 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { recommendationId, maxLimitUsd, proposedLimitUsd } = req.body as any;
-    const res = globalAiNativeService.validatePolicy(recommendationId, { maxLimitUsd: maxLimitUsd || 5000, proposedLimitUsd: proposedLimitUsd || 1200 });
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        recommendationId: z.string().trim().min(1).max(128),
+        maxLimitUsd: z.number().finite().nonnegative(),
+        proposedLimitUsd: z.number().finite().nonnegative(),
+      }).strict().parse(req.body);
+      const res = globalAiNativeService.validatePolicy(body.recommendationId, { maxLimitUsd: body.maxLimitUsd, proposedLimitUsd: body.proposedLimitUsd }, ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_POLICY_REJECTED", message: error instanceof Error ? error.message : "AI policy validation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
@@ -5732,7 +5741,8 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   server.get("/api/v1/ai-native/ledger", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
     requireAdminContext(req);
-    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger(ctx.tenantId) });
   });
 
   server.get("/api/v1/ai-native/dashboard", async (req, reply) => {
