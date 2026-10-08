@@ -7,6 +7,10 @@ type AnyRow = Record<string, any>;
 
 const money = (v: number) => "Tsh " + Math.round(Number(v || 0)).toLocaleString();
 
+async function mutate<T = AnyRow>(url: string, init: RequestInit): Promise<{ success: boolean; data?: T; error?: { message?: string } }> {
+  return apiFetch<{ success: boolean; data?: T; error?: { message?: string } }>(url, init);
+}
+
 async function getData<T = AnyRow[]>(url: string): Promise<T> {
   const r = await apiFetch<{ success: boolean; data: T; error?: { message?: string } }>(url);
   if (!r.success) throw new Error((r.error && r.error.message) || ("Request failed: " + url));
@@ -126,21 +130,21 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
 
   const createDepartment = async () => {
     if (!deptName.trim() || !deptCode.trim()) return;
-    const r = await apiFetch("/api/v1/workforce/departments", { method: "POST", body: JSON.stringify({ name: deptName.trim(), code: deptCode.trim() }) });
+    const r = await mutate("/api/v1/workforce/departments", { method: "POST", body: JSON.stringify({ name: deptName.trim(), code: deptCode.trim() }) });
     if (!r.success) throw new Error("Department creation was rejected.");
     setDeptName(""); setDeptCode(""); await load();
   };
 
   const createPosition = async () => {
     if (!positionTitle.trim() || !positionCode.trim()) return;
-    const r = await apiFetch("/api/v1/workforce/positions", { method: "POST", body: JSON.stringify({ title: positionTitle.trim(), positionCode: positionCode.trim(), departmentId: positionDept || undefined }) });
+    const r = await mutate("/api/v1/workforce/positions", { method: "POST", body: JSON.stringify({ title: positionTitle.trim(), positionCode: positionCode.trim(), departmentId: positionDept || undefined }) });
     if (!r.success) throw new Error("Position creation was rejected.");
     setPositionTitle(""); setPositionCode(""); await load();
   };
 
   const createEmployee = async () => {
     if (!employeeNumber.trim() || !employeeFirst.trim() || !employeeLast.trim()) return;
-    const r = await apiFetch("/api/v1/workforce/employees", {
+    const r = await mutate("/api/v1/workforce/employees", {
       method: "POST",
       body: JSON.stringify({
         employeeNumber: employeeNumber.trim(), firstName: employeeFirst.trim(), lastName: employeeLast.trim(),
@@ -154,32 +158,32 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
 
   const createShift = async () => {
     if (!shiftName.trim()) return;
-    const r = await apiFetch("/api/v1/workforce/shifts/templates", { method: "POST", body: JSON.stringify({ name: shiftName.trim(), startTime: shiftStart, endTime: shiftEnd, workdays: [1,2,3,4,5,6], breakDurationMinutes: 60, requiredHeadcount: 1 }) });
+    const r = await mutate("/api/v1/workforce/shifts/templates", { method: "POST", body: JSON.stringify({ name: shiftName.trim(), startTime: shiftStart, endTime: shiftEnd, workdays: [1,2,3,4,5,6], breakDurationMinutes: 60, requiredHeadcount: 1 }) });
     if (!r.success) throw new Error("Shift creation was rejected.");
     setShiftName(""); await load();
   };
 
   const createSchedule = async () => {
     if (!scheduleEmployee || !scheduleDate) return;
-    const r = await apiFetch("/api/v1/workforce/schedules", { method: "POST", body: JSON.stringify({ employeeId: scheduleEmployee, shiftTemplateId: scheduleShift || undefined, date: scheduleDate, startTime: scheduleStart, endTime: scheduleEnd, status: "PUBLISHED" }) });
+    const r = await mutate("/api/v1/workforce/schedules", { method: "POST", body: JSON.stringify({ employeeId: scheduleEmployee, shiftTemplateId: scheduleShift || undefined, date: scheduleDate, startTime: scheduleStart, endTime: scheduleEnd, status: "PUBLISHED" }) });
     if (!r.success) throw new Error("Schedule creation was rejected.");
     await load();
   };
 
   const clockIn = async (employeeId: string) => {
-    const r = await apiFetch("/api/v1/workforce/attendance/clock-in", { method: "POST", body: JSON.stringify({ employeeId, method: "STANDARD", idempotencyKey: "hr-" + employeeId + "-" + Date.now() }) });
+    const r = await mutate("/api/v1/workforce/attendance/clock-in", { method: "POST", body: JSON.stringify({ employeeId, method: "STANDARD", idempotencyKey: "hr-" + employeeId + "-" + Date.now() }) });
     if (!r.success) throw new Error("Clock-in was rejected.");
     await load();
   };
 
   const clockOut = async (recordId: string) => {
-    const r = await apiFetch("/api/v1/workforce/attendance/" + recordId + "/clock-out", { method: "POST", body: JSON.stringify({}) });
+    const r = await mutate("/api/v1/workforce/attendance/" + recordId + "/clock-out", { method: "POST", body: JSON.stringify({}) });
     if (!r.success) throw new Error("Clock-out was rejected.");
     await load();
   };
 
   const approveCommission = async (id: string) => {
-    const r = await apiFetch("/api/v1/workforce/commissions/" + id + "/approve", { method: "POST", body: "{}" });
+    const r = await mutate("/api/v1/workforce/commissions/" + id + "/approve", { method: "POST", body: "{}" });
     if (!r.success) throw new Error("Commission approval was rejected.");
     await load();
   };
@@ -187,7 +191,7 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
   const createCommission = async () => {
     if (!commissionEmployee || !commissionSales || !commissionRate) return;
     const period = new Date().toISOString().slice(0, 7);
-    const r = await apiFetch("/api/v1/workforce/commissions", { method: "POST", body: JSON.stringify({ employeeId: commissionEmployee, period, salesAmount: Number(commissionSales), commissionRate: Number(commissionRate) }) });
+    const r = await mutate("/api/v1/workforce/commissions", { method: "POST", body: JSON.stringify({ employeeId: commissionEmployee, period, salesAmount: Number(commissionSales), commissionRate: Number(commissionRate) }) });
     if (!r.success) throw new Error("Commission creation was rejected.");
     setCommissionSales(""); setCommissionRate(""); await load();
   };
@@ -195,7 +199,7 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
   const createStaffExpense = async () => {
     if (!expenseEmployee || !expenseAmount || !expenseReason.trim()) return;
     const employee = employees.find((e) => e.id === expenseEmployee);
-    const r = await apiFetch("/api/v1/expenses", {
+    const r = await mutate("/api/v1/expenses", {
       method: "POST",
       body: JSON.stringify({
         category: expenseCategory, amount: Number(expenseAmount), reason: expenseReason.trim(),
@@ -209,7 +213,7 @@ export const ProductionStaffHRPage: React.FC<{ activeTab?: string }> = ({ active
   };
 
   const approvePayroll = async (id: string) => {
-    const r = await apiFetch("/api/v1/workforce/payroll-inputs/" + id + "/approve", { method: "POST", body: "{}" });
+    const r = await mutate("/api/v1/workforce/payroll-inputs/" + id + "/approve", { method: "POST", body: "{}" });
     if (!r.success) throw new Error("Payroll approval was rejected.");
     await load();
   };
