@@ -77,7 +77,7 @@ async function recordFiscalAudit(
       action,
       entityType,
       entityId,
-      metadata,
+      metadata: metadata as any,
     },
   });
 }
