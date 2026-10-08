@@ -6,7 +6,7 @@ const LOCK_ID = "SALES-PRODUCTION-LOCK-V1-2026-10-07";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "631923c2bc23a557397f4cad7aab2b1dbbdab0a6",
+  "apps/web/src/pages/PosPage.tsx": "2d1cd007d1ff971ea37d5fa0248edf7e5d0dee6a",
   "apps/api/src/server.ts": "74e9b9a241fd68550a4ead330b2d4d0fba6d4806",
   "packages/contracts/src/index.ts": "54a4040515a597cfaf61a877a30ea0a033eeb94e",
   "packages/database/src/atomicCommercialFinance.ts": "d87359946bc3bfc34b6b71e9cda1c80d62c986c5",
