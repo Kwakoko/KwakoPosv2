@@ -2,13 +2,15 @@ import React, { useEffect, useState } from "react";
 import { Activity, RefreshCw, Shield, Server, CreditCard, ScrollText } from "lucide-react";
 import { apiFetch } from "../services/applicationApiService.js";
 
-type Tab = "subscriptions" | "health" | "audit" | "security";
+type Tab = "tenants" | "subscriptions" | "health" | "audit" | "security";
 export const SuperAdminLiveControlPlane: React.FC<{ tab: Tab }> = ({ tab }) => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const endpoint = tab === "subscriptions"
+  const endpoint = tab === "tenants"
+    ? "/api/v1/super-admin/tenants"
+    : tab === "subscriptions"
     ? "/api/v1/super-admin/subscriptions"
     : tab === "audit"
       ? "/api/v1/super-admin/audit"
@@ -25,17 +27,41 @@ export const SuperAdminLiveControlPlane: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   useEffect(() => { void load(); }, [endpoint]);
 
-  const renderJson = () => (
-    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "0.78rem", lineHeight: 1.5, maxHeight: 520, overflow: "auto" }}>
-      {JSON.stringify(data, null, 2)}
-    </pre>
-  );
+  const renderJson = () => {
+    if (tab === "tenants" && Array.isArray(data)) {
+      return (
+        <div style={{ display: "grid", gap: "0.65rem" }}>
+          {data.map((tenant: any) => (
+            <div key={tenant.tenantId} className="v2-card" style={{ padding: "0.85rem", border: "1px solid var(--surface-border)" }}>
+              <div className="v2-flex v2-items-center v2-justify-between">
+                <div>
+                  <div className="v2-text-sm v2-font-bold">{tenant.name}</div>
+                  <div className="v2-text-xs v2-text-muted">{tenant.tenantId} · {tenant.slug || "no slug"}</div>
+                </div>
+                <span className="badge">{tenant.status}</span>
+              </div>
+              <div className="v2-text-xs v2-text-muted" style={{ marginTop: "0.5rem" }}>
+                Branches {tenant.branchCount} · Users {tenant.userCount} · Products {tenant.productCount} · Sales {tenant.saleCount}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "0.78rem", lineHeight: 1.5, maxHeight: 520, overflow: "auto" }}>
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    );
+  };
 
-  const title = tab === "subscriptions" ? "Live SaaS Subscription Registry"
+  const title = tab === "tenants" ? "Live Tenant Directory"
+    : tab === "subscriptions" ? "Live SaaS Subscription Registry"
     : tab === "audit" ? "Global Platform Audit"
     : tab === "security" ? "Live Super Admin Security Posture"
     : "Live Platform Diagnostics";
-  const icon = tab === "subscriptions" ? <CreditCard size={16} />
+  const icon = tab === "tenants" ? <Server size={16} />
+    : tab === "subscriptions" ? <CreditCard size={16} />
     : tab === "audit" ? <ScrollText size={16} />
     : tab === "security" ? <Shield size={16} />
     : <Server size={16} />;
