@@ -34,6 +34,7 @@
     "superadmin:unlock": "tsx scripts/security/unlock-super-admin.ts",
     "superadmin:qr": "tsx scripts/security/show-qr.ts",
     "certify:offline-sync": "tsx scripts/certification/world-standard-offline-sync-certification.ts",
+    "certify:support-lock": "tsx scripts/certification/support-production-lock.ts",
     "certify:offline-sync-lock": "tsx scripts/certification/offline-sync-production-lock.ts",
     "certify:offline-e2e": "tsx scripts/certification/world-standard-offline-e2e.ts",
     "maintenance:compact-journal": "tsx scripts/maintenance/compact-sync-journal.ts",
