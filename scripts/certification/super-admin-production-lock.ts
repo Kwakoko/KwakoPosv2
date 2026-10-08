@@ -132,6 +132,9 @@ requireAbsent("apps/api/src/server.ts", 'admin@kwakopos.com', "hard-coded platfo
 requireText("apps/web/src/context/KwakoPosContexts.tsx", 'String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "UI platform role boundary");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "permission cannot elevate to platform mode");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("ADMIN:PLATFORM")', "permission cannot elevate to platform mode");
+requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'sessionStorage.getItem("kwakopos:v2:impersonation")', "client storage cannot unlock tenant inspection");
+requireText("apps/web/src/context/KwakoPosContexts.tsx", "useState<ImpersonatedTenant | null>(null)", "tenant impersonation state defaults closed");
+requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", 'String(user?.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "shell platform role boundary");
 requireAbsent("apps/api/src/server.ts", "ADM-001", "fabricated platform actor identity");
 requireAbsent("apps/api/src/server.ts", "ADM-SEC-01", "fabricated emergency actor identity");
 requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isPlatformProvisioner", "platform tenant provisioning authority");
