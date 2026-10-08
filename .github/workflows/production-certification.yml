@@ -54,6 +54,8 @@ jobs:
           git diff --exit-code -- package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Foundation Production Lock A01-A12
+        run: npm run certify:foundation
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
       - name: Reports Production Lock
