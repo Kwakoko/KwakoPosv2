@@ -11,7 +11,7 @@ const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "b1d9bcefde7e22695ce98bfc457fd3dd9193aff4",
-  "apps/web/src/App.tsx": "cbddf5a53aee19e23566617f425bfeb79d67acaa",
+  "apps/web/src/App.tsx": "6d620e8306a1f4121f0a12695001bb4e179c36a7",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
   "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
