@@ -14,8 +14,11 @@ ALTER TABLE "SupportTicket"
   ADD COLUMN IF NOT EXISTS "resolved_by_user_id" TEXT;
 
 UPDATE "SupportTicket"
-SET "priority" = COALESCE(NULLIF("priority", ''), "severity", 'P3')
-WHERE "priority" IS NULL OR "priority" = '';
+SET "priority" = CASE
+  WHEN COALESCE("severity",'P3') IN ('P0','P1','P2','P3','P4') THEN COALESCE("severity",'P3')
+  ELSE 'P3'
+END
+WHERE "priority" IS NULL OR "priority" = '' OR ("priority" = 'P3' AND COALESCE("severity",'P3') <> 'P3');
 
 CREATE OR REPLACE FUNCTION sync_support_ticket_priority()
 RETURNS trigger
