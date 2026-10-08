@@ -97,6 +97,7 @@
     "certify:documents": "tsx scripts/certification/runDocumentCertification.ts",
     "certify:security-risk": "tsx scripts/certification/runSecurityCertification.ts",
     "certify:notifications": "tsx scripts/certification/runNotificationCertification.ts",
+    "certify:notifications-lock": "tsx scripts/certification/notification-production-lock.ts",
     "certify:compliance-risk": "tsx scripts/certification/runComplianceCertification.ts",
     "certify:multisite": "tsx scripts/certification/runMultiSiteCertification.ts",
     "certify:licensing-tenant": "tsx scripts/certification/runLicensingCertification.ts",
