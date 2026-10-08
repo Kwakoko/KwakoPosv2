@@ -2871,8 +2871,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toUpperCase()) : [];
     const isAdmin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
     const hasWildcard = permissions.includes("*");
-    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE");
-    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE");
+    const canView = isAdmin || hasWildcard || permissions.includes("FINANCE_VIEW") || permissions.includes("FINANCE_CREATE") || permissions.includes("WORKFORCE_VIEW");
+    const canCreate = isAdmin || hasWildcard || permissions.includes("FINANCE_CREATE") || permissions.includes("WORKFORCE_EDIT");
     const canVoid = isAdmin || hasWildcard || permissions.includes("JOURNAL_REVERSE");
     const allowed = action === "view" ? canView : action === "create" ? canCreate : canVoid;
     if (!allowed) throw new Error("FORBIDDEN: Expense finance permission required");
