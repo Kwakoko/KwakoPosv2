@@ -63,7 +63,6 @@ requireCheck(api.includes('["http://localhost:5173", "http://127.0.0.1:5173"]'),
 requireCheck(/\/auth\/login[\s\S]{0,180}rateLimit/.test(api) && /\/auth\/refresh[\s\S]{0,180}rateLimit/.test(api), "Authentication endpoints are missing route-level rate limits.");
 requireCheck(api.includes("SameSite=Strict") && api.includes("HttpOnly"), "Refresh cookie is not hardened.");
 
-requireCheck(/\$queryRawUnsafe[\s\S]*\$\{/.test(""), ""); // Explicitly retain a non-bypassable source scan below.
 const tracked = (() => {
   try {
     return execSync("git ls-files apps packages scripts .github", { cwd: ROOT, encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
