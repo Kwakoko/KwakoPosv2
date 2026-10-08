@@ -3536,11 +3536,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>TAXABLE TURNOVER:</span>
-                  <span>{fmtCcy(Number(authoritativeTaxToday?.totals?.netAmount ?? 0))}</span>
+                  <span>{authoritativeTaxToday ? fmtCcy(Number(authoritativeTaxToday.totals?.netAmount ?? 0)) : "—"}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>VAT OUTPUT TAX:</span>
-                  <span>{fmtCcy(Number(authoritativeTaxToday?.totals?.taxAmount ?? 0))}</span>
+                  <span>{authoritativeTaxToday ? fmtCcy(Number(authoritativeTaxToday.totals?.taxAmount ?? 0)) : "—"}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>EXEMPT / ZERO-RATED:</span>
