@@ -955,6 +955,11 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/refresh" && req.method === "POST") {
+        const origin = String(req.headers.origin || "").trim();
+        const allowedOrigins = Array.isArray(corsOrigin) ? new Set(corsOrigin) : new Set([String(corsOrigin)]);
+        if (origin && !allowedOrigins.has(origin)) {
+          return reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_DENIED", message: "Request origin is not authorized." } });
+        }
         const body = (req.body || {}) as RefreshRequestBody;
         const sessionId = String(body.sessionId || "");
         const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
@@ -987,6 +992,11 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/logout" && req.method === "POST") {
+        const origin = String(req.headers.origin || "").trim();
+        const allowedOrigins = Array.isArray(corsOrigin) ? new Set(corsOrigin) : new Set([String(corsOrigin)]);
+        if (origin && !allowedOrigins.has(origin)) {
+          return reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_DENIED", message: "Request origin is not authorized." } });
+        }
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
@@ -1056,11 +1066,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // - allowedHeaders     → all KwakoPos context headers the client sends
   // - exposedHeaders     → headers the client JS is allowed to read from responses
   // - maxAge             → 86400 s (24 h) preflight cache to reduce OPTIONS round-trips
-  const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN
-        ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-        : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
-    : "*";
+  const configuredOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+    : [];
+  const corsOrigin = configuredOrigins.length
+    ? configuredOrigins
+    : isProductionEnv(config)
+      ? ["https://app.kwakopos.com", "https://admin.kwakopos.com"]
+      : ["http://localhost:5173", "http://127.0.0.1:5173"];
   server.register(cors, {
     origin:         corsOrigin,
     credentials:    true,
@@ -1088,7 +1101,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // H-004 + H-006: Register rate-limiting and security headers middleware
   // Must be registered BEFORE route handlers to ensure all routes are protected.
-  server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
+  server.register(registerSecurityMiddleware, {
+    isProduction: isProductionEnv(config),
+    allowedOrigins: Array.isArray(corsOrigin) ? corsOrigin : [String(corsOrigin)],
+  });
 
   // Canonical production authentication boundary + distributed tracing.
   // Register this shared hook before every route so all protected production endpoints,
