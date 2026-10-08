@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Layers, Plus, Save, Trash2 } from "lucide-react";
 import { useBranch, useRbac, useSync, useTenant } from "../context/KwakoPosContexts.js";
 import { useToast } from "../context/ToastContext.js";
+import { getBundleAvailableQuantity } from "../services/inventoryStockService.js";
 
 type ComponentLine = { variantId: string; quantity: number };
 
@@ -30,8 +31,26 @@ export const InventoryBundleWorkspace: React.FC = () => {
       toast.error("Bundle Save Rejected","Inventory permission and a valid bundle variant are required."); return;
     }
     if (!lines.length) { toast.error("Bundle Save Rejected","Add at least one component."); return; }
+    const normalized = lines.map((line) => ({ variantId: String(line.variantId), quantity: Number(line.quantity) }));
+    const seen = new Set<string>();
+    for (const line of normalized) {
+      if (!line.variantId || !Number.isFinite(line.quantity) || line.quantity <= 0) {
+        toast.error("Bundle Save Rejected","Every component must have a positive quantity."); return;
+      }
+      if (line.variantId === selected.id || seen.has(line.variantId)) {
+        toast.error("Bundle Save Rejected","Bundle components must be unique and cannot reference the bundle itself."); return;
+      }
+      const component = variants.find((v:any) => v.id === line.variantId);
+      if (!component || component.tenantId !== currentTenantId || component.branchId !== currentBranchId || component.isActive === false) {
+        toast.error("Bundle Save Rejected","Every component must belong to the current tenant and branch."); return;
+      }
+      if (component.attributes?.__bundle === true || Array.isArray(component.attributes?.bundleComponents)) {
+        toast.error("Bundle Save Rejected","Nested bundles/kits are not supported."); return;
+      }
+      seen.add(line.variantId);
+    }
     const now = new Date().toISOString();
-    const attributes = { ...(selected.attributes || {}), __bundle: true, bundleComponents: lines };
+    const attributes = { ...(selected.attributes || {}), __bundle: true, bundleComponents: normalized };
     const updated = { ...selected, attributes, updatedAt: now };
     const operationId = `bundle-update-${selected.id}-${Date.now()}`;
     const idempotencyKey = `BUNDLE-${selected.id}-${Date.now()}`;
@@ -65,6 +84,7 @@ export const InventoryBundleWorkspace: React.FC = () => {
         <select className="v2-input" value={bundleId} onChange={e=>{setBundleId(e.target.value); const v=variants.find((x:any)=>x.id===e.target.value); setLines(Array.isArray(v?.attributes?.bundleComponents)?v.attributes.bundleComponents:[]);}}>
           <option value="">Select bundle / kit variant</option>{variants.map((v:any)=><option key={v.id} value={v.id}>{v.sku} — {v.name}</option>)}
         </select>
+        <div className="v2-card v2-p-2"><div className="v2-text-xs v2-text-muted">Available bundle units</div><div className="v2-text-lg">{selected && currentTenantId && currentBranchId ? (()=>{ try { return getBundleAvailableQuantity(db, selected.id, currentTenantId, currentBranchId); } catch { return 0; } })() : 0}</div></div>
         <select className="v2-input" value={componentId} onChange={e=>setComponentId(e.target.value)}>
           <option value="">Select component</option>{variants.filter((v:any)=>v.id!==bundleId).map((v:any)=><option key={v.id} value={v.id}>{v.sku} — {v.name}</option>)}
         </select>
