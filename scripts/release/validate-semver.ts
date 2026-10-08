@@ -30,7 +30,6 @@ export function validateCommitMessage(commitMsg: string): CommitValidationResult
     return { commit: commitMsg, isValid: false, isBreaking: false, error: "Empty commit message" };
   }
 
-  // Ignore merge commits
   if (trimmed.startsWith("Merge branch") || trimmed.startsWith("Merge pull request")) {
     return { commit: commitMsg, isValid: true, type: "chore", scope: "merge", isBreaking: false, subject: trimmed };
   }
@@ -137,7 +136,7 @@ export function validateGitCommits(range?: string): SemverValidationReport {
 
 if (process.argv[1]?.endsWith("validate-semver.ts")) {
   const report = validateGitCommits(process.argv[2]);
-  if (report.status === "FAILED" && process.env.STRICT_SEMVER_VALIDATION === "true") {
+  if (report.status === "FAILED") {
     process.exit(1);
   }
 }
