@@ -63,6 +63,8 @@ async function main(): Promise<void> {
   const server = read("apps/api/src/server.ts");
   const context = read("apps/web/src/context/KwakoPosContexts.tsx");
   const securityEngine = read("scripts/certification/security-auth-ux-acceptance-engine.ts");
+  const securityMiddleware = read("apps/api/src/middleware/securityMiddleware.ts");
+  const auth = read("packages/auth/src/index.ts");
 
   requirePass(!loginPage.includes("DEMO_ACCOUNTS"), "LoginPage contains DEMO_ACCOUNTS");
   requirePass(!loginPage.includes("quickFill"), "LoginPage contains demo quick-fill logic");
@@ -70,6 +72,10 @@ async function main(): Promise<void> {
   requirePass(!apiClient.includes("refreshToken?: unknown"), "apiClient contains legacy refresh-token migration typing");
   requirePass(!apiClient.includes("hasOwnProperty.call(parsed, \"refreshToken\")"), "apiClient contains legacy refresh-token migration logic");
   requirePass(!server.includes("data: { accessToken, refreshToken"), "Production login returns refreshToken in JSON");
+  requirePass(!auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]'), "JWT generation contains implicit wildcard privileges");
+  requirePass(!auth.includes('roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"]'), "JWT generation contains implicit ADMIN role");
+  requirePass(server.includes("SameSite=Strict") && securityMiddleware.includes("CSRF_ORIGIN_DENIED"), "Cookie-auth mutation CSRF boundary is missing");
+  requirePass(!securityMiddleware.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]'), "CSP permits inline scripts");
   requirePass(!server.includes("data: { accessToken: rotated.accessToken, refreshToken"), "Production refresh returns refreshToken in JSON");
   requirePass(server.includes("HttpOnly") && server.includes("SameSite=Strict"), "Production refresh cookie is not hardened");
   requirePass(!context.includes("canAccessModule: () => true"), "Module context has permissive default access");
