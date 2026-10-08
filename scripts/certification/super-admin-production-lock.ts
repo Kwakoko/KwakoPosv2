@@ -104,6 +104,9 @@ for (const workflow of [".github/workflows/ci.yml", ".github/workflows/productio
   requireText(workflow, "npm run certify:super-admin", "Super Admin lock release gate");
 }
 requireText("scripts/certification/foundation-production-lock.ts", "scripts/certification/super-admin-production-lock.ts", "Foundation invokes Super Admin lock");
+for (const workflow of [".github/workflows/ci.yml", ".github/workflows/production-certification.yml", ".github/workflows/production-release-exact-main.yml"]) {
+  requireText(workflow, "npm run certify:super-admin", "explicit Super Admin Production Lock gate");
+}
 requireText("packages/database/prisma/migrations/202610080004_super_admin_production_lock/migration.sql", "BEFORE UPDATE OR DELETE ON platform_audit_events", "append-only platform audit ledger");
 requireText("apps/api/src/server.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform Super Admin route guard");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
