@@ -133,6 +133,27 @@ jobs:
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
 
+      - name: Start local API for security acceptance tests
+        shell: bash
+        env:
+          PORT: "3000"
+          HOST: "127.0.0.1"
+          JWT_SECRET: "ci-security-local-only-not-for-production"
+          START_SERVER: "true"
+          SYNC_CERTIFICATION_PRISMA: "true"
+        run: |
+          set -euo pipefail
+          nohup npx tsx apps/api/src/server.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
+          echo $! > /tmp/kwakopos-candidate-security-api.pid
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/kwakopos-candidate-security-api.log
+          exit 1
+
       - name: Execute Phase 12 Security & Compliance Certification Engine
         run: npm run certify:security
 
