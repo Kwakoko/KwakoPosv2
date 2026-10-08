@@ -7,7 +7,7 @@ const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-08";
 
 const LOCKED_BLOBS: Record<string, string> = {
   "package.json": "5ccea97f940b0538bb300ee728efcb0fc95e0f87",
-  ".github/workflows/ci.yml": "d99c23755dad753d43b935d2edc9bbfc2688cced",
+  ".github/workflows/ci.yml": "5511df36c31b327777188f28bf9be6f3837fdd3c",
   ".github/workflows/production-certification.yml": "7d5bdfd034622938431f751988fc30af6e7633ec",
   ".github/workflows/production-release-exact-main.yml": "e9ab455f004ddd2689ec01528eac5f7fbdde2865",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
