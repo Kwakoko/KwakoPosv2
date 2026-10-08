@@ -696,6 +696,7 @@ model Sale {
   saleNumber     String
   customerId     String?
   cashSessionId  String?
+  employeeId     String?
   subtotal       Decimal      @default(0) @db.Decimal(12, 2)
   discountTotal  Decimal      @default(0) @db.Decimal(12, 2)
   taxTotal       Decimal      @default(0) @db.Decimal(12, 2)
@@ -715,6 +716,7 @@ model Sale {
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   customer       Customer?    @relation(fields: [customerId], references: [id])
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  employee       Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   lines          SaleLine[]
   payments       Payment[]
   returns        Return[]
@@ -1759,6 +1761,7 @@ model Employee {
   schedules          WorkforceSchedule[]
   attendanceRecords  AttendanceRecord[]
   timesheets         Timesheet[]
+  staffExpenses      Expense[]
   leaveRequests      LeaveRequest[]
   assignedTasks      WorkforceTask[]
   assignedWorkOrders WorkOrder[]
