@@ -79,7 +79,7 @@ for (const marker of ["taxInclusivePricing", "VAT Pricing Mode", "tra_vfd_config
 for (const marker of ["enqueueTraVfdOutbox", "processTraVfdOutbox", "taxAmount", "taxRate"])
   must(posUi, marker, "POS fiscal path");
 
-for (const marker of ["taxComplianceRows", "/api/v1/finance/tax-compliance", "Tax & TRA EFD Compliance Ledger", "fiscalizationState"])
+for (const marker of ["taxComplianceRows", "/api/v1/finance/tax-compliance", "Tax & TRA EFD Compliance Ledger", "fiscalState"])
   must(reportsUi, marker, "authoritative tax report");
 
 for (const marker of ["authoritativeTaxToday", "/api/v1/finance/tax-compliance"])
