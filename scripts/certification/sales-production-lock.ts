@@ -6,18 +6,18 @@ const LOCK_ID = "SALES-PRODUCTION-LOCK-V2-2026-10-08";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail","Product Bundles / Kits","Bundle definition","Bundle components","Component quantities","Bundle stock availability","Bundle sale","Component stock deduction","Bundle reverse/refund","Bundle reporting","Bundle ledger integrity","Bundle offline synchronization"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "29a81252c2f4d3342541df24278eb2dbea27aaa3",
+  "apps/web/src/pages/PosPage.tsx": "b4930d7df339b105bb417048c8fbfb48ac08a430",
   "apps/api/src/server.ts": "434a3efaa3ac4ecbe580d7b1b1e7da9c4ce289ae",
-  "packages/contracts/src/index.ts": "dc56a06b26b3ff85e1683b835976a6926b2310f4",
-  "packages/database/src/atomicCommercialFinance.ts": "41bf32457252c646ae7980106e981fed8a9d39b5",
+  "packages/contracts/src/index.ts": "55fe00d48292b228f4f7aa176dc8da9bca1d1402",
+  "packages/database/src/atomicCommercialFinance.ts": "8e690c520372f76f5ac73a976c7f39a3bf9f1191",
   "packages/database/src/index.ts": "ec6eab98927d06b4de98ffe63c14a58fbc87ce29",
   "packages/database/src/prismaProductionRepositories.ts": "72575e27a0c6ed11ba808e0aefb09e08a6fc4936",
-  "packages/database/src/bundleInventory.ts": "39c293ee018edd87d32e10fa09f58c3d2f1922f3",
+  "packages/database/src/bundleInventory.ts": "86a69340f7bdaf36304805720ab5461a1d99a3ff",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
   "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
-  "apps/web/src/components/InventoryBundleWorkspace.tsx": "642260ea068cf35af071290e778ada7d84f62a7f",
+  "apps/web/src/components/InventoryBundleWorkspace.tsx": "6f95a91ee619d9ab00c7cc623dfc00a486c72a54",
   "tests/unit/bundle-production-closure.test.ts": "41a5d7753a35d863e3363c0d1e8ae34cd20093fc"
 };
 
@@ -26,9 +26,9 @@ const MARKERS: Array<[string,string,string[]]> = [
   ["pos-tax","apps/web/src/pages/PosPage.tsx",["taxInclusivePricing","selectedTaxRate","cartGrandTotal"]],
   ["pos-offline","apps/web/src/pages/PosPage.tsx",["executeAtomicMutation","outboxItems","stockLedger","SALE-STOCK-","expandBundleSaleItems","INSUFFICIENT_BUNDLE_STOCK"]],
   ["history-authority","apps/web/src/pages/PosPage.tsx",["/api/v1/pos/sales","isOnline"]],
-  ["sale-contract","packages/contracts/src/index.ts",["CreatePosSaleRequestSchema","occurredAt","isBackdated","CreateSaleReturnRequestSchema"]],
-  ["sale-authority","packages/database/src/atomicCommercialFinance.ts",["async createSale","async voidSale","SALE_CREATED","SALE_VOIDED","jrn-sale-void","sync_change_journal","resolveBundleDefinition","BUNDLE_SALE:","INSUFFICIENT_BUNDLE_COMPONENT_STOCK"]],
-  ["bundle-resolver","packages/database/src/bundleInventory.ts",["resolveBundleDefinition","validateBundleDefinitionAttributes","BUNDLE_NESTING_NOT_SUPPORTED","BUNDLE_SELF_REFERENCE","BUNDLE_COMPONENT_QUANTITY_INVALID"]],
+  ["sale-contract","packages/contracts/src/index.ts",["CreatePosSaleRequestSchema","bundleDefinitionVersion","bundleComponents","CreateSaleReturnRequestSchema"]],
+  ["sale-authority","packages/database/src/atomicCommercialFinance.ts",["async createSale","resolveBundleDefinition","bundleDefinitionVersion","BUNDLE_DEFINITION_CHANGED_OFFLINE","BUNDLE_SALE:","INSUFFICIENT_BUNDLE_COMPONENT_STOCK"]],
+  ["bundle-resolver","packages/database/src/bundleInventory.ts",["resolveBundleDefinition","validateBundleDefinitionAttributes","bundleDefinitionVersion","BUNDLE_NESTING_NOT_SUPPORTED","BUNDLE_SELF_REFERENCE","BUNDLE_COMPONENT_QUANTITY_INVALID"]],
   ["return-authority","packages/database/src/prismaProductionRepositories.ts",["async createSaleReturn","RETURN_QUANTITY_EXCEEDS_REMAINING","SALE_RETURNED","mapReturnToJournal","BUNDLE_RETURN_SNAPSHOT","BUNDLE_RETURN_SNAPSHOT_MISSING"]],
   ["bundle-definition","apps/web/src/components/InventoryBundleWorkspace.tsx",["bundleComponents","Nested bundles/kits are not supported","Available bundle units"]],
   ["bundle-local-stock","apps/web/src/services/inventoryStockService.ts",["getBundleAvailableQuantity","expandBundleSaleItems","BUNDLE_NESTING_NOT_SUPPORTED"]],
