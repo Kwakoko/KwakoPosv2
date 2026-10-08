@@ -55,6 +55,7 @@ const PROTECTED_ROLE_NAMES = new Set([
   "ADMIN",
   "SUPER_ADMIN",
   "SUPERADMIN",
+  "PLATFORM_SUPER_ADMIN",
   "MANAGER",
   "CASHIER",
   "INVENTORY",
@@ -190,7 +191,8 @@ export class PrivilegedRbacMutationService {
       isOwnerActor(roleName) ||
       permissions.has("*") ||
       roleName === "SUPER_ADMIN" ||
-      roleName === "SUPERADMIN";
+      roleName === "SUPERADMIN" ||
+      roleName === "PLATFORM_SUPER_ADMIN";
 
     if (attemptsPrivilegedGrant && !isOwnerActor(actorResolved.roleName) && !actorResolved.permissions.has("*")) {
       throw new RbacMutationError(
