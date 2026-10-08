@@ -117,6 +117,10 @@ export function passwordNeedsRehash(storedHash: string): boolean {
 }
 
 export function generateAccessToken(payload: Partial<JwtPayload> & { tenantId: string; branchId: string; userId?: string }): string {
+  const isProduction = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "production-certification";
+  if (isProduction && (!Array.isArray(payload.roles) || payload.roles.length === 0 || !Array.isArray(payload.permissions) || payload.permissions.length === 0)) {
+    throw new Error("SECURITY_FATAL: Production access tokens require explicit roles and permissions.");
+  }
   const normalized: JwtPayload = {
     ...payload,
     sub: payload.sub || payload.userId || "usr_system",
