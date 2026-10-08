@@ -1,7 +1,0 @@
-ALTER TABLE "roles"
-  ADD COLUMN "description" TEXT,
-  ADD COLUMN "isSystemRole" BOOLEAN NOT NULL DEFAULT false;
-
-UPDATE "roles"
-SET "isSystemRole" = true
-WHERE UPPER("name") IN ('OWNER','ADMIN','SUPER_ADMIN','SUPERADMIN','MANAGER','CASHIER','INVENTORY','ACCOUNTANT');

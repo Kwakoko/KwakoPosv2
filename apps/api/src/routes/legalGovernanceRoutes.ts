@@ -23,7 +23,7 @@ function requireAdmin(req: FastifyRequest) {
     roles.includes("SUPER_ADMIN") ||
     roles.includes("SUPERADMIN") ||
     roles.includes("OWNER") ||
-    permissions.includes("legal:manage") ||
+    permissions.includes("*") ||
     permissions.includes("SUPER_ADMIN_OPERATIONS") ||
     permissions.includes("ADMIN:*");
 
@@ -43,7 +43,7 @@ function requirePlatformSuperAdmin(req: FastifyRequest) {
     roles.includes("PLATFORM_SUPER_ADMIN") ||
     permissions.includes("SUPER_ADMIN_OPERATIONS") ||
     permissions.includes("ADMIN:PLATFORM") ||
-    permissions.includes("platform:governance") ||
+    permissions.includes("*") ||
     permissions.includes("ALL");
   if (!isPlatformSuperAdmin) {
     throw new Error("FORBIDDEN: Platform Super Admin privileges required");
@@ -235,6 +235,9 @@ export function legalGovernanceRoutes(
 
   // Mock override routes for test and evaluation environments
   server.post("/api/legal/mock-accept", async (req, reply) => {
+    if (process.env.NODE_ENV !== "test") {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Test-only endpoint." } });
+    }
     try {
       const rawBody = (req.body || {}) as Record<string, unknown>;
       const tenantContext = (req as any).tenantContext;
@@ -248,6 +251,9 @@ export function legalGovernanceRoutes(
   });
 
   server.post("/api/test/legal/force-accept", async (req, reply) => {
+    if (process.env.NODE_ENV !== "test") {
+      return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Test-only endpoint." } });
+    }
     try {
       const rawBody = (req.body || {}) as Record<string, unknown>;
       const tenantContext = (req as any).tenantContext;

@@ -1,1 +1,0 @@
-export { TenantScopedSyncEngine as PrismaSyncEngine } from "./tenantScopedSyncEngine.js";

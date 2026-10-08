@@ -1,12 +1,13 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { prisma } from "@kwakopos2/database";
+import { requireStepUpToken } from "../services/stepUpGuard.js";
 
 function requireTenantAdmin(req: any, targetTenantId: string): string {
   const ctx = req.tenantContext;
   if (!ctx || ctx.tenantId !== targetTenantId) throw new Error("FORBIDDEN: Tenant context does not match target tenant");
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
   const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: unknown) => String(p).toLowerCase()) : [];
-  if (!roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("admin:production")) {
+  if (!roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) && !permissions.includes("*") && !permissions.includes("admin:*")) {
     throw new Error("FORBIDDEN: Tenant administrator authorization required");
   }
   return String(ctx.userId);
@@ -16,7 +17,7 @@ function requireSuperAdmin(req: any): string {
   const ctx = req.tenantContext;
   const roles = Array.isArray(ctx?.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
   const permissions = Array.isArray(ctx?.permissions) ? ctx.permissions.map((p: unknown) => String(p).toLowerCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !permissions.includes("admin:manage") && !permissions.includes("admin:cleanliness")) {
+  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !permissions.includes("*") && !permissions.includes("admin:*")) {
     throw new Error("FORBIDDEN: Super Admin platform credentials required");
   }
   return String(ctx.userId);
@@ -115,6 +116,7 @@ export function productionCleanlinessRoutes(server: FastifyInstance): void {
       const tenantId = String(body.tenantId || req.tenantContext?.tenantId || "").trim();
       if (!tenantId) return reply.status(400).send({ success: false, error: { code: "TENANT_REQUIRED", message: "A valid tenantId is required." } });
       const actor = requireTenantAdmin(req, tenantId);
+      requireStepUpToken(req, req.tenantContext!, "TENANT_PURGE");
       const scope = String(body.scope || "all").toLowerCase();
       if (!["all", "products", "sales", "contacts"].includes(scope)) {
         return reply.status(400).send({ success: false, error: { code: "PURGE_SCOPE_INVALID", message: "Unsupported purge scope." } });
@@ -133,6 +135,7 @@ export function productionCleanlinessRoutes(server: FastifyInstance): void {
   server.post("/api/v1/production-cleanup", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const actor = requireSuperAdmin(req);
+      requireStepUpToken(req, req.tenantContext!, "PRODUCTION_CLEANUP");
       const purgedCounts = await purgeAllBusinessData();
       req.log.info({ actor, purgedCounts }, "Authoritative PostgreSQL production cleanup completed");
       return reply.send({
