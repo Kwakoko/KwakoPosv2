@@ -401,7 +401,7 @@ const AuthenticatedApp: React.FC = () => {
   const [legalGateNonce, setLegalGateNonce] = useState(0);
 
   const isSuperAdmin = Boolean(
-    user && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase())
+    user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
   const canAdminister = Boolean(
     user && (
