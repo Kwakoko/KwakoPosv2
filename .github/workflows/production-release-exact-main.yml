@@ -82,6 +82,8 @@ jobs:
         run: npm run certify:foundation
       - name: Super Admin Production Lock
         run: npm run certify:super-admin
+      - name: Security Platform Production Lock
+        run: npm run certify:security-platform-lock
 
       - name: Generate Prisma client
         run: npm run db:generate
