@@ -276,7 +276,7 @@ model Notification {
   retryCount        Int       @default(0)
   nextRetryAt       DateTime?
   lastError         String?
-  dedupeKey         String?
+  dedupeKey         String
   readAt            DateTime?
   queuedAt          DateTime  @default(now())
   sentAt            DateTime?
