@@ -147,8 +147,5 @@ jobs:
           EOF
           echo "Production certification dispatched for $RELEASE_SHA"
 
-      - name: Verify authoritative SemVer state
-        shell: bash
-        run: |
-          set -euo pipefail
-          node -e "const p=require('./package.json'); const l=require('./package-lock.json'); if(p.version!==l.version) throw new Error('VERSION_DRIFT: package.json='+p.version+' package-lock.json='+l.version); if(!/^\d+\.\d+\.\d+([-.+].*)?$/.test(p.version)) throw new Error('INVALID_SEMVER:'+p.version); console.log('Authoritative SemVer: '+p.version);"
+      - name: SemVer Production Lock
+        run: npm run certify:semver-lock

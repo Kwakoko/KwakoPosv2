@@ -25,6 +25,35 @@ export function formatSemVer(components) {
     }
     return str;
 }
+function comparePrereleaseIdentifiers(left, right) {
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) {
+        return Number(left) - Number(right);
+    }
+    if (leftNumeric && !rightNumeric)
+        return -1;
+    if (!leftNumeric && rightNumeric)
+        return 1;
+    return left.localeCompare(right);
+}
+function comparePrerelease(left, right) {
+    if (!left && !right)
+        return 0;
+    if (!left && right)
+        return 1;
+    if (left && !right)
+        return -1;
+    const leftIds = left.split(".");
+    const rightIds = right.split(".");
+    const length = Math.min(leftIds.length, rightIds.length);
+    for (let i = 0; i < length; i++) {
+        const comparison = comparePrereleaseIdentifiers(leftIds[i], rightIds[i]);
+        if (comparison !== 0)
+            return comparison;
+    }
+    return leftIds.length - rightIds.length;
+}
 export function compareSemVer(v1, v2) {
     const s1 = parseSemVer(v1);
     const s2 = parseSemVer(v2);
@@ -34,14 +63,7 @@ export function compareSemVer(v1, v2) {
         return s1.minor - s2.minor;
     if (s1.patch !== s2.patch)
         return s1.patch - s2.patch;
-    if (!s1.prerelease && s2.prerelease)
-        return 1;
-    if (s1.prerelease && !s2.prerelease)
-        return -1;
-    if (s1.prerelease && s2.prerelease) {
-        return s1.prerelease.localeCompare(s2.prerelease);
-    }
-    return 0;
+    return comparePrerelease(s1.prerelease, s2.prerelease);
 }
 export function categorizeCommit(type, isBreaking) {
     if (isBreaking)
