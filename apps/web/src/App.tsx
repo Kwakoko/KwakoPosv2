@@ -403,6 +403,7 @@ const AuthenticatedApp: React.FC = () => {
   const isSuperAdmin = Boolean(
     user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
+  const platformContextLocked = isSuperAdmin && !impersonatedTenant;
   const canAdminister = Boolean(
     user && (
       ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(String(user.role || "").toUpperCase()) ||
@@ -507,8 +508,8 @@ const AuthenticatedApp: React.FC = () => {
   useEffect(() => {
     if (!user) return;
 
-    if (isSuperAdmin && !impersonatedTenant) {
-      // Super Admin without active tenant impersonation is strictly locked to Platform Control Tower
+    if (platformContextLocked) {
+      // Platform Super Admin is strictly locked to the Platform Control Tower
       if (!ALLOWED_SUPER_ADMIN_PATHS.has(currentPath)) {
         handleNavigate("/super-admin");
       }
@@ -606,7 +607,7 @@ const AuthenticatedApp: React.FC = () => {
 
   const renderView = () => {
     // Platform Isolation Guard: Super Admin without impersonation cannot render tenant store views
-    if (isSuperAdmin && !impersonatedTenant && !ALLOWED_SUPER_ADMIN_PATHS.has(currentPath)) {
+    if (platformContextLocked && !ALLOWED_SUPER_ADMIN_PATHS.has(currentPath)) {
       return <SuperAdminPage onNavigate={handleNavigate} />;
     }
     // Tenant Isolation Guard: Regular tenant users cannot render super-admin platform views
