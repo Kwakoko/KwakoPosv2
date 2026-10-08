@@ -62,6 +62,8 @@ jobs:
         run: npm run certify:super-admin
       - name: Security Platform Production Lock
         run: npm run certify:security-platform-lock
+      - name: Platform Services C01-C11 Production Lock
+        run: npm run certify:platform-services-lock
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
       - name: Lint
