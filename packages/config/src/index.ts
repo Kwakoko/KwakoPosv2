@@ -230,5 +230,6 @@ export * from "./dataLifecycleDrGovernance.js";
 export * from "./workflowGovernance.js";
 export * from "./aiAgentGovernance.js";
 export * from "./liveProductionEvidenceGovernance.js";
+export * from "./foundationProductionLock.js";
 
 export * from "./visualAssetLibrary.js";
