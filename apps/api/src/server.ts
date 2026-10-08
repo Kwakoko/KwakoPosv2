@@ -308,6 +308,16 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+function enforceTrustedBrowserOrigin(req: FastifyRequest, config: ReturnType<typeof loadConfig>): void {
+  if (!isProductionEnv(config)) return;
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return;
+  const allowed = (process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((value) => value.trim()).filter(Boolean)
+    : ["https://app.kwakopos.com", "https://admin.kwakopos.com"]);
+  if (!allowed.includes(origin)) throw new Error("CSRF_ORIGIN_REJECTED");
+}
+
 
 function requireCommercialPermission(req: FastifyRequest, ...required: string[]): TenantContext {
   const ctx = requireTenantContext(req);
@@ -359,6 +369,64 @@ type LogoutRequestBody = { sessionId?: unknown; reason?: unknown };
 type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
 type SuperAdminSetupStartBody = { setupToken?: unknown };
 type StepUpRequestBody = { password?: unknown; mfaCode?: unknown; action?: unknown; deviceId?: unknown };
+const BiSemanticQuerySchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const BiMetricDefinitionSchema = z.object({
+  metricId: z.string().trim().min(1).max(128),
+  name: z.string().trim().min(1).max(200),
+  definition: z.string().trim().min(1).max(2000),
+  formula: z.string().trim().min(1).max(2000),
+  source: z.string().trim().min(1).max(500),
+  dimensions: z.array(z.string().trim().min(1).max(100)).max(50),
+  freshness: z.enum(["REAL_TIME", "SHORT_LIVED_BATCH", "DAILY", "HISTORICAL"]),
+  owner: z.string().trim().min(1).max(200),
+}).strict();
+
+const AiAskSchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const AiApprovalSchema = z.object({
+  recommendationId: z.string().trim().min(1).max(128),
+}).strict();
+
+const AiKillSwitchSchema = z.object({
+  scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL", "FEATURE"]).default("GLOBAL"),
+  disabled: z.boolean().default(true),
+  targetId: z.string().trim().min(1).max(128).optional(),
+}).strict();
+
+const ApprovalRequestSchema = z.object({
+  subject: z.string().trim().min(1).max(300),
+  domain: z.string().trim().min(1).max(100),
+  actionCode: z.string().trim().min(1).max(150),
+  actionDescription: z.string().trim().min(1).max(2000),
+  amountValue: z.number().finite().nonnegative().optional(),
+  amountCurrency: z.string().trim().min(3).max(10).optional(),
+  businessContext: z.string().trim().min(1).max(5000),
+  evidence: z.array(z.record(z.unknown())).max(100).optional(),
+  aiAssisted: z.boolean().optional(),
+}).strict();
+
+const ApprovalDecisionSchema = z.object({
+  approvalRequestId: z.string().trim().min(1).max(128),
+  decision: z.enum(["APPROVE", "REJECT", "REQUEST_CHANGES"]),
+  comments: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalActionSchema = z.object({
+  reason: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalDelegationRequestSchema = z.object({
+  delegateId: z.string().trim().min(1).max(128),
+  scope: z.string().trim().min(1).max(200),
+  validFrom: z.string().datetime(),
+  validUntil: z.string().datetime(),
+  reason: z.string().trim().min(1).max(2000),
+}).strict();
 
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
@@ -955,6 +1023,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/refresh" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as RefreshRequestBody;
         const sessionId = String(body.sessionId || "");
         const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
@@ -987,6 +1056,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/logout" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
@@ -5614,36 +5684,64 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 21 — AI-Native Business Operations Endpoints
   server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const body = (req.body as any) || {};
-    const rec = globalAiNativeService.requestRecommendation({
-      tenantId: resolveTenantId(req, body.tenantId),
-      branchId: body.branchId || "BRANCH-01",
-      domain: body.domain || "INVENTORY",
-      proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
-      riskLevel: body.riskLevel || "LEVEL_2_CONTROLLED_OPERATIONAL",
-      confidenceScore: body.confidenceScore || 0.92,
-      evidenceSummary: body.evidenceSummary || "Historical sales + seasonal demand spike",
-    });
-    return reply.status(201).send({ success: true, data: rec });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        domain: z.enum(["SALES", "INVENTORY", "FINANCE", "WORKFORCE", "OPERATIONS", "CUSTOMER_SERVICE", "ENGINEERING", "SAAS_REVENUE", "MARKETPLACE"]),
+        proposedAction: z.string().trim().min(1).max(2000),
+        riskLevel: z.enum(["LEVEL_0_INFORMATIONAL", "LEVEL_1_LOW_IMPACT", "LEVEL_2_CONTROLLED_OPERATIONAL", "LEVEL_3_HIGH_IMPACT", "LEVEL_4_RESTRICTED"]),
+        confidenceScore: z.number().finite().min(0).max(1),
+        evidenceSummary: z.string().trim().min(1).max(5000),
+      }).strict().parse(req.body);
+      const rec = globalAiNativeService.requestRecommendation({
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        ...body,
+      });
+      return reply.status(201).send({ success: true, data: rec });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_RECOMMENDATION_REJECTED", message: error instanceof Error ? error.message : "Recommendation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { recommendationId, maxLimitUsd, proposedLimitUsd } = req.body as any;
-    const res = globalAiNativeService.validatePolicy(recommendationId, { maxLimitUsd: maxLimitUsd || 5000, proposedLimitUsd: proposedLimitUsd || 1200 });
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        recommendationId: z.string().trim().min(1).max(128),
+        maxLimitUsd: z.number().finite().nonnegative(),
+        proposedLimitUsd: z.number().finite().nonnegative(),
+      }).strict().parse(req.body);
+      const res = globalAiNativeService.validatePolicy(body.recommendationId, { maxLimitUsd: body.maxLimitUsd, proposedLimitUsd: body.proposedLimitUsd }, ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_POLICY_REJECTED", message: error instanceof Error ? error.message : "AI policy validation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { scope, targetId } = req.body as any;
-    const status = globalAiNativeService.triggerKillSwitch(scope || "AGENT", targetId || "INVENTORY_AGENT");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({
+        scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL"]),
+        targetId: z.string().trim().min(1).max(128),
+      }).strict().parse(req.body);
+      const status = globalAiNativeService.triggerKillSwitch(body.scope, body.targetId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI-native kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_NATIVE_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-native/ledger", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
+    requireAdminContext(req);
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger(ctx.tenantId) });
   });
 
   server.get("/api/v1/ai-native/dashboard", async (req, reply) => {
@@ -5654,15 +5752,23 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 22 — Autonomous Operations (KAOF) Endpoints
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const body = (req.body as any) || {};
-    const res = globalAutonomousOperationsService.executeAutonomousRequest({
-      requestId: `REQ-REM-${Date.now()}`,
-      tenantId: resolveTenantId(req, body.tenantId),
-      agentId: body.targetService || "CloudRunWorkerPool",
-      capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
-      financialCostTzs: 0,
-    });
-    return reply.status(201).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        targetService: z.string().trim().min(1).max(200),
+        proposedRemediation: z.string().trim().min(1).max(2000),
+      }).strict().parse(req.body);
+      const res = globalAutonomousOperationsService.executeAutonomousRequest({
+        requestId: `REQ-REM-${Date.now()}`,
+        tenantId: ctx.tenantId,
+        agentId: body.targetService,
+        capability: body.proposedRemediation,
+        financialCostTzs: 0,
+      });
+      return reply.status(201).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AUTONOMOUS_REMEDIATION_REJECTED", message: error instanceof Error ? error.message : "Autonomous remediation rejected" } });
+    }
   });
 
   server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
@@ -5681,21 +5787,29 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const { scope, targetId, tenantId } = req.body as any;
-    const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId || "TENANT-AUTO-01", targetId || "CloudRunWorkerPool", "SYSTEM");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({ targetId: z.string().trim().min(1).max(200), tenantId: z.string().trim().min(1).max(128).optional() }).strict().parse(req.body);
+      const tenantId = body.tenantId ? resolveTenantId(req, body.tenantId) : actor.tenantId;
+      const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId, body.targetId, actor.userId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Autonomous kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AUTONOMOUS_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(tenantId) });
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(ctx.tenantId) });
   });
 
   server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(ctx.tenantId) });
   });
 
   // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
@@ -5902,30 +6016,24 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 25 — KwakoPos System UI & Experience Architecture Endpoints
   server.post("/api/v1/system-ui/navigation", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const permissions = body.permissions || ["pos.access", "inventory.read", "workforce.read"];
-    const nav = globalSystemUiService.generateNavigation(permissions);
+    const ctx = requireTenantContext(req);
+    const nav = globalSystemUiService.generateNavigation(ctx.permissions);
     return reply.status(200).send({ success: true, data: nav });
   });
 
   server.post("/api/v1/system-ui/search", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeGlobalSearch(
-      body.query || "Cement",
-      resolveTenantId(req, body.tenantId),
-      body.branchId || "BR-DSM-01"
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ query: z.string().trim().min(1).max(300).default("Cement") }).strict().parse(req.body ?? {});
+    const res = globalSystemUiService.executeGlobalSearch(body.query, ctx.tenantId, ctx.branchId);
     return reply.status(200).send({ success: true, data: res });
   });
 
   server.post("/api/v1/system-ui/commands/execute", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const body = (req.body as any) || {};
-    const res = globalSystemUiService.executeCommand(
-      body.actionId || "CMD-CREATE-SALE",
-      body.permissions || ["pos.access"]
-    );
+    const ctx = requireTenantContext(req);
+    const body = z.object({ actionId: z.string().trim().min(1).max(128) }).strict().parse(req.body);
+    const res = globalSystemUiService.executeCommand(body.actionId, ctx.permissions);
     if (!res.success) {
       return reply.status(403).send({ success: false, error: res.error });
     }
@@ -5934,13 +6042,13 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/system-ui/shell-state", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
-    const tenantId = (req.query as any)?.tenantId || "TNT-TZ-001";
-    const branchId = (req.query as any)?.branchId || "BR-DSM-01";
-    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(tenantId, branchId, true) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalSystemUiService.getAppShellState(ctx.tenantId, ctx.branchId, true) });
   });
 
   server.get("/api/v1/system-ui/dashboard", async (req, reply) => {
     const { globalSystemUiService } = await import("./services/systemUiService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalSystemUiService.getDashboardMetrics() });
   });
 
@@ -6184,9 +6292,17 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/workflow-automation/approval", async (req, reply) => {
     const { globalWorkflowAutomationService } = await import("./services/workflowAutomationService.js");
-    const body = (req.body as any) || {};
-    const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        taskId: z.string().trim().min(1).max(128),
+        decision: z.enum(["APPROVED", "REJECTED"]),
+      }).strict().parse(req.body);
+      const res = globalWorkflowAutomationService.decideApproval(body.taskId, body.decision, ctx.userId, ctx.tenantId);
+      return reply.status(res ? 200 : 409).send({ success: res, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "WORKFLOW_APPROVAL_REJECTED", message: error instanceof Error ? error.message : "Workflow approval rejected" } });
+    }
   });
 
   server.get("/api/v1/workflow-automation/dashboard", async (req, reply) => {
@@ -6202,23 +6318,40 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/bi-analytics/define-metric", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.defineMetric(body);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      requireAdminContext(req);
+      const metric = BiMetricDefinitionSchema.parse(req.body);
+      const res = globalBiAnalyticsService.defineMetric(metric);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Metric definition rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_METRIC_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/bi-analytics/query", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.querySemantic(body.queryText || "What was gross margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = BiSemanticQuerySchema.parse(req.body);
+      const res = globalBiAnalyticsService.querySemantic(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical query";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_QUERY_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/insights", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TEN-001";
-    const res = globalBiAnalyticsService.getInsightsAndForecasts(tenantId);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const res = globalBiAnalyticsService.getInsightsAndForecasts(ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical insights";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_INSIGHTS_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/dashboard", async (req, reply) => {
@@ -6234,30 +6367,53 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = AiAskSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI query rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_QUERY_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = AiApprovalSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.executeAction(body.recommendationId, ctx.userId, ctx.tenantId);
+      return reply.status(res.success ? 200 : 409).send({ success: res.success, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI approval rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_APPROVAL_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const params = req.params as any;
-    const res = globalAiOperatingLayerService.explainRecommendation(params.id);
-    return reply.status(200).send({ success: true, data: res });
+    const ctx = requireTenantContext(req);
+    const params = req.params as { id: string };
+    const recommendationId = z.string().min(1).max(128).parse(params.id);
+    const res = globalAiOperatingLayerService.explainRecommendation(recommendationId, ctx.tenantId);
+    return reply.status(res.found ? 200 : 404).send({ success: res.found, data: res });
   });
 
   server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const body = AiKillSwitchSchema.parse(req.body);
+      requireStepUpToken(req, ctx, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const target = body.scope === "GLOBAL" ? body.disabled : (body.targetId || "");
+      if (body.scope !== "GLOBAL" && !body.targetId) throw new Error("AI_KILL_SWITCH_TARGET_REQUIRED");
+      const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope as any, target);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
@@ -6295,48 +6451,87 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
   });
 
+  server.get("/api/v1/approvals/policies", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
+  });
+
   server.post("/api/v1/approvals/requests", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.submitRequest(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireTenantContext(req);
+      const body = ApprovalRequestSchema.parse(req.body) as any;
+      const result = globalEnterpriseApprovalsService.submitRequest({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        requesterId: ctx.userId,
+        requesterRole: String(ctx.roles?.[0] || "USER"),
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_REQUEST_REJECTED", message: error instanceof Error ? error.message : "Approval request rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/decisions", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.recordDecision(body);
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const body = ApprovalDecisionSchema.parse(req.body) as any;
+      const result = globalEnterpriseApprovalsService.recordDecision({ ...body, approverId: ctx.userId, approverRole: String(ctx.roles?.[0] || "ADMIN"), tenantId: ctx.tenantId });
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DECISION_REJECTED", message: error instanceof Error ? error.message : "Approval decision rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/execute", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      z.string().min(1).max(128).parse(id);
+      ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Approval execution rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/cancel", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.cancelRequest(id, body.cancelledBy || "SYSTEM", body.reason || "");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.cancelRequest(id, ctx.userId, body.reason || "", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_CANCEL_REJECTED", message: error instanceof Error ? error.message : "Approval cancellation rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/escalate", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.escalateRequest(id, body.escalatedBy || "SYSTEM", body.reason || "SLA exceeded");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.escalateRequest(id, ctx.userId, body.reason || "SLA exceeded", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_ESCALATION_REJECTED", message: error instanceof Error ? error.message : "Approval escalation rejected" } });
+    }
   });
 
   server.get("/api/v1/approvals/:id", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const request = globalEnterpriseApprovalsService.getRequest(id);
+    const request = globalEnterpriseApprovalsService.getRequest(id, ctx.tenantId);
     return request
       ? reply.status(200).send({ success: true, data: request })
       : reply.status(404).send({ success: false, error: "Approval request not found" });
@@ -6344,22 +6539,39 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/approvals/:id/audit", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id) });
+    z.string().min(1).max(128).parse(id);
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id, ctx.tenantId) });
   });
 
   server.get("/api/v1/approvals/dashboard/health", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getDashboardMetrics() });
   });
 
   server.post("/api/v1/approvals/delegations", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.registerDelegation(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const body = ApprovalDelegationRequestSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.registerDelegation({
+        delegationId: `DEL-${ctx.userId}-${Date.now()}`,
+        originalApproverId: ctx.userId,
+        delegateId: body.delegateId,
+        scope: body.scope,
+        validFrom: body.validFrom,
+        validUntil: body.validUntil,
+        isActive: true,
+        reason: body.reason,
+        createdAt: new Date().toISOString(),
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DELEGATION_REJECTED", message: error instanceof Error ? error.message : "Approval delegation rejected" } });
+    }
   });
-
 
   // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
@@ -6439,16 +6651,29 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/treasury/payment-runs", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.createPaymentRun(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const body = (req.body as any) || {};
+      if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 500) throw new Error("PAYMENT_RUN_ITEMS_INVALID");
+      if (!body.idempotencyKey || String(body.idempotencyKey).trim().length > 200) throw new Error("PAYMENT_RUN_IDEMPOTENCY_KEY_INVALID");
+      const result = globalFinanceTreasuryService.createPaymentRun({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        initiatedBy: ctx.userId,
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_REJECTED", message: error instanceof Error ? error.message : "Payment run rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.performLiquidityCheck(id, Number(body.availableLiquidity || 0));
+    const body = z.object({ availableLiquidity: z.number().finite().nonnegative() }).strict().parse(req.body);
+    const result = globalFinanceTreasuryService.performLiquidityCheck(id, body.availableLiquidity, ctx.tenantId);
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
@@ -6462,10 +6687,15 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/treasury/payment-runs/:id/execute", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.executePaymentRun(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireCommercialPermission(req, "payments.manage", "finance.manage");
+      const { id } = req.params as { id: string };
+      z.string().trim().min(1).max(128).parse(id);
+      const result = globalFinanceTreasuryService.executePaymentRun(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "PAYMENT_RUN_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Payment run execution rejected" } });
+    }
   });
 
   server.post("/api/v1/treasury/beneficiaries", async (req, reply) => {
