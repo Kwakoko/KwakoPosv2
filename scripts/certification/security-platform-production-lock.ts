@@ -78,6 +78,23 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes("getAppShellState(ctx.tenantId, ctx.branchId, true)"),
     "Navigation, search and commands do not accept client-controlled security context.");
 
+  add("SECPLAT-A31", "AI-native recommendation API is tenant-scoped and permission-gated",
+    server.includes('requireCommercialPermission(req, "inventory.manage")') &&
+    server.includes("tenantId: ctx.tenantId") &&
+    server.includes("branchId: ctx.branchId") &&
+    server.includes("AiNativeService"),
+    "AI-native recommendations cannot select another tenant or branch.");
+  add("SECPLAT-A32", "AI-native emergency kill switch is Super Admin + step-up protected",
+    server.includes('"/api/v1/ai-native/kill-switch"') &&
+    server.includes("requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")"),
+    "AI-native emergency control is not user-level self-service.");
+  add("SECPLAT-A33", "Autonomous operations are tenant-scoped and emergency controls are step-up protected",
+    server.includes("tenantId: ctx.tenantId") &&
+    server.includes("resolveTenantId(req, body.tenantId)") &&
+    server.includes("activateAgentKillSwitch(tenantId, body.targetId, actor.userId)") &&
+    server.includes("globalAutonomousOperationsService.getEngine().getAuditTrail(ctx.tenantId)"),
+    "Autonomous remediation and kill-switch operations use authenticated scope.");
+
   add("SECPLAT-A14", "Emergency AI kill switch requires platform authority and step-up authentication",
     server.includes("requireSuperAdminContext(req)") &&
     server.includes('requireStepUpToken(req, ctx, "PLATFORM_EMERGENCY_KILL_SWITCH")'),
