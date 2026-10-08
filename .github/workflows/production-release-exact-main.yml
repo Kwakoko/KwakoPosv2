@@ -86,6 +86,8 @@ jobs:
 
       - name: Production Navigation Lock — route/submenu contract
         run: npm run certify:navigation-lock
+      - name: Reports Production Lock
+        run: npm run certify:reports
       - name: Production Dashboard Analytics Lock
         run: npm run certify:dashboard-lock
       - name: Conflict Center Production Lock
@@ -95,8 +97,12 @@ jobs:
         run: npm run certify:inventory-lock
       - name: Sales Production Lock v1
         run: npm run certify:sales-lock
-      - name: Customers Contacts Production Lock v1
-        run: npm run certify:customers-lock
+      - name: Receipt Store Production Lock v1
+        run: npm run certify:receipts-lock
+      - name: Cash Management Production Lock v1
+        run: npm run certify:cash-lock
+      - name: Finance / Accounting Production Lock v1
+        run: npm run certify:finance-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
 
