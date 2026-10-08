@@ -17,6 +17,12 @@ const autoSemverWorkflow = read(".github/workflows/auto-semver.yml");
 const productionWorkflow = read(".github/workflows/production-release-exact-main.yml");
 const ciWorkflow = read(".github/workflows/ci.yml");
 
+try {
+  execSync("npx tsx scripts/release/validate-semver.ts", { cwd: root, stdio: "inherit" });
+} catch {
+  failures.push("Conventional-commit SemVer validator failed closed.");
+}
+
 const version = String(packageJson.version || "");
 assert(isValidSemVer(version) && !version.startsWith("v"), `package.json version must be strict SemVer without a v prefix: ${version}`);
 assert(packageLock.version === version, `package-lock.json version drift: expected ${version}, found ${packageLock.version}`);
