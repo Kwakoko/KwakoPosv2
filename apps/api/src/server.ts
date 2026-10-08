@@ -6448,11 +6448,6 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // ─── Phase 34 — Enterprise Approvals REST API (/api/v1/approvals/*) ───
   server.get("/api/v1/approvals/policies", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
-  });
-
-  server.get("/api/v1/approvals/policies", async (req, reply) => {
-    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
     requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
   });
