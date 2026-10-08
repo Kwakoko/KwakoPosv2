@@ -44,7 +44,10 @@ function requireAdmin(ctx: ReturnType<typeof ctxOf>, reply: FastifyReply): boole
 
 export function traVfdRoutes(server: FastifyInstance) {
   server.get("/api/v1/tra-vfd/config", async (req, reply) => {
-    try { return reply.send({ success: true, data: await globalTraVfdService.getConfig(ctxOf(req)) }); }
+    try {
+      const ctx = ctxOf(req);
+      if (!requireFiscalAuthority(ctx, reply, "view")) return;
+      return reply.send({ success: true, data: await globalTraVfdService.getConfig(ctx) });
     catch (error: any) { return reply.status(401).send({ success: false, error: error.message }); }
   });
 
