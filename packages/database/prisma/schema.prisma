@@ -193,6 +193,7 @@ model User {
   devices      Device[]
   cashSessions CashSession[]
   notifications Notification[]
+  superAdminSecurity PlatformSuperAdminSecurity?
 
   @@unique([tenantId, email])
   @@index([tenantId, branchId])
@@ -3253,6 +3254,40 @@ model TenantLegalDocument {
 // Used only for billing records that are not yet represented by first-class
 // relational domain models. PostgreSQL remains the sole server authority.
 // ============================================================================
+model PlatformSuperAdminSecurity {
+  userId              String    @id @map("user_id")
+  bootstrapPending    Boolean   @default(true) @map("bootstrap_pending")
+  mustChangePassword  Boolean   @default(true) @map("must_change_password")
+  mfaRequired         Boolean   @default(true) @map("mfa_required")
+  mfaEnrolled         Boolean   @default(false) @map("mfa_enrolled")
+  mfaType             String?   @map("mfa_type")
+  mfaSecretCiphertext String?   @map("mfa_secret_ciphertext")
+  lockedUntil         DateTime? @map("locked_until")
+  failedLoginCount    Int       @default(0) @map("failed_login_count")
+  lastFailedAt        DateTime? @map("last_failed_at")
+  lastLoginAt         DateTime? @map("last_login_at")
+  lastTotpCounter     BigInt?   @map("last_totp_counter")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lockedUntil])
+  @@index([lastTotpCounter])
+  @@map("platform_super_admin_security")
+}
+
+model AuthLoginThrottle {
+  id          String    @id @default(uuid()) @db.Uuid
+  throttleKey String    @unique @map("throttle_key")
+  windowStart DateTime  @default(now()) @map("window_start")
+  attempts    Int       @default(0)
+  lockedUntil DateTime? @map("locked_until")
+  updatedAt   DateTime  @updatedAt
+
+  @@index([lockedUntil])
+  @@map("auth_login_throttles")
+}
+
 model SaasDataRecord {
   id         String   @id @default(uuid())
   scopeKey   String
