@@ -30,7 +30,7 @@ import { useAudioFeedback } from "../utils/useAudioFeedback.js";
 import { DATA_CHANGED_EVENT, publishDataChanged } from "../services/dataChangeEvent.js";
 import { commitLocalMutation } from "../persistence/commitLocalMutation.js";
 import { retryWithBackoff } from "../atomicOutbox.js";
-import { STOCK_CHANGED_EVENT } from "../services/inventoryStockService.js";
+import { STOCK_CHANGED_EVENT, expandBundleSaleItems, getBundleAvailableQuantity } from "../services/inventoryStockService.js";
 import { enqueueTraVfdOutbox, processTraVfdOutbox, getTraVfdConfig } from "../services/traVfdOutboxService.js";
 import { getOrCreatePersistentDeviceId } from "../services/deviceIdentity.js";
 import { BarcodeLabelGeneratorModal } from "../components/UI/BarcodeLabelGeneratorModal.js";
@@ -1227,13 +1227,33 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
     }
 
     const stockOutboxItems: any[] = [];
-    const stockByVariant = new Map<string, { qty: number; product: any; unitCost: number }>();
     for (const item of mappedItems.filter((i: any) => !i.isCustom)) {
+      const variant = db.productVariants.get(String(item.variantId)) as any;
+      if (variant?.attributes?.__bundle === true || Array.isArray(variant?.attributes?.bundleComponents)) {
+        const availableBundles = getBundleAvailableQuantity(db, String(item.variantId), tenantContext.tenantId, tenantContext.branchId);
+        if (availableBundles < Number(item.quantity || 0)) {
+          throw new Error(`INSUFFICIENT_BUNDLE_STOCK:${item.variantId}:AVAILABLE_${availableBundles}`);
+        }
+      }
+    }
+
+    const expandedStockItems = expandBundleSaleItems(db, mappedItems.filter((i: any) => !i.isCustom).map((i: any) => ({
+      productId: i.productId,
+      variantId: i.variantId,
+      qty: Number(i.quantity || 0),
+      unitCost: Number(i.unitCost || 0),
+      name: i.name,
+      sku: i.sku,
+    })), tenantContext.tenantId, tenantContext.branchId);
+
+    const stockByVariant = new Map<string, { qty: number; product: any; unitCost: number }>();
+    for (const item of expandedStockItems) {
       const variantId = String(item.variantId);
+      const product = db.products.get(item.productId) as any;
       const prior = stockByVariant.get(variantId);
       stockByVariant.set(variantId, {
-        qty: (prior?.qty || 0) + Number(item.quantity || 0),
-        product: item.product,
+        qty: (prior?.qty || 0) + Number(item.qty || 0),
+        product: product || { id: item.productId },
         unitCost: Number(item.unitCost || 0),
       });
     }
@@ -1306,10 +1326,14 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       void processTraVfdOutbox(db, tenantContext).catch(() => {});
     }
     // 4. Update local products state so POS counter stock displays decrease immediately
+    const stockSoldByProduct = new Map<string, number>();
+    for (const info of stockByVariant.values()) {
+      const productId = String(info.product?.id || "");
+      if (productId) stockSoldByProduct.set(productId, (stockSoldByProduct.get(productId) || 0) + Number(info.qty || 0));
+    }
     setProducts((prev) =>
       prev.map((p) => {
-        const cartItemsForProd = cart.filter((item) => !item.isCustom && item.product.id === p.id);
-        const totalSold = cartItemsForProd.reduce((sum, item) => sum + item.qty, 0);
+        const totalSold = stockSoldByProduct.get(p.id) || 0;
         return totalSold > 0 ? { ...p, stock: Math.max(0, p.stock - totalSold) } : p;
       })
     );
