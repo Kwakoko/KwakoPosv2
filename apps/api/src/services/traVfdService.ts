@@ -97,7 +97,7 @@ function buildReceiptInput(
     quantity: Number(item.quantity ?? item.qty ?? 0),
     unitPrice: Number(item.unitPrice ?? item.price ?? 0),
     discount: Number(item.discount ?? item.discountAmount ?? 0),
-    taxCode: Number(item.taxCode ?? ((Number(payload.taxAmount || 0) > 0 || Number(item.taxRate || payload.taxRate || 0) > 0) ? 1 : 3)),
+    taxCode: taxConfig.ratePct > 0 ? 1 : 3,
   })).filter((item: any) => item.quantity > 0) : [];
   const paymentMethod = String(payload.paymentMethod || payload.payment_type || "CASH");
   const amount = Number(payload.paidAmount ?? payload.grandTotal ?? 0);
