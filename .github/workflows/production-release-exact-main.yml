@@ -80,6 +80,8 @@ jobs:
 
       - name: Foundation Production Lock A01-A12
         run: npm run certify:foundation
+      - name: Super Admin Production Lock
+        run: npm run certify:super-admin
 
       - name: Generate Prisma client
         run: npm run db:generate

@@ -83,7 +83,7 @@
     "certify:kds": "tsx scripts/certification/runKwakoPosDesignSystemCertification.ts",
     "certify:core-ui": "tsx scripts/certification/runCoreOperatingUiCertification.ts",
     "certify:dmui": "tsx scripts/certification/runDynamicModuleUiCertification.ts",
-    "certify:super-admin": "tsx scripts/certification/runSuperAdminPlatformCertification.ts",
+    "certify:super-admin": "tsx scripts/certification/super-admin-production-lock.ts",
     "certify:uicert": "tsx scripts/certification/runUiCertification.ts",
     "certify:workflow": "tsx scripts/certification/runWorkflowAutomationCertification.ts",
     "certify:bi": "tsx scripts/certification/runBiAnalyticsCertification.ts",

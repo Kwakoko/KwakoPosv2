@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, createHash, randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "@kwakopos2/database";
 import { getJwtAudience, getJwtIssuer, getJwtSecret, hashPassword, validatePasswordStrength } from "@kwakopos2/auth";
@@ -70,11 +70,33 @@ export function generateTotpSecret(): string {
   return base32Encode(randomBytes(20));
 }
 
-export function verifyTotpCode(secret: string, code: string, timestamp = Date.now()): boolean {
-  if (!/^[A-Z2-7]{16,64}$/.test(secret)) return false;
-  if (!/^\d{6}$/.test(code)) return false;
+function findValidTotpCounter(secret: string, code: string, timestamp = Date.now()): number | null {
+  if (!/^[A-Z2-7]{16,64}$/.test(secret)) return null;
+  if (!/^\d{6}$/.test(code)) return null;
   const counter = Math.floor(timestamp / 1000 / 30);
-  return [-4, -3, -2, -1, 0, 1, 2, 3, 4].some((offset) => hotp(secret, counter + offset) === code);
+  for (const offset of [-1, 0, 1]) {
+    const candidate = counter + offset;
+    if (candidate >= 0 && hotp(secret, candidate) === code) return candidate;
+  }
+  return null;
+}
+
+export function verifyTotpCode(secret: string, code: string, timestamp = Date.now()): boolean {
+  return findValidTotpCounter(secret, code, timestamp) !== null;
+}
+
+async function consumeSuperAdminTotp(userId: string, code: string): Promise<boolean> {
+  await ensureSuperAdminSecurity(userId);
+  const rows = await prisma.$queryRaw<{ mfa_secret_ciphertext: string | null; mfa_enrolled: boolean; mfa_required: boolean }[]>`SELECT mfa_secret_ciphertext, mfa_enrolled, mfa_required FROM platform_super_admin_security WHERE user_id = ${userId}`;
+  const state = rows[0];
+  if (!state || !state.mfa_required) return true;
+  if (!state.mfa_enrolled || !state.mfa_secret_ciphertext) return false;
+  const counter = findValidTotpCounter(decryptSecret(state.mfa_secret_ciphertext), code);
+  if (counter === null) return false;
+  const updated = await prisma.$executeRaw`UPDATE platform_super_admin_security
+    SET last_totp_counter = ${counter}, updated_at = NOW()
+    WHERE user_id = ${userId} AND (last_totp_counter IS NULL OR last_totp_counter < ${counter})`;
+  return Number(updated) === 1;
 }
 
 function encryptSecret(secret: string): string {
@@ -119,6 +141,7 @@ export async function ensureSuperAdminSecurityTables(): Promise<void> {
         failed_login_count INTEGER NOT NULL DEFAULT 0,
         last_failed_at TIMESTAMPTZ,
         last_login_at TIMESTAMPTZ,
+        last_totp_counter BIGINT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -225,11 +248,11 @@ export function verifySetupToken(token: string): string {
 }
 
 export function issueStepUpToken(userId: string, action: string): string {
-  return jwt.sign({ sub: userId, scope: "step_up", action }, getJwtSecret(), { expiresIn: 300 });
+  return jwt.sign({ sub: userId, scope: "step_up", action }, getJwtSecret(), { algorithm: "HS256", expiresIn: 300, issuer: getJwtIssuer(), audience: getJwtAudience() });
 }
 
 export function verifyStepUpToken(token: string, expectedAction?: string): { userId: string; action: string } {
-  const payload = jwt.verify(token, getJwtSecret()) as { sub?: string; scope?: string; action?: string };
+  const payload = jwt.verify(token, getJwtSecret(), { algorithms: ["HS256"], issuer: getJwtIssuer(), audience: getJwtAudience() }) as { sub?: string; scope?: string; action?: string };
   if (payload.scope !== "step_up" || !payload.sub || !payload.action) throw new Error("Invalid or expired step-up token.");
   if (expectedAction && payload.action !== expectedAction && payload.action !== "*") {
     throw new Error(`Step-up token action mismatch. Expected ${expectedAction}, got ${payload.action}`);
@@ -241,9 +264,10 @@ export async function beginSuperAdminSetup(token: string): Promise<{ userId: str
   const userId = verifySetupToken(token);
   const state = await getSuperAdminSecurity(userId);
   if (!state) throw new Error("Super Admin security state not found.");
-  if (!state.bootstrapPending && !state.mustChangePassword && state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
+  if (!state.bootstrapPending || !state.mustChangePassword || state.mfaEnrolled) throw new Error("Super Admin setup is already complete.");
   const secret = generateTotpSecret();
-  return { userId, totpSecret: secret, issuer: "KwakoPos", account: "admin@kwakoko.co.tz" };
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  return { userId, totpSecret: secret, issuer: "KwakoPos", account: user?.email || "platform-admin" };
 }
 
 export async function rotateSuperAdminTotp(userId: string, newTotpSecret: string, verificationCode: string): Promise<void> {
@@ -252,6 +276,8 @@ export async function rotateSuperAdminTotp(userId: string, newTotpSecret: string
   if (!/^\d{6}$/.test(String(verificationCode || "")) || !verifyTotpCode(secret, verificationCode)) {
     throw new Error("New TOTP secret verification failed.");
   }
+  const matchedCounter = findValidTotpCounter(secret, verificationCode);
+  if (matchedCounter === null) throw new Error("New TOTP secret verification failed.");
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
   const roleName = String(user?.role?.name || "").toUpperCase();
   if (!user || (roleName !== "SUPER_ADMIN" && roleName !== "PLATFORM_SUPER_ADMIN")) throw new Error("Target user is not a platform SUPER_ADMIN.");
@@ -302,12 +328,8 @@ export async function verifySuperAdminMfa(userId: string, code: string): Promise
   if (!state || !state.mfa_required) return true;
   if (!state.mfa_enrolled || !state.mfa_secret_ciphertext) return false;
   
-  // Support WebAuthn / Passkey signature verification mock if configured
-  if (state.mfa_type === "WEBAUTHN" && code.startsWith("webauthn:")) {
-    return verifyWebAuthnResponse(code);
-  }
-
-  return verifyTotpCode(decryptSecret(state.mfa_secret_ciphertext), code);
+  if (state.mfa_type !== "TOTP") return false;
+  return consumeSuperAdminTotp(userId, code);
 }
 
 export function generateWebAuthnChallenge(userId: string): { challenge: string; rp: { name: string; id: string }; user: { id: string; name: string } } {
@@ -318,10 +340,6 @@ export function generateWebAuthnChallenge(userId: string): { challenge: string; 
   };
 }
 
-export function verifyWebAuthnResponse(responsePayload: string): boolean {
-  if (!responsePayload.startsWith("webauthn:")) return false;
-  return responsePayload.length > 15;
-}
 
 export async function logSuperAdminAuditEvent(params: {
   tenantId?: string;
@@ -359,15 +377,29 @@ export async function logSuperAdminAuditEvent(params: {
   }
 
   // If no tenant or branch exists in database yet, avoid foreign key constraint error
-  if (!tenantId || !branchId) return;
-
-  // Sanitize metadata to guarantee no passwords, secrets, or tokens are logged
+  // Always write the platform audit record, including platform-only actions without tenant scope.
   const sanitizedMeta: Record<string, unknown> = { outcome, timestamp: new Date().toISOString() };
   for (const [key, val] of Object.entries(metadata)) {
-    if (!/password|secret|token|credential|key|hash|cookie/i.test(key)) {
-      sanitizedMeta[key] = val;
-    }
+    if (!/password|secret|token|credential|key|hash|cookie/i.test(key)) sanitizedMeta[key] = val;
   }
+
+  try {
+    await prisma.platformAuditEvent.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantId || null,
+        actorId: userId,
+        action,
+        entityType,
+        entityId,
+        metadata: sanitizedMeta as any,
+      },
+    });
+  } catch (err) {
+    console.error("FAILED_TO_WRITE_PLATFORM_AUDIT_EVENT", err instanceof Error ? err.message : err);
+  }
+
+  if (!tenantId || !branchId) return;
 
   try {
     await prisma.auditEvent.create({

@@ -15,14 +15,17 @@ import {
   Loader2,
   RefreshCw,
   Terminal,
+  Activity,
+  Server,
   Sparkles,
 } from "lucide-react";
 import { apiFetch, changeSuperAdminPassword } from "../services/applicationApiService.js";
 import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";
+import { SuperAdminLiveControlPlane } from "../components/SuperAdminLiveControlPlane.js";
 
-type AdminTab = "tenants" | "security" | "sql-studio" | "cleanliness" | "certification";
+type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness" | "certification";
 
 interface PlatformOverview {
   platformName?: string;
@@ -30,6 +33,8 @@ interface PlatformOverview {
   activeTenants?: number;
   totalBranches?: number;
   totalUsers?: number;
+  activeSubscriptions?: number;
+  activeSecurityIncidents?: number;
 }
 
 export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; initialTab?: AdminTab }> = ({ onNavigate, initialTab }) => {
@@ -78,7 +83,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
     setLoading(true);
     setAuthError(null);
     try {
-      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview");
+      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview/live");
       if (res && res.success) {
         setAuthorized(true);
         setOverview(res.data || null);
@@ -207,6 +212,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
       <div className="v2-flex v2-gap-1" style={{ borderBottom: "1px solid var(--surface-border)", paddingBottom: ".4rem" }}>
         {[
           { id: "tenants", label: "Tenant Directory", icon: Building },
+          { id: "subscriptions", label: "Subscriptions", icon: Shield },
+          { id: "health", label: "System Health", icon: Server },
+          { id: "audit", label: "Global Audit", icon: Activity },
           { id: "security", label: "Security & MFA Controls", icon: Lock },
           { id: "sql-studio", label: "SQL Studio & DB", icon: Terminal },
           { id: "cleanliness", label: "Production Cleanliness", icon: Sparkles },
@@ -232,9 +240,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
           <div className="kpi-card-desc">Total Tenants: {overview?.totalTenants ?? "..."}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-label">Billing Authority</div>
-          <div className="kpi-card-value">TENANT-SCOPED</div>
-          <div className="kpi-card-desc">Subscription and invoice control is exposed through the authenticated Administration workspace.</div>
+          <div className="kpi-card-label">Active SaaS Subscriptions</div>
+          <div className="kpi-card-value">{overview?.activeSubscriptions ?? "Live registry"}</div>
+          <div className="kpi-card-desc">Authoritative PostgreSQL subscription records</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Platform Branches</div>
@@ -251,23 +259,14 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
       {/* Tab Content */}
       {activeTab === "tenants" && (
         <div className="v2-space-y-4">
-          <div className="v2-flex v2-items-center" style={{ position: "relative", maxWidth: 420 }}>
-            <Search size={14} style={{ position: "absolute", left: ".8rem", color: "var(--muted)" }} />
-            <input
-              className="v2-input v2-input-sm"
-              style={{ paddingLeft: "2.4rem" }}
-              placeholder="Search live tenant directory..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <SuperAdminLiveControlPlane tab="tenants" />
           <div className="v2-card" style={{ padding: "1.2rem" }}>
             <div className="v2-flex v2-items-center v2-gap-2">
               <Shield size={16} />
               <strong>Production tenant provisioning</strong>
             </div>
             <p className="v2-text-xs v2-text-muted">
-              Create a real tenant, main branch, owner role, owner account, deterministic defaults, module entitlements, and audit trail without demo data.
+              Provisioning remains server-authoritative through the platform onboarding service and PostgreSQL persistence.
             </p>
             <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openOnboarding} type="button">
               <Plus size={13} /> Start Tenant Onboarding
@@ -276,6 +275,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
         </div>
       )}
 
+      {activeTab === "subscriptions" && <SuperAdminLiveControlPlane tab="subscriptions" />}
+      {activeTab === "health" && <SuperAdminLiveControlPlane tab="health" />}
+      {activeTab === "audit" && <SuperAdminLiveControlPlane tab="audit" />}
       {activeTab === "security" && (
         <div className="v2-space-y-4">
           <div className="v2-card" style={{ padding: "1.5rem" }}>
