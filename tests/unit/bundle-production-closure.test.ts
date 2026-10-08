@@ -21,7 +21,7 @@ function variant(id: string, productId: string, costPrice: number, attributes: a
 }
 
 describe("bundle production invariants", () => {
-  it("computes sellable bundle quantity as the minimum component capacity", () => {
+  it("computes sellable bundle quantity as the minimum component capacity", async () => {
     const db: any = {
       productVariants: new Map([
         ["bundle", variant("bundle", "bundle-product", 0, { __bundle: true, bundleComponents: [
@@ -75,7 +75,6 @@ describe("bundle production invariants", () => {
       .rejects.toThrow("BUNDLE_SELF_REFERENCE");
   });
 });
-
 
   it("rejects a component that crosses tenant or branch scope", async () => {
     const variants = new Map<string, any>([
