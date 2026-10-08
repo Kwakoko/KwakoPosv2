@@ -60,6 +60,7 @@ const PurchasingPage = lazyWorkspacePage("PurchasingPage");
 const FinancePage = lazyWorkspacePage("FinancePage");
 const ReportsPage = lazyWorkspacePage("ReportsPage");
 const SettingsPage = lazyWorkspacePage("SettingsPage");
+const AdministrationPage = lazyPage(() => import("./pages/AdministrationPage.js").then((m) => ({ default: m.AdministrationPage })));
 const UsersPage = lazyWorkspacePage("UsersPage");
 const SuperAdminPage = lazyWorkspacePage("SuperAdminPage");
 const DiagnosticsPage = lazyWorkspacePage("DiagnosticsPage");
@@ -182,6 +183,7 @@ const TAB_TO_PATH: Record<string, string> = {
   "Demand Forecast": "/ai",
   // Settings
   Settings: "/settings",
+  Administration: "/administration",
   "General Settings": "/settings",
   "Business Profile & Identity": "/settings",
   "POS Configurations": "/settings",
@@ -305,6 +307,7 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/finance": "Finance",
   "/reports": "Reports",
   "/settings": "Settings",
+  "/administration": "Administration",
   "/users": "Users & Roles",
   "/super-admin": "Super Admin",
   "/super-admin/certification": "Super Admin",
@@ -651,6 +654,8 @@ const AuthenticatedApp: React.FC = () => {
         return <ReportsPage activeTab={activeTab} />;
       case "/settings":
         return <SettingsPage activeTab={activeTab} />;
+      case "/administration":
+        return <AdministrationPage onNavigate={handleNavigate} />;
       case "/users":
         return <UsersPage />;
       case "/super-admin":
