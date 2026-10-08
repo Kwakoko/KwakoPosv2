@@ -766,7 +766,7 @@ function registerCanonicalProductionAuthentication(
           const userId = (ctx as any).userId || ctx.sub;
           const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
           const roleName = String(user?.role?.name || "").toUpperCase();
-          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP"]);
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP", "TENANT_SUSPEND", "TENANT_REACTIVATE", "SUBSCRIPTION_CHANGE", "FEATURE_FLAG_CHANGE"]);
           if (!allowedStepUpActions.has(action)) {
             reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
             return;
