@@ -67,7 +67,7 @@ SET revoked_at = NOW(),
     status = 'REVOKED',
     revoke_reason = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
 WHERE ds."revokedAt" IS NULL
-  AND ds.user_id IN (
+  AND ds."userId" IN (
     SELECT u.id
     FROM users u
     JOIN roles r ON r.id = u."roleId"
