@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@kwakopos2/database";
 import {
   TraVfdFiscalState,
@@ -63,7 +63,7 @@ function computeReceiptHash(previousHash: string, invoiceNumber: string, timesta
 async function recordFiscalAudit(ctx: { tenantId: string; branchId: string; userId?: string }, action: string, fiscalizationId: string, metadata: Record<string, unknown> = {}) {
   await prisma.auditEvent.create({
     data: {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       tenantId: ctx.tenantId,
       branchId: ctx.branchId,
       userId: ctx.userId || "system",
@@ -302,6 +302,9 @@ export class TraVfdService {
         where: { id: row.id },
         data: { reconciliationStatus: "UNAVAILABLE", reconciliationError: message, nextAttemptAt: reconciliationRetryAt() },
       });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, {
+        reconciliationStatus: "UNAVAILABLE", error: message,
+      });
       return mapFiscalization(updated);
     }
 
@@ -321,17 +324,25 @@ export class TraVfdService {
             responsePayload: { ...responsePayload, reconciliation: result.details } as any,
           },
         });
+        await recordFiscalAudit(ctx as any, "TRA_VFD_VERIFIED", row.id, {
+          reconciliationStatus: "MATCHED", fiscalReceiptNumber: verified.fiscalReceiptNumber,
+          verificationCode: verified.verificationCode,
+        });
         return mapFiscalization(verified);
       }
       const mismatch = await prisma.traVfdFiscalization.update({
         where: { id: row.id },
         data: { reconciliationStatus: "MISMATCH", reconciledAt: new Date(), reconciliationError: "TRA_VFD_VERIFICATION_MISMATCH", lastError: "TRA_VFD_VERIFICATION_MISMATCH" },
       });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, { reconciliationStatus: "MISMATCH" });
       return mapFiscalization(mismatch);
     } catch (error: any) {
       const unavailable = await prisma.traVfdFiscalization.update({
         where: { id: row.id },
         data: { reconciliationStatus: "UNAVAILABLE", reconciliationError: error?.message || "TRA_VFD_VERIFICATION_UNAVAILABLE", nextAttemptAt: reconciliationRetryAt() },
+      });
+      await recordFiscalAudit(ctx as any, "TRA_VFD_RECONCILIATION_FAILED", row.id, {
+        reconciliationStatus: "UNAVAILABLE", error: error?.message || "TRA_VFD_VERIFICATION_UNAVAILABLE",
       });
       return mapFiscalization(unavailable);
     }
