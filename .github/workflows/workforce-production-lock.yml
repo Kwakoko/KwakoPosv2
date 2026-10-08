@@ -15,6 +15,25 @@ jobs:
     name: Staff / HR Production Lock
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kwakopos_workforce_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kwakopos_workforce_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kwakopos_workforce_ci?schema=public
+      CI: true
+      NODE_ENV: test
+      KWAKOPOS_TEST_BYPASS_LEGAL_GATE: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +48,8 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npm run db:generate
+      - name: Apply migrations
+        run: npm run db:migrate
       - name: Build workspaces
         run: npm run build
       - name: Staff / HR production lock
