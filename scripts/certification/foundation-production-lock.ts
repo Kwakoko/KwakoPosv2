@@ -1,12 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import {
+  FOUNDATION_PRODUCTION_LOCK_VERSION,
+  FOUNDATION_PRODUCTION_LOCK_CERTIFICATE,
+  FOUNDATION_REQUIRED_AUTHORITIES,
+  FOUNDATION_REQUIRED_GATES,
+} from "../../packages/config/src/foundationProductionLock.js";
 
 const root = process.cwd();
 const failures: string[] = [];
 const read = (p: string) => fs.readFileSync(path.join(root, p), "utf8");
 const json = (p: string) => JSON.parse(read(p));
 const assert = (ok: boolean, msg: string) => { if (!ok) failures.push(msg); };
+const exists = (p: string) => fs.existsSync(path.join(root, p));
 
 const packageJson = json("package.json");
 const manifest = json("release-manifest.json");
