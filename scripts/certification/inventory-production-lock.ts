@@ -11,10 +11,10 @@ const REQUIRED_SUBITEMS = [
 
 const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
-  "apps/web/src/services/inventoryStockService.ts": "b5b24e3efabb022477173419993f6c4723a483fa",
+  "apps/web/src/services/inventoryStockService.ts": "5fadbef7dc8de26e7bc93ce95547cf7a9c8f7e3b",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
   "packages/database/src/inventoryAuthority.ts": "fd3d915de4ac1851a562ee3554c5598d71529cc9",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "2230175727d1590e155c8c72e443cd959fa25fe2",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
   "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
   "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae",
   "tests/unit/stock-ledger-movement.test.ts": "d24fcfb9a39a76b8d60a282ce2c4401c07e7bb2c",
