@@ -100,7 +100,11 @@ const forbiddenProductionMarkers = [
   'req.headers["x-admin-role"]',
 ];
 for (const file of tracked) {
-  if (/^apps\/web\/dist\//.test(file) || /^artifacts\//.test(file)) continue;
+  if (
+    file === "scripts/certification/foundation-production-lock.ts" ||
+    /^apps\/web\/dist\//.test(file) ||
+    /^artifacts\//.test(file)
+  ) continue;
   let source = "";
   try { source = read(file); } catch { continue; }
   for (const forbidden of forbiddenProductionMarkers) {
