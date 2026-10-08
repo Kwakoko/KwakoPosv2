@@ -36,6 +36,10 @@ const SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES = new Set([
 
 /** Maximum number of server rejections before an outbox item is permanently abandoned. */
 export const MAX_OUTBOX_RETRIES = 5;
+/** Durable retry schedule: persisted before the next automatic replay. */
+export const OUTBOX_RETRY_BASE_DELAY_MS = 5_000;
+export const OUTBOX_RETRY_MAX_DELAY_MS = 60_000;
+export const OUTBOX_RETRY_JITTER_RATIO = 0.20;
 
 export function assertSyncOutboxEntityTypeAllowed(entityType: string): void {
   if (SYNC_OUTBOX_FORBIDDEN_ENTITY_TYPES.has(String(entityType))) {
@@ -78,6 +82,10 @@ export interface OutboxItem {
   resolution?: string;
   /** Number of times this item has been attempted and rejected by the server. */
   retryCount?: number;
+  /** ISO timestamp after which the item may be retried automatically. */
+  nextAttemptAt?: string;
+  /** ISO timestamp of the most recent push attempt. */
+  lastAttemptAt?: string;
   /** ISO timestamp when this item was permanently abandoned (retryCount >= MAX_OUTBOX_RETRIES). */
   abandonedAt?: string;
 }
@@ -1979,10 +1987,11 @@ export class LocalIndexedDbStore {
   }
 
   retryFailedOutbox(tenantId?: string, branchId?: string): number {
-    // Only retry items that have NOT been permanently abandoned.
+    // Only retry items whose durable next-attempt deadline has arrived.
     const failed = this.getRetriableFailedOutbox(tenantId, branchId);
     for (const item of failed) {
       item.status = "PENDING";
+      item.nextAttemptAt = undefined;
       this.syncMetadata.delete(`error_${item.id}`);
       this.persist("syncOutbox", item.id, item);
       if (this.nativeDb) this.persistDelete("syncMetadata", `error_${item.id}`);
@@ -1995,6 +2004,7 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item || item.status !== "FAILED") return;
     item.status = "PENDING";
+    item.nextAttemptAt = undefined;
     this.syncMetadata.delete(`error_${operationId}`);
     this.persist("syncOutbox", operationId, item);
     if (this.nativeDb) this.persistDelete("syncMetadata", `error_${operationId}`);
@@ -2010,6 +2020,8 @@ export class LocalIndexedDbStore {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
     item.status = "SYNCED";
+    item.nextAttemptAt = undefined;
+    item.lastAttemptAt = new Date().toISOString();
     this.persist("syncOutbox", operationId, item);
     this.setPersistenceStatus(item, item.operationType === "DELETE" ? "TOMBSTONED" : "SERVER_CONFIRMED");
     if (item.entityType === "Sale") {
@@ -2062,9 +2074,27 @@ export class LocalIndexedDbStore {
   markOutboxFailed(operationId: string, errorReason: string): void {
     const item = this.syncOutbox.get(operationId);
     if (!item) return;
+    const now = Date.now();
+    const retryCount = (item.retryCount ?? 0) + 1;
     item.status = "FAILED";
     item.error = errorReason;
-    item.retryCount = (item.retryCount ?? 0) + 1;
+    item.retryCount = retryCount;
+    item.lastAttemptAt = new Date(now).toISOString();
+
+    if (retryCount < MAX_OUTBOX_RETRIES) {
+      const exponentialDelay = Math.min(
+        OUTBOX_RETRY_MAX_DELAY_MS,
+        OUTBOX_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, retryCount - 1)),
+      );
+      const jitterMultiplier =
+        1 - OUTBOX_RETRY_JITTER_RATIO + Math.random() * OUTBOX_RETRY_JITTER_RATIO * 2;
+      item.nextAttemptAt = new Date(
+        now + Math.round(exponentialDelay * jitterMultiplier),
+      ).toISOString();
+    } else {
+      item.nextAttemptAt = undefined;
+    }
+
     // Permanently abandon items that have hit the server-rejection retry cap.
     // They will no longer be re-queued by retryFailedOutbox() and will be
     // excluded from the pending-sync badge count shown to the user.
@@ -2085,9 +2115,13 @@ export class LocalIndexedDbStore {
    * These are items that can still be retried safely.
    */
   getRetriableFailedOutbox(tenantId?: string, branchId?: string): OutboxItem[] {
-    return this.getFailedOutbox(tenantId, branchId).filter(
-      (item) => !item.abandonedAt && (item.retryCount ?? 0) < MAX_OUTBOX_RETRIES,
-    );
+    const now = Date.now();
+    return this.getFailedOutbox(tenantId, branchId).filter((item) => {
+      if (item.abandonedAt || (item.retryCount ?? 0) >= MAX_OUTBOX_RETRIES) return false;
+      if (!item.nextAttemptAt) return true;
+      const retryAt = Date.parse(item.nextAttemptAt);
+      return Number.isFinite(retryAt) && retryAt <= now;
+    });
   }
 
   /**
