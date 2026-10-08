@@ -10,8 +10,8 @@ export class WorkflowAutomationService {
     return globalWorkflowAutomationEngine.dispatchTrigger(eventType, payload);
   }
 
-  public decideApproval(taskId: string, decision: "APPROVED" | "REJECTED", approverId: string) {
-    return globalWorkflowAutomationEngine.decideApprovalTask(taskId, decision, approverId);
+  public decideApproval(taskId: string, decision: "APPROVED" | "REJECTED", approverId: string, tenantId?: string) {
+    return globalWorkflowAutomationEngine.decideApprovalTask(taskId, decision, approverId, tenantId);
   }
 
   public retryInstance(instanceId: string) {
