@@ -1053,6 +1053,25 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       if (!i.variantId && !i.isCustom) throw new Error(`POS_VARIANT_REQUIRED:${i.product.id}`);
       const variantId = i.variantId || `${i.product.id}-custom`;
       const unitCost = Number((i.product as any).costPrice || (i.product as any).buyingPrice || 0);
+      const localVariant = !i.isCustom ? (db.productVariants.get(String(variantId)) as any) : null;
+      const localBundle = localVariant?.attributes?.__bundle === true || Array.isArray(localVariant?.attributes?.bundleComponents);
+      const bundleDefinitionVersion = localBundle
+        ? String(localVariant?.attributes?.bundleDefinitionVersion || localVariant?.updatedAt || "")
+        : undefined;
+      const bundleComponents = localBundle && Array.isArray(localVariant?.attributes?.bundleComponents)
+        ? localVariant.attributes.bundleComponents.map((component: any) => {
+            const componentVariant = db.productVariants.get(String(component.variantId)) as any;
+            return {
+              variantId: String(component.variantId),
+              productId: String(componentVariant?.productId || ""),
+              quantity: Number(component.quantity),
+              unitCost: Number(componentVariant?.costPrice || 0),
+            };
+          })
+        : undefined;
+      if (localBundle && (!bundleDefinitionVersion || !bundleComponents?.length || bundleComponents.some((c: any) => !c.productId || !Number.isFinite(c.quantity) || c.quantity <= 0))) {
+        throw new Error(`BUNDLE_SNAPSHOT_INVALID:${variantId}`);
+      }
       return {
         productId: i.product.id,
         variantId,
@@ -1064,6 +1083,8 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
         discountPercent: i.discountPercent || 0,
         discountAmount: i.discountPercent ? (i.price * (i.discountPercent / 100)) * i.qty : 0,
         taxAmount: 0,
+        bundleDefinitionVersion,
+        bundleComponents,
         quantity: i.qty,
         qty: i.qty,
         product: i.product,
