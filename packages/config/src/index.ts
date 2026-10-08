@@ -84,11 +84,6 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export function resolveRealBuildNumber(): number {
-  if (typeof window !== "undefined" || typeof execSync !== "function") return 584;
-  const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
-export type Config = z.infer<typeof ConfigSchema>;
-
-export function resolveRealBuildNumber(): number {
   const envBuild = process.env.BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER || process.env.CI_BUILD_NUMBER;
   return envBuild && /^\d+$/.test(envBuild) ? parseInt(envBuild, 10) : 584;
 }
@@ -99,6 +94,18 @@ export function resolveRealGitSha(): string {
 }
 
 export function loadConfig(overrideEnv?: Partial<Record<string, string>>): Config {
+  const gitSha = resolveRealGitSha();
+  const buildNumber = resolveRealBuildNumber();
+  const env = {
+    GIT_SHA: gitSha,
+    BUILD_NUMBER: buildNumber,
+    ...process.env,
+    ...overrideEnv,
+  };
+  const parsed = ConfigSchema.parse(env);
+  if (parsed.NODE_ENV === "production" || parsed.NODE_ENV === "production-certification") {
+    if (!process.env.DATABASE_URL) throw new Error("SECURITY_FATAL: DATABASE_URL environment variable is MANDATORY in production!");
+    if (!process.env.JWT_SECRET) throw new Error("SECURITY_FATAL: JWT_SECRET environment variable is MANDATORY in production!");
     if (!/^[0-9a-f]{40}$/i.test(parsed.GIT_SHA || "")) throw new Error("RELEASE_BLOCKED: authentic GIT_SHA is mandatory in production!");
   }
   return parsed;
