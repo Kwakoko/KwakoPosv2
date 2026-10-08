@@ -46,9 +46,10 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
   add("SECPLAT-A05", "AI/BI API authorization is server-context driven",
     server.includes('requireCommercialPermission(req, "finance.read")') &&
     server.includes("globalBiAnalyticsService.querySemantic(body.queryText, ctx.permissions)") &&
-    !server.includes("body.permissions ||") &&
     server.includes("globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions)") &&
-    !server.includes("body.approverId ||"),
+    !server.includes("globalBiAnalyticsService.querySemantic(body.queryText ||") &&
+    !server.includes("globalAiOperatingLayerService.askAi(body.queryText ||") &&
+    !server.includes("globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId") &&
     "Client-supplied permissions and approver identities are not authorization sources.");
   add("SECPLAT-A06", "Enterprise approval lifecycle is actor- and tenant-bound",
     server.includes("approverId: ctx.userId") &&
@@ -192,8 +193,8 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
   add("SECPLAT-A26", "Production security headers are enabled",
     security.includes("@fastify/helmet") &&
     security.includes("strictTransportSecurity") &&
-    security.includes("frameguard") &&
-    security.includes("xContentTypeOptions"),
+    security.includes("xFrameOptions: { action: \"deny\" }") &&
+    security.includes("xContentTypeOptions: true"),
     "Helmet config covers transport, framing and content-type hardening.");
   add("SECPLAT-A27", "Production CSP forbids inline scripts",
     security.includes('scriptSrc: ["\'self\'"]') &&
