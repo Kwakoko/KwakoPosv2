@@ -323,6 +323,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
         </div>
       )}
 
+      {activeTab === "security" && <SuperAdminLiveControlPlane tab="security" />}
       {activeTab === "subscriptions" && <SuperAdminLiveControlPlane tab="subscriptions" />}
       {activeTab === "health" && <SuperAdminLiveControlPlane tab="health" />}
       {activeTab === "audit" && <SuperAdminLiveControlPlane tab="audit" />}
