@@ -33,6 +33,8 @@ interface PlatformOverview {
   activeTenants?: number;
   totalBranches?: number;
   totalUsers?: number;
+  activeSubscriptions?: number;
+  activeSecurityIncidents?: number;
 }
 
 export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; initialTab?: AdminTab }> = ({ onNavigate, initialTab }) => {
@@ -238,9 +240,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
           <div className="kpi-card-desc">Total Tenants: {overview?.totalTenants ?? "..."}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-label">Billing Authority</div>
-          <div className="kpi-card-value">TENANT-SCOPED</div>
-          <div className="kpi-card-desc">Subscription and invoice control is exposed through the authenticated Administration workspace.</div>
+          <div className="kpi-card-label">Active SaaS Subscriptions</div>
+          <div className="kpi-card-value">{overview?.activeSubscriptions ?? "Live registry"}</div>
+          <div className="kpi-card-desc">Authoritative PostgreSQL subscription records</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Platform Branches</div>
@@ -257,23 +259,14 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
       {/* Tab Content */}
       {activeTab === "tenants" && (
         <div className="v2-space-y-4">
-          <div className="v2-flex v2-items-center" style={{ position: "relative", maxWidth: 420 }}>
-            <Search size={14} style={{ position: "absolute", left: ".8rem", color: "var(--muted)" }} />
-            <input
-              className="v2-input v2-input-sm"
-              style={{ paddingLeft: "2.4rem" }}
-              placeholder="Search live tenant directory..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <SuperAdminLiveControlPlane tab="tenants" />
           <div className="v2-card" style={{ padding: "1.2rem" }}>
             <div className="v2-flex v2-items-center v2-gap-2">
               <Shield size={16} />
               <strong>Production tenant provisioning</strong>
             </div>
             <p className="v2-text-xs v2-text-muted">
-              Create a real tenant, main branch, owner role, owner account, deterministic defaults, module entitlements, and audit trail without demo data.
+              Provisioning remains server-authoritative through the platform onboarding service and PostgreSQL persistence.
             </p>
             <button className="v2-btn v2-btn-primary v2-btn-sm" onClick={openOnboarding} type="button">
               <Plus size={13} /> Start Tenant Onboarding
