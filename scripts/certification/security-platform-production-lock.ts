@@ -49,7 +49,7 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes("globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions)") &&
     !server.includes("globalBiAnalyticsService.querySemantic(body.queryText ||") &&
     !server.includes("globalAiOperatingLayerService.askAi(body.queryText ||") &&
-    !server.includes("globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId") &&
+    !server.includes("globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId"),
     "Client-supplied permissions and approver identities are not authorization sources.");
   add("SECPLAT-A06", "Enterprise approval lifecycle is actor- and tenant-bound",
     server.includes("approverId: ctx.userId") &&
@@ -83,7 +83,7 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     server.includes('requireCommercialPermission(req, "inventory.manage")') &&
     server.includes("tenantId: ctx.tenantId") &&
     server.includes("branchId: ctx.branchId") &&
-    server.includes("globalAiNativeService.requestRecommendation({") &&
+    server.includes("globalAiNativeService.requestRecommendation({"),
     "AI-native recommendations cannot select another tenant or branch.");
   add("SECPLAT-A32", "AI-native emergency kill switch is Super Admin + step-up protected",
     server.includes('"/api/v1/ai-native/kill-switch"') &&
