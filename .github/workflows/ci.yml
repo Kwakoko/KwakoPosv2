@@ -102,6 +102,8 @@ jobs:
         run: npm run certify:sales-lock
       - name: Receipt Store Production Lock v1
         run: npm run certify:receipts-lock
+      - name: Tax / Fiscalization Production Lock v1
+        run: npm run certify:tax-fiscal-lock
       - name: Cash Management Production Lock v1
         run: npm run certify:cash-lock
       - name: Backdated Inventory Production Lock
