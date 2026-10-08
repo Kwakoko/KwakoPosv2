@@ -6052,6 +6052,18 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
       if (!tenantId || reason.length < 3 || !Number.isInteger(timeLimitMinutes) || timeLimitMinutes < 1 || timeLimitMinutes > 60) {
         return reply.status(400).send({ success: false, error: { code: "CONTEXT_SWITCH_INPUT_INVALID", message: "tenantId, reason and a 1–60 minute time limit are required." } });
       }
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, status: true, createdAt: true } });
+      if (!tenant) return reply.status(404).send({ success: false, error: { code: "TENANT_NOT_FOUND", message: "Target tenant not found." } });
+      if (tenant.status === "CLOSED") return reply.status(409).send({ success: false, error: { code: "TENANT_CLOSED", message: "Closed tenants cannot be opened for support." } });
+      globalSuperAdminPlatformService.registerTenant?.({
+        tenantId: tenant.id,
+        name: tenant.name,
+        status: String(tenant.status) as any,
+        country: "TZ",
+        branchesCount: 0,
+        modulesCount: 0,
+        createdAt: tenant.createdAt.toISOString(),
+      });
       const session = globalSuperAdminPlatformService.initiateContextSwitch(String(actor.userId), tenantId, reason, timeLimitMinutes);
       await prisma.$executeRaw`INSERT INTO platform_audit_events (id,tenant_id,actor_id,action,entity_type,entity_id,metadata)
         VALUES (${randomUUID()},${tenantId},${actor.userId},'SUPER_ADMIN_CONTEXT_SWITCH_STARTED','Tenant',${tenantId},${JSON.stringify({ switchId: session.switchId, reason, timeLimitMinutes })}::jsonb)`;
