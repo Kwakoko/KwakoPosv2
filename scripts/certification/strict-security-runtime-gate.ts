@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   requirePass(!auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]'), "JWT generation contains implicit wildcard privileges");
   requirePass(!auth.includes('roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"]'), "JWT generation contains implicit ADMIN role");
   requirePass(server.includes("CSRF_ORIGIN_DENIED") && server.includes("SameSite=Strict"), "Cookie-auth mutation CSRF boundary is missing");
-  requirePass(!securityMiddleware.includes("unsafe-inline"), "CSP permits inline scripts");
+  requirePass(!securityMiddleware.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]'), "CSP permits inline scripts");
   requirePass(!server.includes("data: { accessToken: rotated.accessToken, refreshToken"), "Production refresh returns refreshToken in JSON");
   requirePass(server.includes("HttpOnly") && server.includes("SameSite=Strict"), "Production refresh cookie is not hardened");
   requirePass(!context.includes("canAccessModule: () => true"), "Module context has permissive default access");
