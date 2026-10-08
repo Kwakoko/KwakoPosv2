@@ -2127,7 +2127,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
 
       const userId = ctx.userId;
-      const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+      const userEmail = String((ctx as any)?.email || "").trim();
       const tokenPayload = {
         sub: userId,
         tenantId: newTenantId,
