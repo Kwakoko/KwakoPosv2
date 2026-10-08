@@ -308,6 +308,18 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   return ctx;
 }
 
+}
+
+function enforceTrustedBrowserOrigin(req: FastifyRequest, config: ReturnType<typeof loadConfig>): void {
+  if (!isProductionEnv(config)) return;
+  const origin = String(req.headers.origin || "").trim();
+  if (!origin) return;
+  const allowed = (process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((value) => value.trim()).filter(Boolean)
+    : ["https://app.kwakopos.com", "https://admin.kwakopos.com"]);
+  if (!allowed.includes(origin)) throw new Error("CSRF_ORIGIN_REJECTED");
+}
+
 
 function requireCommercialPermission(req: FastifyRequest, ...required: string[]): TenantContext {
   const ctx = requireTenantContext(req);
@@ -359,6 +371,34 @@ type LogoutRequestBody = { sessionId?: unknown; reason?: unknown };
 type SuperAdminSetupBody = { setupToken?: unknown; newPassword?: unknown; totpSecret?: unknown; totpCode?: unknown };
 type SuperAdminSetupStartBody = { setupToken?: unknown };
 type StepUpRequestBody = { password?: unknown; mfaCode?: unknown; action?: unknown; deviceId?: unknown };
+const BiSemanticQuerySchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const BiMetricDefinitionSchema = z.object({
+  metricId: z.string().trim().min(1).max(128),
+  name: z.string().trim().min(1).max(200),
+  definition: z.string().trim().min(1).max(2000),
+  formula: z.string().trim().min(1).max(2000),
+  source: z.string().trim().min(1).max(500),
+  dimensions: z.array(z.string().trim().min(1).max(100)).max(50),
+  freshness: z.enum(["REAL_TIME", "SHORT_LIVED_BATCH", "BATCH", "DAILY"]),
+  owner: z.string().trim().min(1).max(200),
+}).strict();
+
+const AiAskSchema = z.object({
+  queryText: z.string().trim().min(1).max(500),
+}).strict();
+
+const AiApprovalSchema = z.object({
+  recommendationId: z.string().trim().min(1).max(128),
+}).strict();
+
+const AiKillSwitchSchema = z.object({
+  scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL", "FEATURE"]).default("GLOBAL"),
+  disabled: z.boolean().default(true),
+  targetId: z.string().trim().min(1).max(128).optional(),
+}).strict();
 
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
@@ -955,6 +995,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/refresh" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as RefreshRequestBody;
         const sessionId = String(body.sessionId || "");
         const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
@@ -987,6 +1028,7 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/logout" && req.method === "POST") {
+        enforceTrustedBrowserOrigin(req, config);
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
@@ -6202,23 +6244,40 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/bi-analytics/define-metric", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.defineMetric(body);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      requireAdminContext(req);
+      const metric = BiMetricDefinitionSchema.parse(req.body);
+      const res = globalBiAnalyticsService.defineMetric(metric);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Metric definition rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_METRIC_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/bi-analytics/query", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const body = (req.body as any) || {};
-    const res = globalBiAnalyticsService.querySemantic(body.queryText || "What was gross margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = BiSemanticQuerySchema.parse(req.body);
+      const res = globalBiAnalyticsService.querySemantic(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical query";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_QUERY_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/insights", async (req, reply) => {
     const { globalBiAnalyticsService } = await import("./services/biAnalyticsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TEN-001";
-    const res = globalBiAnalyticsService.getInsightsAndForecasts(tenantId);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const res = globalBiAnalyticsService.getInsightsAndForecasts(ctx.tenantId);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unauthorized analytical insights";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "BI_INSIGHTS_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/bi-analytics/dashboard", async (req, reply) => {
@@ -6234,16 +6293,28 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/ai-operating-layer/ask", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.askAi(body.queryText || "What is current margin?", body.permissions || ["finance.read"]);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireCommercialPermission(req, "finance.read");
+      const body = AiAskSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.askAi(body.queryText, ctx.permissions);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI query rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_QUERY_REJECTED", message } });
+    }
   });
 
   server.post("/api/v1/ai-operating-layer/approve", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.executeAction(body.recommendationId, body.approverId || "USER-001");
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = AiApprovalSchema.parse(req.body);
+      const res = globalAiOperatingLayerService.executeAction(body.recommendationId, ctx.userId, ctx.tenantId);
+      return reply.status(res.success ? 200 : 409).send({ success: res.success, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI approval rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 400).send({ success: false, error: { code: "AI_APPROVAL_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/explain/:id", async (req, reply) => {
@@ -6255,9 +6326,18 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/ai-operating-layer/kill-switch", async (req, reply) => {
     const { globalAiOperatingLayerService } = await import("./services/aiOperatingLayerService.js");
-    const body = (req.body as any) || {};
-    const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope || "GLOBAL", body.disabled ?? true);
-    return reply.status(200).send({ success: true, data: res });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const body = AiKillSwitchSchema.parse(req.body);
+      requireStepUpToken(req, ctx, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const target = body.scope === "GLOBAL" ? body.disabled : (body.targetId || "");
+      if (body.scope !== "GLOBAL" && !body.targetId) throw new Error("AI_KILL_SWITCH_TARGET_REQUIRED");
+      const res = globalAiOperatingLayerService.toggleKillSwitch(body.scope as any, target);
+      return reply.status(200).send({ success: true, data: res });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-operating-layer/dashboard", async (req, reply) => {
