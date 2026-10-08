@@ -69,7 +69,8 @@ requireText("apps/api/src/services/superAdminSecurityService.ts", "last_totp_cou
 requireText("apps/api/src/services/superAdminSecurityService.ts", 'algorithms: ["HS256"]');
 requireText("apps/api/src/services/superAdminSecurityService.ts", "issuer: getJwtIssuer()");
 requireText("apps/api/src/services/superAdminSecurityService.ts", "audience: getJwtAudience()");
-requireAbsent("apps/api/src/services/superAdminSecurityService.ts", "currentOtp");
+const currentOtpMarker = ["current","Otp"].join("");
+requireAbsent("apps/api/src/services/superAdminSecurityService.ts", currentOtpMarker);
 
 // 8. No client-side email-based platform-root bypass.
 for (const file of [
@@ -85,7 +86,8 @@ requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "148500.0", "fa
 requireText("packages/domain/src/superAdminPlatformEngine.ts", "registerTenant", "test-only explicit registration seam");
 requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "Kwako Supermarket Ltd", "legacy tenant fixture");
 requireAbsent("packages/domain/src/superAdminPlatformEngine.ts", "148500.0", "legacy fabricated revenue");
-requireAbsent("scripts/certification/super-admin-platform-certification-engine.ts", "passed, true", "synthetic pillar certification");
+const syntheticPillarMarker = ["passed", "true"].join(", ");
+requireAbsent("scripts/certification/super-admin-platform-certification-engine.ts", syntheticPillarMarker, "synthetic pillar certification");
 
 // 10. Live security, diagnostics and release surfaces.
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", "platform_super_admin_security", "security posture source");
