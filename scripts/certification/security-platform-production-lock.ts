@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 
+// Production lock is evaluated on the exact PR commit; no runtime mutation is permitted.
 const ROOT = process.cwd();
 const FAILURES: string[] = [];
 
