@@ -1,7 +1,7 @@
 {
   "version": "2.13.0",
   "tag": "v2.13.0",
-  "gitSha": null,
+  "gitSha": "04005c90964a5f04b922e1bb15a27f1701898e7a",
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
