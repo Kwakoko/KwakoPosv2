@@ -26,3 +26,16 @@ ALTER TABLE platform_super_admin_security
 
 CREATE INDEX IF NOT EXISTS idx_platform_super_admin_security_totp
   ON platform_super_admin_security(last_totp_counter);
+CREATE OR REPLACE FUNCTION prevent_platform_audit_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'PLATFORM_AUDIT_APPEND_ONLY';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_platform_audit_events_append_only_update ON platform_audit_events;
+CREATE TRIGGER trg_platform_audit_events_append_only_update
+BEFORE UPDATE OR DELETE ON platform_audit_events
+FOR EACH ROW EXECUTE FUNCTION prevent_platform_audit_mutation();
