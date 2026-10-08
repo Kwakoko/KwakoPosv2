@@ -39,6 +39,7 @@ for (const authority of [
   "scripts/certification/strict-security-runtime-gate.ts",
   "scripts/release/verify-security-trust.ts",
   ".github/workflows/security-scan.yml",
+  ".github/workflows/security-platform-production-lock.yml",
 ]) requireCheck(exists(authority), "Missing security authority: " + authority);
 
 requireCheck(/JWT_SECRET environment variable is MANDATORY in production/.test(auth), "JWT secret is not mandatory in production.");
@@ -86,6 +87,8 @@ requireCheck(exists(".github/workflows/ci.yml") && read(".github/workflows/ci.ym
 requireCheck(exists(".github/workflows/production-certification.yml") && read(".github/workflows/production-certification.yml").includes("npm run certify:security-lock"), "Candidate certification does not execute the Security Platform Production Lock.");
 requireCheck(exists(".github/workflows/production-release-exact-main.yml") && read(".github/workflows/production-release-exact-main.yml").includes("npm run certify:security-lock"), "Exact-main release does not execute the Security Platform Production Lock.");
 requireCheck(exists(".github/workflows/security-scan.yml") && read(".github/workflows/security-scan.yml").includes("npm run certify:security-lock"), "Security scan workflow does not execute the Security Platform Production Lock.");
+requireCheck(read(".github/workflows/security-scan.yml").includes("npm audit --omit=dev --audit-level=high"), "Production dependency vulnerability audit is not a mandatory high-severity gate.");
+requireCheck(exists(".github/workflows/security-platform-production-lock.yml") && read(".github/workflows/security-platform-production-lock.yml").includes("npm run certify:security-lock"), "Standalone Security Platform Production Lock workflow is missing.");
 
 const report = {
   certificate: "KWAKOKO-SECURITY-PLATFORM-PRODUCTION-LOCK-v1.0",
