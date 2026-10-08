@@ -1028,24 +1028,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
   }, [isSuperAdmin, impersonatedTenant, activeTab]);
 
-  const startImpersonation = useCallback(async (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => {
+  const startImpersonation = useCallback(async (_tenantId: string, _tenantName?: string, _branchId?: string, _branchName?: string) => {
     if (!isSuperAdmin) {
-      throw new Error("Only Super Admin can activate tenant inspection mode.");
+      throw new Error("Only Platform Super Admin can inspect tenants.");
     }
-    const result = await apiSwitchContext(tenantId, branchId);
-    const resolved: ImpersonatedTenant = {
-      tenantId: result.tenantId,
-      tenantName: result.tenantName || tenantName || result.tenantId,
-      branchId: result.branchId,
-      branchName: result.branchName || branchName || result.branchId,
-    };
-    setImpersonatedTenant(resolved);
-    try {
-      sessionStorage.setItem("kwakopos:v2:impersonation", JSON.stringify(resolved));
-    } catch { /* ignore */ }
-    setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    setActiveModuleState("Retail");
-    setActiveTabState("Dashboard");
+    throw new Error("Tenant application impersonation is disabled. Use the Super Admin Support Control Tower for tenant inspection.");
   }, [isSuperAdmin]);
 
   const stopImpersonation = useCallback(async () => {
@@ -1053,12 +1040,6 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     try {
       sessionStorage.removeItem("kwakopos:v2:impersonation");
     } catch { /* ignore */ }
-    try {
-      const result = await apiSwitchContext("PLATFORM_SUPER_ADMIN");
-      setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    } catch {
-      /* ignore */
-    }
     setActiveTabState("Super Admin");
   }, []);
 
