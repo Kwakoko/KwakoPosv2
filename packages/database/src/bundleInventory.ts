@@ -13,7 +13,7 @@ export interface BundleResolution {
   components: BundleComponentSnapshot[];
 }
 
-function readBundleComponents(variant: any): any[] | null {
+export function readBundleComponents(variant: any): any[] | null {
   const attributes = variant?.attributes && typeof variant.attributes === "object" ? variant.attributes : {};
   const raw = attributes.bundleComponents;
   if (attributes.__bundle === true || Array.isArray(raw)) {
@@ -21,6 +21,34 @@ function readBundleComponents(variant: any): any[] | null {
     return raw;
   }
   return null;
+}
+
+export async function validateBundleDefinitionAttributes(
+  tx: any,
+  tenantId: string,
+  branchId: string,
+  parentVariantId: string,
+  attributes: any,
+): Promise<void> {
+  const components = readBundleComponents({ id: parentVariantId, attributes });
+  if (!components) return;
+
+  const seen = new Set<string>();
+  for (const component of components) {
+    const componentVariantId = String(component?.variantId || "").trim();
+    const componentQty = Number(component?.quantity);
+    if (!componentVariantId) throw new Error("BUNDLE_COMPONENT_REQUIRED");
+    if (componentVariantId === parentVariantId) throw new Error("BUNDLE_SELF_REFERENCE");
+    if (seen.has(componentVariantId)) throw new Error("BUNDLE_COMPONENT_DUPLICATE");
+    if (!Number.isFinite(componentQty) || componentQty <= 0) throw new Error("BUNDLE_COMPONENT_QUANTITY_INVALID");
+    seen.add(componentVariantId);
+
+    const componentVariant = await tx.productVariant.findUnique({ where: { id: componentVariantId } });
+    if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId || componentVariant.isActive === false) {
+      throw new Error("BUNDLE_COMPONENT_OUT_OF_SCOPE");
+    }
+    if (readBundleComponents(componentVariant)) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
+  }
 }
 
 export async function resolveBundleDefinition(
@@ -51,24 +79,14 @@ export async function resolveBundleDefinition(
     };
   }
 
-  const seen = new Set<string>();
+  await validateBundleDefinitionAttributes(tx, tenantId, branchId, variant.id, variant.attributes);
+
   const resolved: BundleComponentSnapshot[] = [];
   for (const component of components) {
-    const componentVariantId = String(component?.variantId || "").trim();
-    const componentQty = Number(component?.quantity);
-    if (!componentVariantId || componentVariantId === variant.id || seen.has(componentVariantId)) {
-      throw new Error(componentVariantId === variant.id ? "BUNDLE_SELF_REFERENCE" : "BUNDLE_COMPONENT_DUPLICATE");
-    }
-    if (!Number.isFinite(componentQty) || componentQty <= 0) throw new Error("BUNDLE_COMPONENT_QUANTITY_INVALID");
-    seen.add(componentVariantId);
-
+    const componentVariantId = String(component.variantId);
+    const componentQty = Number(component.quantity);
     const componentVariant = await tx.productVariant.findUnique({ where: { id: componentVariantId } });
-    if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId || componentVariant.isActive === false) {
-      throw new Error("BUNDLE_COMPONENT_OUT_OF_SCOPE");
-    }
-    const nested = readBundleComponents(componentVariant);
-    if (nested) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
-
+    if (!componentVariant) throw new Error("BUNDLE_COMPONENT_OUT_OF_SCOPE");
     resolved.push({
       variantId: componentVariant.id,
       productId: componentVariant.productId,
