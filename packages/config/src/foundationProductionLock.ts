@@ -32,6 +32,7 @@ export const FOUNDATION_REQUIRED_AUTHORITIES = {
   platformGovernance: "packages/config/src/platformGovernanceControlPlane.ts",
   liveProductionEvidence: "packages/config/src/liveProductionEvidenceGovernance.ts",
   aiAgentGovernance: "packages/config/src/aiAgentGovernance.ts",
+  platformServicesProductionLock: "packages/config/src/platformServicesProductionLock.ts",
 } as const;
 
 export const FOUNDATION_REQUIRED_GATES = [
@@ -53,4 +54,5 @@ export const FOUNDATION_REQUIRED_GATES = [
   "certify:security",
   "production:evidence:verify",
   "platform-governance:verify",
+  "certify:platform-services-lock",
 ] as const;
