@@ -106,13 +106,11 @@ export class PrismaAtomicCommercialFinanceService {
             variantId: component.variantId,
             productId: component.productId,
             quantity: component.quantity,
-            unitCost: component.unitCost,
           }));
           const actual = item.bundleComponents.map((component: any) => ({
             variantId: String(component.variantId),
             productId: String(component.productId),
             quantity: Number(component.quantity),
-            unitCost: Number(component.unitCost),
           }));
           if (JSON.stringify(expected) !== JSON.stringify(actual)) {
             throw new Error("BUNDLE_DEFINITION_CHANGED_OFFLINE");
