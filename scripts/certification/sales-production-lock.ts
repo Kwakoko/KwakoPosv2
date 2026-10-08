@@ -6,14 +6,14 @@ const LOCK_ID = "SALES-PRODUCTION-LOCK-V1-2026-10-07";
 const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product selection","Customer selection","Discounts","Taxes","Payments","Payment channels","Receipts","Refunds","Voids/cancellations","Sales history","Sales detail","Recent orders","Sales reports","Sales sync/outbox","Sales ledger/audit trail"];
 
 const LOCKED_BLOBS: Record<string,string> = {
-  "apps/web/src/pages/PosPage.tsx": "631923c2bc23a557397f4cad7aab2b1dbbdab0a6",
-  "apps/api/src/server.ts": "a74c1c1515c1e4e242bdf521157620c01b06a7be",
-  "packages/contracts/src/index.ts": "088c086f91320349f3f8ac4b94c699f15d0c9cf3",
+  "apps/web/src/pages/PosPage.tsx": "2d1cd007d1ff971ea37d5fa0248edf7e5d0dee6a",
+  "apps/api/src/server.ts": "434a3efaa3ac4ecbe580d7b1b1e7da9c4ce289ae",
+  "packages/contracts/src/index.ts": "dc56a06b26b3ff85e1683b835976a6926b2310f4",
   "packages/database/src/atomicCommercialFinance.ts": "61edd609ee8260d547883e2ffa16a9204f747a65",
-  "packages/database/src/prismaProductionRepositories.ts": "bdfa9bf62d475f3129c44ff986daf450c3e42442",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "c439797e147cb3f03a1dd69d546d7a50f091f91f",
-  "apps/web/src/indexedDb.ts": "03382d251e7eed4962a1fff8a25154aeebcb5c3b",
-  "apps/web/src/clientSyncEngine.ts": "7b846fb46a1cb725b7d6c09130669963d6078c4e"
+  "packages/database/src/prismaProductionRepositories.ts": "19be308366d07d0af829ed0dd2052c0447f7fa77",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "2230175727d1590e155c8c72e443cd959fa25fe2",
+  "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
+  "apps/web/src/clientSyncEngine.ts": "dc09da367ef05f11bdbf2b03e0660ca9257146ae"
 };
 
 const MARKERS: Array<[string,string,string[]]> = [
