@@ -62,7 +62,6 @@ export interface PosSaleStockItem {
   unitCost?: number;
   name?: string;
   sku?: string;
-  bundleParentVariantId?: string;
 }
 
 export interface PosSaleStockParams {
@@ -437,100 +436,23 @@ export async function queueAddStock(
   });
 }
 
-function bundleComponentsForVariant(variant: any): Array<{ variantId: string; quantity: number }> | null {
-  const attributes = variant?.attributes && typeof variant.attributes === "object" ? variant.attributes : {};
-  const raw = attributes.bundleComponents;
-  if (attributes.__bundle === true || Array.isArray(raw)) {
-    if (!Array.isArray(raw) || raw.length === 0) throw new Error("BUNDLE_DEFINITION_INVALID");
-    return raw.map((component: any) => {
-      const variantId = String(component?.variantId || "").trim();
-      const quantity = Number(component?.quantity);
-      if (!variantId || !Number.isFinite(quantity) || quantity <= 0) throw new Error("BUNDLE_COMPONENT_QUANTITY_INVALID");
-      return { variantId, quantity };
-    });
-  }
-  return null;
-}
-
-function localVariantStock(db: LocalIndexedDbStore, variantId: string, tenantId: string, branchId: string): number {
-  const rows = [...db.stockLedger.values()].filter((entry: any) =>
-    entry.tenantId === tenantId && entry.branchId === branchId && entry.variantId === variantId
-  );
-  return rows.reduce((sum, entry: any) => sum + Number(entry.quantityChange ?? entry.quantity ?? 0), 0);
-}
-
-export function getBundleAvailableQuantity(
-  db: LocalIndexedDbStore,
-  variantId: string,
-  tenantId: string,
-  branchId: string,
-): number {
-  const variant = db.productVariants.get(variantId) as any;
-  if (!variant || variant.tenantId !== tenantId || variant.branchId !== branchId) {
-    throw new Error(`BUNDLE_VARIANT_OUT_OF_SCOPE:${variantId}`);
-  }
-  const components = bundleComponentsForVariant(variant);
-  if (!components) return Math.max(0, Math.floor(localVariantStock(db, variantId, tenantId, branchId)));
-
-  let available = Number.POSITIVE_INFINITY;
-  for (const component of components) {
-    if (component.variantId === variantId) throw new Error("BUNDLE_SELF_REFERENCE");
-    const componentVariant = db.productVariants.get(component.variantId) as any;
-    if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId) {
-      throw new Error(`BUNDLE_COMPONENT_OUT_OF_SCOPE:${component.variantId}`);
-    }
-    if (bundleComponentsForVariant(componentVariant)) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
-    const stock = localVariantStock(db, componentVariant.id, tenantId, branchId);
-    available = Math.min(available, Math.floor(stock / component.quantity));
-  }
-  return Number.isFinite(available) ? Math.max(0, available) : 0;
-}
-
-export function expandBundleSaleItems(
-  db: LocalIndexedDbStore,
-  items: PosSaleStockItem[],
-  tenantId: string,
-  branchId: string,
-): PosSaleStockItem[] {
-  const byVariant = new Map<string, PosSaleStockItem>();
+function expandBundleSaleItems(db: LocalIndexedDbStore, items: PosSaleStockItem[], tenantId: string, branchId: string): PosSaleStockItem[] {
+  const expanded: PosSaleStockItem[] = [];
   for (const item of items) {
     const variant = item.variantId ? (db.productVariants.get(item.variantId) as any) : null;
-    const components = variant ? bundleComponentsForVariant(variant) : null;
-    if (!components) {
-      const key = String(item.variantId || item.productId);
-      const previous = byVariant.get(key);
-      byVariant.set(key, previous
-        ? { ...previous, qty: Number(previous.qty) + Number(item.qty) }
-        : { ...item });
-      continue;
-    }
-
+    const components = variant?.attributes?.bundleComponents;
+    if (!Array.isArray(components) || components.length === 0) { expanded.push(item); continue; }
     for (const component of components) {
-      const componentVariant = db.productVariants.get(component.variantId) as any;
-      if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId) {
-        throw new Error(`BUNDLE_COMPONENT_OUT_OF_SCOPE:${component.variantId}`);
-      }
+      const componentVariant = db.productVariants.get(String(component.variantId)) as any;
+      if (!componentVariant || componentVariant.tenantId !== tenantId || componentVariant.branchId !== branchId) throw new Error(`BUNDLE_COMPONENT_OUT_OF_SCOPE:${component.variantId}`);
       const componentProduct = db.products.get(componentVariant.productId) as any;
-      if (!componentProduct || componentProduct.tenantId !== tenantId || componentProduct.branchId !== branchId) {
-        throw new Error(`BUNDLE_COMPONENT_PRODUCT_OUT_OF_SCOPE:${componentVariant.productId}`);
-      }
-      if (bundleComponentsForVariant(componentVariant)) throw new Error("BUNDLE_NESTING_NOT_SUPPORTED");
-      const qty = Number(item.qty) * component.quantity;
-      const previous = byVariant.get(componentVariant.id);
-      byVariant.set(componentVariant.id, previous
-        ? { ...previous, qty: Number(previous.qty) + qty }
-        : {
-            productId: componentVariant.productId,
-            variantId: componentVariant.id,
-            qty,
-            unitCost: Number(componentVariant.costPrice ?? componentVariant.price ?? 0),
-            name: componentProduct.name,
-            sku: componentVariant.sku,
-            bundleParentVariantId: item.variantId,
-          });
+      if (!componentProduct || componentProduct.tenantId !== tenantId || componentProduct.branchId !== branchId) throw new Error(`BUNDLE_COMPONENT_PRODUCT_OUT_OF_SCOPE:${componentVariant.productId}`);
+      const componentQty = Number(component.quantity);
+      if (!Number.isFinite(componentQty) || componentQty <= 0) throw new Error("BUNDLE_COMPONENT_QUANTITY_INVALID");
+      expanded.push({ productId: componentVariant.productId, variantId: componentVariant.id, qty: Number(item.qty) * componentQty, unitCost: Number(componentVariant.costPrice ?? componentVariant.price ?? 0), name: componentProduct.name, sku: componentVariant.sku });
     }
   }
-  return [...byVariant.values()];
+  return expanded;
 }
 
 /**
