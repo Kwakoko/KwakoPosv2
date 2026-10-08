@@ -20,6 +20,7 @@ import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+import { prisma } from "@kwakopos2/database";
 import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
@@ -3110,6 +3111,107 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     if (!(privileged || wildcard || rules[action].some((p) => permissions.has(p)))) throw new Error("FORBIDDEN: Finance permission required");
     return ctx;
   };
+
+  // Tax / TRA fiscal compliance report is PostgreSQL-authoritative and includes every fiscalization record in range.
+  server.get("/api/v1/finance/tax-compliance", async (req) => {
+    const ctx = assertFinanceAuthority(req, "view");
+    const query = (req.query as any) || {};
+    const now = new Date();
+    const end = query.to ? new Date(String(query.to)) : now;
+    if (!Number.isFinite(end.getTime())) throw new Error("TAX_REPORT_INVALID_TO_DATE");
+    let start = query.from ? new Date(String(query.from)) : new Date(end);
+    if (!Number.isFinite(start.getTime())) throw new Error("TAX_REPORT_INVALID_FROM_DATE");
+    const range = String(query.range || "").toLowerCase();
+    if (!query.from) {
+      const d = new Date(end);
+      if (range === "today") d.setHours(0, 0, 0, 0);
+      else if (range === "this_week") {
+        const day = d.getDay();
+        d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+        d.setHours(0, 0, 0, 0);
+      } else if (range === "this_month") {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_quarter") {
+        d.setMonth(Math.floor(d.getMonth() / 3) * 3, 1); d.setHours(0, 0, 0, 0);
+      } else if (range === "this_year") {
+        d.setMonth(0, 1); d.setHours(0, 0, 0, 0);
+      } else {
+        d.setDate(1); d.setHours(0, 0, 0, 0);
+      }
+      start = d;
+    }
+    if (start >= end) throw new Error("TAX_REPORT_INVALID_DATE_RANGE");
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
+    const branchScope = requestedBranch ? { tenantId: ctx.tenantId, branchId: requestedBranch } : { tenantId: ctx.tenantId };
+    const [sales, fiscalizations, configRows] = await Promise.all([
+      prisma.sale.findMany({
+        where: { ...branchScope, soldAt: { gte: start, lte: end }, status: { notIn: ["CANCELLED", "VOIDED", "REFUNDED"] } },
+        orderBy: { soldAt: "asc" },
+      }),
+      prisma.traVfdFiscalization.findMany({
+        where: { ...branchScope, createdAt: { gte: start, lte: end } },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.setting.findMany({
+        where: { ...branchScope, scope: "BRANCH", key: "tax.config", isActive: true },
+        orderBy: { updatedAt: "desc" },
+      }),
+    ]);
+    const fiscalByTransaction = new Map<string, any>();
+    for (const fiscal of fiscalizations) {
+      const existing = fiscalByTransaction.get(fiscal.transactionId);
+      if (!existing || new Date(fiscal.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+        fiscalByTransaction.set(fiscal.transactionId, fiscal);
+      }
+    }
+    const rows = sales.map((sale: any) => {
+      const fiscal = fiscalByTransaction.get(sale.id) || fiscalByTransaction.get(sale.saleNumber);
+      const netAmount = Number(sale.subtotal);
+      const taxAmount = Number(sale.taxTotal);
+      return {
+        id: sale.id, tenantId: sale.tenantId, branchId: sale.branchId,
+        receiptRef: sale.saleNumber, transactionId: sale.id,
+        date: sale.soldAt.toISOString(), netAmount, taxAmount, grossAmount: Number(sale.grandTotal),
+        taxRate: netAmount > 0 && taxAmount > 0 ? Number(((taxAmount / netAmount) * 100).toFixed(4)) : 0,
+        fiscalState: fiscal?.state || "NOT_APPLICABLE",
+        fiscalReceiptNumber: fiscal?.fiscalReceiptNumber || null,
+        fiscalCode: fiscal?.fiscalCode || null,
+        verificationCode: fiscal?.verificationCode || null,
+        reconciliationStatus: fiscal?.reconciliationStatus || null,
+        lastError: fiscal?.lastError || null,
+        attempts: fiscal?.attempts || 0,
+        nextAttemptAt: fiscal?.nextAttemptAt?.toISOString?.() || null,
+      };
+    });
+    const totalNet = rows.reduce((sum, row) => sum + row.netAmount, 0);
+    const totalTax = rows.reduce((sum, row) => sum + row.taxAmount, 0);
+    const totalGross = rows.reduce((sum, row) => sum + row.grossAmount, 0);
+    const fiscalStateCounts = fiscalizations.reduce((acc: Record<string, number>, row: any) => {
+      acc[row.state] = (acc[row.state] || 0) + 1; return acc;
+    }, {});
+    const reconciliationCounts = fiscalizations.reduce((acc: Record<string, number>, row: any) => {
+      const state = row.reconciliationStatus || "PENDING";
+      acc[state] = (acc[state] || 0) + 1; return acc;
+    }, {});
+    const config = configRows.map((row: any) => ({
+      branchId: row.branchId,
+      vatEnabled: Boolean(row.value?.vatEnabled),
+      taxId: row.value?.taxId || null,
+      taxCode: row.value?.taxCode || "VAT",
+      taxRatePercent: Number(row.value?.vatRatePercent ?? 0),
+      taxInclusivePricing: row.value?.taxInclusivePricing !== false,
+      currencyCode: row.value?.currencyCode || "TZS",
+    }));
+    return {
+      success: true,
+      data: {
+        from: start.toISOString(), to: end.toISOString(), rows,
+        totals: { netAmount: totalNet, taxAmount: totalTax, grossAmount: totalGross, transactionCount: rows.length },
+        fiscalStateCounts, reconciliationCounts, config,
+      },
+    };
+  });
 
   // ==========================================
   // PHASE 2: Finance & Operational Control REST Routes
@@ -6552,6 +6654,7 @@ export async function startServer(): Promise<FastifyInstance> {
   while (true) {
     try {
       await server.listen({ port, host });
+      if (productionPersistence) startTraVfdReconciliationWorker();
       break;
     } catch (err: any) {
       if (err?.code === "EADDRINUSE" && attempts < 5) {
