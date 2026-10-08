@@ -916,6 +916,7 @@ model Expense {
   tenantId       String
   branchId       String
   cashSessionId  String?
+  employeeId     String?
   category       String
   amount         Decimal      @db.Decimal(12, 2)
   reason         String
@@ -938,6 +939,7 @@ model Expense {
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
   cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  employee       Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, branchId, idempotencyKey])
   @@index([tenantId, branchId, incurredAt])
