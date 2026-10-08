@@ -52,7 +52,8 @@ requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.in
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.includes("admin:*")', "admin wildcard cannot grant Super Admin");
 requireText("scripts/security/bootstrap-super-admin.ts", 'const email = String(process.env.SUPER_ADMIN_EMAIL || "").trim().toLowerCase();', "bootstrap identity supplied by deployment");
 requireText("scripts/security/bootstrap-super-admin.ts", 'name: "PLATFORM_SUPER_ADMIN"', "bootstrap creates dedicated platform role");
-requireAbsent("scripts/security/bootstrap-super-admin.ts", 'name: "SUPER_ADMIN"', "bootstrap must not create tenant Super Admin role");
+requireAbsent("scripts/security/bootstrap-super-admin.ts", 'create: { tenantId: tenant.id, name: "SUPER_ADMIN"', "bootstrap must not create tenant Super Admin role");
+requireText("scripts/security/bootstrap-super-admin.ts", 'create: { tenantId: tenant.id, name: "PLATFORM_SUPER_ADMIN"', "bootstrap creates the dedicated platform role");
 requireAbsent("scripts/security/bootstrap-super-admin.ts", 'permissions: ["*"]', "platform role must not inherit tenant wildcard permissions");
 requireText("apps/api/src/services/superAdminSecurityService.ts", 'roleName !== "PLATFORM_SUPER_ADMIN"', "security rows cannot elevate tenant accounts");
 requireText("apps/api/src/services/superAdminSecurityService.ts", "PLATFORM_AUDIT_WRITE_FAILED", "platform audit is fail-closed in production");
@@ -128,7 +129,11 @@ requireText("apps/api/src/server.ts", "PLATFORM_TENANT_APP_ISOLATION", "tenant a
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")', "emergency kill switch step-up");
 requireAbsent("apps/api/src/server.ts", "body.adminId", "client-supplied Super Admin actor identity");
-requireAbsent("apps/api/src/server.ts", 'admin@kwakopos.com', "hard-coded platform identity in context switching");
+const serverSource = read("apps/api/src/server.ts");
+const switchContextStart = serverSource.indexOf('server.post("/auth/switch-context"');
+const switchContextSource = switchContextStart >= 0 ? serverSource.slice(switchContextStart, switchContextStart + 12000) : "";
+requireTrue("apps/api/src/server.ts switch-context route present", switchContextStart >= 0);
+requireAbsentText(switchContextSource, 'admin@kwakopos.com', "hard-coded platform identity in tenant context switching");
 requireText("apps/web/src/context/KwakoPosContexts.tsx", 'String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "UI platform role boundary");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "permission cannot elevate to platform mode");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("ADMIN:PLATFORM")', "permission cannot elevate to platform mode");
