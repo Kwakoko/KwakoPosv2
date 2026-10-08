@@ -955,11 +955,6 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/refresh" && req.method === "POST") {
-        const origin = String(req.headers.origin || "").trim();
-        const allowedOrigins = Array.isArray(corsOrigin) ? new Set(corsOrigin) : new Set([String(corsOrigin)]);
-        if (origin && !allowedOrigins.has(origin)) {
-          return reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_DENIED", message: "Request origin is not authorized." } });
-        }
         const body = (req.body || {}) as RefreshRequestBody;
         const sessionId = String(body.sessionId || "");
         const refreshToken = parseCookies(req.headers?.cookie)[REFRESH_COOKIE] || "";
@@ -992,11 +987,6 @@ function registerCanonicalProductionAuthentication(
       }
   
       if (routePath === "/auth/logout" && req.method === "POST") {
-        const origin = String(req.headers.origin || "").trim();
-        const allowedOrigins = Array.isArray(corsOrigin) ? new Set(corsOrigin) : new Set([String(corsOrigin)]);
-        if (origin && !allowedOrigins.has(origin)) {
-          return reply.status(403).send({ success: false, error: { code: "CSRF_ORIGIN_DENIED", message: "Request origin is not authorized." } });
-        }
         const body = (req.body || {}) as LogoutRequestBody;
         const sessionId = String(body.sessionId || "");
         const reason = String(body.reason || "USER_LOGOUT").toUpperCase();
