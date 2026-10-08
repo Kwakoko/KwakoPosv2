@@ -55,6 +55,14 @@ jobs:
       - run: npm run build
       - name: Production dependency vulnerability audit
         run: npm audit --omit=dev --audit-level=high
+      - name: Full dependency vulnerability audit
+        run: npm audit --audit-level=high
+      - name: Security Platform Production Lock
+        run: npm run certify:security-platform-lock
+      - name: Security & Trust Governance
+        run: npm run security-trust:verify
+      - name: Production dependency vulnerability audit
+        run: npm audit --omit=dev --audit-level=high
       - name: Start local API for executable security acceptance tests
         shell: bash
         env:
