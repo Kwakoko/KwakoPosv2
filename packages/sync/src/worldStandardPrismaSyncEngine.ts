@@ -1429,16 +1429,6 @@ const now = new Date();
   }
 
   private async lockConflictEntity(tx: any, ctx: TenantContext, entityType: string, entityId: string): Promise<void> {
-    const tableByType: Record<string, string> = {
-      Product: "products",
-      ProductVariant: "product_variants",
-      Customer: "customers",
-      Supplier: "suppliers",
-      Category: "categories",
-      Brand: "brands",
-      Expense: "expenses",
-      CustomerContact: "customer_contacts",
-    };
     const queryArgs = [entityId, ctx.tenantId, ctx.branchId] as const;
     let rows: Array<{ id: string }>;
     switch (entityType) {
