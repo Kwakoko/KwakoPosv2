@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { PLATFORM_SERVICES_PRODUCTION_LOCKS } from "../../packages/config/src/platformServicesProductionLock.js";
 
 describe("Platform Services Production Lock v1", () => {
@@ -23,8 +25,6 @@ describe("Platform Services Production Lock v1", () => {
       ".github/workflows/production-certification.yml",
       ".github/workflows/production-release-exact-main.yml",
     ]) {
-      const fs = require("node:fs") as typeof import("node:fs");
-      const path = require("node:path") as typeof import("node:path");
       const source = fs.readFileSync(path.join(process.cwd(), workflow), "utf8");
       expect(source).toContain("npm run certify:platform-services-lock");
     }
