@@ -6716,8 +6716,8 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     const { globalNotificationService } = await import("./services/notificationService.js");
     const ctx = requireAdminContext(req);
     const { id } = req.params as { id: string };
-    const row = await globalNotificationService.retryDue(ctx, 100);
-    return reply.status(200).send({ success: true, data: { notificationId: id, ...row } });
+    const data = await globalNotificationService.retryOne(ctx, id);
+    return reply.status(200).send({ success: true, data });
   });
 
   server.get("/api/v1/notifications/health", async (req, reply) => {
