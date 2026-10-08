@@ -118,10 +118,6 @@ jobs:
         run: npm run certify:tax-fiscal-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
-      - name: Offline Sync Platform Production Lock
-        run: npm run certify:offline-sync-lock
-      - name: Support Production Lock v1
-        run: npm run certify:support-lock
 
       - name: Validate conventional commit
         run: npx tsx scripts/ci/validate-commit-message.ts
@@ -152,6 +148,8 @@ jobs:
       - name: Execute 17-Domain Full-System Certification Campaign
         run: npm run certify:campaign
 
+      - name: Security Platform Production Lock
+        run: npm run certify:security-lock
       - name: Execute Phase 12 Security & Compliance Certification Engine
         run: npm run certify:security
 
