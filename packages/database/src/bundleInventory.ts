@@ -63,7 +63,7 @@ export async function resolveBundleDefinition(
   }
 
   const components = readBundleComponents(variant);
-  const definitionVersion = variant.updatedAt ? new Date(variant.updatedAt).toISOString() : "UNKNOWN";
+  const definitionVersion = String(variant?.attributes?.bundleDefinitionVersion || (variant.updatedAt ? new Date(variant.updatedAt).toISOString() : "UNKNOWN"));
   if (!components) {
     return {
       isBundle: false,
