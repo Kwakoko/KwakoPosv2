@@ -25,6 +25,7 @@ import { apiFetch, changeSuperAdminPassword } from "../services/applicationApiSe
 import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";
+import { SuperAdminLiveControlPlane } from "../components/SuperAdminLiveControlPlane.js";
 
 type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness" | "certification";
 const money = (v: number) => `Tsh ${(v / 1_000_000).toFixed(1)}M`;
@@ -83,7 +84,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
     setLoading(true);
     setAuthError(null);
     try {
-      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview");
+      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview/live");
       if (res && res.success) {
         setAuthorized(true);
         setOverview(res.data || null);
@@ -322,15 +323,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
         </div>
       )}
 
-      {activeTab !== "tenants" && activeTab !== "security" && activeTab !== "sql-studio" && activeTab !== "cleanliness" && activeTab !== "certification" && (
-        <div className="v2-card" style={{ padding: "1.2rem" }}>
-          <div className="v2-flex v2-items-center v2-gap-2">
-            <Eye size={16} />
-            <strong>{activeTab === "subscriptions" ? "Subscriptions" : activeTab === "health" ? "System Health" : "Super Admin Audit Log"}</strong>
-          </div>
-          <p className="v2-text-xs v2-text-muted">This control surface remains connected to the live platform telemetry engine.</p>
-        </div>
-      )}
+      {activeTab === "subscriptions" && <SuperAdminLiveControlPlane tab="subscriptions" />}
+      {activeTab === "health" && <SuperAdminLiveControlPlane tab="health" />}
+      {activeTab === "audit" && <SuperAdminLiveControlPlane tab="audit" />}
 
       {activeTab === "sql-studio" && <SuperAdminSqlStudio />}
       {activeTab === "cleanliness" && <SuperAdminCleanlinessStudio />}
