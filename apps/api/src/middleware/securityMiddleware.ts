@@ -15,7 +15,7 @@ export interface SecurityMiddlewareOptions {
  *   1. H-006 – @fastify/helmet     : Sets security response headers (CSP, HSTS, X-Frame-Options, etc.)
  *   2. H-004 – @fastify/rate-limit : Global IP/tenant rate limiting
  */
-export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOptions> = fp<SecurityMiddlewareOptions>(async (
+export const registerSecurityMiddleware = fp<SecurityMiddlewareOptions>(async (
   server: FastifyInstance,
   opts: SecurityMiddlewareOptions
 ): Promise<void> => {
