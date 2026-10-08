@@ -891,6 +891,7 @@ export const SaleSchema = z.object({
   saleNumber: z.string(),
   customerId: z.string().uuid().nullable().optional(),
   cashSessionId: z.string().uuid().nullable().optional(),
+  employeeId: z.string().uuid().nullable().optional(),
   subtotal: z.number().nonnegative(),
   discountTotal: z.number().nonnegative().default(0),
   taxTotal: z.number().nonnegative().default(0),
@@ -1140,6 +1141,7 @@ export type Expense = z.infer<typeof ExpenseSchema>;
 export const CreateExpenseRequestSchema = z.object({
   id: z.string().uuid().optional(),
   cashSessionId: z.string().uuid().optional(),
+  employeeId: z.string().uuid().optional(),
   category: z.string().min(1),
   amount: z.number().positive(),
   reason: z.string().min(1),
