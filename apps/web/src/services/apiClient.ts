@@ -274,7 +274,6 @@ export interface SuperAdminSetupDetails {
   totpSecret: string;
   otpauthUri?: string;
   qrPayload?: string;
-  currentOtp?: string;
   userId?: string;
   issuer?: string;
   account?: string;
