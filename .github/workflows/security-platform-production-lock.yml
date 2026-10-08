@@ -7,6 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Explicit standalone lock: this workflow is the authoritative Security Platform gate.
 concurrency:
   group: security-platform-production-lock-${{ github.ref }}
   cancel-in-progress: true
