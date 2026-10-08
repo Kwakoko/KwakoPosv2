@@ -7,11 +7,11 @@ const REQUIRED_SUBITEMS = ["Sales Dashboard","POS","New Sale","Cart","Product se
 
 const LOCKED_BLOBS: Record<string,string> = {
   "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
-  "apps/api/src/server.ts": "0ae33e9217e3cfd0eb93b154a98d04872d85ae71",
-  "packages/contracts/src/index.ts": "f1d05ff580b66d16e9bed5d5b439885d40743391",
-  "packages/database/src/atomicCommercialFinance.ts": "f68a8715038480b7da98526c3a58ec3bf0ded170",
+  "apps/api/src/server.ts": "abbaf0c7668796c73a2765a11e48bcfdf001ec19",
+  "packages/contracts/src/index.ts": "27b80e50d9ee754721393adc6d858b1e71143cd2",
+  "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
   "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
-  "packages/database/src/prismaProductionRepositories.ts": "72575e27a0c6ed11ba808e0aefb09e08a6fc4936",
+  "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
   "packages/database/src/bundleInventory.ts": "86a69340f7bdaf36304805720ab5461a1d99a3ff",
   "packages/sync/src/worldStandardPrismaSyncEngine.ts": "3b0667066646b29b1767ae83c3266d8290207843",
   "apps/web/src/indexedDb.ts": "982b269df8356696d85f546bc2fbe544e7c82e67",
