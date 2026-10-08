@@ -112,6 +112,8 @@ must(files.pkg, '"certify:tax-fiscal-lock"', "package certification script");
 mustNot(files.reportsUi, "VAT (18%)", "tax report hard-coded VAT label");
 mustNot(files.dashboardUi, "VAT OUTPUT TAX (18%)", "dashboard hard-coded VAT label");
 mustNot(files.dashboardUi, "netSales * 0.18 / 1.18", "dashboard hard-coded VAT formula");
+mustNot(files.provider, "1.18", "VFD provider hard-coded VAT divisor");
+mustNot(files.provider, "* 0.18", "VFD provider hard-coded VAT multiplication");
 
 const exclusive = PricingTaxEngine.calculateTax(10000, { ratePct: 18, isInclusive: false });
 const inclusive = PricingTaxEngine.calculateTax(11800, { ratePct: 18, isInclusive: true });
