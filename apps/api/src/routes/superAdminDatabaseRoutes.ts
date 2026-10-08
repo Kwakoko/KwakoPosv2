@@ -191,8 +191,8 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
       const query = (req.query || {}) as any;
       const search = String(query.search || "").trim();
       const limit = Math.min(200, Math.max(1, Number.parseInt(String(query.limit || "100"), 10) || 100));
-      const where = search
-        ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { slug: { contains: search, mode: "insensitive" } }] }
+      const where: Prisma.TenantWhereInput = search
+        ? { OR: [{ name: { contains: search, mode: Prisma.QueryMode.insensitive } }, { slug: { contains: search, mode: Prisma.QueryMode.insensitive } }] }
         : {};
       const tenants = await prisma.tenant.findMany({
         where, orderBy: { createdAt: "desc" }, take: limit,
