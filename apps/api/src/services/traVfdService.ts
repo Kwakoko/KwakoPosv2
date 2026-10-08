@@ -60,6 +60,22 @@ function computeReceiptHash(previousHash: string, invoiceNumber: string, timesta
   const payload = `${previousHash}|${invoiceNumber}|${timestampUtc}|${canonicalMoney(grandTotal)}|${canonicalMoney(taxTotal)}`;
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
+async function recordFiscalAudit(ctx: { tenantId: string; branchId: string; userId?: string }, action: string, fiscalizationId: string, metadata: Record<string, unknown> = {}) {
+  await prisma.auditEvent.create({
+    data: {
+      id: crypto.randomUUID(),
+      tenantId: ctx.tenantId,
+      branchId: ctx.branchId,
+      userId: ctx.userId || "system",
+      deviceId: "tra-vfd",
+      action,
+      entityType: "TraVfdFiscalization",
+      entityId: fiscalizationId,
+      metadata,
+    },
+  });
+}
+
 function totalOf(payload: any): number {
   return Number(payload?.grandTotal ?? payload?.total ?? payload?.totalAmount ?? 0);
 }
@@ -137,6 +153,16 @@ export class TraVfdService {
         efdSerial: input.efdSerial, receiptCode: input.receiptCode, routingKey: input.routingKey,
       },
     });
+    await recordFiscalAudit(
+      { tenantId: ctx.tenantId, branchId: ctx.branchId, userId: (ctx as any).userId },
+      "TRA_VFD_CONFIG_UPDATED",
+      row.id,
+      {
+        enabled: row.enabled, environment: row.environment, endpointConfigured: Boolean(row.endpoint),
+        tinConfigured: Boolean(row.tin), certificateConfigured: Boolean(row.certSerial),
+        registrationConfigured: Boolean(row.registrationId), efdSerialConfigured: Boolean(row.efdSerial),
+      },
+    );
     return {
       enabled: row.enabled, endpoint: row.endpoint, environment: row.environment as "TEST" | "PRODUCTION",
       tin: row.tin || undefined, certSerial: row.certSerial || undefined, registrationId: row.registrationId || undefined,
@@ -184,7 +210,11 @@ export class TraVfdService {
       });
       return created;
     });
-    return mapFiscalization(fiscalization);
+    const mapped = mapFiscalization(fiscalization);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_FISCAL_ENQUEUED", mapped.id, {
+      transactionId: mapped.transactionId, chainSequence: mapped.chainSequence, receiptId: mapped.receiptId, state: mapped.state,
+    });
+    return mapped;
   }
 
   async get(ctx: { tenantId: string; branchId: string }, id: string) {
@@ -220,6 +250,7 @@ export class TraVfdService {
         data: { status: "SUBMITTING", attempts: attempt, lastError: null },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_SUBMITTING", row.id, { attempt });
     try {
       const counters = await reserveCounters(config.id);
       const input = buildReceiptInput(row, config, counters);
@@ -241,6 +272,10 @@ export class TraVfdService {
           data: { status: "SENT", processedAt: new Date(), lastError: null, nextAttemptAt: null },
         }),
       ]);
+      await recordFiscalAudit(ctx as any, "TRA_VFD_ACCEPTED", row.id, {
+        fiscalReceiptNumber: response.number == null ? null : String(response.number),
+        verificationCode: response.verificationCode || null,
+      });
       return this.reconcile(ctx, row.id);
     } catch (error: any) {
       const message = error?.message || "TRA_VFD_SUBMISSION_FAILED";
@@ -365,6 +400,7 @@ export class TraVfdService {
         data: { status: "FAILED", lastError: reason },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_REJECTED", id, { reason, attempt });
     return mapFiscalization(await prisma.traVfdFiscalization.findUniqueOrThrow({ where: { id } }));
   }
   private async retry(id: string, ctx: { tenantId: string; branchId: string }, reason: string, attempt?: number) {
@@ -380,6 +416,9 @@ export class TraVfdService {
         data: { status: "PENDING", attempts: currentAttempt, lastError: reason, nextAttemptAt: next },
       }),
     ]);
+    await recordFiscalAudit(ctx as any, "TRA_VFD_RETRY_SCHEDULED", id, {
+      reason, attempt: currentAttempt, nextAttemptAt: next.toISOString(),
+    });
     return mapFiscalization(await prisma.traVfdFiscalization.findUniqueOrThrow({ where: { id } }));
   }
 }
