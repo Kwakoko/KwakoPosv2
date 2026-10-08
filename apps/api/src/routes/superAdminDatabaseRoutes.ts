@@ -177,7 +177,7 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
   server.get("/api/v1/super-admin/system/logs", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       requireSuperAdmin(req);
-      const platformLogs = await prisma.$queryRaw<any[]>\`SELECT id, tenant_id AS "tenantId", actor_id AS "actorId", action, entity_type AS "entityType", entity_id AS "entityId", metadata, created_at AS "createdAt" FROM platform_audit_events ORDER BY created_at DESC LIMIT 200\`;
+      const platformLogs = await prisma.$queryRaw<any[]>`SELECT id, tenant_id AS "tenantId", actor_id AS "actorId", action, entity_type AS "entityType", entity_id AS "entityId", metadata, created_at AS "createdAt" FROM platform_audit_events ORDER BY created_at DESC LIMIT 200`;
       return reply.send({ success: true, logs: jsonSafe(platformLogs), source: "postgresql" });
     } catch (error: any) {
       return reply.status(403).send({ success: false, error: { code: "SYSTEM_LOGS_FORBIDDEN", message: "System logs unavailable." } });
@@ -368,7 +368,6 @@ export function superAdminDatabaseRoutes(server: FastifyInstance): void {
   server.get("/api/v1/super-admin/security/health", async (req, reply) => {
     try {
       requireSuperAdmin(req);
-      await prisma.$executeRaw`ALTER TABLE platform_super_admin_security ADD COLUMN IF NOT EXISTS last_totp_counter BIGINT`;
       const [securityRows, throttleRows, incidents, activeSessions]=await Promise.all([
         prisma.$queryRaw<any[]>`SELECT user_id AS "userId",mfa_required AS "mfaRequired",mfa_enrolled AS "mfaEnrolled",mfa_type AS "mfaType",locked_until AS "lockedUntil",failed_login_count AS "failedLoginCount",last_login_at AS "lastLoginAt" FROM platform_super_admin_security ORDER BY user_id`,
         prisma.$queryRaw<any[]>`SELECT COUNT(*)::int AS count,COUNT(*) FILTER (WHERE locked_until>NOW())::int AS "activeLocks" FROM auth_login_throttles`,
