@@ -128,7 +128,7 @@ requireText("apps/api/src/server.ts", "PLATFORM_TENANT_APP_ISOLATION", "tenant a
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")', "emergency kill switch step-up");
 requireAbsent("apps/api/src/server.ts", "body.adminId", "client-supplied Super Admin actor identity");
-requireAbsent("apps/api/src/server.ts", 'const userEmail = (ctx as any)?.email || "admin@kwakoko.com"', "hard-coded platform identity in context switching");
+requireAbsent("apps/api/src/server.ts", 'admin@kwakopos.com', "hard-coded platform identity in context switching");
 requireText("apps/web/src/context/KwakoPosContexts.tsx", 'String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "UI platform role boundary");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "permission cannot elevate to platform mode");
 requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("ADMIN:PLATFORM")', "permission cannot elevate to platform mode");
