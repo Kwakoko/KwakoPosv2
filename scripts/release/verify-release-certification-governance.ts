@@ -51,6 +51,7 @@ const evidence = certifyReleaseEvidence({
   evidenceClassificationValid: true,
   governanceConvergencePassed: true,
   finalApprovalPresent: true,
+  platformServicesProductionLockPassed: true,
 });
 check("controlled-certification-pass", evidence.decision === "PASS" && evidence.gatesPassed === 16, `${evidence.gatesPassed}/16 gates`);
 
@@ -59,7 +60,7 @@ const blocked = certifyReleaseEvidence({ ...({
   buildPassed: true, typecheckPassed: true, testsPassed: true, securityPassed: true, privacyPassed: true,
   tenantIsolationPassed: false, offlineSyncPassed: true, migrationPassed: true, reliabilityPassed: true,
   performancePassed: true, rollbackReady: true, provenanceVerified: true, attestationVerified: true,
-  evidenceClassificationValid: true, governanceConvergencePassed: true, finalApprovalPresent: true,
+  evidenceClassificationValid: true, governanceConvergencePassed: true, finalApprovalPresent: true, platformServicesProductionLockPassed: true,
 } as const) });
 check("fail-closed-block", blocked.decision === "BLOCK" && blocked.failedGates.includes("tenant-isolation"), `decision=${blocked.decision}`);
 
