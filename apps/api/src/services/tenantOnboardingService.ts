@@ -3,7 +3,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { hashPassword } from "@kwakopos2/auth";
 import { StandardPluginCatalog } from "@kwakopos2/domain";
 import { TenantOnboardingCreateRequestSchema, TenantOnboardingUpdateRequestSchema } from "@kwakopos2/contracts";
-import { globalLegalGovernanceService } from "./legalGovernanceService.js";
 
 const OWNER_PERMISSIONS = [
   "PRODUCT_VIEW", "PRODUCT_CREATE", "PRODUCT_EDIT", "PRODUCT_ARCHIVE", "INVENTORY_VIEW", "INVENTORY_ADJUST", "INVENTORY_TRANSFER", "INVENTORY_COUNT",
@@ -93,9 +92,6 @@ export class TenantOnboardingService {
         },
         { maxWait: 10000, timeout: 25000 }
       );
-      try {
-        globalLegalGovernanceService.forceAcceptanceForTest(result.ownerUserId, result.tenantId);
-      } catch {}
       return result;
     } catch (error: any) {
       if (error instanceof TenantOnboardingError) throw error;

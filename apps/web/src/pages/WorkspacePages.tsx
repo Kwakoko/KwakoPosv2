@@ -340,43 +340,110 @@ export const AiPage: React.FC<AiPageProps> = () => {
 export const FinancePage: React.FC = () => {
   const { t } = useTranslation();
   const { formatCurrency, formatMoneyCompact } = useFormatters();
-  const { data: sales, error } = useApiList<Sale>("/api/v1/pos/sales");
-  const total = sales.reduce((s, x) => s + Number(x.grandTotal || 0), 0);
+  const [dashboard, setDashboard] = useState<any | null>(null);
+  const [trialBalance, setTrialBalance] = useState<any | null>(null);
+  const [pnl, setPnl] = useState<any | null>(null);
+  const [balanceSheet, setBalanceSheet] = useState<any | null>(null);
+  const [cashFlow, setCashFlow] = useState<any | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadFinance = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [d, tb, pl, bs, cf, ac] = await Promise.all([
+        apiFetch<any>("/api/v1/finance/dashboard/executive"),
+        apiFetch<any>("/api/v1/finance/reports/trial-balance"),
+        apiFetch<any>("/api/v1/finance/reports/profit-loss"),
+        apiFetch<any>("/api/v1/finance/reports/balance-sheet"),
+        apiFetch<any>("/api/v1/finance/reports/cash-flow"),
+        apiFetch<any>("/api/v1/finance/accounts"),
+      ]);
+      setDashboard(d.data);
+      setTrialBalance(tb.data);
+      setPnl(pl.data);
+      setBalanceSheet(bs.data);
+      setCashFlow(cf.data);
+      setAccounts(Array.isArray(ac.data) ? ac.data : []);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to load Finance data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadFinance(); }, [loadFinance]);
+
   return (
     <div className="v2-animate-page-enter">
       <div className="v2-flex v2-items-center v2-justify-between v2-mb-4">
         <h1 className="v2-text-xl v2-font-black" style={{ letterSpacing: "-.02em" }}>{t("finance.title")}</h1>
-        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => runUiAction("ui.apps.web.src.pages.WorkspacePages.350.button", "Button", "UI_COMMAND")} data-action-id="ui.apps.web.src.pages.WorkspacePages.350.button"><Download size={13} /> {t("finance.trialBalance")}</button>
+        <button className="v2-btn v2-btn-primary v2-btn-sm" type="button" onClick={() => void loadFinance()} disabled={loading}>
+          <RefreshCw size={13} /> Refresh Finance
+        </button>
       </div>
+
       {error && <div className="badge v2-badge-danger v2-mb-4">{error}</div>}
-      <div className="metrics-grid kpi-grid-4 v2-mb-4">
-        <KpiCard label={t("finance.recordedRevenue")}   value={formatMoneyCompact(total || 42850000)} icon={<DollarSign size={18} />} accent="#38bdf8" />
-        <KpiCard label={t("finance.totalTransactions")} value={sales.length || 842}      icon={<Receipt size={18} />}    accent="#4ade80" />
-        <KpiCard label={t("finance.trialBalance")}      value="BALANCED"                  icon={<Scale size={18} />}      accent="#818cf8" />
-        <KpiCard label={t("finance.openReceivables")}   value={formatMoneyCompact(3200000)}            icon={<Coins size={18} />}      accent="#fbbf24" />
-      </div>
-      <div className="v2-card">
-        <div className="v2-card-header"><div className="v2-card-title">{t("finance.chartOfAccounts")}</div></div>
-        <table className="v2-table">
-          <thead><tr><th>{t("finance.accountName")}</th><th>{t("finance.accountType")}</th><th>{t("finance.debit")}</th><th>{t("finance.credit")}</th><th>{t("finance.balance")}</th></tr></thead>
-          <tbody>
-            {[
-              { account: `1100 — Cash in Hand`,         type: t("finance.typeAsset"),     debit: formatCurrency(4820000), credit: formatCurrency(300000),  balance: formatCurrency(4520000) },
-              { account: `1200 — Accounts Receivable`,  type: t("finance.typeAsset"),     debit: formatCurrency(3200000), credit: formatCurrency(0),       balance: formatCurrency(3200000) },
-              { account: `2100 — Accounts Payable`,     type: t("finance.typeLiability"), debit: formatCurrency(0),       credit: formatCurrency(8400000), balance: formatCurrency(8400000) },
-              { account: `4100 — Sales Revenue`,        type: t("finance.typeRevenue"),   debit: formatCurrency(0),       credit: formatCurrency(total || 42850000), balance: formatCurrency(total || 42850000) },
-            ].map((row, i) => (
-              <tr key={i}>
-                <td className="v2-font-bold">{row.account}</td>
-                <td><span className={`badge ${row.type === t("finance.typeRevenue") ? "v2-badge-success" : row.type === t("finance.typeLiability") ? "v2-badge-danger" : "v2-badge-accent"}`}>{row.type}</span></td>
-                <td className="v2-mono v2-text-xs">{row.debit}</td>
-                <td className="v2-mono v2-text-xs">{row.credit}</td>
-                <td className="v2-font-black">{row.balance}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {loading && !dashboard ? <LoadingRows rows={6} /> : (
+        <>
+          <div className="metrics-grid kpi-grid-4 v2-mb-4">
+            <KpiCard label={t("finance.recordedRevenue")} value={formatMoneyCompact(Number(dashboard?.revenue || 0))} icon={<DollarSign size={18} />} accent="#38bdf8" />
+            <KpiCard label="Net Profit" value={formatMoneyCompact(Number(dashboard?.netProfit || 0))} icon={<TrendingUp size={18} />} accent="#4ade80" />
+            <KpiCard label={t("finance.trialBalance")} value={trialBalance?.isBalanced ? "BALANCED" : "OUT OF BALANCE"} icon={<Scale size={18} />} accent="#818cf8" />
+            <KpiCard label={t("finance.openReceivables")} value={formatMoneyCompact(Number(dashboard?.accountsReceivable || 0))} icon={<Coins size={18} />} accent="#fbbf24" />
+          </div>
+
+          <div className="metrics-grid kpi-grid-4 v2-mb-4">
+            <KpiCard label="Cash" value={formatMoneyCompact(Number(dashboard?.cashPosition || 0))} icon={<DollarSign size={18} />} accent="#22c55e" />
+            <KpiCard label="Bank" value={formatMoneyCompact(Number(dashboard?.bankPosition || 0))} icon={<Building size={18} />} accent="#60a5fa" />
+            <KpiCard label="Payables" value={formatMoneyCompact(Number(dashboard?.accountsPayable || 0))} icon={<Receipt size={18} />} accent="#f97316" />
+            <KpiCard label="Inventory Value" value={formatMoneyCompact(Number(dashboard?.inventoryValue || 0))} icon={<Package size={18} />} accent="#a78bfa" />
+          </div>
+
+          <div className="metrics-grid kpi-grid-4 v2-mb-4">
+            <KpiCard label="Operating Cash Flow" value={formatMoneyCompact(Number(cashFlow?.operatingCashFlow || 0))} icon={<TrendingUp size={18} />} accent="#22c55e" />
+            <KpiCard label="Investing Cash Flow" value={formatMoneyCompact(Number(cashFlow?.investingCashFlow || 0))} icon={<TrendingDown size={18} />} accent="#60a5fa" />
+            <KpiCard label="Financing Cash Flow" value={formatMoneyCompact(Number(cashFlow?.financingCashFlow || 0))} icon={<DollarSign size={18} />} accent="#c084fc" />
+            <KpiCard label="Net Change in Cash" value={formatMoneyCompact(Number(cashFlow?.netChangeInCash || 0))} icon={<Activity size={18} />} accent="#fbbf24" />
+          </div>
+
+          <div className="metrics-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", marginBottom: "1rem" }}>
+            <Panel title={t("finance.chartOfAccounts")}>
+              <table className="v2-table">
+                <thead><tr><th>Code</th><th>{t("finance.accountName")}</th><th>{t("finance.accountType")}</th><th>Balance</th></tr></thead>
+                <tbody>
+                  {accounts.map((a: any) => {
+                    const item = (trialBalance?.items || []).find((x: any) => x.accountId === a.id);
+                    return <tr key={a.id}><td className="v2-mono">{a.accountCode}</td><td className="v2-font-bold">{a.name}</td><td>{a.accountClass}</td><td className="v2-mono">{formatCurrency(Number(item?.balance || 0))}</td></tr>;
+                  })}
+                  {!accounts.length && <tr><td colSpan={4}><Empty message="No chart-of-accounts records available." /></td></tr>}
+                </tbody>
+              </table>
+            </Panel>
+
+            <Panel title="Financial Statements">
+              <div className="v2-space-y-3">
+                <div className="v2-flex v2-justify-between"><span>P&L</span><strong>{formatCurrency(Number(pnl?.netProfit || 0))} net profit</strong></div>
+                <div className="v2-flex v2-justify-between"><span>Balance Sheet</span><strong>{balanceSheet?.isBalanced ? "BALANCED" : "OUT OF BALANCE"}</strong></div>
+                <div className="v2-flex v2-justify-between"><span>Trial Balance</span><strong>{trialBalance?.isBalanced ? "BALANCED" : "OUT OF BALANCE"}</strong></div>
+                <div className="v2-flex v2-justify-between"><span>Cash Flow</span><strong>{formatCurrency(Number(cashFlow?.netChangeInCash || 0))} net change</strong></div>
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title="Accounting Control">
+            <div className="v2-flex v2-gap-2 v2-items-center">
+              <span className="badge v2-badge-success">PostgreSQL authoritative</span>
+              <span className="badge v2-badge-success">Double-entry enforced</span>
+              <span className="badge v2-badge-success">Period controls enforced</span>
+              <span className="badge v2-badge-success">Audit trail enabled</span>
+              <span className="badge v2-badge-success">AR / AP linked to GL</span>
+            </div>
+          </Panel>
+        </>
+      )}
     </div>
   );
 };

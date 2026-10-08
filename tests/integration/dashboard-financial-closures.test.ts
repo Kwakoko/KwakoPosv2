@@ -191,24 +191,8 @@ describe("Dashboard financial closures", () => {
       expect(recent[0]?.lines?.[0]?.product?.name).toBe("Dashboard Closure Product");
       expect(recent[0]?.payments).toHaveLength(2);
     } finally {
-      await prisma.returnLine.deleteMany({ where: { returnRel: { tenantId } } });
-      await prisma.return.deleteMany({ where: { tenantId } });
-      await prisma.drawerOperation.deleteMany({ where: { tenantId } });
-      await prisma.journalLine.deleteMany({ where: { journalEntry: { tenantId } } });
-      await prisma.journalEntry.deleteMany({ where: { tenantId } });
-      await prisma.payment.deleteMany({ where: { tenantId } });
-      await prisma.saleLine.deleteMany({ where: { sale: { tenantId } } });
-      await prisma.sale.deleteMany({ where: { tenantId } });
-      await prisma.stockLedger.deleteMany({ where: { tenantId } });
-      await prisma.productBranchStock.deleteMany({ where: { tenantId } });
-      await prisma.productVariant.deleteMany({ where: { tenantId } });
-      await prisma.product.deleteMany({ where: { tenantId } });
-      await prisma.setting.deleteMany({ where: { tenantId } });
-      await prisma.customer.deleteMany({ where: { tenantId } });
-      await prisma.account.deleteMany({ where: { tenantId } });
-      await prisma.auditEvent.deleteMany({ where: { tenantId } });
-      await prisma.branch.deleteMany({ where: { tenantId } });
-      await prisma.tenant.deleteMany({ where: { id: tenantId } });
+      // Tenant-scoped test data is isolated by random tenantId. Do not delete audit_events:
+      // production audit events are append-only and protected by the database trigger.
     }
   });
 });

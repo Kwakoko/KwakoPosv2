@@ -1,0 +1,38 @@
+name: Foundation Production Lock
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  foundation-lock:
+    name: Foundation P0/P1 Production Lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Build workspaces
+        run: npm run build
+      - name: Foundation production lock
+        run: npx tsx scripts/certification/foundation-production-lock.ts
+      - name: Unit tests
+        run: npm run test:unit

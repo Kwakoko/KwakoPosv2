@@ -20,6 +20,7 @@ import { registerSecurityMiddleware } from "./middleware/securityMiddleware.js";
 import { tenantExportRoutes } from "./routes/tenantExportRoutes.js";
 import { rbacRoutes } from "./routes/rbacRoutes.js";
 import type { TenantContext } from "@kwakopos2/contracts";
+import { CreateTaxRequestSchema } from "@kwakopos2/contracts";
 
 function resolveWebDistFile(relativePath: string): string | null {
   const safeRelative = (relativePath || "").replace(/^\/+/, "");
@@ -93,6 +94,7 @@ import {
   OpenCashSessionRequestSchema,
   SealCashSessionCountRequestSchema,
   CloseCashSessionRequestSchema,
+  CashTransferRequestSchema,
   CreateExpenseRequestSchema,
   PayExpenseRequestSchema,
   VoidExpenseRequestSchema,
@@ -229,6 +231,7 @@ import {
 } from "@kwakopos2/observability";
 import { randomUUID } from "crypto";
 import { supportOperationsRoutes } from "./routes/supportOperationsRoutes.js";
+import { customerContactRoutes } from "./routes/customerContactRoutes.js";
 import { supportControlTowerRoutes } from "./routes/supportControlTowerRoutes.js";
 import { startSupportAutomationScheduler } from "./services/supportAutomationScheduler.js";
 import {
@@ -300,6 +303,18 @@ function requireAdminContext(req: FastifyRequest): TenantContext {
   if (!isAdmin && !hasAdminPermission) {
     throw new Error("FORBIDDEN: Administrative privileges required");
   }
+  return ctx;
+}
+
+
+function requireCommercialPermission(req: FastifyRequest, ...required: string[]): TenantContext {
+  const ctx = requireTenantContext(req);
+  const roles = (ctx.roles || []).map((r) => String(r).trim().toUpperCase());
+  const permissions = new Set((ctx.permissions || []).map((p) => String(p).trim().toLowerCase()));
+  const allowed = permissions.has("*") || permissions.has("admin:*") ||
+    roles.some((r) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) ||
+    required.some((p) => permissions.has(p.toLowerCase()));
+  if (!allowed) throw new Error("FORBIDDEN: " + required.join(" or ") + " permission required");
   return ctx;
 }
 
@@ -738,8 +753,14 @@ function registerCanonicalProductionAuthentication(
         try {
           const ctx = verifyAccessToken(token);
           const userId = (ctx as any).userId || ctx.sub;
-          const user = await prisma.user.findUnique({ where: { id: userId } });
-          if (!user || !(await comparePassword(password, user.passwordHash))) {
+          const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+          const roleName = String(user?.role?.name || "").toUpperCase();
+          const allowedStepUpActions = new Set(["ROLLBACK_EXECUTE", "ROLLBACK_EMERGENCY", "TENANT_PURGE", "PRODUCTION_CLEANUP"]);
+          if (!allowedStepUpActions.has(action)) {
+            reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
+            return;
+          }
+          if (!user || user.status !== "ACTIVE" || !["SUPER_ADMIN", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(roleName) || !(await comparePassword(password, user.passwordHash))) {
             await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
             reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
             return;
@@ -969,6 +990,8 @@ function registerCanonicalProductionAuthentication(
       }
     })
 
+  customerContactRoutes(server);
+
   supportOperationsRoutes(server);
     supportControlTowerRoutes(server);
   
@@ -1177,7 +1200,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
             requireAdminContext(req);
           }
           if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-            if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
+            if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(testUserId)) {
               globalLegalGovernanceService.forceAcceptanceForTest(testUserId, testTenantId);
             }
             const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(testUserId, testTenantId);
@@ -1227,7 +1250,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
         requireAdminContext(req);
       }
       if (!authenticatedPath.startsWith("/api/legal/") && !authenticatedPath.startsWith("/api/admin/legal/") && !authenticatedPath.startsWith("/api/test/legal/")) {
-        if ((req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
+        if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || req.headers["x-bypass-legal-acceptance"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true") && !shouldEnforceLegalGate(payload.sub)) {
           globalLegalGovernanceService.forceAcceptanceForTest(payload.sub, payload.tenantId);
         }
         const legalStatus = globalLegalGovernanceService.checkUserAcceptanceStatus(payload.sub, payload.tenantId);
@@ -1398,6 +1421,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       // Financial constraint violations → 409.
       if (code.match(/^FINANCE_.+_VIOLATION$/) || msg.match(/FINANCE_.+_VIOLATION/))
         return [409, "FINANCIAL_CONSTRAINT_VIOLATION", "A financial constraint was violated."];
+
+      // Customer / contact / financial business rules → 400.
+      if ([
+        "CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE",
+        "PAYMENT_EXCEEDS_CUSTOMER_BALANCE",
+        "CASH_SESSION_REQUIRED",
+        "CASH_SESSION_INVALID",
+        "CUSTOMER_NOT_FOUND",
+        "CONTACT_NOT_FOUND",
+        "CONTACT_CUSTOMER_REQUIRED",
+        "SUPPLIER_NOT_FOUND",
+        "PAYMENT_AMOUNT_REQUIRED",
+        "PAYMENT_CUSTOMER_OR_SUPPLIER_REQUIRED",
+        "PAYMENT_EXCEEDS_OUTSTANDING_PAYABLE",
+      ].includes(code) || msg.toLowerCase().includes("customer_delete_blocked") || msg.toLowerCase().includes("payment_exceeds_customer_balance"))
+        return [400, "BAD_REQUEST", "A customer, contact, or financial business rule was violated."];
 
       // Business-rule invariant errors (generic INVARIANT_* prefix) → 400.
       if (
@@ -1921,7 +1960,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       userRole = record.role;
     }
 
-    if (!isProductionEnv(config) && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
+    if (process.env.NODE_ENV === "test" && (req.headers["x-auto-accept-legal"] === "true" || process.env.KWAKOPOS_TEST_BYPASS_LEGAL_GATE === "true")) {
       globalLegalGovernanceService.forceAcceptanceForTest(userId, tenantId);
     }
 
@@ -2560,51 +2599,102 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return { success: true, data: filtered };
   });
 
-  // Customer Management
+  // Customer Management — PostgreSQL authoritative master records.
   server.get("/api/v1/customers", async (req) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customers = await commercialRepository.getCustomers(req.tenantContext!);
     return { success: true, data: customers };
   });
 
   server.post("/api/v1/customers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_CREATE", "customers.write");
     const validated = CreateCustomerRequestSchema.parse(req.body);
-    const customer = await commercialRepository.createCustomer(req.tenantContext!, validated);
+    if (!productionPersistence) {
+      const customer = await commercialRepository.createCustomer(ctx, validated);
+      return reply.status(201).send({ success: true, data: customer });
+    }
+    const createdId = validated.id || randomUUID();
+    const customer = await prisma.$transaction(async (tx: any) => {
+      const existing = validated.id
+        ? await tx.customer.findFirst({ where: { id: validated.id, tenantId: ctx.tenantId, branchId: ctx.branchId } })
+        : null;
+      if (existing) return existing;
+      const created = await tx.customer.create({ data: {
+        id: createdId, tenantId: ctx.tenantId, branchId: ctx.branchId,
+        customerCode: validated.customerCode || `CUST-${(validated.id || createdId).slice(0, 8).toUpperCase()}`, name: validated.name,
+        phone: validated.phone || null, email: validated.email || null, address: validated.address || null,
+        creditLimit: validated.creditLimit || 0, currentBalance: validated.openingBalance || 0, openingBalance: validated.openingBalance || 0,
+        status: "ACTIVE",
+      } });
+      await tx.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: created.id, metadata: { customerCode: created.customerCode } } });
+      return created;
+    });
     return reply.status(201).send({ success: true, data: customer });
   });
 
   server.get("/api/v1/customers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "CUSTOMER_VIEW", "customers.read");
     const customer = await commercialRepository.getCustomerById(req.tenantContext!, (req.params as any).id);
     if (!customer) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Customer not found" } });
     return { success: true, data: customer };
   });
 
   server.put("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
     const validated = UpdateCustomerRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateCustomer(req.tenantContext!, (req.params as any).id, validated);
+    const id = (req.params as any).id;
+    const before = await commercialRepository.getCustomerById(ctx, id);
+    const updated = await commercialRepository.updateCustomer(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_UPDATED", entityType: "Customer", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, creditLimit: before.creditLimit, status: before.status } : null } } });
+    }
+    return { success: true, data: updated };
+  });
+
+  server.delete("/api/v1/customers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "CUSTOMER_EDIT", "customers.write");
+    const id = String((req.params as any).id);
+    const customer = await prisma.customer.findFirst({ where: { id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+    if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
+    if (Number(customer.currentBalance) > 0.005) throw new Error("CUSTOMER_DELETE_BLOCKED_OUTSTANDING_BALANCE");
+    const updated = await prisma.customer.update({ where: { id }, data: { status: "INACTIVE" } });
+    await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "CUSTOMER_ARCHIVED", entityType: "Customer", entityId: id, metadata: { previousStatus: customer.status } } });
     return { success: true, data: updated };
   });
 
   // Supplier Management
   server.get("/api/v1/suppliers", async (req) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const suppliers = await commercialRepository.getSuppliers(req.tenantContext!);
     return { success: true, data: suppliers };
   });
 
   server.post("/api/v1/suppliers", async (req, reply) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_CREATE", "suppliers.write");
     const validated = CreateSupplierRequestSchema.parse(req.body);
-    const supplier = await commercialRepository.createSupplier(req.tenantContext!, validated);
+    const supplier = await commercialRepository.createSupplier(ctx, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_CREATED", entityType: "Supplier", entityId: supplier.id, metadata: { supplierCode: supplier.supplierCode } } });
+    }
     return reply.status(201).send({ success: true, data: supplier });
   });
 
   server.get("/api/v1/suppliers/:id", async (req, reply) => {
+    requireCommercialPermission(req, "SUPPLIER_VIEW", "suppliers.read");
     const supplier = await commercialRepository.getSupplierById(req.tenantContext!, (req.params as any).id);
     if (!supplier) return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Supplier not found" } });
     return { success: true, data: supplier };
   });
 
   server.put("/api/v1/suppliers/:id", async (req) => {
+    const ctx = requireCommercialPermission(req, "SUPPLIER_EDIT", "suppliers.write");
     const validated = UpdateSupplierRequestSchema.parse(req.body);
-    const updated = await commercialRepository.updateSupplier(req.tenantContext!, (req.params as any).id, validated);
+    const id = String((req.params as any).id);
+    const before = await commercialRepository.getSupplierById(ctx, id);
+    const updated = await commercialRepository.updateSupplier(ctx, id, validated);
+    if (productionPersistence) {
+      await prisma.auditEvent.create({ data: { id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, userId: ctx.userId, deviceId: ctx.userId, action: "SUPPLIER_UPDATED", entityType: "Supplier", entityId: id, metadata: { changedFields: Object.keys(validated).sort(), before: before ? { name: before.name, phone: before.phone, email: before.email, address: before.address, taxPin: before.taxPin, status: before.status } : null } } });
+    }
     return { success: true, data: updated };
   });
 
@@ -2651,39 +2741,90 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   // POS Sales Engine
+  const assertSalesAuthority = (req: any, action: "view" | "create" | "void" | "return") => {
+    const ctx = requireTenantContext(req);
+    const raw = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+    const permissions = new Set(raw.map((p) => p.toUpperCase()));
+    const permissionsLower = new Set(raw.map((p) => p.toLowerCase()));
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const manager = roles.some((r: string) => ["MANAGER", "BRANCH_MANAGER"].includes(r));
+    const wildcard = permissions.has("*") || permissionsLower.has("*") || permissionsLower.has("sales.*");
+    const allowedByAction: Record<string, boolean> = {
+      view: permissions.has("SALE_VIEW") || permissions.has("SALE_CREATE") || permissionsLower.has("sales.view") || permissionsLower.has("sales.create"),
+      create: permissions.has("SALE_CREATE") || permissionsLower.has("sales.create"),
+      void: permissions.has("SALE_VOID") || permissionsLower.has("sales.void") || permissionsLower.has("sales.cancel"),
+      return: permissions.has("SALE_RETURN") || permissions.has("PAYMENT_REFUND") || permissionsLower.has("sales.return") || permissionsLower.has("sales.refund"),
+    };
+    if (!(admin || manager || wildcard || allowedByAction[action])) throw new Error(`FORBIDDEN: SALE_${action.toUpperCase()} required`);
+    return ctx;
+  };
+
   server.get("/api/v1/pos/sales", async (req) => {
-    const sales = await commercialRepository.getSales(req.tenantContext!);
+    const ctx = assertSalesAuthority(req, "view");
+    const sales = await commercialRepository.getSales(ctx);
     return { success: true, data: sales };
   });
 
   server.post("/api/v1/pos/sales", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "create");
     const validated = CreatePosSaleRequestSchema.parse(req.body);
+    const discountRequested = Number(validated.discountTotal || 0) > 0 || validated.items.some((x: any) => Number(x.discountAmount || 0) > 0);
+    if (discountRequested) {
+      const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).trim()) : [];
+      const upperPermissions = new Set(permissions.map((p) => p.toUpperCase()));
+      const lowerPermissions = new Set(permissions.map((p) => p.toLowerCase()));
+      const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+      const manager = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+      if (!(manager || upperPermissions.has("*") || lowerPermissions.has("*") || upperPermissions.has("DISCOUNT_MANAGE") || lowerPermissions.has("discount.manage") || lowerPermissions.has("sales.discount"))) {
+        throw new Error("FORBIDDEN: DISCOUNT_MANAGE required for sale discounts");
+      }
+    }
     const result = atomicCommercialFinance
-      ? await atomicCommercialFinance.createSale(req.tenantContext!, validated)
-      : await commercialRepository.createPosSale(req.tenantContext!, validated);
+      ? await atomicCommercialFinance.createSale(ctx, validated)
+      : await commercialRepository.createPosSale(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
   server.get("/api/v1/pos/sales/:id", async (req, reply) => {
-    const sale = await commercialRepository.getSaleById(req.tenantContext!, (req.params as any).id);
+    const ctx = assertSalesAuthority(req, "view");
+    const sale = await commercialRepository.getSaleById(ctx, (req.params as any).id);
     if (!sale) {
       return reply.status(404).send({ success: false, error: { code: "NOT_FOUND", message: "Sale not found" } });
     }
     return { success: true, data: sale };
   });
 
+  server.post("/api/v1/pos/sales/:id/void", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "void");
+    if (!atomicCommercialFinance) throw new Error("SALE_VOID_REQUIRES_POSTGRESQL_AUTHORITY");
+    const body = z.object({ reason: z.string().trim().min(3).max(500), operationId: z.string().min(1).max(200).optional(), idempotencyKey: z.string().min(1).max(200).optional(), deviceId: z.string().min(1).max(128).optional() }).parse(req.body);
+    const result = await atomicCommercialFinance.voidSale(ctx, String((req.params as any).id), body.reason, body);
+    return reply.status(200).send({ success: true, data: result });
+  });
+
   // Returns & Refunds
   server.post("/api/v1/returns", async (req, reply) => {
+    const ctx = assertSalesAuthority(req, "return");
+    const rawPermissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const refundAuthority = rawPermissions.includes("payment_refund") || rawPermissions.includes("sales.refund") || rawPermissions.includes("sales.return") ||
+      roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN", "MANAGER", "BRANCH_MANAGER"].includes(r));
+    if (!refundAuthority) throw new Error("FORBIDDEN: PAYMENT_REFUND required for financial return");
     const validated = CreateSaleReturnRequestSchema.parse(req.body);
-    const result = await commercialRepository.createSaleReturn(req.tenantContext!, validated);
+    const result = await commercialRepository.createSaleReturn(ctx, validated);
     return reply.status(201).send({ success: true, data: result });
   });
 
-  const assertCashDrawerAuthority = (req: any, permission: "open" | "close" | "move") => {
+  const assertCashDrawerAuthority = (req: any, permission: "view" | "open" | "close" | "move" | "approve") => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
     const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p: any) => String(p).toLowerCase()) : [];
-    const allowed = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r)) || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
+    const admin = roles.some((r: string) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(r));
+    const canView = admin || permissions.includes("*") || permissions.includes("cashdrawer.view") || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close") || permissions.includes("cashdrawer.move") || permissions.includes("cashdrawer.approve");
+    const allowed = permission === "view"
+      ? canView
+      : admin || permissions.includes("*") || permissions.includes(`cashdrawer.${permission}`) || permissions.includes("cashdrawer.open") || permissions.includes("cashdrawer.close");
     if (!allowed) throw new Error("FORBIDDEN: Cash drawer authority required");
     return ctx;
   };
@@ -2716,6 +2857,24 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   };
 
   // Cash Sessions & Drawer Reconciliation
+  server.get("/api/v1/cash-registers", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    return { success: true, data: await commercialRepository.listCashRegisters(req.tenantContext!) };
+  });
+
+  server.get("/api/v1/cash-sessions", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    const query = (req.query as any) || {};
+    return {
+      success: true,
+      data: await commercialRepository.listCashSessions(
+        req.tenantContext!,
+        query.status ? String(query.status) : undefined,
+        Number(query.limit || 100),
+      ),
+    };
+  });
+
   server.post("/api/v1/cash-sessions", async (req, reply) => {
     assertCashDrawerAuthority(req, "open");
     const validated = OpenCashSessionRequestSchema.parse(req.body);
@@ -2724,7 +2883,9 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.get("/api/v1/cash-sessions/active", async (req) => {
-    const session = await commercialRepository.getActiveCashSession(req.tenantContext!);
+    assertCashDrawerAuthority(req, "view");
+    const registerCode = String((req.query as any)?.registerCode || "").trim() || undefined;
+    const session = await commercialRepository.getActiveCashSession(req.tenantContext!, registerCode);
     return { success: true, data: session || null };
   });
 
@@ -2803,6 +2964,26 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     return reply.status(201).send({ success: true, data: movement });
   });
 
+  server.post("/api/v1/cash-sessions/:id/transfer", async (req, reply) => {
+    assertCashDrawerAuthority(req, "move");
+    if (!productionPersistence) throw new Error("CASH_TRANSFER_REQUIRES_POSTGRESQL_AUTHORITY");
+    const validated = CashTransferRequestSchema.parse(req.body);
+    const result = await commercialRepository.transferCash(req.tenantContext!, String((req.params as any).id), validated);
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  server.get("/api/v1/cash-sessions/:id/payment-channel-reconciliation", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("PAYMENT_CHANNEL_RECONCILIATION_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getPaymentChannelReconciliation(req.tenantContext!, String((req.params as any).id)) };
+  });
+
+  server.get("/api/v1/cash-sessions/:id/audit-trail", async (req) => {
+    assertCashDrawerAuthority(req, "view");
+    if (!productionPersistence) throw new Error("CASH_AUDIT_TRAIL_REQUIRES_POSTGRESQL_AUTHORITY");
+    return { success: true, data: await commercialRepository.getCashAuditTrail(req.tenantContext!, String((req.params as any).id)) };
+  });
+
   server.post("/api/v1/drawer-operations/:id/execute", async (req) => {
     const ctx = requireTenantContext(req);
     const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
@@ -2878,7 +3059,8 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     }
     if (start >= end) throw new Error("REPORT_INVALID_DATE_RANGE");
 
-    const requestedBranch = query.branchId ? String(query.branchId) : null;
+    const allBranches = String(query.allBranches || "").toLowerCase() === "true";
+    const requestedBranch = allBranches ? null : (query.branchId ? String(query.branchId) : ctx.branchId);
     const data = await commercialRepository.getReportsData(ctx, { from: start, to: end, branchId: requestedBranch });
     return { success: true, data };
   });
@@ -2913,6 +3095,23 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     };
   });
 
+  const assertFinanceAuthority = (req: any, action: "view" | "create" | "reverse" | "close" | "admin" = "view") => {
+    const ctx = requireTenantContext(req);
+    const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r: any) => String(r).toUpperCase()) : [];
+    const permissions = new Set((ctx.permissions || []).map((p: any) => String(p).toLowerCase()));
+    const privileged = roles.some((r: string) => ["OWNER","ADMIN","SUPER_ADMIN","SUPERADMIN"].includes(r));
+    const wildcard = permissions.has("*") || permissions.has("admin:*");
+    const rules: Record<string,string[]> = {
+      view: ["finance.view","finance.create","financial_reports.view"],
+      create: ["finance.create","finance.manage","journal.create"],
+      reverse: ["finance.manage","journal.reverse"],
+      close: ["finance.manage","finance.period.close"],
+      admin: ["finance.manage"],
+    };
+    if (!(privileged || wildcard || rules[action].some((p) => permissions.has(p)))) throw new Error("FORBIDDEN: Finance permission required");
+    return ctx;
+  };
+
   // ==========================================
   // PHASE 2: Finance & Operational Control REST Routes
   // ==========================================
@@ -2924,12 +3123,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/accounts", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateAccountRequestSchema.parse(req.body);
     const account = await financeRepository.createAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: account });
   });
 
   server.put("/api/v1/finance/accounts/:id", async (req) => {
+    assertFinanceAuthority(req, "admin");
     const validated = UpdateAccountRequestSchema.parse(req.body);
     const updated = await financeRepository.updateAccount(req.tenantContext!, (req.params as any).id, validated);
     return { success: true, data: updated };
@@ -2942,17 +3143,20 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/periods", async (req, reply) => {
+    assertFinanceAuthority(req, "admin");
     const validated = CreateAccountingPeriodRequestSchema.parse(req.body);
     const period = await financeRepository.createAccountingPeriod(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: period });
   });
 
   server.post("/api/v1/finance/periods/:id/close", async (req) => {
+    assertFinanceAuthority(req, "close");
     const closed = await financeRepository.closePeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: closed };
   });
 
   server.post("/api/v1/finance/periods/:id/reopen", async (req) => {
+    assertFinanceAuthority(req, "close");
     const reopened = await financeRepository.reopenPeriod(req.tenantContext!, (req.params as any).id);
     return { success: true, data: reopened };
   });
@@ -2964,6 +3168,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.createJournalEntry(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -2978,6 +3183,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/journals/:id/reverse", async (req, reply) => {
+    assertFinanceAuthority(req, "reverse");
     const validated = ReverseJournalEntryRequestSchema.parse(req.body);
     const result = await financeRepository.reverseJournalEntry(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: result });
@@ -2990,6 +3196,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/receivables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateCustomerInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createCustomerInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -3007,6 +3214,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/payables/invoices", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateSupplierInvoiceRequestSchema.parse(req.body);
     const invoice = await financeRepository.createSupplierInvoice(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: invoice });
@@ -3019,9 +3227,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Payment Allocation
   server.post("/api/v1/finance/payments/allocate", async (req) => {
+    assertFinanceAuthority(req, "create");
     const validated = AllocatePaymentRequestSchema.parse(req.body);
     const result = await financeRepository.allocatePayment(req.tenantContext!, validated);
     return { success: true, data: result };
+  });
+
+  // Tax configuration
+  server.get("/api/v1/finance/taxes", async (req) => {
+    assertFinanceAuthority(req, "view");
+    return { success: true, data: await financeRepository.getTaxes(req.tenantContext!) };
+  });
+  server.post("/api/v1/finance/taxes", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
+    const validated = CreateTaxRequestSchema.parse(req.body);
+    const tax = await financeRepository.createTax(req.tenantContext!, validated);
+    return reply.status(201).send({ success: true, data: tax });
   });
 
   // Bank Accounts & Transactions
@@ -3031,12 +3252,14 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   });
 
   server.post("/api/v1/finance/banks", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankAccountRequestSchema.parse(req.body);
     const bank = await financeRepository.createBankAccount(req.tenantContext!, validated);
     return reply.status(201).send({ success: true, data: bank });
   });
 
   server.post("/api/v1/finance/banks/:id/transactions", async (req, reply) => {
+    assertFinanceAuthority(req, "create");
     const validated = CreateBankTransactionRequestSchema.parse(req.body);
     const tx = await financeRepository.recordBankTransaction(req.tenantContext!, (req.params as any).id, validated);
     return reply.status(201).send({ success: true, data: tx });
@@ -3061,26 +3284,43 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Financial Reports
   server.get("/api/v1/finance/reports/trial-balance", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getTrialBalance(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/reports/profit-loss", async (req) => {
+    assertFinanceAuthority(req, "view");
     const { startDate, endDate } = (req.query as any) || {};
     const report = await financeRepository.getProfitAndLoss(req.tenantContext!, startDate, endDate);
     return { success: true, data: report };
   });
 
+  server.get("/api/v1/finance/reports/cash-flow", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const { startDate, endDate } = (req.query as any) || {};
+    const report = await financeRepository.getCashFlow(req.tenantContext!, startDate, endDate);
+    return { success: true, data: report };
+  });
+
   server.get("/api/v1/finance/reports/balance-sheet", async (req) => {
+    assertFinanceAuthority(req, "view");
     const asOfDate = (req.query as any)?.asOfDate;
     const report = await financeRepository.getBalanceSheet(req.tenantContext!, asOfDate);
     return { success: true, data: report };
   });
 
   server.get("/api/v1/finance/dashboard/executive", async (req) => {
+    assertFinanceAuthority(req, "view");
     const dashboard = await financeRepository.getExecutiveDashboard(req.tenantContext!);
     return { success: true, data: dashboard };
+  });
+
+  server.get("/api/v1/finance/audit-trail", async (req) => {
+    assertFinanceAuthority(req, "view");
+    const events = await financeRepository.getFinancialAuditTrail(req.tenantContext!);
+    return { success: true, data: events };
   });
 
   server.get("/api/v1/finance/anomalies", async (req) => {
@@ -5570,11 +5810,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // Phase 29 — Super Admin & Platform UI Endpoints
   server.get("/api/v1/super-admin/overview", async (req, reply) => {
-    const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
-    const adminId = (req.headers["x-admin-id"] as string) || "ADM-001";
-    const email = (req.headers["x-admin-email"] as string) || "admin@kwakopos.com";
-    const role = (req.headers["x-admin-role"] as string) || "PLATFORM_ADMIN";
-    return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    try {
+      const ctx = requireSuperAdminContext(req);
+      const { globalSuperAdminPlatformService } = await import("./services/superAdminPlatformService.js");
+      const adminId = String(ctx.userId);
+      const email = String((ctx as any).email || "");
+      const role = String(ctx.roles?.[0] || "SUPER_ADMIN");
+      return reply.status(200).send({ success: true, data: globalSuperAdminPlatformService.getOperatingPlane(adminId, email, role) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Access denied";
+      const status = message.startsWith("UNAUTHORIZED") ? 401 : 403;
+      return reply.status(status).send({ success: false, error: { code: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN", message: status === 401 ? "Authentication required." : "Access denied." } });
+    }
   });
 
   server.post("/api/v1/super-admin/context-switch", async (req, reply) => {
