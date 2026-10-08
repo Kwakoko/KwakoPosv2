@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { runSuperAdminPlatformCertification } from "../../scripts/certification/super-admin-platform-certification-engine.js";
 
@@ -9,7 +10,6 @@ describe("Super Admin Production Lock", () => {
   });
 
   it("contains an independent fail-closed lock contract", () => {
-    const { execFileSync } = require("node:child_process");
     execFileSync("npx", ["tsx", "scripts/certification/super-admin-production-lock.ts"], { stdio: "pipe" });
   });
 });
