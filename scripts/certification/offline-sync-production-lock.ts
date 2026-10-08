@@ -31,7 +31,7 @@ const REQUIRED_MARKERS: Array<[string, string, string[]]> = [
   ]],
   ["migration-authority", "apps/web/src/persistence/migrationEngine.ts", [
     "migrateToVersion",
-    "if (toVersion >= 5 && fromVersion < 5)",
+    "preservedOutboxCount",
     "if (toVersion >= 6 && fromVersion < 6)",
     "if (toVersion >= 7 && fromVersion < 7)",
   ]],
@@ -87,7 +87,7 @@ const REQUIRED_MARKERS: Array<[string, string, string[]]> = [
     "status).toBe(\"SYNCED\")",
   ]],
   ["multi-device-test", "tests/browser/five-client-convergence.spec.ts", [
-    "secondDevice",
+    "const deviceIds = [\"DEVICE-A\", \"DEVICE-B\", \"DEVICE-C\", \"DEVICE-D\", \"DEVICE-E\"]",
     "lastSyncRevision",
     "syncEpoch",
   ]],
