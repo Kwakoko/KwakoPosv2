@@ -21,7 +21,7 @@ export function runSecurityTrustVerification(cwd = process.cwd()) {
 
   const api = read("apps/api/src/server.ts");
   checks.push({ name: "tenant-trusted-context", passed: /function requireTenantContext/.test(api) && /Cross-tenant access denied/.test(api), detail: "tenant context and cross-tenant denial present" });
-  checks.push({ name: "production-cors-hardening", passed: /H-007: Hardened CORS configuration/.test(api) && /CORS_ORIGIN/.test(api) && !/:\s*["']\*["']/.test(api), detail: "CORS uses explicit approved origins" });
+  checks.push({ name: "production-cors-hardening", passed: /H-007: Hardened CORS configuration/.test(api) && /CORS_ORIGIN/.test(api) && !/:\s*["']\*["']/.test(api) && /origin\.startsWith\("https:\/\/"\)/.test(api), detail: "CORS uses explicit HTTPS origins in production" });
   const securityMiddleware = read("apps/api/src/middleware/securityMiddleware.ts");
   const auth = read("packages/auth/src/index.ts");
   checks.push({ name: "csp-script-hardening", passed: /scriptSrc:\s*\["'self'"\]/.test(securityMiddleware) && !securityMiddleware.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]'), detail: "production CSP does not allow inline scripts" });
