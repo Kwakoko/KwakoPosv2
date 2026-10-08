@@ -11,13 +11,13 @@ SET name = 'PLATFORM_SUPER_ADMIN',
 WHERE legacy.id = (
   SELECT r.id
   FROM roles r
-  JOIN tenants t ON t.id = r.tenant_id
+  JOIN tenants t ON t.id = r."tenantId"
   WHERE t.slug = 'kwakoko-platform'
     AND r.name IN ('SUPER_ADMIN', 'SUPERADMIN')
     AND NOT EXISTS (
       SELECT 1
       FROM roles existing_platform
-      WHERE existing_platform.tenant_id = r.tenant_id
+      WHERE existing_platform."tenantId" = r."tenantId"
         AND existing_platform.name = 'PLATFORM_SUPER_ADMIN'
     )
   ORDER BY CASE r.name WHEN 'SUPER_ADMIN' THEN 0 ELSE 1 END
@@ -28,16 +28,16 @@ WHERE legacy.id = (
 UPDATE users AS u
 SET role_id = platform.id
 FROM roles platform
-JOIN tenants t ON t.id = platform.tenant_id
+JOIN tenants t ON t.id = platform."tenantId"
 WHERE t.slug = 'kwakoko-platform'
   AND platform.name = 'PLATFORM_SUPER_ADMIN'
-  AND u.tenant_id = platform.tenant_id
+  AND u."tenantId" = platform."tenantId"
   AND EXISTS (
     SELECT 1
     FROM roles legacy
-    WHERE legacy.id = u.role_id
+    WHERE legacy.id = u."roleId"
       AND legacy.name IN ('SUPER_ADMIN', 'SUPERADMIN')
-      AND legacy.tenant_id = u.tenant_id
+      AND legacy."tenantId" = u."tenantId"
   );
 
 -- Force the dedicated platform role to a non-tenant wildcard permission set.
@@ -46,7 +46,7 @@ SET permissions = ARRAY['platform:control'],
     is_system_role = TRUE,
     updated_at = NOW()
 FROM tenants t
-WHERE platform.tenant_id = t.id
+WHERE platform."tenantId" = t.id
   AND t.slug = 'kwakoko-platform'
   AND platform.name = 'PLATFORM_SUPER_ADMIN';
 
@@ -55,8 +55,8 @@ DELETE FROM platform_super_admin_security s
 WHERE EXISTS (
   SELECT 1
   FROM users u
-  JOIN roles r ON r.id = u.role_id
-  WHERE s.user_id = u.id
+  JOIN roles r ON r.id = u."roleId"
+  WHERE s."userId" = u.id
     AND r.name <> 'PLATFORM_SUPER_ADMIN'
 );
 
@@ -66,12 +66,12 @@ UPDATE device_sessions ds
 SET revoked_at = NOW(),
     status = 'REVOKED',
     revoke_reason = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
-WHERE ds.revoked_at IS NULL
-  AND ds.user_id IN (
+WHERE ds."revokedAt" IS NULL
+  AND ds."userId" IN (
     SELECT u.id
     FROM users u
-    JOIN roles r ON r.id = u.role_id
-    JOIN tenants t ON t.id = u.tenant_id
+    JOIN roles r ON r.id = u."roleId"
+    JOIN tenants t ON t.id = u."tenantId"
     WHERE t.slug = 'kwakoko-platform'
       AND r.name = 'PLATFORM_SUPER_ADMIN'
   );
@@ -84,11 +84,11 @@ DECLARE
   tenant_slug TEXT;
 BEGIN
   IF NEW.name = 'PLATFORM_SUPER_ADMIN' THEN
-    SELECT slug INTO tenant_slug FROM tenants WHERE id = NEW.tenant_id;
+    SELECT slug INTO tenant_slug FROM tenants WHERE id = NEW."tenantId";
     IF tenant_slug IS DISTINCT FROM 'kwakoko-platform' THEN
       RAISE EXCEPTION 'PLATFORM_SUPER_ADMIN_SCOPE_VIOLATION';
     END IF;
-    NEW.is_system_role := TRUE;
+    NEW."isSystemRole" := TRUE;
     NEW.permissions := ARRAY['platform:control'];
   END IF;
   RETURN NEW;
@@ -112,12 +112,12 @@ DECLARE
 BEGIN
   SELECT name, tenant_id INTO role_name, role_tenant_id
   FROM roles
-  WHERE id = NEW.role_id;
+  WHERE id = NEW."roleId";
 
   IF role_name = 'PLATFORM_SUPER_ADMIN' THEN
-    SELECT slug INTO tenant_slug FROM tenants WHERE id = NEW.tenant_id;
+    SELECT slug INTO tenant_slug FROM tenants WHERE id = NEW."tenantId";
     IF tenant_slug IS DISTINCT FROM 'kwakoko-platform'
-       OR role_tenant_id IS DISTINCT FROM NEW.tenant_id THEN
+       OR role_tenant_id IS DISTINCT FROM NEW."tenantId" THEN
       RAISE EXCEPTION 'PLATFORM_SUPER_ADMIN_USER_SCOPE_VIOLATION';
     END IF;
   END IF;
@@ -140,8 +140,8 @@ DECLARE
 BEGIN
   SELECT r.name INTO role_name
   FROM users u
-  JOIN roles r ON r.id = u.role_id
-  WHERE u.id = NEW.user_id;
+  JOIN roles r ON r.id = u."roleId"
+  WHERE u.id = NEW."userId";
 
   IF role_name IS DISTINCT FROM 'PLATFORM_SUPER_ADMIN' THEN
     RAISE EXCEPTION 'PLATFORM_SUPER_ADMIN_SECURITY_ROLE_VIOLATION';
