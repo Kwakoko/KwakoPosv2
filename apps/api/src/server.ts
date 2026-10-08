@@ -210,6 +210,7 @@ import {
 
 import { SyncEngine, PrismaSyncEngine, assertSyncConflictPermission } from "@kwakopos2/sync";
 import { PrivilegedRbacMutationService, RbacMutationError } from "./services/rbacMutationService.js";
+import { requireStepUpToken } from "./services/stepUpGuard.js";
 import {
   createTraceContext,
   defaultLogger,
