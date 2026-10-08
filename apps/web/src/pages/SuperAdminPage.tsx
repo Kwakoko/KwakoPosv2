@@ -15,14 +15,17 @@ import {
   Loader2,
   RefreshCw,
   Terminal,
+  Activity,
+  Server,
   Sparkles,
 } from "lucide-react";
 import { apiFetch, changeSuperAdminPassword } from "../services/applicationApiService.js";
 import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";
+import { SuperAdminLiveControlPlane } from "../components/SuperAdminLiveControlPlane.js";
 
-type AdminTab = "tenants" | "security" | "sql-studio" | "cleanliness" | "certification";
+type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness" | "certification";
 
 interface PlatformOverview {
   platformName?: string;
@@ -78,7 +81,7 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
     setLoading(true);
     setAuthError(null);
     try {
-      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview");
+      const res = await apiFetch<{ success: boolean; data?: PlatformOverview }>("/api/v1/super-admin/overview/live");
       if (res && res.success) {
         setAuthorized(true);
         setOverview(res.data || null);
@@ -207,6 +210,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
       <div className="v2-flex v2-gap-1" style={{ borderBottom: "1px solid var(--surface-border)", paddingBottom: ".4rem" }}>
         {[
           { id: "tenants", label: "Tenant Directory", icon: Building },
+          { id: "subscriptions", label: "Subscriptions", icon: Shield },
+          { id: "health", label: "System Health", icon: Server },
+          { id: "audit", label: "Global Audit", icon: Activity },
           { id: "security", label: "Security & MFA Controls", icon: Lock },
           { id: "sql-studio", label: "SQL Studio & DB", icon: Terminal },
           { id: "cleanliness", label: "Production Cleanliness", icon: Sparkles },
@@ -276,6 +282,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
         </div>
       )}
 
+      {activeTab === "subscriptions" && <SuperAdminLiveControlPlane tab="subscriptions" />}
+      {activeTab === "health" && <SuperAdminLiveControlPlane tab="health" />}
+      {activeTab === "audit" && <SuperAdminLiveControlPlane tab="audit" />}
       {activeTab === "security" && (
         <div className="v2-space-y-4">
           <div className="v2-card" style={{ padding: "1.5rem" }}>
