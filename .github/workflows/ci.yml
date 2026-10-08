@@ -58,6 +58,8 @@ jobs:
         run: npm run db:migrate
       - name: Foundation Production Lock A01-A12
         run: npm run certify:foundation
+      - name: Super Admin Production Lock
+        run: npm run certify:super-admin
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
       - name: Lint
