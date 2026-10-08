@@ -157,6 +157,7 @@
     "certify:foundation": "tsx scripts/certification/foundation-production-lock.ts",
     "certify:campaign": "tsx scripts/certification/runFullSystemCertification.ts",
     "certify:inventory-lock": "tsx scripts/certification/inventory-production-lock.ts",
+    "certify:administration-lock": "tsx scripts/certification/administration-production-lock.ts",
     "certify:backdated-lock": "tsx scripts/certification/backdated-production-lock.ts",
     "certify:sales-lock": "tsx scripts/certification/sales-production-lock.ts",
     "certify:pricing-lock": "tsx scripts/certification/pricing-production-lock.ts",
