@@ -1074,6 +1074,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
     : isProductionEnv(config)
       ? ["https://app.kwakopos.com", "https://admin.kwakopos.com"]
       : ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+  if (isProductionEnv(config) && corsOrigin.some((origin) => origin === "*" || !origin.startsWith("https://"))) {
+    throw new Error("SECURITY_FATAL: Production CORS origins must be explicit HTTPS origins.");
+  }
   server.register(cors, {
     origin:         corsOrigin,
     credentials:    true,
