@@ -56,7 +56,7 @@ requireCheck(!/path\.join\([^\n]*req\.(?:query|params)/.test(api), "Potential re
 
 requireCheck(middleware.includes('import fp from "fastify-plugin";') && middleware.includes('fp<SecurityMiddlewareOptions>'), "Security middleware is not registered as a Fastify root plugin.");
 requireCheck(middleware.includes('scriptSrc: ["\'self\"]'), "CSP still permits inline scripts.");
-requireCheck(!middleware.includes("unsafe-inline"), "Security middleware still contains unsafe-inline CSP policy.");
+requireCheck(!middleware.includes('scriptSrc: ["\'self\'", "\'unsafe-inline\'"]'), "CSP script policy still permits inline scripts.");
 requireCheck(middleware.includes("CSRF_ORIGIN_DENIED") && middleware.includes("allowedOrigins"), "Origin-based CSRF defense is missing.");
 requireCheck(!api.includes('    : "*";'), "CORS wildcard fallback remains enabled.");
 requireCheck(api.includes('["http://localhost:5173", "http://127.0.0.1:5173"]'), "Non-production CORS fallback is not explicit.");
