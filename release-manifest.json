@@ -1,13 +1,13 @@
 {
   "version": "2.13.0",
   "tag": "v2.13.0",
-  "gitSha": "",
+  "gitSha": "2e976b3b534d58076350b5c150317609458ffe3e",
   "containerDigest": null,
   "cloudRunRevision": null,
   "environment": "development",
   "releaseChannel": "development",
-  "releasedAt": "2026-10-08T03:22:41.593Z",
-  "certification": "PENDING",
+  "releasedAt": "2026-10-08T03:31:07.354Z",
+  "certification": "FAIL",
   "brand": {
     "parentBrand": "Kwakoko",
     "platform": "Kwakoko Business Operating System",

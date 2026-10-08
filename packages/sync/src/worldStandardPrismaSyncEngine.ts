@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { TenantContext, SyncPushRequest, SyncPushResponse, SyncDeltaRequest, SyncDeltaResponse } from "@kwakopos2/contracts";
-import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma } from "@kwakopos2/database";
+import { PrismaProductRepository, PrismaStockRepository, PrismaAtomicCommercialFinanceService, productShape, variantShape, ledgerShape, prisma, validateBundleDefinitionAttributes } from "@kwakopos2/database";
 import { assertSyncConflictPermission, computePayloadChecksum, getBaseUpdatedAt, operationFingerprint, orderSyncOperations, requireBaseUpdatedAt, stripSyncControlFields, validateSyncRequest } from "./syncIntegrity.js";
 import { calculateAuthoritativeStock, projectProductBranchStock, projectProductStockSummary, projectVariantInventory, rejectNonZeroAbsoluteInventoryMutation } from "@kwakopos2/database";
 import { ReceiptEngine, ReceiptNumberGenerator, assertBackdatingThreshold, assertBackdatingPermission, assertSaleBackdatingPermission, calculateAvailableStock, validateRetroactiveTimeline } from "@kwakopos2/domain";
