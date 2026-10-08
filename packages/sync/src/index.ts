@@ -507,9 +507,6 @@ export {
   verifyPayloadChecksum,
   syncDependencyRank,
   orderSyncOperations,
-  hasSyncConflictPermission,
-  assertSyncConflictPermission,
-  requireBaseUpdatedAt,
 } from "./syncIntegrity.js";
 export { SyncConflictLogger, globalSyncConflictLogger } from "./syncConflictLogger.js";
 export * from "./gates/shaResolution.js";

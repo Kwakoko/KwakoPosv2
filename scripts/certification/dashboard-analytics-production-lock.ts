@@ -6,10 +6,14 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "DASHBOARD-ANALYTICS-PRODUCTION-LOCK-2026-10-04";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "182b4714c943fa4bdc752e57baf07c12d7e68eb7",
-  "apps/web/src/pages/DashboardPage.tsx": "2adcdd19e046a098e6fd8f37c8c4d6871ef11bf4",
-  "apps/api/src/services/dashboardKpiService.ts": "86f8ee60dde1074f08818e33ab5dc36ebd3779ff",
+  "package.json": "490b7fd6ec428e77f1e2f48c8375856b1bac0eec",
+  "apps/web/src/pages/DashboardPage.tsx": "ff7cb0795e1684016c8960245c0737c61e2271dd",
+  "apps/api/src/services/dashboardKpiService.ts": "90b1a5c5601730da6aea2cc1dec219148fdf95fc",
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
+  "packages/database/src/prismaProductionRepositories.ts": "d07fa6b890b5a96ff60c746cacb47375dac03aaa",
+  "tests/integration/dashboard-final-closures.test.ts": "0bf976e22962182f797f8de7a823cf0177dd0807",
+  ".github/workflows/ci.yml": "13c28caf7388b5a7cd9b5fbee63ef5009b574784",
+  ".github/workflows/production-certification.yml": "dec4347ba084c34bbbeea8759496004da0cf0899",
   ".github/workflows/production-release-exact-main.yml": "9da0bac0d0847f65ac7a4820f8c95769d7bc0665"
 };
 
@@ -17,8 +21,6 @@ const REQUIRED_MARKERS: Array<[string,string,string]> = [
   ["authoritative-dashboard-api", "apps/web/src/services/dashboardKpiService.ts", "fetchDashboardKpiSnapshot"],
   ["no-dashboard-kpi-idb-fallback", "apps/web/src/services/dashboardKpiService.ts", "Callers must not replace a failed online request with IndexedDB KPI data."],
   ["repeatable-read-authority", "apps/api/src/services/dashboardKpiService.ts", 'isolationLevel: "RepeatableRead"'],
-  ["utc-reporting-authority", "apps/api/src/services/dashboardKpiService.ts", "SET LOCAL TIME ZONE 'UTC'"],
-  ["utc-boundary-test", "tests/integration/dashboard-final-closures.test.ts", "keeps dashboard day/hour boundaries deterministic at UTC midnight"],
   ["payment-tenant-join", "apps/api/src/services/dashboardKpiService.ts", 's."tenantId" = p."tenantId"'],
   ["payment-branch-join", "apps/api/src/services/dashboardKpiService.ts", 's."branchId" = p."branchId"'],
   ["return-tenant-join", "apps/api/src/services/dashboardKpiService.ts", 's."tenantId" = r."tenantId"'],

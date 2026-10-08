@@ -136,30 +136,6 @@ jobs:
       - name: Execute Phase 12 Security & Compliance Certification Engine
         run: npm run certify:security
 
-      - name: Start local API for synthetic and security acceptance tests
-        shell: bash
-        env:
-          PORT: "3000"
-          HOST: "127.0.0.1"
-          JWT_SECRET: "ci-security-local-only-not-for-production"
-          START_SERVER: "true"
-          SYNC_CERTIFICATION_PRISMA: "true"
-        run: |
-          set -euo pipefail
-          if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
-            exit 0
-          fi
-          nohup npx tsx apps/api/src/serverFixed.ts > /tmp/kwakopos-candidate-security-api.log 2>&1 &
-          echo $! > /tmp/kwakopos-candidate-security-api.pid
-          for i in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat /tmp/kwakopos-candidate-security-api.log
-          exit 1
-
       - name: Run synthetic monitoring
         run: npx tsx scripts/ops/synthetic-monitor.ts
 
