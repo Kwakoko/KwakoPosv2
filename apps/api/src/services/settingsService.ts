@@ -22,7 +22,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   "business.profile": { businessName: "", tradingName: "", tinNumber: "", vrnNumber: "", email: "", phone: "", address: "" },
   "localization.config": { locale: "en" },
   "pos.config": { autoPrintReceipt: true, kickCashDrawer: true, barcodeScannerMode: "KEYBOARD_EMULATION", maxDiscountPercent: 15, allowHoldOrders: true },
-  "tax.config": { vatEnabled: false, vatRatePercent: 0, currencySymbol: "Tsh", currencyCode: "TZS" },
+  "tax.config": { vatEnabled: false, vatRatePercent: 0, taxInclusivePricing: true, currencySymbol: "Tsh", currencyCode: "TZS" },
   "inventory.config": { enforceFefoBatching: true, allowNegativeStock: false, defaultLowStockThreshold: 10, barcodePrefix: "200" },
   "security.config": {
     inactivityLockMinutes: 15,
