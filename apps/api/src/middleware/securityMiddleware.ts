@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import fp from "fastify-plugin";
 
 export interface SecurityMiddlewareOptions {
   isProduction?: boolean;
@@ -14,7 +15,7 @@ export interface SecurityMiddlewareOptions {
  *   1. H-006 – @fastify/helmet     : Sets security response headers (CSP, HSTS, X-Frame-Options, etc.)
  *   2. H-004 – @fastify/rate-limit : Global IP/tenant rate limiting
  */
-export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOptions> = async (
+export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOptions> = fp(async (
   server: FastifyInstance,
   opts: SecurityMiddlewareOptions
 ): Promise<void> => {
@@ -75,4 +76,4 @@ export const registerSecurityMiddleware: FastifyPluginAsync<SecurityMiddlewareOp
       },
     }),
   });
-};
+}, { name: "kwakopos-security-middleware" });
