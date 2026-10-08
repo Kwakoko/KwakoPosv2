@@ -105,6 +105,7 @@ const forbiddenProductionMarkers = [
 for (const file of tracked) {
   if (
     file === "scripts/certification/foundation-production-lock.ts" ||
+    file === "scripts/certification/security-platform-production-lock.ts" ||
     /^apps\/web\/dist\//.test(file) ||
     /^artifacts\//.test(file)
   ) continue;
