@@ -6,10 +6,6 @@ import React, { useState, useEffect } from "react";
 import {
   Shield,
   Building,
-  Activity,
-  Server,
-  CreditCard,
-  Eye,
   Plus,
   Search,
   Lock,
@@ -26,8 +22,7 @@ import { SuperAdminSqlStudio } from "../components/SuperAdminSqlStudio.js";
 import { SuperAdminCleanlinessStudio } from "../components/SuperAdminCleanlinessStudio.js";
 import { SuperAdminCertificationStudio } from "../components/SuperAdminCertificationStudio.js";
 
-type AdminTab = "tenants" | "subscriptions" | "health" | "audit" | "security" | "sql-studio" | "cleanliness" | "certification";
-const money = (v: number) => `Tsh ${(v / 1_000_000).toFixed(1)}M`;
+type AdminTab = "tenants" | "security" | "sql-studio" | "cleanliness" | "certification";
 
 interface PlatformOverview {
   platformName?: string;
@@ -212,9 +207,6 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
       <div className="v2-flex v2-gap-1" style={{ borderBottom: "1px solid var(--surface-border)", paddingBottom: ".4rem" }}>
         {[
           { id: "tenants", label: "Tenant Directory", icon: Building },
-          { id: "subscriptions", label: "SaaS Subscriptions", icon: CreditCard },
-          { id: "health", label: "System Health & Telemetry", icon: Server },
-          { id: "audit", label: "Super Admin Audit Log", icon: Activity },
           { id: "security", label: "Security & MFA Controls", icon: Lock },
           { id: "sql-studio", label: "SQL Studio & DB", icon: Terminal },
           { id: "cleanliness", label: "Production Cleanliness", icon: Sparkles },
@@ -240,9 +232,9 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
           <div className="kpi-card-desc">Total Tenants: {overview?.totalTenants ?? "..."}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-card-label">Monthly Recurring Revenue</div>
-          <div className="kpi-card-value">{money(0)}</div>
-          <div className="kpi-card-desc">Awaiting live billing telemetry</div>
+          <div className="kpi-card-label">Billing Authority</div>
+          <div className="kpi-card-value">TENANT-SCOPED</div>
+          <div className="kpi-card-desc">Subscription and invoice control is exposed through the authenticated Administration workspace.</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-card-label">Platform Branches</div>
@@ -319,16 +311,6 @@ export const SuperAdminPage: React.FC<{ onNavigate?: (path: string) => void; ini
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {activeTab !== "tenants" && activeTab !== "security" && activeTab !== "sql-studio" && activeTab !== "cleanliness" && activeTab !== "certification" && (
-        <div className="v2-card" style={{ padding: "1.2rem" }}>
-          <div className="v2-flex v2-items-center v2-gap-2">
-            <Eye size={16} />
-            <strong>{activeTab === "subscriptions" ? "Subscriptions" : activeTab === "health" ? "System Health" : "Super Admin Audit Log"}</strong>
-          </div>
-          <p className="v2-text-xs v2-text-muted">This control surface remains connected to the live platform telemetry engine.</p>
         </div>
       )}
 
