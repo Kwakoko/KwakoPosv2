@@ -892,7 +892,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || user.role === "SUPERADMIN" || permissions.includes("SUPER_ADMIN_OPERATIONS") || permissions.includes("ADMIN:PLATFORM"))
+    user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
   const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
   const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
