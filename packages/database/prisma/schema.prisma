@@ -194,6 +194,7 @@ model User {
   devices      Device[]
   cashSessions CashSession[]
   notifications Notification[]
+  superAdminSecurity PlatformSuperAdminSecurity?
 
   @@unique([tenantId, email])
   @@index([tenantId, branchId])
