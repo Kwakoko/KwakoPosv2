@@ -94,6 +94,8 @@ jobs:
         run: npm run certify:payments-lock
       - name: Backdated Inventory Production Lock
         run: npm run certify:backdated-lock
+      - name: Offline Sync Platform Production Lock
+        run: npm run certify:offline-sync-lock
       - name: Validate commit contract
         run: npx tsx scripts/ci/validate-commit-message.ts
       - name: Generate release manifest
