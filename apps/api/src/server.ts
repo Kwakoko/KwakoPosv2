@@ -6661,9 +6661,10 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/treasury/payment-runs/:id/liquidity-check", async (req, reply) => {
     const { globalFinanceTreasuryService } = await import("./services/financeTreasuryService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalFinanceTreasuryService.performLiquidityCheck(id, Number(body.availableLiquidity || 0));
+    const body = z.object({ availableLiquidity: z.number().finite().nonnegative() }).strict().parse(req.body);
+    const result = globalFinanceTreasuryService.performLiquidityCheck(id, body.availableLiquidity, ctx.tenantId);
     return reply.status(result.success ? 200 : 422).send(result);
   });
 
