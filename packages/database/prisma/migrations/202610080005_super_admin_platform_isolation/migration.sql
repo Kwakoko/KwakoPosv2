@@ -43,8 +43,8 @@ WHERE t.slug = 'kwakoko-platform'
 -- Force the dedicated platform role to a non-tenant wildcard permission set.
 UPDATE roles AS platform
 SET permissions = ARRAY['platform:control'],
-    is_system_role = TRUE,
-    updated_at = NOW()
+    "isSystemRole" = TRUE,
+    "updatedAt" = NOW()
 FROM tenants t
 WHERE platform."tenantId" = t.id
   AND t.slug = 'kwakoko-platform'
@@ -63,9 +63,9 @@ WHERE EXISTS (
 -- Invalidate any pre-lock tenant-scoped sessions so legacy Super Admin credentials
 -- cannot remain usable after the platform role is migrated.
 UPDATE device_sessions ds
-SET revoked_at = NOW(),
+SET "revokedAt" = NOW(),
     status = 'REVOKED',
-    revoke_reason = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
+    "revokeReason" = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
 WHERE ds."revokedAt" IS NULL
   AND ds."userId" IN (
     SELECT u.id
@@ -110,7 +110,7 @@ DECLARE
   role_tenant_id TEXT;
   tenant_slug TEXT;
 BEGIN
-  SELECT name, tenant_id INTO role_name, role_tenant_id
+  SELECT name, "tenantId" INTO role_name, role_tenant_id
   FROM roles
   WHERE id = NEW."roleId";
 
