@@ -5685,17 +5685,24 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 21 — AI-Native Business Operations Endpoints
   server.post("/api/v1/ai-native/recommendations", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const body = (req.body as any) || {};
-    const rec = globalAiNativeService.requestRecommendation({
-      tenantId: resolveTenantId(req, body.tenantId),
-      branchId: body.branchId || "BRANCH-01",
-      domain: body.domain || "INVENTORY",
-      proposedAction: body.proposedAction || "Reorder 500 units of SKU-101",
-      riskLevel: body.riskLevel || "LEVEL_2_CONTROLLED_OPERATIONAL",
-      confidenceScore: body.confidenceScore || 0.92,
-      evidenceSummary: body.evidenceSummary || "Historical sales + seasonal demand spike",
-    });
-    return reply.status(201).send({ success: true, data: rec });
+    try {
+      const ctx = requireCommercialPermission(req, "inventory.manage");
+      const body = z.object({
+        domain: z.string().trim().min(1).max(100),
+        proposedAction: z.string().trim().min(1).max(2000),
+        riskLevel: z.string().trim().min(1).max(80),
+        confidenceScore: z.number().finite().min(0).max(1),
+        evidenceSummary: z.string().trim().min(1).max(5000),
+      }).strict().parse(req.body);
+      const rec = globalAiNativeService.requestRecommendation({
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        ...body,
+      });
+      return reply.status(201).send({ success: true, data: rec });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AI_NATIVE_RECOMMENDATION_REJECTED", message: error instanceof Error ? error.message : "Recommendation rejected" } });
+    }
   });
 
   server.post("/api/v1/ai-native/policy/validate", async (req, reply) => {
@@ -5707,13 +5714,24 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/ai-native/kill-switch", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
-    const { scope, targetId } = req.body as any;
-    const status = globalAiNativeService.triggerKillSwitch(scope || "AGENT", targetId || "INVENTORY_AGENT");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({
+        scope: z.enum(["GLOBAL", "TENANT", "AGENT", "TOOL"]),
+        targetId: z.string().trim().min(1).max(128),
+      }).strict().parse(req.body);
+      const status = globalAiNativeService.triggerKillSwitch(body.scope, body.targetId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI-native kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AI_NATIVE_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/ai-native/ledger", async (req, reply) => {
     const { globalAiNativeService } = await import("./services/aiNativeService.js");
+    requireAdminContext(req);
     return reply.status(200).send({ success: true, data: globalAiNativeService.getLedger() });
   });
 
@@ -5725,15 +5743,23 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
   // Phase 22 — Autonomous Operations (KAOF) Endpoints
   server.post("/api/v1/autonomous-operations/detect-remediate", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const body = (req.body as any) || {};
-    const res = globalAutonomousOperationsService.executeAutonomousRequest({
-      requestId: `REQ-REM-${Date.now()}`,
-      tenantId: resolveTenantId(req, body.tenantId),
-      agentId: body.targetService || "CloudRunWorkerPool",
-      capability: body.proposedRemediation || "Restart Worker Instance & Reopen Connection Pool",
-      financialCostTzs: 0,
-    });
-    return reply.status(201).send({ success: true, data: res });
+    try {
+      const ctx = requireAdminContext(req);
+      const body = z.object({
+        targetService: z.string().trim().min(1).max(200),
+        proposedRemediation: z.string().trim().min(1).max(2000),
+      }).strict().parse(req.body);
+      const res = globalAutonomousOperationsService.executeAutonomousRequest({
+        requestId: `REQ-REM-${Date.now()}`,
+        tenantId: ctx.tenantId,
+        agentId: body.targetService,
+        capability: body.proposedRemediation,
+        financialCostTzs: 0,
+      });
+      return reply.status(201).send({ success: true, data: res });
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "AUTONOMOUS_REMEDIATION_REJECTED", message: error instanceof Error ? error.message : "Autonomous remediation rejected" } });
+    }
   });
 
   server.post("/api/v1/autonomous-operations/simulation/dry-run", async (req, reply) => {
@@ -5752,21 +5778,29 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.post("/api/v1/autonomous-operations/kill-switch", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const { scope, targetId, tenantId } = req.body as any;
-    const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId || "TENANT-AUTO-01", targetId || "CloudRunWorkerPool", "SYSTEM");
-    return reply.status(200).send({ success: true, data: status });
+    try {
+      const actor = requireSuperAdminContext(req);
+      requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH");
+      const body = z.object({ targetId: z.string().trim().min(1).max(200), tenantId: z.string().trim().min(1).max(128).optional() }).strict().parse(req.body);
+      const tenantId = body.tenantId ? resolveTenantId(req, body.tenantId) : actor.tenantId;
+      const status = globalAutonomousOperationsService.activateAgentKillSwitch(tenantId, body.targetId, actor.userId);
+      return reply.status(200).send({ success: true, data: status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Autonomous kill switch rejected";
+      return reply.status(message.startsWith("FORBIDDEN") ? 403 : 401).send({ success: false, error: { code: "AUTONOMOUS_KILL_SWITCH_REJECTED", message } });
+    }
   });
 
   server.get("/api/v1/autonomous-operations/ledger", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(tenantId) });
+    const ctx = requireAdminContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getEngine().getAuditTrail(ctx.tenantId) });
   });
 
   server.get("/api/v1/autonomous-operations/dashboard", async (req, reply) => {
     const { globalAutonomousOperationsService } = await import("./services/autonomousOperationsService.js");
-    const tenantId = (req.query as any)?.tenantId || "TENANT-AUTO-01";
-    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(tenantId) });
+    const ctx = requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalAutonomousOperationsService.getHealthSummary(ctx.tenantId) });
   });
 
   // Phase 23 — KwakoPos Certification Program (KCA) Endpoints
