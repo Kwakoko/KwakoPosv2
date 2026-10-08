@@ -102,6 +102,9 @@ for (const marker of ["VAT (18%)", "TAXABLE TURNOVER (18%)", "VAT OUTPUT TAX (18
 }
 for (const marker of ["1.18", "0.18"])
   mustNot(provider, marker, "hard-coded VAT formula in VFD provider");
+mustNot(posUi, "Set 18%", "POS hard-coded VAT override label");
+mustNot(posUi, "prev === 0 ? 0.18 : 0", "POS hard-coded VAT override formula");
+mustNot(posUi, "setSelectedTaxRate(held.selectedTaxRate)", "held cart must not override authoritative tax configuration");
 
 const exclusive = PricingTaxEngine.calculateTax(10000, { ratePct: 18, isInclusive: false });
 const inclusive = PricingTaxEngine.calculateTax(11800, { ratePct: 18, isInclusive: true });

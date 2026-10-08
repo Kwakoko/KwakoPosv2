@@ -901,7 +901,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       total: cartGrandTotal,
       customer: selectedCustomer,
       discountPercent,
-      selectedTaxRate,
       createdAt: new Date().toISOString(),
     };
     const updated = [newHold, ...heldCarts];
@@ -922,7 +921,6 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
       setSelectedCustomerId(customerOptions.find((c) => c.name === held.customer)?.id || null);
     }
     if (typeof held.discountPercent === "number") setDiscountPercent(held.discountPercent);
-    if (typeof held.selectedTaxRate === "number") setSelectedTaxRate(held.selectedTaxRate);
     const updated = heldCarts.filter((h) => h.id !== held.id);
     setHeldCarts(updated);
     persistHeldCarts(updated);
@@ -2339,23 +2337,7 @@ export const PosPage: React.FC<PosPageProps> = ({ onNavigate, activeTab }) => {
               <div className="v2-flex v2-justify-between v2-items-center">
                 <div className="v2-flex v2-items-center v2-gap-2">
                   <span className="v2-text-muted">VAT ({Math.round(selectedTaxRate * 100)}%)</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTaxRate((prev) => (prev === 0 ? 0.18 : 0))}
-                    className="v2-btn v2-btn-ghost v2-btn-xs"
-                    style={{
-                      padding: "1px 6px",
-                      fontSize: "0.68rem",
-                      height: "auto",
-                      borderRadius: "var(--radius-sm)",
-                      border: "1px solid var(--surface-border)",
-                      color: selectedTaxRate > 0 ? "var(--accent)" : "var(--text-muted)",
-                      cursor: "pointer",
-                    }}
-                    title="Toggle VAT between 0% and 18%"
-                  >
-                    {selectedTaxRate > 0 ? "Set 0%" : "Set 18%"}
-                  </button>
+                  <span className="v2-text-xs v2-text-muted">Managed in Tax Settings</span>
                 </div>
                 <span className="v2-mono v2-font-bold">{money(taxAmount)}</span>
               </div>
