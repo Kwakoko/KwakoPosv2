@@ -19,8 +19,8 @@ function requireFiscalAuthority(
   reply: FastifyReply,
   action: "view" | "queue" | "manage",
 ): boolean {
-  const roles = ctx.roles.map((role) => role.toUpperCase());
-  const permissions = new Set(ctx.permissions.map((permission) => permission.toLowerCase()));
+  const roles = ctx.roles.map((role: string) => role.toUpperCase());
+  const permissions = new Set(ctx.permissions.map((permission: string) => permission.toLowerCase()));
   const privileged = roles.some((role) => ["ADMIN", "OWNER", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
   const allowed = privileged || permissions.has("*") || permissions.has("admin:*") ||
     (action === "view"
