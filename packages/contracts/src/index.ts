@@ -924,15 +924,6 @@ export const CreatePosSaleRequestSchema = z.object({
       unitCost: z.number().nonnegative().optional(),
       discountAmount: z.number().nonnegative().optional(),
       taxAmount: z.number().nonnegative().optional(),
-      bundleDefinitionVersion: z.string().min(1).optional(),
-      bundleComponents: z.array(
-        z.object({
-          variantId: z.string().min(1),
-          productId: z.string().min(1),
-          quantity: z.number().positive(),
-          unitCost: z.number().nonnegative(),
-        })
-      ).min(1).optional(),
     })
   ).min(1),
   discountTotal: z.number().nonnegative().optional(),
