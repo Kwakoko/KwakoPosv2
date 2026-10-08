@@ -398,6 +398,37 @@ const AiKillSwitchSchema = z.object({
   targetId: z.string().trim().min(1).max(128).optional(),
 }).strict();
 
+const ApprovalRequestSchema = z.object({
+  subject: z.string().trim().min(1).max(300),
+  domain: z.string().trim().min(1).max(100),
+  actionCode: z.string().trim().min(1).max(150),
+  actionDescription: z.string().trim().min(1).max(2000),
+  amountValue: z.number().finite().nonnegative().optional(),
+  amountCurrency: z.string().trim().min(3).max(10).optional(),
+  businessContext: z.string().trim().min(1).max(5000),
+  evidence: z.array(z.record(z.unknown())).max(100).optional(),
+  aiAssisted: z.boolean().optional(),
+}).strict();
+
+const ApprovalDecisionSchema = z.object({
+  approvalRequestId: z.string().trim().min(1).max(128),
+  decision: z.enum(["APPROVE", "REJECT", "REQUEST_CHANGES"]),
+  comments: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalActionSchema = z.object({
+  reason: z.string().trim().max(2000).optional(),
+}).strict();
+
+const ApprovalDelegationSchema = z.object({
+  delegationId: z.string().trim().min(1).max(128),
+  delegateId: z.string().trim().min(1).max(128),
+  scope: z.string().trim().min(1).max(200),
+  validFrom: z.string().datetime(),
+  validUntil: z.string().datetime(),
+  isActive: z.boolean(),
+}).strict();
+
 function configurePersistentSessions() {
   globalSessionManager.setStoreProvider({
     create: async (record) => { await prisma.deviceSession.create({ data: record as any }); },
@@ -6375,48 +6406,87 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
   });
 
+  server.get("/api/v1/approvals/policies", async (req, reply) => {
+    const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.listPolicies() });
+  });
+
   server.post("/api/v1/approvals/requests", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.submitRequest(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      const ctx = requireTenantContext(req);
+      const body = ApprovalRequestSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.submitRequest({
+        ...body,
+        tenantId: ctx.tenantId,
+        branchId: ctx.branchId,
+        requesterId: ctx.userId,
+        requesterRole: String(ctx.roles?.[0] || "USER"),
+      });
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_REQUEST_REJECTED", message: error instanceof Error ? error.message : "Approval request rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/decisions", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.recordDecision(body);
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const body = ApprovalDecisionSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.recordDecision({ ...body, approverId: ctx.userId, approverRole: String(ctx.roles?.[0] || "ADMIN"), tenantId: ctx.tenantId });
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DECISION_REJECTED", message: error instanceof Error ? error.message : "Approval decision rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/execute", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, body.executorId || "SYSTEM");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      z.string().min(1).max(128).parse(id);
+      ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.executeApprovedRequest(id, ctx.userId, ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_EXECUTION_REJECTED", message: error instanceof Error ? error.message : "Approval execution rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/cancel", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.cancelRequest(id, body.cancelledBy || "SYSTEM", body.reason || "");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.cancelRequest(id, ctx.userId, body.reason || "", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_CANCEL_REJECTED", message: error instanceof Error ? error.message : "Approval cancellation rejected" } });
+    }
   });
 
   server.post("/api/v1/approvals/:id/escalate", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const { id } = req.params as { id: string };
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.escalateRequest(id, body.escalatedBy || "SYSTEM", body.reason || "SLA exceeded");
-    return reply.status(result.success ? 200 : 422).send(result);
+    try {
+      const ctx = requireAdminContext(req);
+      const { id } = req.params as { id: string };
+      const body = ApprovalActionSchema.parse(req.body || {});
+      const result = globalEnterpriseApprovalsService.escalateRequest(id, ctx.userId, body.reason || "SLA exceeded", ctx.tenantId);
+      return reply.status(result.success ? 200 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_ESCALATION_REJECTED", message: error instanceof Error ? error.message : "Approval escalation rejected" } });
+    }
   });
 
   server.get("/api/v1/approvals/:id", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    const request = globalEnterpriseApprovalsService.getRequest(id);
+    const request = globalEnterpriseApprovalsService.getRequest(id, ctx.tenantId);
     return request
       ? reply.status(200).send({ success: true, data: request })
       : reply.status(404).send({ success: false, error: "Approval request not found" });
@@ -6424,22 +6494,29 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
 
   server.get("/api/v1/approvals/:id/audit", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    const ctx = requireTenantContext(req);
     const { id } = req.params as { id: string };
-    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id) });
+    z.string().min(1).max(128).parse(id);
+    return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getAuditTrail(id, ctx.tenantId) });
   });
 
   server.get("/api/v1/approvals/dashboard/health", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
+    requireTenantContext(req);
     return reply.status(200).send({ success: true, data: globalEnterpriseApprovalsService.getDashboardMetrics() });
   });
 
   server.post("/api/v1/approvals/delegations", async (req, reply) => {
     const { globalEnterpriseApprovalsService } = await import("./services/enterpriseApprovalsService.js");
-    const body = (req.body as any) || {};
-    const result = globalEnterpriseApprovalsService.registerDelegation(body);
-    return reply.status(result.success ? 201 : 422).send(result);
+    try {
+      requireAdminContext(req);
+      const body = ApprovalDelegationSchema.parse(req.body);
+      const result = globalEnterpriseApprovalsService.registerDelegation(body);
+      return reply.status(result.success ? 201 : 422).send(result);
+    } catch (error) {
+      return reply.status(400).send({ success: false, error: { code: "APPROVAL_DELEGATION_REJECTED", message: error instanceof Error ? error.message : "Approval delegation rejected" } });
+    }
   });
-
 
   // ─── Phase 35 — Finance & Treasury REST API (/api/v1/treasury/*) ───
   server.get("/api/v1/treasury/bank-accounts", async (req, reply) => {
