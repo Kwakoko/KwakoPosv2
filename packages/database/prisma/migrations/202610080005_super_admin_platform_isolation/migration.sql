@@ -57,7 +57,23 @@ BEGIN
   WHERE s.user_id = u.id
     AND u.role_id = r.id
     AND r.name <> 'PLATFORM_SUPER_ADMIN';
-END $$;
+END $;
+
+-- Invalidate any pre-lock tenant-scoped sessions so legacy Super Admin credentials
+-- cannot remain usable after the platform role is migrated.
+UPDATE device_sessions ds
+SET revoked_at = NOW(),
+    status = 'REVOKED',
+    revoke_reason = 'SUPER_ADMIN_PLATFORM_ISOLATION_MIGRATION'
+WHERE ds.revoked_at IS NULL
+  AND ds.user_id IN (
+    SELECT u.id
+    FROM users u
+    JOIN roles r ON r.id = u.role_id
+    JOIN tenants t ON t.id = u.tenant_id
+    WHERE t.slug = 'kwakoko-platform'
+      AND r.name = 'PLATFORM_SUPER_ADMIN'
+  );
 
 CREATE OR REPLACE FUNCTION enforce_platform_super_admin_role_scope()
 RETURNS trigger
