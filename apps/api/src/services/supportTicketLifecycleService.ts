@@ -53,7 +53,7 @@ async function auditTx(
 }
 
 async function getTicketOrThrow(tx: any, tenantId: string, ticketId: string): Promise<any> {
-  const rows = await tx.$queryRawUnsafe<any[]>(
+  const rows = await tx.$queryRawUnsafe(
     `SELECT * FROM "SupportTicket" WHERE "tenant_id"=$1 AND "id"=$2 LIMIT 1`,
     tenantId,
     ticketId,
@@ -76,17 +76,17 @@ export class SupportTicketLifecycleService {
     return withTenantTransaction(t, async (tx) => {
       const ticket = await getTicketOrThrow(tx, t, ticketId);
       const [comments, attachments, audit] = await Promise.all([
-        tx.$queryRawUnsafe<any[]>(
+        tx.$queryRawUnsafe(
           `SELECT * FROM "SupportTicketComment" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" ASC LIMIT 500`,
           t,
           ticketId,
         ),
-        tx.$queryRawUnsafe<any[]>(
+        tx.$queryRawUnsafe(
           `SELECT * FROM "SupportTicketAttachment" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" ASC LIMIT 500`,
           t,
           ticketId,
         ),
-        tx.$queryRawUnsafe<any[]>(
+        tx.$queryRawUnsafe(
           `SELECT * FROM "SupportEvent" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" DESC LIMIT 500`,
           t,
           ticketId,
@@ -144,7 +144,7 @@ export class SupportTicketLifecycleService {
     return withTenantTransaction(t, async (tx) => {
       const ticket = await getTicketOrThrow(tx, t, ticketId);
       if (userId) {
-        const users = await tx.$queryRawUnsafe<any[]>(
+        const users = await tx.$queryRawUnsafe(
           `SELECT "id","status" FROM "users" WHERE "tenantId"=$1 AND "id"=$2 LIMIT 1`,
           t,
           userId,
@@ -171,7 +171,7 @@ export class SupportTicketLifecycleService {
       const ticket = await getTicketOrThrow(tx, t, ticketId);
       if (ticket.status === "RESOLVED") throw new Error("SUPPORT_TICKET_ALREADY_RESOLVED");
       const id = randomUUID();
-      const rows = await tx.$queryRawUnsafe<any[]>(
+      const rows = await tx.$queryRawUnsafe(
         `INSERT INTO "SupportTicketComment" ("id","tenant_id","ticket_id","author_user_id","body","internal")
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
         id,
@@ -208,7 +208,7 @@ export class SupportTicketLifecycleService {
     return withTenantTransaction(t, async (tx) => {
       await getTicketOrThrow(tx, t, ticketId);
       if (input.commentId) {
-        const comments = await tx.$queryRawUnsafe<any[]>(
+        const comments = await tx.$queryRawUnsafe(
           `SELECT 1 FROM "SupportTicketComment" WHERE "tenant_id"=$1 AND "ticket_id"=$2 AND "id"=$3 LIMIT 1`,
           t,
           ticketId,
@@ -217,7 +217,7 @@ export class SupportTicketLifecycleService {
         if (!comments[0]) throw new Error("SUPPORT_COMMENT_NOT_FOUND");
       }
       const id = randomUUID();
-      const rows = await tx.$queryRawUnsafe<any[]>(
+      const rows = await tx.$queryRawUnsafe(
         `INSERT INTO "SupportTicketAttachment"
           ("id","tenant_id","ticket_id","comment_id","uploaded_by_user_id","file_name","mime_type","storage_key","size_bytes","sha256")
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
@@ -298,7 +298,7 @@ export class SupportTicketLifecycleService {
 
   async listComments(tenantId: string, ticketId: string) {
     const t = tenantScope(tenantId);
-    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe<any[]>(
+    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe(
       `SELECT * FROM "SupportTicketComment" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" ASC LIMIT 500`,
       t,
       ticketId,
@@ -307,7 +307,7 @@ export class SupportTicketLifecycleService {
 
   async listAttachments(tenantId: string, ticketId: string) {
     const t = tenantScope(tenantId);
-    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe<any[]>(
+    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe(
       `SELECT * FROM "SupportTicketAttachment" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" ASC LIMIT 500`,
       t,
       ticketId,
@@ -316,7 +316,7 @@ export class SupportTicketLifecycleService {
 
   async listAudit(tenantId: string, ticketId: string) {
     const t = tenantScope(tenantId);
-    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe<any[]>(
+    return withTenantTransaction(t, (tx) => tx.$queryRawUnsafe(
       `SELECT * FROM "SupportEvent" WHERE "tenant_id"=$1 AND "ticket_id"=$2 ORDER BY "created_at" DESC LIMIT 500`,
       t,
       ticketId,
