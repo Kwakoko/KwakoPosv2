@@ -207,10 +207,28 @@ jobs:
           [[ -n "$GCP_PROJECT_ID" ]] || { echo "RELEASE_BLOCKED: GCP project missing"; exit 1; }
           [[ -n "$GCP_WIF_PROVIDER" && -n "$GCP_SERVICE_ACCOUNT" ]] || { echo "RELEASE_BLOCKED: GCP WIF configuration missing"; exit 1; }
 
+      - name: Normalize Google Workload Identity Provider
+        id: normalize-gcp-wif
+        shell: bash
+        env:
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          set -euo pipefail
+          provider="$GCP_WIF_PROVIDER"
+          provider="${provider#https://iam.googleapis.com/}"
+          provider="${provider#http://iam.googleapis.com/}"
+          provider="${provider#//iam.googleapis.com/}"
+          provider="${provider#iam.googleapis.com/}"
+          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
+            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name"
+            exit 1
+          }
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          workload_identity_provider: ${{ steps.normalize-gcp-wif.outputs.provider }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup Google Cloud SDK
