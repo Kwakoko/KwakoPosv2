@@ -704,12 +704,23 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
         if (!["ACCEPTED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED","IN_TRANSIT"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_DISPATCH:" + o.status);
         if (!o.buyer_purchase_order_id) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
+        await tx.$queryRawUnsafe(
+          'SELECT id FROM purchase_orders WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 FOR UPDATE',
+          o.buyer_purchase_order_id, o.buyer_tenant_id, o.buyer_branch_id,
+        );
+        const buyerPo = await tx.purchaseOrder.findFirst({
+          where: { id: o.buyer_purchase_order_id, tenantId: o.buyer_tenant_id, branchId: o.buyer_branch_id },
+          include: { items: true },
+        });
+        if (!buyerPo || buyerPo.status === "CANCELLED" || buyerPo.status === "REJECTED") throw new Error("NATIVE_PURCHASE_ORDER_NOT_SHIPPABLE");
         const items = itemsOf(o), dispatch: Array<{ item: Item; quantity: number; variant: any }> = [];
         if (new Set(b.items.map((x) => x.lineId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
         for (const x of b.items) {
           const item = items.find((i) => i.lineId === x.lineId); if (!item) throw new Error("ORDER_LINE_NOT_FOUND");
           if (!item.unitPrice || x.quantity > Number(item.acceptedQuantity || 0) - item.dispatchedQuantity) throw new Error("DISPATCH_QUANTITY_EXCEEDS_ACCEPTED");
           if (!item.buyerVariantId) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED");
+          const poItem = buyerPo.items.find((p: any) => p.variantId === item.buyerVariantId);
+          if (!poItem || Number(poItem.quantityOrdered) < Number(item.dispatchedQuantity) + x.quantity - 0.0001) throw new Error("DISPATCH_EXCEEDS_NATIVE_PURCHASE_ORDER");
           const variant = await tx.productVariant.findFirst({ where: { id: item.sellerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true } });
           if (!variant) throw new Error("SELLER_VARIANT_BOUNDARY_OR_NOT_FOUND");
           await stockMove(tx, c, variant, -x.quantity, o.id, "dispatch-" + b.idempotencyKey + "-" + item.lineId, "SALE");
@@ -746,6 +757,12 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
             built.allocation.taxAmount, built.allocation.grossAmount,
           );
         }
+        await tx.$executeRawUnsafe(
+          "INSERT INTO supply_chain_shipment_events (id,shipment_id,tenant_id,branch_id,actor_user_id,action,from_status,to_status,idempotency_key,payload) VALUES ($1,$2,$3,$4,$5,'SHIPMENT_CONFIRMED',NULL,'CONFIRMED',$6,$7::jsonb)",
+          randomUUID(), shipmentId, o.buyer_tenant_id, o.buyer_branch_id, c.userId,
+          "gateway-shipment-confirmed:" + o.id + ":" + b.idempotencyKey,
+          JSON.stringify({ gatewayOrderId: o.id, carrierName: b.carrierName, trackingNumber: b.trackingNumber }),
+        );
         const complete = items.every((x) => x.dispatchedQuantity >= Number(x.acceptedQuantity || 0));
         const logistics = {
           ...(o.logistics || {}), carrierName: b.carrierName, trackingNumber: b.trackingNumber,
