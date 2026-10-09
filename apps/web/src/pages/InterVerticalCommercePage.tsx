@@ -259,7 +259,7 @@ export const InterVerticalCommercePage: React.FC = () => {
               </div>}
               {buyer && ["PARTIALLY_RECEIVED", "RECEIVED"].includes(order.status) && <div className="v2-grid v2-grid-2 v2-gap-2 v2-mt-3">
                 <label className="v2-text-xs">Payment amount (TZS)<input className="v2-input v2-mt-1" type="number" min="0.01" step="0.01" value={paymentAmount[order.id] || ""} onChange={(e) => setPaymentAmount((prev) => ({ ...prev, [order.id]: e.target.value }))} /></label>
-                <div><label className="v2-text-xs">Method</label><select className="v2-input v2-mt-1" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}><option value="BANK">Bank</option><option value="MOBILE_MONEY">Mobile money</option><option value="CASH">Cash</option><option value="CARD">Card</option><option value="OTHER">Other</option></select><button className="v2-btn v2-btn-secondary v2-btn-sm v2-mt-2" disabled={busy} onClick={() => void submitPayment(order)}><CircleDollarSign size={13} /> Submit payment</button></div>
+                <div><label className="v2-text-xs">Method</label><select className="v2-input v2-mt-1" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}><option value="BANK">Bank transfer</option><option value="MOBILE_MONEY">Mobile money</option></select><button className="v2-btn v2-btn-secondary v2-btn-sm v2-mt-2" disabled={busy} onClick={() => void submitPayment(order)}><CircleDollarSign size={13} /> Submit payment</button></div>
               </div>}
               {detail && <div className="v2-bg-subtle v2-rounded-lg v2-p-3 v2-mt-3">
                 <strong className="v2-text-sm">Events and payments</strong>
