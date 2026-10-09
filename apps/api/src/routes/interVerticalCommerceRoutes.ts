@@ -392,7 +392,6 @@ async function buyerReceipt(
   if (!supplier) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
   const buyerTax = await resolveBranchTaxAuthority(tx, ctx);
   const recoverInputTax = buyerTax.vatEnabled;
-  const inventoryValue = recoverInputTax ? netAmount : grossAmount;
   const receiptItems = receives.map((x) => {
     const value = recoverInputTax ? x.netAmount : x.grossAmount;
     return {
@@ -425,6 +424,16 @@ async function buyerReceipt(
     where: { id: supplierId }, data: { outstandingBalance: { increment: grossAmount } },
   });
 
+  const shipmentIds = [...new Set(receives.map((x) => x.shipmentId))];
+  const priorShipmentStatus = new Map<string, string>();
+  for (const shipmentId of shipmentIds) {
+    const rows = await tx.$queryRawUnsafe(
+      "SELECT id,status FROM supply_chain_shipments WHERE id=$1 AND tenant_id=$2 AND branch_id=$3 AND gateway_order_id=$4 FOR UPDATE",
+      shipmentId, ctx.tenantId, ctx.branchId, order.id,
+    );
+    if (!rows.length) throw new Error("SHIPMENT_NOT_FOUND_OR_FORBIDDEN");
+    priorShipmentStatus.set(String(rows[0].id), String(rows[0].status));
+  }
   for (const entry of receives) {
     const updated = await tx.$queryRawUnsafe(
       "UPDATE supply_chain_shipment_lines SET quantity_received=quantity_received+$2, updated_at=now() WHERE shipment_id=$1 AND gateway_line_id=$3 AND quantity_received+$2<=quantity_shipped RETURNING id",
@@ -432,10 +441,30 @@ async function buyerReceipt(
     );
     if (!updated.length) throw new Error("SHIPMENT_RECEIPT_QUANTITY_MISMATCH");
   }
-  await tx.$executeRawUnsafe(
-    "UPDATE supply_chain_shipments AS s SET status=CASE WHEN NOT EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received<l.quantity_shipped) THEN 'RECEIVED' WHEN EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received>0) THEN 'RECEIVING' ELSE s.status END, actual_arrival_date=COALESCE(s.actual_arrival_date,now()), updated_at=now() WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.gateway_order_id=$3",
+  const updatedShipments = await tx.$queryRawUnsafe(
+    "UPDATE supply_chain_shipments AS s SET status=CASE WHEN NOT EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received<l.quantity_shipped) THEN 'RECEIVED' WHEN EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received>0) THEN 'RECEIVING' ELSE s.status END, updated_at=now() WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.gateway_order_id=$3 RETURNING id,status",
     ctx.tenantId, ctx.branchId, order.id,
   );
+  await tx.$executeRawUnsafe(
+    "UPDATE supply_chain_shipments SET actual_arrival_date=COALESCE(actual_arrival_date,now()),updated_at=now() WHERE tenant_id=$1 AND branch_id=$2 AND gateway_order_id=$3 AND status IN ('RECEIVING','RECEIVED') AND actual_arrival_date IS NULL",
+    ctx.tenantId, ctx.branchId, order.id,
+  );
+  for (const shipment of updatedShipments) {
+    const shipmentId = String(shipment.id);
+    const fromStatus = priorShipmentStatus.get(shipmentId) || "CONFIRMED";
+    const toStatus = String(shipment.status);
+    const lines = receives.filter((x) => x.shipmentId === shipmentId).map((x) => ({
+      gatewayLineId: x.item.lineId, quantity: x.quantity, netAmount: x.netAmount,
+      taxAmount: x.taxAmount, grossAmount: x.grossAmount,
+    }));
+    await tx.$executeRawUnsafe(
+      "INSERT INTO supply_chain_shipment_events (id,shipment_id,tenant_id,branch_id,actor_user_id,action,from_status,to_status,idempotency_key,payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)",
+      randomUUID(), shipmentId, ctx.tenantId, ctx.branchId, ctx.userId,
+      fromStatus === toStatus ? "SHIPMENT_GOODS_RECEIVED" : "SHIPMENT_STATUS_CHANGED",
+      fromStatus, toStatus, "gateway-shipment-receipt:" + shipmentId + ":" + key,
+      JSON.stringify({ receiptNotes: notes, lines }),
+    );
+  }
 
   const accounts = await finance.accounts(tx, ctx);
   const built = FinancialBridge.mapGoodsReceiptToJournal(
