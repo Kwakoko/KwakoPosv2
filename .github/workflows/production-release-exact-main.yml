@@ -200,7 +200,7 @@ jobs:
       - name: Validate Google Cloud configuration
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
@@ -211,7 +211,7 @@ jobs:
         id: normalize-gcp-wif
         shell: bash
         env:
-          GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER || secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
           set -euo pipefail
           python scripts/release/normalize-gcp-wif-provider.py "$GCP_WIF_PROVIDER" >> "$GITHUB_OUTPUT"

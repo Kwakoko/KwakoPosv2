@@ -55,11 +55,14 @@ function comparePrereleaseIdentifiers(left: string, right: string): number {
   const rightNumeric = /^\d+$/.test(right);
 
   if (leftNumeric && rightNumeric) {
-    return Number(left) - Number(right);
+    // SemVer numeric identifiers are arbitrary precision. Comparing via Number()
+    // loses ordering above Number.MAX_SAFE_INTEGER (and may yield NaN for Infinity - Infinity).
+    if (left.length !== right.length) return left.length - right.length;
+    return left < right ? -1 : left > right ? 1 : 0;
   }
   if (leftNumeric && !rightNumeric) return -1;
   if (!leftNumeric && rightNumeric) return 1;
-  return left.localeCompare(right);
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function comparePrerelease(left?: string, right?: string): number {
