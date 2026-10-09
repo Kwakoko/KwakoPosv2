@@ -215,9 +215,7 @@ jobs:
         run: |
           set -euo pipefail
           provider="$GCP_WIF_PROVIDER"
-          # Normalize harmless transport/whitespace wrappers without weakening
-          # the canonical Google WIF resource-name requirement.
-          provider="$(printf '%s' "$provider" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s#^https?://iam.googleapis.com/##; s#^//iam.googleapis.com/##; s#^iam.googleapis.com/##; s#/$##')"
+          provider="$(node -e 'const p=(process.env.GCP_WIF_PROVIDER||"").trim(); process.stdout.write(p.replace(/^https?:\\/\\/iam.googleapis.com\\//,"").replace(/^\\/\\/iam.googleapis.com\\//,"").replace(/^iam.googleapis.com\\//,"").replace(/\\/$/,""))')"
           [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
             echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
             exit 1
