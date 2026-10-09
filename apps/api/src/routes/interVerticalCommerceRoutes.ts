@@ -701,22 +701,64 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
         if (!["ACCEPTED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED","IN_TRANSIT"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_DISPATCH:" + o.status);
+        if (!o.buyer_purchase_order_id) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
         const items = itemsOf(o), dispatch: Array<{ item: Item; quantity: number; variant: any }> = [];
         if (new Set(b.items.map((x) => x.lineId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
         for (const x of b.items) {
           const item = items.find((i) => i.lineId === x.lineId); if (!item) throw new Error("ORDER_LINE_NOT_FOUND");
           if (!item.unitPrice || x.quantity > Number(item.acceptedQuantity || 0) - item.dispatchedQuantity) throw new Error("DISPATCH_QUANTITY_EXCEEDS_ACCEPTED");
+          if (!item.buyerVariantId) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED");
           const variant = await tx.productVariant.findFirst({ where: { id: item.sellerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true } });
           if (!variant) throw new Error("SELLER_VARIANT_BOUNDARY_OR_NOT_FOUND");
           await stockMove(tx, c, variant, -x.quantity, o.id, "dispatch-" + b.idempotencyKey + "-" + item.lineId, "SALE");
           item.dispatchedQuantity += x.quantity; dispatch.push({ item, quantity: x.quantity, variant });
         }
-        const documents = await sellerInvoice(tx, c, o, dispatch, b.idempotencyKey);
+        const shipmentId = randomUUID();
+        const documents = await sellerInvoice(tx, c, o, dispatch, b.idempotencyKey, shipmentId);
+        const allocationByLine = new Map(documents.allocations.map((x) => [x.item.lineId, x]));
+        for (const x of dispatch) {
+          const built = allocationByLine.get(x.item.lineId);
+          if (!built) throw new Error("DISPATCH_TAX_SNAPSHOT_MISSING");
+          x.item.dispatchAllocations = [...(x.item.dispatchAllocations || []), built.allocation];
+        }
+
+        const eta = b.eta ? new Date(b.eta) : new Date(Date.now() + 7 * 86400000);
+        await tx.$executeRawUnsafe(
+          "INSERT INTO supply_chain_shipments (id,tenant_id,branch_id,po_id,supplier_id,gateway_order_id,source_tenant_id,source_branch_id,carrier_name,tracking_number,status,supplier_eta,carrier_eta,destination_warehouse_id,created_by_user_id,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CONFIRMED',$11,$12,NULL,$13,$14)",
+          shipmentId, o.buyer_tenant_id, o.buyer_branch_id, o.buyer_purchase_order_id, o.buyer_supplier_id,
+          o.id, o.seller_tenant_id, o.seller_branch_id, b.carrierName || "Unspecified carrier", b.trackingNumber || null,
+          eta, b.eta ? new Date(b.eta) : null, c.userId, "ivg-shipment-" + o.id + "-" + b.idempotencyKey,
+        );
+        for (const x of dispatch) {
+          const built = allocationByLine.get(x.item.lineId)!;
+          const buyerVariant = await tx.productVariant.findFirst({
+            where: { id: x.item.buyerVariantId, tenantId: o.buyer_tenant_id, branchId: o.buyer_branch_id, isActive: true },
+            select: { productId: true },
+          });
+          if (!buyerVariant) throw new Error("BUYER_VARIANT_BOUNDARY_OR_NOT_FOUND");
+          await tx.$executeRawUnsafe(
+            "INSERT INTO supply_chain_shipment_lines (id,shipment_id,gateway_line_id,seller_variant_id,buyer_variant_id,product_id,sku,description,quantity_shipped,unit_price,net_amount,tax_rate_pct,tax_inclusive,tax_amount,gross_amount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+            randomUUID(), shipmentId, x.item.lineId, x.item.sellerVariantId, x.item.buyerVariantId,
+            buyerVariant.productId, x.item.sku, x.item.name, x.quantity, x.item.unitPrice,
+            built.allocation.netAmount, built.allocation.taxRatePct, built.allocation.taxInclusive,
+            built.allocation.taxAmount, built.allocation.grossAmount,
+          );
+        }
         const complete = items.every((x) => x.dispatchedQuantity >= Number(x.acceptedQuantity || 0));
-        const logistics = { ...(o.logistics || {}), carrierName: b.carrierName, trackingNumber: b.trackingNumber, eta: b.eta || null, lastDispatchAt: new Date().toISOString() };
+        const logistics = {
+          ...(o.logistics || {}), carrierName: b.carrierName, trackingNumber: b.trackingNumber,
+          eta: b.eta || null, lastDispatchAt: new Date().toISOString(),
+          shipmentIds: [...new Set([...(Array.isArray(o.logistics?.shipmentIds) ? o.logistics.shipmentIds : []), shipmentId])],
+        };
         const next = complete ? "DISPATCHED" : "PARTIALLY_DISPATCHED";
         const updated = await patchOrder(tx, id, { status: next, items, logistics });
-        await event(tx, id, c, "ORDER_DISPATCHED", o.status, next, b.idempotencyKey, { saleId: documents.sale.id, invoiceId: documents.invoice.id, amount: documents.amount, carrierName: b.carrierName, trackingNumber: b.trackingNumber, eta: b.eta || null, items: dispatch.map((x) => ({ lineId: x.item.lineId, quantity: x.quantity })) });
+        await event(tx, id, c, "ORDER_DISPATCHED", o.status, next, b.idempotencyKey, {
+          saleId: documents.sale.id, invoiceId: documents.invoice.id, amount: documents.amount,
+          taxAmount: documents.taxAmount, fiscalizationId: documents.fiscalizationId,
+          fiscalizationState: documents.fiscalizationState, shipmentId,
+          carrierName: b.carrierName, trackingNumber: b.trackingNumber, eta: b.eta || null,
+          items: dispatch.map((x) => ({ lineId: x.item.lineId, quantity: x.quantity })),
+        });
         return updated;
       });
       return reply.send({ success: true, data: orderDto(row) });
