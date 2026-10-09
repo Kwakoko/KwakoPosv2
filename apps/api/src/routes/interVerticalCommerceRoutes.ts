@@ -921,6 +921,22 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         for (const doc of buyerDocs) {
           if (remain <= 0.005) break;
           const allocation = Math.min(remain, Number(doc.amount) - Number(doc.paid_amount));
+          if (doc.document_type === "SUPPLIER_INVOICE") {
+            const invoice = await tx.supplierInvoice.findFirst({
+              where: { id: doc.document_id, tenantId: bc.tenantId, branchId: bc.branchId },
+            });
+            if (!invoice || Number(invoice.balanceDue) + 0.005 < allocation) throw new Error("BUYER_SUPPLIER_INVOICE_BALANCE_MISMATCH");
+            const balance = Math.max(0, Number(invoice.balanceDue) - allocation);
+            await tx.supplierInvoice.update({ where: { id: invoice.id }, data: {
+              amountPaid: { increment: allocation }, balanceDue: balance,
+              status: balance <= 0.005 ? "PAID" : "PARTIALLY_PAID",
+            } });
+            await tx.paymentAllocation.create({ data: {
+              id: randomUUID(), tenantId: bc.tenantId, branchId: bc.branchId,
+              paymentId: buyerPayment.id, supplierInvoiceId: invoice.id,
+              allocatedAmount: allocation, createdById: bc.userId,
+            } });
+          }
           await tx.$executeRawUnsafe("UPDATE inter_vertical_finance_documents SET paid_amount=paid_amount+$2 WHERE id=$1", doc.id, allocation);
           remain -= allocation;
         }
