@@ -10,8 +10,8 @@ const EXPECTED_SUBMENU_GROUPS = 126;
 const EXPECTED_SUBITEM_COUNT = 659;
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "9963853569fc898625d4e3db48920f4a7399fb96",
-  "apps/web/src/App.tsx": "544b8daca2f6a02af11cc3672d2c48836a2059b4",
+  "package.json": "29fdef497005f558d7bb5347aff0b5e9d2641925",
+  "apps/web/src/App.tsx": "a67c77edd34362b241599ed2b5f28b6f55a7acd2",
   "apps/web/src/modules/moduleRegistry.ts": "33955eb09c8940a45471b64fa980a966da7e11c2",
   "apps/web/src/pages/VerticalCommandCenterPage.tsx": "dc932c2adf63194e6af11ed340be7ba43f9d498f",
   "apps/web/src/pages/DashboardPage.tsx": "59b98fc129531507362218674b135597bf224f8d",
