@@ -49,8 +49,7 @@ def normalize(value: str) -> str:
 
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
-    provider = _strip_boundary_format_marks(provider.strip().strip("\\ufeff"))
-    provider = _strip_boundary_format_marks(provider.strip().strip("\\ufeff"))
+    provider = _strip_boundary_format_marks(provider)
 
     # Accept canonical resource names and equivalent IAM URL/API-version forms.
     provider = re.sub(r"^https?://iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
