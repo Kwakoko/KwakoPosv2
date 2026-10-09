@@ -43,7 +43,7 @@ const Receive = z.object({
 });
 const PaymentRequest = z.object({
   idempotencyKey: z.string().trim().min(8).max(200), amount: z.number().positive().finite(),
-  paymentMethod: z.enum(["BANK", "MOBILE_MONEY", "CASH", "CARD", "OTHER"]).default("BANK"),
+  paymentMethod: z.enum(["BANK", "MOBILE_MONEY"]).default("BANK"),
   provider: z.string().trim().max(100).optional(), providerReference: z.string().trim().max(200).optional(), notes: z.string().trim().max(1000).optional().default(""),
 });
 
@@ -51,10 +51,11 @@ async function ensureSchema(): Promise<void> {
   if (schemaReady) return schemaReady;
   schemaReady = (async () => {
     const sql = [
-      "CREATE TABLE IF NOT EXISTS inter_vertical_connections (id TEXT PRIMARY KEY, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT, buyer_supplier_id TEXT, seller_customer_id TEXT, status TEXT NOT NULL DEFAULT 'PENDING', requested_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, notes TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
+      "CREATE TABLE IF NOT EXISTS inter_vertical_connections (id TEXT PRIMARY KEY, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT, buyer_supplier_id TEXT, seller_customer_id TEXT, status TEXT NOT NULL DEFAULT 'PENDING', requested_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, notes TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL, seller_response_idempotency_key TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
       "CREATE UNIQUE INDEX IF NOT EXISTS inter_vertical_connections_active_pair_uq ON inter_vertical_connections (buyer_tenant_id, buyer_branch_id, seller_tenant_id, seller_branch_id) WHERE status = 'ACTIVE'",
       "CREATE INDEX IF NOT EXISTS inter_vertical_connections_buyer_idx ON inter_vertical_connections (buyer_tenant_id, buyer_branch_id, status)",
       "CREATE INDEX IF NOT EXISTS inter_vertical_connections_seller_idx ON inter_vertical_connections (seller_tenant_id, seller_branch_id, status)",
+      "CREATE UNIQUE INDEX IF NOT EXISTS inter_vertical_connections_seller_response_uq ON inter_vertical_connections (seller_tenant_id, seller_branch_id, seller_response_idempotency_key) WHERE seller_response_idempotency_key IS NOT NUL",
       "CREATE TABLE IF NOT EXISTS inter_vertical_orders (id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE, connection_id TEXT NOT NULL, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT NOT NULL, buyer_supplier_id TEXT NOT NULL, seller_customer_id TEXT NOT NULL, status TEXT NOT NULL, finance_status TEXT NOT NULL DEFAULT 'OPEN', currency TEXT NOT NULL DEFAULT 'TZS', items JSONB NOT NULL DEFAULT '[]'::jsonb, logistics JSONB NOT NULL DEFAULT '{}'::jsonb, total_amount NUMERIC(14,2) NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', rejection_reason TEXT, created_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, idempotency_key TEXT NOT NULL, settled_amount NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_buyer_idx ON inter_vertical_orders (buyer_tenant_id, buyer_branch_id, status, created_at DESC)",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_seller_idx ON inter_vertical_orders (seller_tenant_id, seller_branch_id, status, created_at DESC)",
@@ -105,7 +106,7 @@ function httpStatus(err: unknown): number {
   if (m.includes("CONFLICT") || m.includes("INVALID_STATUS") || m.includes("ALREADY_") || m.includes("IDEMPOTENCY")) return 409;
   if (m.includes("INSUFFICIENT") || m.includes("EXCEEDS_") || m.includes("BOUNDARY") || m.includes("MAPPING_REQUIRED") || m.includes("CREDIT_LIMIT")) return 422;
   if (m.includes("TENANT_BRANCH_CONTEXT_REQUIRED") || m.includes("UNAUTHORIZED")) return 401;
-  if (m.includes("INVALID") || m.includes("REQUIRED") || m.includes("MISSING") || m.includes("DUPLICATE")) return 400;
+  if (m.includes("INVALID") || m.includes("REQUIRED") || m.includes("MISSING") || m.includes("DUPLICATE") || m.includes("CANNOT_")) return 400;
   return 500;
 }
 function errorReply(reply: FastifyReply, err: unknown) {
@@ -307,6 +308,8 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       await ensureSchema(); const c = ctxOf(req); permission(c, "supplier.create", "suppliers.write", "purchase.approve", "purchasing.manage", "sales.manage");
       const id = String((req.params as any).id || ""), b = LinkResponse.parse(req.body);
       const row = await db.$transaction(async (tx: any) => {
+        const replay = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE seller_tenant_id=$1 AND seller_branch_id=$2 AND seller_response_idempotency_key=$3", c.tenantId, c.branchId, b.idempotencyKey);
+        if (replay.length) return replay[0];
         const rows = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE id=$1 AND seller_tenant_id=$2 FOR UPDATE", id, c.tenantId);
         const link = rows[0]; if (!link) throw new Error("CONNECTION_NOT_FOUND");
         if (link.status === "ACTIVE" && b.action === "ACCEPT" && link.seller_branch_id === c.branchId) return link;
@@ -318,7 +321,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         await tx.branch.findFirstOrThrow({ where: { id: c.branchId, tenantId: c.tenantId } });
         await tx.branch.findFirstOrThrow({ where: { id: link.buyer_branch_id, tenantId: link.buyer_tenant_id } });
         if (b.action === "REJECT") {
-          const rejected = await tx.$queryRawUnsafe("UPDATE inter_vertical_connections SET status='REJECTED',seller_branch_id=$2,accepted_by_user_id=$3,notes=$4,updated_at=now() WHERE id=$1 RETURNING *", id, c.branchId, c.userId, (link.notes ? link.notes + " | " : "") + "Rejected: " + (b.reason || "No reason supplied"));
+          const rejected = await tx.$queryRawUnsafe("UPDATE inter_vertical_connections SET status='REJECTED',seller_branch_id=$2,accepted_by_user_id=$3,notes=$4,seller_response_idempotency_key=$5,updated_at=now() WHERE id=$1 RETURNING *", id, c.branchId, c.userId, (link.notes ? link.notes + " | " : "") + "Rejected: " + (b.reason || "No reason supplied"), b.idempotencyKey);
           return rejected[0];
         }
         const suffix = id.replace(/-/g, "").slice(0,10).toUpperCase();
@@ -326,7 +329,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const custCount = await tx.customer.count({ where: { tenantId: link.seller_tenant_id, branchId: c.branchId } });
         const supplier = await tx.supplier.create({ data: { id: randomUUID(), tenantId: link.buyer_tenant_id, branchId: link.buyer_branch_id, supplierCode: "B2B-" + suffix + "-" + (supCount + 1), name: seller.name, address: seller.slug, status: "ACTIVE" } });
         const customer = await tx.customer.create({ data: { id: randomUUID(), tenantId: link.seller_tenant_id, branchId: c.branchId, customerCode: "B2B-" + suffix + "-" + (custCount + 1), name: buyer.name, address: buyer.slug, creditLimit: b.creditLimit, currentBalance: 0, customerSegment: "B2B", status: "ACTIVE" } });
-        const accepted = await tx.$queryRawUnsafe("UPDATE inter_vertical_connections SET status='ACTIVE',seller_branch_id=$2,buyer_supplier_id=$3,seller_customer_id=$4,accepted_by_user_id=$5,updated_at=now() WHERE id=$1 RETURNING *", id, c.branchId, supplier.id, customer.id, c.userId);
+        const accepted = await tx.$queryRawUnsafe("UPDATE inter_vertical_connections SET status='ACTIVE',seller_branch_id=$2,buyer_supplier_id=$3,seller_customer_id=$4,accepted_by_user_id=$5,seller_response_idempotency_key=$6,updated_at=now() WHERE id=$1 RETURNING *", id, c.branchId, supplier.id, customer.id, c.userId, b.idempotencyKey);
         return accepted[0];
       });
       return reply.send({ success: true, data: row });
