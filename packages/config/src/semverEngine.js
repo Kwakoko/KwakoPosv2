@@ -29,14 +29,18 @@ function comparePrereleaseIdentifiers(left, right) {
     const leftNumeric = /^\d+$/.test(left);
     const rightNumeric = /^\d+$/.test(right);
     if (leftNumeric && rightNumeric) {
-        return Number(left) - Number(right);
+        // SemVer numeric identifiers are arbitrary precision; Number() loses precision.
+        if (left.length !== right.length)
+            return left.length - right.length;
+        return left < right ? -1 : left > right ? 1 : 0;
     }
     if (leftNumeric && !rightNumeric)
         return -1;
     if (!leftNumeric && rightNumeric)
         return 1;
-    return left.localeCompare(right);
+    return left < right ? -1 : left > right ? 1 : 0;
 }
+
 function comparePrerelease(left, right) {
     if (!left && !right)
         return 0;
