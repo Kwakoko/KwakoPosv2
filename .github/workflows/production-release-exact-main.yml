@@ -214,15 +214,32 @@ jobs:
           GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
           set -euo pipefail
-          provider="$GCP_WIF_PROVIDER"
+          # Normalize without logging the secret itself. Accept the canonical IAM
+          # resource path, its IAM-hosted URL form, and API URLs that include /v1/.
+          provider="$(printf '%s' "$GCP_WIF_PROVIDER" | tr -d '\r\n')"
+          provider="$(printf '%s' "$provider" | sed -E "s/^[[:space:]\"'\x60]+//; s/[[:space:]\"'\x60]+$//")"
           provider="${provider#https://iam.googleapis.com/}"
           provider="${provider#http://iam.googleapis.com/}"
           provider="${provider#//iam.googleapis.com/}"
           provider="${provider#iam.googleapis.com/}"
-          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
-            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name"
+          provider="${provider#/v1/}"
+          provider="${provider#v1/}"
+          provider="${provider#/v1beta/}"
+          provider="${provider#v1beta/}"
+          provider="${provider#/v1beta1/}"
+          provider="${provider#v1beta1/}"
+          provider="${provider%%\?*}"
+          provider="${provider%%\#*}"
+          provider="${provider#/}"
+          while [[ "$provider" == */ ]]; do provider="${provider%/}"; done
+          if [[ ! "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]]; then
+            if [[ "$provider" == projects/* && "$provider" == *"/locations/global/workloadIdentityPools/"* && ! "$provider" =~ ^projects/[0-9]+/ ]]; then
+              echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER uses a non-numeric project identifier; Google WIF requires the project number in the provider resource path."
+            else
+              echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER is not a canonical projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource after safe URL normalization."
+            fi
             exit 1
-          }
+          fi
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
