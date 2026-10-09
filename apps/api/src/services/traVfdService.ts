@@ -182,6 +182,72 @@ export class TraVfdService {
       efdSerial: row.efdSerial || undefined, receiptCode: row.receiptCode || undefined, routingKey: row.routingKey || undefined,
     };
   }
+  /**
+   * Adds fiscalization and its durable outbox record using a caller-owned Prisma
+   * transaction. Use this when a fiscal invoice and its fiscalization obligation
+   * must commit or roll back together (for example, a B2B dispatch invoice).
+   */
+  async enqueueInTransaction(
+    tx: any,
+    ctx: { tenantId: string; branchId: string; userId?: string },
+    req: CreateTraVfdFiscalizationRequest,
+  ): Promise<TraVfdFiscalizationDTO> {
+    const lockKey = `kwakopos:tra-vfd-chain:${ctx.tenantId}:${ctx.branchId}:${req.deviceId}`;
+    await tx.$executeRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1))", lockKey);
+    const existing = await tx.traVfdFiscalization.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, transactionId: req.transactionId },
+    });
+    if (existing) return mapFiscalization(existing);
+    const config = await tx.traVfdConfig.findUnique({
+      where: { tenantId_branchId: { tenantId: ctx.tenantId, branchId: ctx.branchId } },
+    });
+    if (!config?.enabled) throw new Error("TRA_VFD_DISABLED");
+    const latest = await tx.traVfdFiscalization.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, deviceId: req.deviceId },
+      orderBy: { chainSequence: "desc" },
+      select: { chainSequence: true, receiptHash: true },
+    });
+    const chainSequence = (latest?.chainSequence ?? 0) + 1;
+    const previousReceiptHash = latest?.receiptHash || "GENESIS";
+    const payload = req.payload as any;
+    const invoiceNumber = String(payload.invoiceNumber || payload.receiptNumber || req.transactionId);
+    const timestampUtc = canonicalFiscalTimestamp(payload, new Date());
+    const receiptHash = computeReceiptHash(previousReceiptHash, invoiceNumber, timestampUtc, payload.grandTotal ?? payload.total, payload.taxTotal ?? payload.taxAmount);
+    if (req.chainSequence !== undefined &&
+        (req.chainSequence !== chainSequence || req.previousReceiptHash !== previousReceiptHash || req.receiptHash !== receiptHash)) {
+      throw new Error("TRA_VFD_FISCAL_CHAIN_CONFLICT");
+    }
+    const created = await tx.traVfdFiscalization.create({
+      data: {
+        tenantId: ctx.tenantId, branchId: ctx.branchId, receiptId: req.receiptId ?? null,
+        transactionId: req.transactionId, deviceId: req.deviceId, chainSequence, previousReceiptHash,
+        receiptHash, state: "LOCAL_FISCAL_PENDING", requestPayload: req.payload as any,
+        attempts: 0, reconciliationStatus: "PENDING",
+      },
+    });
+    await tx.traVfdOutbox.create({
+      data: {
+        tenantId: ctx.tenantId, branchId: ctx.branchId, fiscalizationId: created.id,
+        operationId: created.id,
+        idempotencyKey: "TRA-VFD:" + ctx.tenantId + ":" + ctx.branchId + ":" + req.transactionId,
+        payload: req.payload as any, status: "PENDING",
+      },
+    });
+    await tx.auditEvent.create({
+      data: {
+        id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
+        userId: ctx.userId || "system", deviceId: "tra-vfd",
+        action: "TRA_VFD_FISCAL_ENQUEUED", entityType: "TraVfdFiscalization",
+        entityId: created.id,
+        metadata: {
+          transactionId: created.transactionId, chainSequence: created.chainSequence,
+          receiptId: created.receiptId, state: created.state,
+        },
+      },
+    });
+    return mapFiscalization(created);
+  }
+
   async enqueue(ctx: { tenantId: string; branchId: string }, req: CreateTraVfdFiscalizationRequest) {
     const existing = await prisma.traVfdFiscalization.findFirst({
       where: { tenantId: ctx.tenantId, branchId: ctx.branchId, transactionId: req.transactionId },
