@@ -30,15 +30,43 @@ def _strip_boundary_format_marks(value: str) -> str:
     return value[start:end]
 
 
+DEFAULT_IGNORABLE_RANGES = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+
+
+def _is_keyword_ignorable(character: str) -> bool:
+    codepoint = ord(character)
+    category = unicodedata.category(character)
+    if category in {"Cc", "Cf", "Cs", "Mn", "Me", "Zs", "Zl", "Zp"}:
+        return True
+    return any(start <= codepoint <= end for start, end in DEFAULT_IGNORABLE_RANGES)
+
+
 def _canonicalize_resource_keyword(value: str, expected: str) -> str:
-    # Invisible Unicode format characters can be embedded inside a copied
-    # Google resource-type keyword. Remove them only from these fixed keyword
-    # segments. Project numbers, pool IDs, and provider IDs never use this
-    # helper, so their original bytes remain subject to strict validation.
-    candidate = "".join(
-        character for character in value
-        if unicodedata.category(character) != "Cf"
-    )
+    # Provider resource-type keywords are fixed tokens, not identifiers.
+    # Normalize compatibility glyphs and strip Unicode default-ignorables only
+    # in these keyword positions, including Hangul fillers (category Lo).
+    # Project number, pool ID, and provider ID segments never pass through
+    # this function and remain strictly validated.
+    candidate = unicodedata.normalize("NFKC", value)
+    candidate = "".join(character for character in candidate if not _is_keyword_ignorable(character))
     candidate = _strip_boundary_format_marks(candidate)
     return expected if candidate.casefold() == expected.casefold() else value
 
