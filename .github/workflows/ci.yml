@@ -124,6 +124,8 @@ jobs:
         run: npm run certify:notifications-lock
       - name: Tax / Fiscalization Production Lock v1
         run: npm run certify:tax-fiscal-lock
+      - name: Inter-Vertical Commerce Production Lock v1
+        run: npm run certify:inter-vertical-commerce-lock
       - name: Cash Management Production Lock v1
         run: npm run certify:cash-lock
       - name: Backdated Inventory Production Lock

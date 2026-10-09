@@ -26,6 +26,7 @@ const lazyWorkspacePage = (key: string) => {
     case "InventoryPage": return lazyPage(() => import("./pages/InventoryPage.js").then((m) => ({ default: m.InventoryPage })));
     case "CustomersPage": return lazyPage(() => import("./pages/CustomersPage.js").then((m) => ({ default: m.CustomersPage })));
     case "PurchasingPage": return lazyPage(() => import("./pages/PurchasingPage.js").then((m) => ({ default: m.PurchasingPage })));
+    case "InterVerticalCommercePage": return lazyPage(() => import("./pages/InterVerticalCommercePage.js").then((m) => ({ default: m.InterVerticalCommercePage })));
     case "ReportsPage": return lazyPage(() => import("./pages/ReportsPage.js").then((m) => ({ default: m.ReportsPage })));
     case "SettingsPage": return lazyPage(() => import("./pages/SettingsPage.js").then((m) => ({ default: m.SettingsPage })));
     case "SuperAdminPage": return lazyPage(() => import("./pages/SuperAdminPage.js").then((m) => ({ default: m.SuperAdminPage })));
@@ -57,6 +58,7 @@ const PosPage = lazyWorkspacePage("PosPage");
 const InventoryPage = lazyWorkspacePage("InventoryPage");
 const CustomersPage = lazyWorkspacePage("CustomersPage");
 const PurchasingPage = lazyWorkspacePage("PurchasingPage");
+const InterVerticalCommercePage = lazyWorkspacePage("InterVerticalCommercePage");
 const FinancePage = lazyWorkspacePage("FinancePage");
 const ReportsPage = lazyWorkspacePage("ReportsPage");
 const SettingsPage = lazyWorkspacePage("SettingsPage");
@@ -149,6 +151,7 @@ const TAB_TO_PATH: Record<string, string> = {
   "Goods Received": "/purchasing",
   "Supplier Ledgers": "/purchasing",
   Warehouses: "/purchasing",
+  "Inter-Vertical Commerce": "/inter-vertical",
   // Expenses
   Expenses: "/expenses",
   // Reports
@@ -304,6 +307,7 @@ const PATH_TO_CANONICAL_TAB: Record<string, string> = {
   "/inventory": "Inventory",
   "/customers": "Customers",
   "/purchasing": "Purchasing",
+  "/inter-vertical": "Inter-Vertical Commerce",
   "/finance": "Finance",
   "/reports": "Reports",
   "/settings": "Settings",
@@ -659,6 +663,8 @@ const AuthenticatedApp: React.FC = () => {
         return <CustomersPage activeTab={activeTab} />;
       case "/purchasing":
         return <PurchasingPage activeTab={activeTab} />;
+      case "/inter-vertical":
+        return <InterVerticalCommercePage />;
       case "/finance":
         return <FinancePage />;
       case "/reports":
