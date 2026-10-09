@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Normalize and validate a Google Workload Identity Provider resource name.
+"""Normalize and validate Google Workload Identity Provider resource names.
 
 Prints a GitHub Actions output line (provider=<resource>) only after strict
-validation. The normalized value cannot contain newlines or output delimiters.
+validation. Input values are never printed when validation fails.
 """
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ import re
 import sys
 
 
-# Google Cloud resource IDs are 4–32 chars, use lowercase letters/digits/
-# hyphens, and start/end with an alphanumeric. Digits are valid first chars.
 IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9-]{2,30}[a-z0-9]$")
 RESOURCE_LAYOUT = re.compile(
     r"^projects/([^/]+)/locations/global/workloadIdentityPools/([^/]+)/providers/([^/]+)$"
@@ -21,11 +19,18 @@ RESOURCE_LAYOUT = re.compile(
 def normalize(value: str) -> str:
     provider = value.strip()
 
-    # Environment/secret values are sometimes copied with surrounding quotes.
+    # A secret copied through an editor may contain line-wraps. Remove only
+    # CR/LF boundaries and adjacent horizontal indentation; all other content
+    # remains subject to the strict resource-shape check below.
+    # Accept line-wraps only next to path separators. Do not join arbitrary
+    # lines, which could silently change an identifier.
+    provider = re.sub(r"/[ \t]*(?:\r\n|\r|\n)[ \t]*", "/", provider)
+    provider = re.sub(r"[ \t]*(?:\r\n|\r|\n)[ \t]*/", "/", provider)
+
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
 
-    # Accept canonical resource names and the equivalent IAM HTTPS URL forms.
+    # Accept canonical resource names and equivalent IAM URL/API-version forms.
     provider = re.sub(r"^https?://iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = re.sub(r"^//iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = re.sub(r"^iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
@@ -36,9 +41,23 @@ def normalize(value: str) -> str:
 
     match = RESOURCE_LAYOUT.fullmatch(provider)
     if match is None:
+        # Only shape metadata is logged. Never echo secret contents or IDs.
+        segments = [segment for segment in provider.split("/") if segment]
+        markers = {
+            "starts_projects": bool(segments and segments[0] == "projects"),
+            "has_locations": "locations" in segments,
+            "has_global_location": any(
+                segments[i : i + 2] == ["locations", "global"]
+                for i in range(len(segments) - 1)
+            ),
+            "has_workload_identity_pools": "workloadIdentityPools" in segments,
+            "has_providers": "providers" in segments,
+        }
+        shape = ", ".join(f"{name}={str(present).lower()}" for name, present in markers.items())
         raise ValueError(
             "provider path must use projects/<project-number>/locations/global/"
-            "workloadIdentityPools/<pool-id>/providers/<provider-id>"
+            "workloadIdentityPools/<pool-id>/providers/<provider-id>; "
+            f"safe_shape_diagnostic: segments={len(segments)}, {shape}; provider value omitted"
         )
 
     project_number, pool_id, provider_id = match.groups()
@@ -60,19 +79,40 @@ def normalize(value: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("RELEASE_BLOCKED: expected exactly one Workload Identity Provider argument", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print(
+            "RELEASE_BLOCKED: expected primary provider and optional legacy fallback",
+            file=sys.stderr,
+        )
         return 2
 
-    try:
-        provider = normalize(sys.argv[1])
-    except ValueError as exc:
-        print(f"RELEASE_BLOCKED: {exc}", file=sys.stderr)
+    candidates = [
+        ("GCP_WIF_PROVIDER", sys.argv[1]),
+    ]
+    if len(sys.argv) == 3:
+        candidates.append(("GCP_WORKLOAD_IDENTITY_PROVIDER", sys.argv[2]))
+
+    errors = []
+    configured = False
+    for source_name, value in candidates:
+        if not value.strip():
+            continue
+        configured = True
+        try:
+            provider = normalize(value)
+        except ValueError as exc:
+            errors.append((source_name, str(exc)))
+            continue
+        print(f"provider={provider}")
+        return 0
+
+    if not configured:
+        print("RELEASE_BLOCKED: Google WIF provider configuration missing", file=sys.stderr)
         return 1
 
-    # The regex excludes newlines and '=' so this is safe for GITHUB_OUTPUT.
-    print(f"provider={provider}")
-    return 0
+    for source_name, reason in errors:
+        print(f"RELEASE_BLOCKED: {source_name} rejected: {reason}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
