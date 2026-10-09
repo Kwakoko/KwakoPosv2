@@ -36,7 +36,10 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     "JWT_SECRET and production security secrets are mandatory.");
   add("SECPLAT-A03", "Production JWTs cannot fall back to implicit privileges",
     auth.includes("Production access tokens require explicit roles and permissions.") &&
-    auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]'),
+    auth.includes("roles: Array.isArray(payload.roles) ? payload.roles.filter") &&
+    auth.includes("permissions: Array.isArray(payload.permissions) ? payload.permissions.filter") &&
+    !auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]') &&
+    !auth.includes('roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"]'),
     "Production rejects missing privilege claims before the wildcard fallback can be used.");
 
   add("SECPLAT-A04", "Platform Super Admin is role-bound, not permission-wildcard bound",
