@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 
 
 IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9-]{2,30}[a-z0-9]$")
@@ -17,8 +18,27 @@ RESOURCE_LAYOUT = re.compile(
 )
 
 
+def _strip_boundary_format_marks(value: str) -> str:
+    """Strip Unicode format marks only at an input/keyword boundary."""
+    start = 0
+    end = len(value)
+    wrappers = " \t\r\n\"'"
+    while start < end and (unicodedata.category(value[start]) == "Cf" or value[start] in wrappers):
+        start += 1
+    while end > start and (unicodedata.category(value[end - 1]) == "Cf" or value[end - 1] in wrappers):
+        end -= 1
+    return value[start:end]
+
+
+def _canonicalize_resource_keyword(value: str, expected: str) -> str:
+    candidate = _strip_boundary_format_marks(value)
+    return expected if candidate.casefold() == expected.casefold() else value
+
+
 def normalize(value: str) -> str:
-    provider = value.strip()
+    # Editor exports can prepend or append a UTF-8 BOM. Remove that marker
+    # only at the whole-value boundary; never rewrite characters inside IDs.
+    provider = _strip_boundary_format_marks(value.strip().strip("\ufeff"))
 
     # A secret copied through an editor may contain line-wraps. Remove only
     # CR/LF boundaries and adjacent horizontal indentation; all other content
@@ -30,6 +50,7 @@ def normalize(value: str) -> str:
 
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
+    provider = _strip_boundary_format_marks(provider)
 
     # Accept canonical resource names and equivalent IAM URL/API-version forms.
     provider = re.sub(r"^https?://iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
@@ -45,21 +66,28 @@ def normalize(value: str) -> str:
     # case. Canonicalize only resource-type keywords at their fixed positions;
     # never case-fold the project number, pool ID, or provider ID.
     segments = provider.split("/")
-    if (
-        len(segments) == 8
-        and segments[2].casefold() == "locations"
-        and segments[3].casefold() == "global"
-        and segments[4].casefold() == "workloadidentitypools"
-        and segments[6].casefold() == "providers"
-        and segments[0].casefold() == "projects"
-    ):
-        segments[0] = "projects"
-        segments[2] = "locations"
-        segments[3] = "global"
-        segments[4] = "workloadIdentityPools"
-        segments[6] = "providers"
-        provider = "/".join(segments)
+    if len(segments) == 8:
+        # Normalize resource-type keywords at their fixed path positions.
+        # Strip only boundary format/quote marks from those keyword segments;
+        # project number, pool ID, and provider ID bytes remain untouched.
+        expected_keywords = {
+            0: "projects",
+            2: "locations",
+            3: "global",
+            4: "workloadIdentityPools",
+            6: "providers",
+        }
+        for position, expected in expected_keywords.items():
+            segments[position] = _canonicalize_resource_keyword(segments[position], expected)
 
+        if (
+            segments[0] == "projects"
+            and segments[2] == "locations"
+            and segments[3] == "global"
+            and segments[4] == "workloadIdentityPools"
+            and segments[6] == "providers"
+        ):
+            provider = "/".join(segments)
     match = RESOURCE_LAYOUT.fullmatch(provider)
     if match is not None:
         # Canonicalize only fixed Google resource-type keywords. Identifier

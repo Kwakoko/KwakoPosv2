@@ -38,6 +38,43 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(mixedCase)).toBe("provider=" + canonical);
   });
 
+  it("strips BOM and Unicode format marks at the whole-value boundary", () => {
+    expect(run("\ufeff" + canonical)).toBe("provider=" + canonical);
+    expect(run("\u200b" + canonical)).toBe("provider=" + canonical);
+    expect(run(canonical + "\u2060")).toBe("provider=" + canonical);
+    expect(run('\u200b"' + canonical + '"\ufeff')).toBe("provider=" + canonical);
+    expect(run("\u200ehttps://iam.googleapis.com/v1/" + canonical)).toBe("provider=" + canonical);
+  });
+
+  it("canonicalizes formatting marks around fixed resource keywords only", () => {
+    const markedKeywords =
+      "\u200bPROJECTS\u2060/123456789012/\u200eLOCATIONS\u200b/GLOBAL\u2060/" +
+      "WORKLOADIDENTITYPOOLS\u200e/1234-pool/PROVIDERS\u200b/5provider";
+    expect(run(markedKeywords)).toBe("provider=" + canonical);
+  });
+
+
+  it("preserves valid provider identifiers ending in u, e, or f", () => {
+    for (const suffix of ["u", "e", "f"]) {
+      const value = canonical.replace("5provider", "valid-provider" + suffix);
+      expect(run(value)).toBe("provider=" + value);
+    }
+  });
+
+  it("never removes format marks embedded in project, pool, or provider identifiers", () => {
+    expect(() => run(canonical.replace("123456789012", "1234\u200b56789012"))).toThrow();
+    expect(() => run(canonical.replace("1234-pool", "1234-\u200bpool"))).toThrow();
+    expect(() => run(canonical.replace("5provider", "5pro\u200bvider"))).toThrow();
+  });
+
+  it("continues to fail closed on unrecognized resource prefixes without exposing the secret", () => {
+    const result = runFailure("unknown-prefix/" + canonical);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("safe_shape_diagnostic");
+    expect(result.stderr).not.toContain("123456789012");
+    expect(result.stderr).not.toContain("5provider");
+  });
+
   it("normalizes supported HTTPS and scheme-less IAM URL forms", () => {
     expect(run("https://iam.googleapis.com/" + canonical)).toBe("provider=" + canonical);
     expect(run("//iam.googleapis.com/" + canonical + "/")).toBe("provider=" + canonical);
