@@ -246,49 +246,132 @@ async function addFinanceDoc(tx: any, order: any, ctx: Ctx, side: "BUYER" | "SEL
     randomUUID(), order.id, ctx.tenantId, ctx.branchId, side, type, documentId, amount,
   );
 }
-async function sellerInvoice(tx: any, ctx: Ctx, order: any, dispatch: Array<{ item: Item; quantity: number; variant: any }>, key: string): Promise<{ sale: any; invoice: any; amount: number }> {
+async function sellerInvoice(
+  tx: any, ctx: Ctx, order: any,
+  dispatch: Array<{ item: Item; quantity: number; variant: any }>,
+  key: string, shipmentId: string,
+): Promise<{
+  sale: any; invoice: any; amount: number; taxAmount: number;
+  fiscalizationId: string | null; fiscalizationState: string;
+  allocations: Array<{ item: Item; variant: any; allocation: DispatchAllocation }>;
+}> {
   const now = new Date();
-  const totals = dispatch.reduce((s, x) => {
-    s.revenue += x.quantity * Number(x.item.unitPrice || 0);
-    s.cost += x.quantity * Number(x.variant.costPrice || 0);
-    return s;
-  }, { revenue: 0, cost: 0 });
-  if (totals.revenue <= 0) throw new Error("ORDER_TOTAL_INVALID");
-  const customer = await tx.customer.findFirst({ where: { id: order.seller_customer_id, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+  const customer = await tx.customer.findFirst({
+    where: { id: order.seller_customer_id, tenantId: ctx.tenantId, branchId: ctx.branchId },
+  });
   if (!customer) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
-  if (Number(customer.currentBalance || 0) + totals.revenue > Number(customer.creditLimit || 0) + 0.005) throw new Error("SELLER_CREDIT_LIMIT_EXCEEDED");
+  const tax = await resolveBranchTaxAuthority(tx, ctx);
+  const lineBuilds = dispatch.map((x) => ({
+    ...x,
+    calculated: PricingTaxEngine.calculateLineItem({
+      unitPrice: Number(x.item.unitPrice || 0),
+      unitCost: Number(x.variant.costPrice || 0),
+      quantity: x.quantity,
+      taxConfig: tax.config,
+    }),
+  }));
+  const totals = PricingTaxEngine.calculateSaleTotals(
+    lineBuilds.map((x) => ({
+      lineTotal: x.calculated.lineTotal,
+      totalCost: x.calculated.totalCost,
+      discountAmount: x.calculated.discountAmount,
+      taxAmount: x.calculated.taxAmount,
+    })),
+    0,
+    tax.config,
+  );
+  if (totals.grandTotal <= 0) throw new Error("ORDER_TOTAL_INVALID");
+  const netRevenue = Math.max(0, Number(totals.grandTotal) - Number(totals.taxTotal));
+  const totalCost = Number(totals.totalCost);
+  if (Number(customer.currentBalance || 0) + Number(totals.grandTotal) > Number(customer.creditLimit || 0) + 0.005) {
+    throw new Error("SELLER_CREDIT_LIMIT_EXCEEDED");
+  }
+  const saleNumber = "IVS-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase();
   const sale = await tx.sale.create({ data: {
-    id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
-    saleNumber: "IVS-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase(),
-    customerId: customer.id, subtotal: totals.revenue, discountTotal: 0, taxTotal: 0,
-    grandTotal: totals.revenue, totalCost: totals.cost, grossProfit: totals.revenue - totals.cost,
-    status: "COMPLETED", paymentStatus: "UNPAID", deviceId: "inter-vertical-gateway",
-    operationId: "ivg-" + key, idempotencyKey: "ivg-sale-" + key, soldById: ctx.userId, soldAt: now,
-    lines: { create: dispatch.map((x) => ({
+    id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, saleNumber,
+    customerId: customer.id, subtotal: netRevenue, discountTotal: totals.discountTotal,
+    taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, totalCost,
+    grossProfit: netRevenue - totalCost, status: "COMPLETED", paymentStatus: "UNPAID",
+    deviceId: "inter-vertical-gateway", operationId: "ivg-" + key,
+    idempotencyKey: "ivg-sale-" + key, soldById: ctx.userId, soldAt: now,
+    lines: { create: lineBuilds.map((x) => ({
       id: randomUUID(), productId: x.variant.productId, variantId: x.variant.id, quantity: x.quantity,
-      unitPrice: Number(x.item.unitPrice), unitCost: Number(x.variant.costPrice || 0), discountAmount: 0,
-      taxAmount: 0, lineTotal: x.quantity * Number(x.item.unitPrice),
+      unitPrice: Number(x.item.unitPrice), unitCost: Number(x.variant.costPrice || 0),
+      discountAmount: x.calculated.discountAmount, taxAmount: x.calculated.taxAmount,
+      lineTotal: x.calculated.lineTotal,
     })) },
   }, include: { lines: true } });
+  const invoiceNumber = "IVI-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase();
   const invoice = await tx.customerInvoice.create({ data: {
     id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, customerId: customer.id, saleId: sale.id,
-    invoiceNumber: "IVI-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase(),
-    invoiceDate: now, dueDate: new Date(now.getTime() + 30 * 86400000), subtotal: totals.revenue,
-    taxTotal: 0, discountTotal: 0, grandTotal: totals.revenue, amountPaid: 0, balanceDue: totals.revenue,
-    status: "ISSUED", notes: "Inter-Vertical Order " + order.order_number,
-    lines: { create: dispatch.map((x) => ({
+    invoiceNumber, invoiceDate: now, dueDate: new Date(now.getTime() + 30 * 86400000),
+    subtotal: netRevenue, taxTotal: totals.taxTotal, discountTotal: totals.discountTotal,
+    grandTotal: totals.grandTotal, amountPaid: 0, balanceDue: totals.grandTotal, status: "ISSUED",
+    notes: "Inter-Vertical Order " + order.order_number + "; TRA fiscalization is queued separately",
+    lines: { create: lineBuilds.map((x) => ({
       id: randomUUID(), variantId: x.variant.id, description: x.item.name || x.item.sku,
       quantity: x.quantity, unitPrice: Number(x.item.unitPrice),
-      taxRate: 0, taxAmount: 0, discountAmount: 0, lineTotal: x.quantity * Number(x.item.unitPrice),
+      taxRate: tax.config.ratePct, taxAmount: x.calculated.taxAmount,
+      discountAmount: x.calculated.discountAmount, lineTotal: x.calculated.lineTotal,
     })) },
   } });
-  await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { increment: totals.revenue } } });
+  await tx.customer.update({
+    where: { id: customer.id }, data: { currentBalance: { increment: Number(totals.grandTotal) } },
+  });
   const accounts = await finance.accounts(tx, ctx);
-  const built = FinancialBridge.mapSaleToJournal(ctx as any, sale as any, accounts as any, "CREDIT",
-    (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+  const built = FinancialBridge.mapSaleToJournal(
+    ctx as any, sale as any, accounts as any, "CREDIT",
+    (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
+  );
   await finance.writeJournal(tx, ctx as any, built);
-  await addFinanceDoc(tx, order, ctx, "SELLER", "CUSTOMER_INVOICE", invoice.id, totals.revenue);
-  return { sale, invoice, amount: totals.revenue };
+  await addFinanceDoc(tx, order, ctx, "SELLER", "CUSTOMER_INVOICE", invoice.id, Number(totals.grandTotal));
+
+  let fiscalizationId: string | null = null, fiscalizationState = "DISABLED";
+  const vfdConfig = await tx.traVfdConfig.findUnique({
+    where: { tenantId_branchId: { tenantId: ctx.tenantId, branchId: ctx.branchId } },
+    select: { enabled: true },
+  });
+  if (vfdConfig?.enabled) {
+    const fiscal = await globalTraVfdService.enqueueInTransaction(tx, ctx, {
+      transactionId: invoice.id,
+      deviceId: "inter-vertical-gateway",
+      payload: {
+        invoiceNumber, receiptNumber: invoiceNumber, createdAt: now.toISOString(),
+        customerId: customer.id, customerName: customer.name || "B2B CUSTOMER",
+        customerMobile: customer.phone || "", customerIdType: 6,
+        orderNumber: order.order_number, sourceType: "INTER_VERTICAL_B2B",
+        currency: order.currency || "TZS",
+        items: lineBuilds.map((x) => ({
+          id: x.item.sku, productId: x.variant.productId, variantId: x.variant.id,
+          description: x.item.name || x.item.sku, quantity: x.quantity,
+          unitPrice: Number(x.item.unitPrice), discountAmount: x.calculated.discountAmount,
+          taxRate: tax.config.ratePct, taxAmount: x.calculated.taxAmount,
+          lineTotal: x.calculated.lineTotal,
+        })),
+        subtotal: netRevenue, taxRatePct: tax.config.ratePct, taxInclusive: tax.config.isInclusive,
+        taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, paidAmount: 0,
+        paymentMethod: "CREDIT", paymentStatus: "UNPAID",
+      },
+    });
+    fiscalizationId = fiscal.id; fiscalizationState = fiscal.state;
+  }
+
+  const allocations = lineBuilds.map((x) => ({
+    item: x.item,
+    variant: x.variant,
+    allocation: {
+      shipmentId, quantity: x.quantity, receivedQuantity: 0, unitPrice: Number(x.item.unitPrice),
+      taxRatePct: tax.config.ratePct, taxInclusive: tax.config.isInclusive,
+      netAmount: Math.round((Number(x.calculated.lineTotal) - Number(x.calculated.taxAmount)) * 100) / 100,
+      taxAmount: Number(x.calculated.taxAmount), grossAmount: Number(x.calculated.lineTotal),
+      receivedNetAmount: 0, receivedTaxAmount: 0, receivedGrossAmount: 0,
+      sellerInvoiceId: invoice.id, sellerInvoiceNumber: invoiceNumber,
+    } satisfies DispatchAllocation,
+  }));
+  return {
+    sale, invoice, amount: Number(totals.grandTotal), taxAmount: Number(totals.taxTotal),
+    fiscalizationId, fiscalizationState, allocations,
+  };
 }
 async function buyerReceipt(tx: any, ctx: Ctx, order: any, supplierId: string, purchaseOrderId: string, receives: Array<{ item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string }>, key: string, notes: string): Promise<{ receipt: any; amount: number }> {
   const now = new Date();
