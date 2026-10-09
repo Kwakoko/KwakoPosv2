@@ -58,6 +58,7 @@ describe("Semantic Versioning (SemVer 2.0.0) Engine", () => {
       expect(compareSemVer("1.0.0-alpha.9007199254740992", "1.0.0-alpha.9007199254740993")).toBeLessThan(0);
       expect(compareSemVer("1.0.0-alpha.999999999999999999999999999999", "1.0.0-alpha.1000000000000000000000000000000")).toBeLessThan(0);
       expect(compareSemVer("1.0.0-alpha.9007199254740993", "1.0.0-alpha.9007199254740993")).toBe(0);
+      expect(compareSemVer("1.0.0-A", "1.0.0-a")).toBeLessThan(0);
     });
   });
 
