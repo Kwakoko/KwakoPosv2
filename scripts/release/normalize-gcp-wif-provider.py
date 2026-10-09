@@ -10,9 +10,11 @@ import re
 import sys
 
 
-IDENTIFIER = r"[a-z][a-z0-9-]{2,30}[a-z0-9]"
-RESOURCE_PATTERN = re.compile(
-    rf"^projects/[0-9]+/locations/global/workloadIdentityPools/{IDENTIFIER}/providers/{IDENTIFIER}$"
+# Google Cloud resource IDs are 4–32 chars, use lowercase letters/digits/
+# hyphens, and start/end with an alphanumeric. Digits are valid first chars.
+IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9-]{2,30}[a-z0-9]$")
+RESOURCE_LAYOUT = re.compile(
+    r"^projects/([^/]+)/locations/global/workloadIdentityPools/([^/]+)/providers/([^/]+)$"
 )
 
 
@@ -29,13 +31,27 @@ def normalize(value: str) -> str:
     provider = re.sub(r"^iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = provider.rstrip("/").strip()
 
-    if not RESOURCE_PATTERN.fullmatch(provider):
+    match = RESOURCE_LAYOUT.fullmatch(provider)
+    if match is None:
         raise ValueError(
-            "GCP_WORKLOAD_IDENTITY_PROVIDER must be a full "
-            "projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> "
-            "resource name or its iam.googleapis.com URL form; pool/provider IDs must be "
-            "4–32 lowercase letters, digits, or hyphens, start with a letter, and end alphanumerically"
+            "provider path must use projects/<project-number>/locations/global/"
+            "workloadIdentityPools/<pool-id>/providers/<provider-id>"
         )
+
+    project_number, pool_id, provider_id = match.groups()
+    if not project_number.isdecimal():
+        raise ValueError(
+            "project path segment must be a numeric Google Cloud project number, not a project ID"
+        )
+
+    for label, identifier in (("pool", pool_id), ("provider", provider_id)):
+        if not IDENTIFIER.fullmatch(identifier):
+            raise ValueError(
+                f"{label} ID must be 4–32 lowercase letters, digits, or hyphens, "
+                "and start/end with an alphanumeric"
+            )
+        if identifier.startswith("gcp-"):
+            raise ValueError(f"{label} ID uses the gcp- prefix reserved by Google Cloud")
 
     return provider
 
