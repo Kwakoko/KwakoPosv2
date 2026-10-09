@@ -182,6 +182,14 @@ export async function getSuperAdminSecurity(userId: string): Promise<SuperAdminS
 
 export async function ensureSuperAdminSecurity(userId: string): Promise<void> {
   await ensureSuperAdminSecurityTables();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { role: true },
+  });
+  const roleName = String(user?.role?.name || "").trim().toUpperCase();
+  if (!user || roleName !== "PLATFORM_SUPER_ADMIN") {
+    throw new Error("SUPER_ADMIN_PLATFORM_ROLE_REQUIRED");
+  }
   await prisma.$executeRaw`INSERT INTO platform_super_admin_security(user_id) VALUES (${userId}) ON CONFLICT (user_id) DO NOTHING`;
 }
 
@@ -280,7 +288,7 @@ export async function rotateSuperAdminTotp(userId: string, newTotpSecret: string
   if (matchedCounter === null) throw new Error("New TOTP secret verification failed.");
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
   const roleName = String(user?.role?.name || "").toUpperCase();
-  if (!user || (roleName !== "SUPER_ADMIN" && roleName !== "PLATFORM_SUPER_ADMIN")) throw new Error("Target user is not a platform SUPER_ADMIN.");
+  if (!user || roleName !== "PLATFORM_SUPER_ADMIN") throw new Error("Target user is not a platform SUPER_ADMIN.");
   let sessionsRevoked = 0;
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`UPDATE platform_super_admin_security SET bootstrap_pending = FALSE, mfa_required = TRUE, mfa_enrolled = TRUE, mfa_type = 'TOTP', mfa_secret_ciphertext = $1, failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE user_id = $2`, encryptSecret(secret), userId);
@@ -336,7 +344,7 @@ export function generateWebAuthnChallenge(userId: string): { challenge: string; 
   return {
     challenge: randomBytes(32).toString("base64url"),
     rp: { name: "Kwakoko Business Operating System", id: "kwakopos.com" },
-    user: { id: userId, name: "admin@kwakoko.co.tz" },
+    user: { id: userId, name: "platform-admin" },
   };
 }
 
@@ -364,16 +372,8 @@ export async function logSuperAdminAuditEvent(params: {
         branchId = branchId || user.branchId;
       }
     }
-    if (!tenantId || !branchId) {
-      const platformTenant = await prisma.tenant.findFirst({
-        where: { OR: [{ slug: "kwakoko-platform" }, { status: "ACTIVE" }] },
-        include: { branches: { take: 1 } },
-      }).catch(() => null);
-      if (platformTenant) {
-        tenantId = tenantId || platformTenant.id;
-        branchId = branchId || platformTenant.branches[0]?.id;
-      }
-    }
+    // Platform audit events remain platform-scoped when tenant/branch provenance is absent.
+    // Never attach a Super Admin security event to an arbitrary active tenant.
   }
 
   // If no tenant or branch exists in database yet, avoid foreign key constraint error
@@ -396,6 +396,7 @@ export async function logSuperAdminAuditEvent(params: {
       },
     });
   } catch (err) {
+    if (production()) throw new Error("PLATFORM_AUDIT_WRITE_FAILED");
     console.error("FAILED_TO_WRITE_PLATFORM_AUDIT_EVENT", err instanceof Error ? err.message : err);
   }
 
@@ -443,14 +444,16 @@ export async function rotateSuperAdminPassword(params: {
 
   const user = params.userId
     ? await prisma.user.findUnique({ where: { id: params.userId }, include: { role: true } })
-    : await prisma.user.findFirst({ where: { email: String(params.email || "admin@kwakoko.co.tz").trim().toLowerCase() }, include: { role: true } });
+    : params.email
+      ? await prisma.user.findFirst({ where: { email: String(params.email).trim().toLowerCase() }, include: { role: true } })
+      : null;
 
   if (!user) {
     throw new Error("Target Super Admin account not found.");
   }
 
   const roleName = String(user.role?.name || "").toUpperCase();
-  if (roleName !== "SUPER_ADMIN" && roleName !== "PLATFORM_SUPER_ADMIN") {
+  if (roleName !== "PLATFORM_SUPER_ADMIN") {
     throw new Error("Target user is not a platform SUPER_ADMIN.");
   }
 
@@ -508,7 +511,7 @@ export async function recoverSuperAdminPassword(params: {
   }
 
   const result = await rotateSuperAdminPassword({
-    email: params.email || "admin@kwakoko.co.tz",
+    email: params.email,
     newPassword: params.newPassword,
     actorId: params.actorId || "platform-recovery",
     reason: "Authorized disaster recovery",

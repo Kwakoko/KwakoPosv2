@@ -81,6 +81,8 @@ jobs:
           done
           cat /tmp/kwakopos-security-api.log
           exit 1
+      - name: Security Platform Production Lock
+        run: npm run certify:security-lock
       - name: Security certification
         env:
           KWAKOPOS_SECURITY_TARGET_URL: "http://127.0.0.1:3000"

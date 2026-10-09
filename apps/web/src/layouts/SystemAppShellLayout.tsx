@@ -907,7 +907,7 @@ export const Sidebar: React.FC<{
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const isSuperAdminUser = Boolean(
-    isSuperAdmin || Boolean(user?.role && ["SUPER_ADMIN","SUPERADMIN","PLATFORM_SUPER_ADMIN"].includes(String(user.role).toUpperCase()))
+    isSuperAdmin || String(user?.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
 
   // Auto-expand the section that contains the active tab

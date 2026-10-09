@@ -538,13 +538,9 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     return "Dashboard";
   });
 
-  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(() => {
-    try {
-      const saved = sessionStorage.getItem("kwakopos:v2:impersonation");
-      if (saved) return JSON.parse(saved);
-    } catch { /* ignore */ }
-    return null;
-  });
+  // Platform tenant inspection is no longer persisted client-side. The Platform Super Admin
+  // stays in the independent control plane; tenant inspection uses the server-side Support Tower.
+  const [impersonatedTenant, setImpersonatedTenant] = useState<ImpersonatedTenant | null>(null);
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -892,7 +888,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   const permissions = useMemo(() => claims.permissions || [], [claims]);
   const moduleEntitlements = useMemo(() => claims.moduleEntitlements || [], [claims]);
   const isSuperAdmin = Boolean(
-    user && (user.role === "SUPER_ADMIN" || user.role === "SUPERADMIN" || permissions.includes("SUPER_ADMIN_OPERATIONS") || permissions.includes("ADMIN:PLATFORM"))
+    user && String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"
   );
   const currentTenantId = impersonatedTenant?.tenantId || (isSuperAdmin ? null : user?.tenantId || null);
   const currentBranchId = impersonatedTenant?.branchId || (isSuperAdmin ? null : user?.branchId || null);
@@ -1028,24 +1024,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     }
   }, [isSuperAdmin, impersonatedTenant, activeTab]);
 
-  const startImpersonation = useCallback(async (tenantId: string, tenantName?: string, branchId?: string, branchName?: string) => {
+  const startImpersonation = useCallback(async (_tenantId: string, _tenantName?: string, _branchId?: string, _branchName?: string) => {
     if (!isSuperAdmin) {
-      throw new Error("Only Super Admin can activate tenant inspection mode.");
+      throw new Error("Only Platform Super Admin can inspect tenants.");
     }
-    const result = await apiSwitchContext(tenantId, branchId);
-    const resolved: ImpersonatedTenant = {
-      tenantId: result.tenantId,
-      tenantName: result.tenantName || tenantName || result.tenantId,
-      branchId: result.branchId,
-      branchName: result.branchName || branchName || result.branchId,
-    };
-    setImpersonatedTenant(resolved);
-    try {
-      sessionStorage.setItem("kwakopos:v2:impersonation", JSON.stringify(resolved));
-    } catch { /* ignore */ }
-    setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    setActiveModuleState("Retail");
-    setActiveTabState("Dashboard");
+    throw new Error("Tenant application impersonation is disabled. Use the Super Admin Support Control Tower for tenant inspection.");
   }, [isSuperAdmin]);
 
   const stopImpersonation = useCallback(async () => {
@@ -1053,16 +1036,11 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
     try {
       sessionStorage.removeItem("kwakopos:v2:impersonation");
     } catch { /* ignore */ }
-    try {
-      const result = await apiSwitchContext("PLATFORM_SUPER_ADMIN");
-      setUser((prev) => prev ? { ...prev, tenantId: result.tenantId, branchId: result.branchId } : null);
-    } catch {
-      /* ignore */
-    }
     setActiveTabState("Super Admin");
   }, []);
 
   const switchTenant = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentTenantId) return;
     if (!availableTenantsList.some((tenant) => tenant.id === id)) return;
     if (!isOnline) return;
@@ -1075,6 +1053,7 @@ export const KwakoPosProvider: React.FC<{ children: React.ReactNode; dbInstance?
   };
 
   const switchBranch = async (id: string) => {
+    if (isSuperAdmin) return;
     if (!id || id === currentBranchId) return;
     if (!availableBranchesList.some((branch) => branch.id === id)) return;
     if (!isOnline) return;

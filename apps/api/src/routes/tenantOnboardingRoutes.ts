@@ -10,7 +10,7 @@ function requireContext(req: FastifyRequest) {
 }
 function isPlatformProvisioner(ctx: { roles: string[]; permissions: string[] }): boolean {
   const roles = ctx.roles.map(String).map((v) => v.toUpperCase());
-  return roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN") || roles.includes("PLATFORM_SUPER_ADMIN");
+  return roles.includes("PLATFORM_SUPER_ADMIN");
 }
 function isOwner(ctx: { roles: string[]; permissions: string[] }): boolean {
   return ctx.roles.map(String).map((v) => v.toUpperCase()).includes("OWNER");

@@ -6,9 +6,9 @@ import { execFileSync } from "node:child_process";
 const LOCK_ID = "BACKDATED-COMMERCIAL-PRODUCTION-LOCK-2026-10-08";
 
 const LOCKED_BLOBS: Record<string, string> = {
-  "package.json": "9963853569fc898625d4e3db48920f4a7399fb96",
-  ".github/workflows/ci.yml": "7d91f6194335d10b761c16e1e6a7f6f8ab10d335",
-  ".github/workflows/production-certification.yml": "b571200b143cc61156099bdd227b6d6d37884cba",
+  "package.json": "29fdef497005f558d7bb5347aff0b5e9d2641925",
+  ".github/workflows/ci.yml": "e1fba0fbf5a7eed4302529d3c16804de70228e6d",
+  ".github/workflows/production-certification.yml": "cbb5ee8eb264dcd89752b036bce03f76afb62048",
   ".github/workflows/production-release-exact-main.yml": "83f32ee23991146795bb22cde954c1734d5b9aea",
   "apps/web/src/pages/InventoryPage.tsx": "b82e73ee898254e4c5c89a979d700b8f6f4124b3",
   "apps/web/src/pages/PosPage.tsx": "35648f21f71204e65333582c33af9287a1a1edb1",
@@ -19,7 +19,7 @@ const LOCKED_BLOBS: Record<string, string> = {
   "packages/database/src/index.ts": "aa2cc24f2f5d9b6a9392efb179f40110f4693d5c",
   "packages/database/src/prismaRepositories.ts": "d53a4e232250e68a0359f10e915601d84f9418d1",
   "packages/database/src/atomicCommercialFinance.ts": "61a73fb17fc50306939e68ca1443356534c5b1f0",
-  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "6f9e95de79010ea7e40bb683c46f7f56c3c77d65",
+  "packages/sync/src/worldStandardPrismaSyncEngine.ts": "981f5773f39aabd4e18f3fd630fe34b940f0a662",
   "tests/unit/backdated-inventory.test.ts": "0d94562873f8ee67f0b63f3a263cc4016ddb136f",
   "tests/unit/payload-validation-service.test.ts": "b6f422df36190828ba2ec853fe6b94a963f9d083",
   "tests/integration/prisma-stock-convergence.test.ts": "82e2aa06c495b74482ded929ce2e1fdda3671cd9",

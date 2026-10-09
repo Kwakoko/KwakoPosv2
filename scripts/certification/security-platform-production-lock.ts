@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 
 type Check = { id: string; name: string; passed: boolean; detail: string };
 
@@ -35,7 +36,10 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     "JWT_SECRET and production security secrets are mandatory.");
   add("SECPLAT-A03", "Production JWTs cannot fall back to implicit privileges",
     auth.includes("Production access tokens require explicit roles and permissions.") &&
-    auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]'),
+    auth.includes("roles: Array.isArray(payload.roles) ? payload.roles.filter") &&
+    auth.includes("permissions: Array.isArray(payload.permissions) ? payload.permissions.filter") &&
+    !auth.includes('permissions: payload.permissions && payload.permissions.length ? payload.permissions : ["*"]') &&
+    !auth.includes('roles: payload.roles && payload.roles.length ? payload.roles : ["ADMIN"]'),
     "Production rejects missing privilege claims before the wildcard fallback can be used.");
 
   add("SECPLAT-A04", "Platform Super Admin is role-bound, not permission-wildcard bound",
@@ -216,6 +220,25 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     packageJson.includes('"certify:security-platform-lock"') &&
     foundation.includes('"certify:security-platform-lock"'),
     "The dedicated lock is part of the production release contract.");
+
+
+  const trackedSqlSources = (() => {
+    try {
+      return execSync("git ls-files apps packages scripts .github", { cwd, encoding: "utf8" })
+        .split(/\r?\n/).filter(Boolean);
+    } catch {
+      return [];
+    }
+  })();
+  const unsafeSqlFiles = trackedSqlSources.filter((file) => {
+    if (!/\.(ts|tsx|js|jsx)$/.test(file)) return false;
+    const source = read(file);
+    return /\$queryRawUnsafe\s*(?:<[^>]+>)?\s*\(\s*[`"][^`"]*\$\{/.test(source) ||
+      /\$executeRawUnsafe\s*(?:<[^>]+>)?\s*\(\s*[`"][^`"]*\$\{/.test(source);
+  });
+  add("SECPLAT-A34", "Dynamic SQL is rejected when unsafe raw APIs interpolate request/data strings",
+    unsafeSqlFiles.length === 0,
+    unsafeSqlFiles.length === 0 ? "No interpolated unsafe SQL found." : "Interpolated unsafe SQL remains in: " + unsafeSqlFiles.join(", "));
 
   const passed = checks.filter((c) => c.passed).length;
   const failed = checks.length - passed;

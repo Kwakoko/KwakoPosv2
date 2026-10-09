@@ -66,6 +66,8 @@ jobs:
         run: npm run certify:platform-services-lock
       - name: Production Auth Transport Lock
         run: npm run release:auth-lock
+      - name: Security Platform Production Lock
+        run: npm run certify:security-lock
       - name: Lint
         run: npm run lint
       - name: Finance / Accounting Production Lock v1

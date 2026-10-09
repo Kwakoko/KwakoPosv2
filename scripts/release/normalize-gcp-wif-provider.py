@@ -29,6 +29,9 @@ def normalize(value: str) -> str:
     provider = re.sub(r"^https?://iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = re.sub(r"^//iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = re.sub(r"^iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
+    provider = provider.split("#", 1)[0].split("?", 1)[0].strip()
+    provider = provider.lstrip("/")
+    provider = re.sub(r"^(?:v1beta1?|v1)/", "", provider, flags=re.IGNORECASE)
     provider = provider.rstrip("/").strip()
 
     match = RESOURCE_LAYOUT.fullmatch(provider)

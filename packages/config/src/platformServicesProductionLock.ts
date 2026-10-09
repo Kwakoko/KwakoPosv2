@@ -226,7 +226,7 @@ export const PLATFORM_SERVICES_PRODUCTION_LOCKS: readonly PlatformServiceLock[] 
     testFiles: ["tests/unit/super-admin-production-lock.test.ts"],
     requiredMarkers: [
       ["scripts/certification/super-admin-production-lock.ts", "SUPER ADMIN PRODUCTION LOCK: PASS"],
-      ["apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("SUPER_ADMIN")'],
+      ["apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")'],
       ["apps/api/src/services/superAdminSecurityService.ts", "last_totp_counter"],
       ["apps/web/src/components/SuperAdminLiveControlPlane.tsx", "/api/v1/super-admin/security/health"],
       ["tests/unit/super-admin-production-lock.test.ts", "fail-closed"],

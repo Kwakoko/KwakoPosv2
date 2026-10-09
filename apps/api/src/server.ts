@@ -290,7 +290,7 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
 function requireSuperAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
+  if (!roles.includes("PLATFORM_SUPER_ADMIN")) {
     throw new Error("FORBIDDEN: Platform Super Admin privileges required");
   }
   return ctx;
@@ -647,7 +647,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 
   const roleName = String(user.role?.name || "ADMIN").toUpperCase();
   const superAdminState = await getSuperAdminSecurity(user.id);
-  const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN" || !!superAdminState;
+  const isSuperAdmin = roleName === "PLATFORM_SUPER_ADMIN";
   if (isSuperAdmin) {
     await ensureSuperAdminSecurity(user.id);
     const state = await getSuperAdminSecurity(user.id);
@@ -841,7 +841,10 @@ function registerCanonicalProductionAuthentication(
             reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
             return;
           }
-          if (!user || user.status !== "ACTIVE" || !["SUPER_ADMIN", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(roleName) || !(await comparePassword(password, user.passwordHash))) {
+          const securityState = user ? await getSuperAdminSecurity(userId) : null;
+          if (!user || user.status !== "ACTIVE" || roleName !== "PLATFORM_SUPER_ADMIN" ||
+              !securityState?.mfaRequired || !securityState.mfaEnrolled ||
+              !(await comparePassword(password, user.passwordHash))) {
             await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
             reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
             return;
@@ -1126,11 +1129,18 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
   // - allowedHeaders     → all KwakoPos context headers the client sends
   // - exposedHeaders     → headers the client JS is allowed to read from responses
   // - maxAge             → 86400 s (24 h) preflight cache to reduce OPTIONS round-trips
-  const corsOrigin = isProductionEnv(config)
-    ? (process.env.CORS_ORIGIN
-        ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-        : ["https://app.kwakopos.com", "https://admin.kwakopos.com"])
-    : "*";
+  const configuredOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+    : [];
+  const corsOrigin = configuredOrigins.length
+    ? configuredOrigins
+    : isProductionEnv(config)
+      ? ["https://app.kwakopos.com", "https://admin.kwakopos.com"]
+      : ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+  if (isProductionEnv(config) && corsOrigin.some((origin) => origin === "*" || !origin.startsWith("https://"))) {
+    throw new Error("SECURITY_FATAL: Production CORS origins must be explicit HTTPS origins.");
+  }
   server.register(cors, {
     origin:         corsOrigin,
     credentials:    true,
@@ -1158,7 +1168,10 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
 
   // H-004 + H-006: Register rate-limiting and security headers middleware
   // Must be registered BEFORE route handlers to ensure all routes are protected.
-  server.register(registerSecurityMiddleware, { isProduction: isProductionEnv(config) });
+  server.register(registerSecurityMiddleware, {
+    isProduction: isProductionEnv(config),
+    allowedOrigins: Array.isArray(corsOrigin) ? corsOrigin : [String(corsOrigin)],
+  });
 
   // Canonical production authentication boundary + distributed tracing.
   // Register this shared hook before every route so all protected production endpoints,
@@ -2146,12 +2159,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const requestedBranchId = targetBranchId == null ? "" : String(targetBranchId).trim();
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
       const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
-      const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN");
-      const canSwitchBranch = isSuperAdmin || permissions.includes("*") || permissions.includes("branch.switch");
+      const isPlatformSuperAdmin = roles.includes("PLATFORM_SUPER_ADMIN");
+      const isTenantAdmin = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+      const canSwitchBranch = !isPlatformSuperAdmin && (isTenantAdmin || permissions.includes("*") || permissions.includes("branch.switch"));
 
       const newTenantId = requestedTenantId || ctx.tenantId;
-      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching requires Super Admin authorization." } });
+      if (isPlatformSuperAdmin) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: "PLATFORM_TENANT_APP_ISOLATION",
+            message: "Platform Super Admin credentials cannot enter tenant application context.",
+          },
+        });
+      }
+      if (newTenantId !== ctx.tenantId && !isTenantAdmin) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching is not available to this account." } });
       }
       if (requestedBranchId && requestedBranchId !== ctx.branchId && !canSwitchBranch) {
         return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Branch switching permission is required." } });
@@ -2184,7 +2207,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
 
       const userId = ctx.userId;
-      const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+      const userEmail = String((ctx as any)?.email || "").trim();
       const tokenPayload = {
         sub: userId,
         tenantId: newTenantId,

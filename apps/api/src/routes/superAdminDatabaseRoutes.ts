@@ -8,7 +8,7 @@ import { prisma } from "@kwakopos2/database";
 function requireSuperAdmin(req: any): string {
   const ctx = req.tenantContext;
   const roles = Array.isArray(ctx?.roles) ? ctx.roles.map((r: unknown) => String(r).toUpperCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
+  if (!roles.includes("PLATFORM_SUPER_ADMIN")) {
     throw new Error("FORBIDDEN: Platform Super Admin role required");
   }
   return String(ctx?.userId || "");

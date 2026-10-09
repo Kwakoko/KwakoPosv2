@@ -27,6 +27,13 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(run(`iam.googleapis.com/${canonical}`)).toBe(`provider=${canonical}`);
   });
 
+  it("normalizes API-versioned IAM URLs and removes query/fragment wrappers", () => {
+    expect(run(`https://iam.googleapis.com/v1/${canonical}?project=kwakopos-prod#provider`)).toBe(`provider=${canonical}`);
+    expect(run(`https://iam.googleapis.com/v1beta/${canonical}?alt=json`)).toBe(`provider=${canonical}`);
+    expect(run(`https://iam.googleapis.com/v1beta1/${canonical}/`)).toBe(`provider=${canonical}`);
+    expect(run(`http://iam.googleapis.com/${canonical}/`)).toBe(`provider=${canonical}`);
+  });
+
   it("trims surrounding whitespace and one matching quote pair", () => {
     expect(run(`  "${canonical}"  `)).toBe(`provider=${canonical}`);
   });
