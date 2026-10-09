@@ -51,6 +51,7 @@ const semverRuntimeChecks: Array<[string, boolean]> = [
   ["numeric prerelease identifiers precede lexical identifiers", compareSemVer("1.0.0-1", "1.0.0-alpha") < 0],
   ["arbitrarily large numeric prerelease identifiers compare exactly", compareSemVer("1.0.0-alpha.9007199254740992", "1.0.0-alpha.9007199254740993") < 0 && compareSemVer("1.0.0-alpha.999999999999999999999999999999", "1.0.0-alpha.1000000000000000000000000000000") < 0],
   ["lexical prerelease comparison alpha < beta", compareSemVer("1.0.0-alpha", "1.0.0-beta") < 0],
+  ["prerelease text follows SemVer ASCII ordering", compareSemVer("1.0.0-A", "1.0.0-a") < 0],
   ["shorter prerelease chain has lower precedence", compareSemVer("1.0.0-alpha", "1.0.0-alpha.1") < 0],
   ["stable release has higher precedence than prerelease", compareSemVer("1.0.0-rc.1", "1.0.0") < 0],
   ["leading-zero numeric core versions are rejected", !isValidSemVer("01.2.3") && !isValidSemVer("1.02.3") && !isValidSemVer("1.2.03")],
