@@ -22,7 +22,10 @@ def normalize(value: str) -> str:
     # A secret copied through an editor may contain line-wraps. Remove only
     # CR/LF boundaries and adjacent horizontal indentation; all other content
     # remains subject to the strict resource-shape check below.
-    provider = re.sub(r"[ \t]*(?:\r\n|\r|\n)[ \t]*", "", provider)
+    # Accept line-wraps only next to path separators. Do not join arbitrary
+    # lines, which could silently change an identifier.
+    provider = re.sub(r"/[ \t]*(?:\r\n|\r|\n)[ \t]*", "/", provider)
+    provider = re.sub(r"[ \t]*(?:\r\n|\r|\n)[ \t]*/", "/", provider)
 
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
