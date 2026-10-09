@@ -3,8 +3,11 @@ import { prisma } from "@kwakopos2/database";
 import { hashPassword, validatePasswordStrength } from "@kwakopos2/auth";
 import { ensureSuperAdminSecurityTables } from "../../apps/api/src/services/superAdminSecurityService.js";
 
-const email = String(process.env.SUPER_ADMIN_EMAIL || "admin@kwakoko.co.tz").trim().toLowerCase();
+const email = String(process.env.SUPER_ADMIN_EMAIL || "").trim().toLowerCase();
 const password = String(process.env.SUPER_ADMIN_INITIAL_PASSWORD || "");
+if (!email) {
+  throw new Error("SUPER_ADMIN_EMAIL must be supplied through deployment secret/configuration; it must never be committed or hardcoded.");
+}
 
 if (!password) {
   throw new Error("SUPER_ADMIN_INITIAL_PASSWORD must be supplied through deployment secret configuration; it must never be committed or hardcoded.");
@@ -62,10 +65,20 @@ async function main(): Promise<void> {
       create: { tenantId: tenant.id, name: "Kwakoko Headquarters", code: "HQ", isMain: true },
     });
 
-    const role = await tx.role.upsert({
+    const legacyRole = await tx.role.findUnique({
       where: { tenantId_name: { tenantId: tenant.id, name: "SUPER_ADMIN" } },
-      update: { permissions: ["*"] },
-      create: { tenantId: tenant.id, name: "SUPER_ADMIN", permissions: ["*"] },
+    });
+    if (legacyRole) {
+      await tx.role.update({
+        where: { id: legacyRole.id },
+        data: { name: "PLATFORM_SUPER_ADMIN", permissions: ["platform:control"], isSystemRole: true },
+      });
+    }
+
+    const role = await tx.role.upsert({
+      where: { tenantId_name: { tenantId: tenant.id, name: "PLATFORM_SUPER_ADMIN" } },
+      update: { permissions: ["platform:control"], isSystemRole: true },
+      create: { tenantId: tenant.id, name: "PLATFORM_SUPER_ADMIN", permissions: ["platform:control"], isSystemRole: true },
     });
 
     const user = await tx.user.create({

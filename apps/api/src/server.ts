@@ -290,7 +290,7 @@ function resolveTenantId(req: FastifyRequest, requestedTenantId?: unknown): stri
 function requireSuperAdminContext(req: FastifyRequest): TenantContext {
   const ctx = requireTenantContext(req);
   const roles = Array.isArray(ctx.roles) ? ctx.roles.map((role) => String(role).toUpperCase()) : [];
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN") && !roles.includes("PLATFORM_SUPER_ADMIN")) {
+  if (!roles.includes("PLATFORM_SUPER_ADMIN")) {
     throw new Error("FORBIDDEN: Platform Super Admin privileges required");
   }
   return ctx;
@@ -647,7 +647,7 @@ async function handleProductionLogin(req: FastifyRequest, reply: FastifyReply) {
 
   const roleName = String(user.role?.name || "ADMIN").toUpperCase();
   const superAdminState = await getSuperAdminSecurity(user.id);
-  const isSuperAdmin = roleName === "SUPER_ADMIN" || roleName === "PLATFORM_SUPER_ADMIN" || !!superAdminState;
+  const isSuperAdmin = roleName === "PLATFORM_SUPER_ADMIN";
   if (isSuperAdmin) {
     await ensureSuperAdminSecurity(user.id);
     const state = await getSuperAdminSecurity(user.id);
@@ -841,7 +841,10 @@ function registerCanonicalProductionAuthentication(
             reply.status(400).send({ success: false, error: { code: "STEP_UP_ACTION_INVALID", message: "Unsupported step-up action." } });
             return;
           }
-          if (!user || user.status !== "ACTIVE" || !["SUPER_ADMIN", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(roleName) || !(await comparePassword(password, user.passwordHash))) {
+          const securityState = user ? await getSuperAdminSecurity(userId) : null;
+          if (!user || user.status !== "ACTIVE" || roleName !== "PLATFORM_SUPER_ADMIN" ||
+              !securityState?.mfaRequired || !securityState.mfaEnrolled ||
+              !(await comparePassword(password, user.passwordHash))) {
             await logSuperAdminAuditEvent({ userId, deviceId, action: "STEP_UP_AUTH_FAILURE", outcome: "FAILURE", metadata: { targetAction: action } });
             reply.status(401).send({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid credentials for step-up authentication" } });
             return;
@@ -2146,12 +2149,22 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       const requestedBranchId = targetBranchId == null ? "" : String(targetBranchId).trim();
       const roles = Array.isArray(ctx.roles) ? ctx.roles.map((r) => String(r).toUpperCase()) : [];
       const permissions = Array.isArray(ctx.permissions) ? ctx.permissions.map((p) => String(p).toLowerCase()) : [];
-      const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN");
-      const canSwitchBranch = isSuperAdmin || permissions.includes("*") || permissions.includes("branch.switch");
+      const isPlatformSuperAdmin = roles.includes("PLATFORM_SUPER_ADMIN");
+      const isTenantAdmin = roles.some((role) => ["OWNER", "ADMIN", "SUPER_ADMIN", "SUPERADMIN"].includes(role));
+      const canSwitchBranch = !isPlatformSuperAdmin && (isTenantAdmin || permissions.includes("*") || permissions.includes("branch.switch"));
 
       const newTenantId = requestedTenantId || ctx.tenantId;
-      if (newTenantId !== ctx.tenantId && !isSuperAdmin) {
-        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching requires Super Admin authorization." } });
+      if (isPlatformSuperAdmin) {
+        return reply.status(403).send({
+          success: false,
+          error: {
+            code: "PLATFORM_TENANT_APP_ISOLATION",
+            message: "Platform Super Admin credentials cannot enter tenant application context.",
+          },
+        });
+      }
+      if (newTenantId !== ctx.tenantId && !isTenantAdmin) {
+        return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Cross-tenant context switching is not available to this account." } });
       }
       if (requestedBranchId && requestedBranchId !== ctx.branchId && !canSwitchBranch) {
         return reply.status(403).send({ success: false, error: { code: "FORBIDDEN", message: "Branch switching permission is required." } });
@@ -2184,7 +2197,7 @@ export function buildServer(opts: BuildServerOptions = {}): FastifyInstance {
       }
 
       const userId = ctx.userId;
-      const userEmail = (ctx as any)?.email || "admin@kwakopos.com";
+      const userEmail = String((ctx as any)?.email || "").trim();
       const tokenPayload = {
         sub: userId,
         tenantId: newTenantId,

@@ -28,9 +28,12 @@ export function runSuperAdminPlatformCertification(cwd = process.cwd()): {
   const hasAll = (file: string, markers: string[]) => markers.every((m) => read(file).includes(m));
 
   check("SADM-P01", "Independent fail-closed lock", exists("scripts/certification/super-admin-production-lock.ts"), "Dedicated Super Admin Production Lock exists.");
-  check("SADM-P02", "Strict platform role boundary", hasAll("apps/api/src/routes/superAdminDatabaseRoutes.ts", ['roles.includes("SUPER_ADMIN")','roles.includes("PLATFORM_SUPER_ADMIN")']) &&
-    !read("apps/api/src/routes/superAdminDatabaseRoutes.ts").includes('permissions.includes("*")'),
-    "Super Admin database/control routes cannot be entered through tenant wildcard permissions.");
+  check("SADM-P02", "Strict platform role boundary", hasAll("apps/api/src/routes/superAdminDatabaseRoutes.ts", ['roles.includes("PLATFORM_SUPER_ADMIN")']) &&
+    !read("apps/api/src/routes/superAdminDatabaseRoutes.ts").includes('roles.includes("SUPER_ADMIN")') &&
+    !read("apps/api/src/routes/superAdminDatabaseRoutes.ts").includes('roles.includes("SUPERADMIN")') &&
+    !read("apps/api/src/routes/superAdminDatabaseRoutes.ts").includes('permissions.includes("*")') &&
+    !read("apps/api/src/routes/superAdminDatabaseRoutes.ts").includes('permissions.includes("admin:*")'),
+    "Super Admin database/control routes require the dedicated platform role and cannot be entered through tenant permission wildcards.");
   check("SADM-P03", "Authoritative tenant management", hasAll("apps/api/src/routes/superAdminDatabaseRoutes.ts", ["/api/v1/super-admin/tenants","prisma.tenant.findMany"]), "Tenant directory reads PostgreSQL.");
   check("SADM-P04", "Authoritative tenant suspension", hasAll("apps/api/src/routes/superAdminDatabaseRoutes.ts", ["/api/v1/super-admin/tenants/:tenantId/suspend",'requireStepUpToken(req,ctx,"TENANT_SUSPEND")']), "Suspension is server-side, transactional, audited and step-up protected.");
   check("SADM-P05", "Authoritative tenant reactivation", hasAll("apps/api/src/routes/superAdminDatabaseRoutes.ts", ["/api/v1/super-admin/tenants/:tenantId/reactivate",'requireStepUpToken(req,ctx,"TENANT_REACTIVATE")']), "Reactivation is server-side and step-up protected.");
@@ -47,6 +50,14 @@ export function runSuperAdminPlatformCertification(cwd = process.cwd()): {
     !read("packages/domain/src/superAdminPlatformEngine.ts").includes("148500.0") &&
     !read("scripts/certification/super-admin-platform-certification-engine.ts").includes(["passed", "true"].join(", ")),
     "Legacy engine and certification no longer provide synthetic production truth.");
+  check("SADM-P16", "Platform identity cannot become tenant application identity",
+    hasAll("apps/api/src/server.ts", [
+      'const isSuperAdmin = roleName === "PLATFORM_SUPER_ADMIN";',
+      'PLATFORM_TENANT_APP_ISOLATION',
+      'roles.includes("PLATFORM_SUPER_ADMIN")'
+    ]) &&
+    !read("apps/api/src/server.ts").includes('const isSuperAdmin = roles.includes("SUPER_ADMIN") || roles.includes("SUPERADMIN")'),
+    "Platform credentials are prevented from creating or switching into tenant-application credentials.");
 
   const passedPillars = results.filter((r) => r.passed).length;
   const totalPillars = results.length;

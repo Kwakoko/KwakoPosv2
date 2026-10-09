@@ -47,8 +47,8 @@ describe("Phase 29 — KwakoPos Super Admin & Platform UI Test Suite", () => {
 
   it("should pass 100% of the repository-backed Super Admin certification campaign", () => {
     const cert = runSuperAdminPlatformCertification();
-    expect(cert.totalPillars).toBe(15);
-    expect(cert.passedPillars).toBe(15);
+    expect(cert.totalPillars).toBe(16);
+    expect(cert.passedPillars).toBe(16);
     expect(cert.failedPillars).toBe(0);
     expect(cert.successRatePct).toBe(100);
   });

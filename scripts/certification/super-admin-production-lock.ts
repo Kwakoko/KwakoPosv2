@@ -17,6 +17,12 @@ const requireAbsent = (relative: string, needle: string, label = needle) => {
   const source = read(relative);
   if (source.includes(needle)) failures.push(`FORBIDDEN: ${relative} :: ${label}`);
 };
+const requireAbsentText = (source: string, needle: string, label = needle) => {
+  if (source.includes(needle)) failures.push(`FORBIDDEN: certification-runtime :: ${label}`);
+};
+const requireTrue = (label: string, condition: boolean) => {
+  if (!condition) failures.push(`MISSING: ${label}`);
+};
 
 // 1. Independent lock artifact and release wiring.
 requireText("package.json", '"certify:super-admin": "tsx scripts/certification/super-admin-production-lock.ts"', "package script");
@@ -39,13 +45,24 @@ for (const route of [
 ]) requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", route);
 
 // 3. Independent strict Super Admin authorization.
-requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("SUPER_ADMIN")');
-requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform provisioning role boundary");
+requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "dedicated platform role boundary");
+requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("SUPER_ADMIN")', "legacy tenant Super Admin cannot enter platform routes");
+requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("SUPERADMIN")', "legacy tenant Superadmin cannot enter platform routes");
+requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", 'return roles.includes("PLATFORM_SUPER_ADMIN");', "platform provisioning requires dedicated platform role");
+requireAbsent("apps/api/src/routes/tenantOnboardingRoutes.ts", 'roles.includes("SUPER_ADMIN")', "legacy tenant Super Admin cannot provision tenants");
+requireAbsent("apps/api/src/routes/tenantOnboardingRoutes.ts", 'roles.includes("SUPERADMIN")', "legacy tenant Superadmin cannot provision tenants");
 requireAbsent("apps/api/src/routes/tenantOnboardingRoutes.ts", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "platform permission cannot grant provisioning");
 requireText("apps/api/src/services/rbacMutationService.ts", '"PLATFORM_SUPER_ADMIN"', "tenant RBAC protects platform super admin role");
 requireText("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")');
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.includes("*")', "wildcard cannot grant Super Admin");
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'permissions.includes("admin:*")', "admin wildcard cannot grant Super Admin");
+requireText("scripts/security/bootstrap-super-admin.ts", 'const email = String(process.env.SUPER_ADMIN_EMAIL || "").trim().toLowerCase();', "bootstrap identity supplied by deployment");
+requireText("scripts/security/bootstrap-super-admin.ts", 'name: "PLATFORM_SUPER_ADMIN"', "bootstrap creates dedicated platform role");
+requireAbsent("scripts/security/bootstrap-super-admin.ts", 'create: { tenantId: tenant.id, name: "SUPER_ADMIN"', "bootstrap must not create tenant Super Admin role");
+requireText("scripts/security/bootstrap-super-admin.ts", 'create: { tenantId: tenant.id, name: "PLATFORM_SUPER_ADMIN"', "bootstrap creates the dedicated platform role");
+requireAbsent("scripts/security/bootstrap-super-admin.ts", 'permissions: ["*"]', "platform role must not inherit tenant wildcard permissions");
+requireText("apps/api/src/services/superAdminSecurityService.ts", 'roleName !== "PLATFORM_SUPER_ADMIN"', "security rows cannot elevate tenant accounts");
+requireText("apps/api/src/services/superAdminSecurityService.ts", "PLATFORM_AUDIT_WRITE_FAILED", "platform audit is fail-closed in production");
 
 // 4. High-risk mutation step-up policy.
 for (const action of ["TENANT_SUSPEND","TENANT_REACTIVATE","SUBSCRIPTION_CHANGE","FEATURE_FLAG_CHANGE"]) {
@@ -108,16 +125,36 @@ for (const workflow of [".github/workflows/ci.yml", ".github/workflows/productio
   requireText(workflow, "npm run certify:super-admin", "explicit Super Admin Production Lock gate");
 }
 requireText("packages/database/prisma/migrations/202610080004_super_admin_production_lock/migration.sql", "BEFORE UPDATE OR DELETE ON platform_audit_events", "append-only platform audit ledger");
-requireText("apps/api/src/server.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform Super Admin route guard");
+requireText("packages/database/prisma/migrations/202610080005_super_admin_platform_isolation/migration.sql", "PLATFORM_SUPER_ADMIN_SCOPE_VIOLATION", "database-enforced platform role scope");
+requireText("packages/database/prisma/migrations/202610080005_super_admin_platform_isolation/migration.sql", "PLATFORM_SUPER_ADMIN_SECURITY_ROLE_VIOLATION", "security-row role binding");
+requireText("packages/database/prisma/migrations/202610080005_super_admin_platform_isolation/migration.sql", "ARRAY['platform:control']", "platform role cannot inherit tenant wildcard permissions");
+requireText("apps/api/src/server.ts", 'if (!roles.includes("PLATFORM_SUPER_ADMIN"))', "platform Super Admin route guard");
+requireAbsent("apps/api/src/server.ts", 'if (!roles.includes("SUPER_ADMIN") && !roles.includes("SUPERADMIN")', "legacy role route bypass");
+requireText("apps/api/src/server.ts", 'const isSuperAdmin = roleName === "PLATFORM_SUPER_ADMIN";', "platform-only login identity");
+requireText("apps/api/src/server.ts", "PLATFORM_TENANT_APP_ISOLATION", "tenant application isolation");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "CONTEXT_SWITCH")', "context switch step-up");
 requireText("apps/api/src/server.ts", 'requireStepUpToken(req, actor, "PLATFORM_EMERGENCY_KILL_SWITCH")', "emergency kill switch step-up");
 requireAbsent("apps/api/src/server.ts", "body.adminId", "client-supplied Super Admin actor identity");
+const serverSource = read("apps/api/src/server.ts");
+const switchContextStart = serverSource.indexOf('server.post("/auth/switch-context"');
+const switchContextSource = switchContextStart >= 0 ? serverSource.slice(switchContextStart, switchContextStart + 12000) : "";
+requireTrue("apps/api/src/server.ts switch-context route present", switchContextStart >= 0);
+requireAbsentText(switchContextSource, 'admin@kwakopos.com', "hard-coded platform identity in tenant context switching");
+requireText("apps/web/src/context/KwakoPosContexts.tsx", 'String(user.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "UI platform role boundary");
+requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("SUPER_ADMIN_OPERATIONS")', "permission cannot elevate to platform mode");
+requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'permissions.includes("ADMIN:PLATFORM")', "permission cannot elevate to platform mode");
+requireAbsent("apps/web/src/context/KwakoPosContexts.tsx", 'sessionStorage.getItem("kwakopos:v2:impersonation")', "client storage cannot unlock tenant inspection");
+requireText("apps/web/src/context/KwakoPosContexts.tsx", "useState<ImpersonatedTenant | null>(null)", "tenant impersonation state defaults closed");
+requireText("apps/web/src/layouts/SystemAppShellLayout.tsx", 'String(user?.role || "").toUpperCase() === "PLATFORM_SUPER_ADMIN"', "shell platform role boundary");
 requireAbsent("apps/api/src/server.ts", "ADM-001", "fabricated platform actor identity");
 requireAbsent("apps/api/src/server.ts", "ADM-SEC-01", "fabricated emergency actor identity");
 requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isPlatformProvisioner", "platform tenant provisioning authority");
 requireText("apps/api/src/routes/tenantOnboardingRoutes.ts", "isSuperAdmin: true", "platform provisioning writes authoritative tenant state");
 requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'permissions.includes("*")', "support wildcard privilege bypass");
 requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'permissions.includes("admin:*")', "support admin wildcard privilege bypass");
+requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'roles.includes("SUPER_ADMIN")', "legacy role support bypass");
+requireAbsent("apps/api/src/routes/supportControlTowerRoutes.ts", 'roles.includes("SUPERADMIN")', "legacy role support bypass");
+requireText("apps/api/src/routes/supportControlTowerRoutes.ts", 'roles.includes("PLATFORM_SUPER_ADMIN")', "platform-only support access");
 requireAbsent("apps/api/src/routes/superAdminDatabaseRoutes.ts", 'logs: []', "fabricated system logs");
 
 // 11. Live control-plane UI.
