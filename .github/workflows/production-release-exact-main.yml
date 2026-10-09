@@ -214,13 +214,7 @@ jobs:
           GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
           set -euo pipefail
-          provider="$GCP_WIF_PROVIDER"
-          provider="$(node -e 'const p=(process.env.GCP_WIF_PROVIDER||"").trim(); process.stdout.write(p.replace(/^https?:\\/\\/iam.googleapis.com\\//,"").replace(/^\\/\\/iam.googleapis.com\\//,"").replace(/^iam.googleapis.com\\//,"").replace(/\\/$/,""))')"
-          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
-            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
-            exit 1
-          }
-          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          python scripts/release/normalize-gcp-wif-provider.py "$GCP_WIF_PROVIDER" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
