@@ -215,12 +215,320 @@ jobs:
         run: |
           set -euo pipefail
           provider="$GCP_WIF_PROVIDER"
+          # Normalize harmless transport/whitespace wrappers without weakening
+          # the canonical Google WIF resource-name requirement.
+          provider="$(printf '%s' "$provider" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s#^https?://iam.googleapis.com/##; s#^//iam.googleapis.com/##; s#^iam.googleapis.com/##; s#/$##')"
+          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
+            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
+            exit 1
+          }
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ steps.normalize-gcp-wif.outputs.provider }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify Google Cloud access
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .
+          gcloud config set project "$GCP_PROJECT_ID"
+          gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectId)' | grep -Fx "$GCP_PROJECT_ID"
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Install Chromium
+        run: npm run production:browser:install
+
+      - name: Synchronize production database schema
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
+      - name: Deploy immutable Cloud Run candidate at 0 percent traffic
+        env:
+          NODE_ENV: production-certification
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: npm run release:deploy-candidate
+
+      - name: Export and validate exact candidate identity
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
+          const expected = process.env.RELEASE_SHA;
+          if (!fs.existsSync(p)) { console.error('RELEASE_BLOCKED: Candidate deployment evidence file missing'); process.exit(1); }
+          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (!c.candidateUrl || !c.candidateRevision || !c.gitSha || !c.containerDigest || !c.imageRef || !c.containerSourceSha) { console.error('RELEASE_BLOCKED: Candidate identity/provenance incomplete'); process.exit(1); }
+          if (!/^[0-9a-f]{40}$/.test(c.gitSha) || c.gitSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate source SHA mismatch: expected=${expected} actual=${c.gitSha}`); process.exit(1); }
+          if (!/^sha256:[0-9a-f]{64}$/.test(c.containerDigest)) { console.error('RELEASE_BLOCKED: Candidate container digest is missing or invalid'); process.exit(1); }
+          if (!c.imageRef.endsWith(`@${c.containerDigest}`)) { console.error('RELEASE_BLOCKED: Candidate image reference does not bind to immutable digest'); process.exit(1); }
+          if (!/^[0-9a-f]{40}$/.test(c.containerSourceSha) || c.containerSourceSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate container source SHA mismatch: expected=${expected} actual=${c.containerSourceSha}`); process.exit(1); }
+          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCANDIDATE_IMAGE_REF=${c.imageRef}\n`);
+          NODE
+
+      - name: Independently verify container OCI source provenance
+        shell: bash
+        env:
+          EXPECTED_RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CANDIDATE_IMAGE_REF: ${{ env.CANDIDATE_IMAGE_REF }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CANDIDATE_IMAGE_REF" ]] || { echo "RELEASE_BLOCKED: candidate immutable image reference missing"; exit 1; }
+          docker pull "$CANDIDATE_IMAGE_REF"
+          SOURCE_SHA="$(docker inspect "$CANDIDATE_IMAGE_REF" --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: container OCI source revision label missing or invalid: $SOURCE_SHA"; exit 1; }
+          [[ "$SOURCE_SHA" == "$EXPECTED_RELEASE_SHA" ]] || { echo "RELEASE_BLOCKED: container OCI source SHA mismatch: expected=$EXPECTED_RELEASE_SHA actual=$SOURCE_SHA"; exit 1; }
+          echo "CONTAINER_SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
+
+      - name: Validate provenance certification prerequisites
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid RELEASE_SHA"; exit 1; }
+          [[ "$CONTAINER_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: missing/invalid independently verified CONTAINER_SOURCE_SHA"; exit 1; }
+          [[ "$RELEASE_SHA" == "$CONTAINER_SOURCE_SHA" ]] || { echo "RELEASE_BLOCKED: release/container provenance SHA mismatch"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence private signing key missing"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence public signing key missing"; exit 1; }
+          [[ "$RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT" =~ ^([sS][hH][aA]256:)?[0-9a-fA-F]{64}$ ]] || { echo "RELEASE_BLOCKED: trusted signing public-key fingerprint missing or invalid"; exit 1; }
+
+      - name: Run 15-Gate Version Sync Release Integrity Certification
+        env:
+          NODE_ENV: production-certification
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATION_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT }}
+          KWAKOPOS_REQUIRED_CI_WORKFLOWS: ci.yml,security-scan.yml
+        run: npm run certify:version-sync
+
+      - name: Certify exact candidate over HTTPS
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npm run production:certify:deployed
+
+      - name: Run Browser A → Cloud Run → Browser B certification
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npm run production:browser
+
+      - name: Promote exact certified revision to 100 percent
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+        run: npm run release:promote
+
+      - name: Publish official GitHub release and immutable tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx scripts/release/publish-github-release.ts
+
+      - name: Execute production operations and governance gate
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npx tsx scripts/ops/production-operations-gate.ts
+
+      - name: Archive production release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwakopos-exact-release-evidence-${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          path: artifacts/release-evidence/
+          retention-days: 90
+          if-no-files-found: error
+\\r'/}"
+          provider="${provider//
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ steps.normalize-gcp-wif.outputs.provider }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify Google Cloud access
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .
+          gcloud config set project "$GCP_PROJECT_ID"
+          gcloud projects describe "$GCP_PROJECT_ID" --format='value(projectId)' | grep -Fx "$GCP_PROJECT_ID"
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Install Chromium
+        run: npm run production:browser:install
+
+      - name: Synchronize production database schema
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
+
+      - name: Deploy immutable Cloud Run candidate at 0 percent traffic
+        env:
+          NODE_ENV: production-certification
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: npm run release:deploy-candidate
+
+      - name: Export and validate exact candidate identity
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = 'artifacts/release-evidence/kwakopos-candidate-deployment.json';
+          const expected = process.env.RELEASE_SHA;
+          if (!fs.existsSync(p)) { console.error('RELEASE_BLOCKED: Candidate deployment evidence file missing'); process.exit(1); }
+          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (!c.candidateUrl || !c.candidateRevision || !c.gitSha || !c.containerDigest || !c.imageRef || !c.containerSourceSha) { console.error('RELEASE_BLOCKED: Candidate identity/provenance incomplete'); process.exit(1); }
+          if (!/^[0-9a-f]{40}$/.test(c.gitSha) || c.gitSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate source SHA mismatch: expected=${expected} actual=${c.gitSha}`); process.exit(1); }
+          if (!/^sha256:[0-9a-f]{64}$/.test(c.containerDigest)) { console.error('RELEASE_BLOCKED: Candidate container digest is missing or invalid'); process.exit(1); }
+          if (!c.imageRef.endsWith(`@${c.containerDigest}`)) { console.error('RELEASE_BLOCKED: Candidate image reference does not bind to immutable digest'); process.exit(1); }
+          if (!/^[0-9a-f]{40}$/.test(c.containerSourceSha) || c.containerSourceSha !== expected) { console.error(`RELEASE_BLOCKED: Candidate container source SHA mismatch: expected=${expected} actual=${c.containerSourceSha}`); process.exit(1); }
+          fs.appendFileSync(process.env.GITHUB_ENV, `CANDIDATE_URL=${c.candidateUrl}\nCLOUD_RUN_REVISION=${c.candidateRevision}\nCONTAINER_DIGEST=${c.containerDigest}\nCANDIDATE_DIGEST=${c.containerDigest}\nGIT_SHA=${c.gitSha}\nCANDIDATE_IMAGE_REF=${c.imageRef}\n`);
+          NODE
+
+      - name: Independently verify container OCI source provenance
+        shell: bash
+        env:
+          EXPECTED_RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CANDIDATE_IMAGE_REF: ${{ env.CANDIDATE_IMAGE_REF }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CANDIDATE_IMAGE_REF" ]] || { echo "RELEASE_BLOCKED: candidate immutable image reference missing"; exit 1; }
+          docker pull "$CANDIDATE_IMAGE_REF"
+          SOURCE_SHA="$(docker inspect "$CANDIDATE_IMAGE_REF" --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: container OCI source revision label missing or invalid: $SOURCE_SHA"; exit 1; }
+          [[ "$SOURCE_SHA" == "$EXPECTED_RELEASE_SHA" ]] || { echo "RELEASE_BLOCKED: container OCI source SHA mismatch: expected=$EXPECTED_RELEASE_SHA actual=$SOURCE_SHA"; exit 1; }
+          echo "CONTAINER_SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
+
+      - name: Validate provenance certification prerequisites
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: invalid RELEASE_SHA"; exit 1; }
+          [[ "$CONTAINER_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "RELEASE_BLOCKED: missing/invalid independently verified CONTAINER_SOURCE_SHA"; exit 1; }
+          [[ "$RELEASE_SHA" == "$CONTAINER_SOURCE_SHA" ]] || { echo "RELEASE_BLOCKED: release/container provenance SHA mismatch"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence private signing key missing"; exit 1; }
+          [[ -n "$RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY" ]] || { echo "RELEASE_BLOCKED: release evidence public signing key missing"; exit 1; }
+          [[ "$RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT" =~ ^([sS][hH][aA]256:)?[0-9a-fA-F]{64}$ ]] || { echo "RELEASE_BLOCKED: trusted signing public-key fingerprint missing or invalid"; exit 1; }
+
+      - name: Run 15-Gate Version Sync Release Integrity Certification
+        env:
+          NODE_ENV: production-certification
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATION_SHA: ${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          CONTAINER_SOURCE_SHA: ${{ env.CONTAINER_SOURCE_SHA }}
+          RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PRIVATE_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY }}
+          RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT: ${{ secrets.KWAKOPOS_RELEASE_EVIDENCE_SIGNING_PUBLIC_KEY_FINGERPRINT }}
+          KWAKOPOS_REQUIRED_CI_WORKFLOWS: ci.yml,security-scan.yml
+        run: npm run certify:version-sync
+
+      - name: Certify exact candidate over HTTPS
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npm run production:certify:deployed
+
+      - name: Run Browser A → Cloud Run → Browser B certification
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npm run production:browser
+
+      - name: Promote exact certified revision to 100 percent
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+          GCP_REGION: us-central1
+          CLOUD_RUN_SERVICE: kwakopos-production-service
+          EXECUTE_GCLOUD: 'true'
+        run: npm run release:promote
+
+      - name: Publish official GitHub release and immutable tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx scripts/release/publish-github-release.ts
+
+      - name: Execute production operations and governance gate
+        env:
+          NODE_ENV: production-certification
+          STRICT_HTTPS: 'true'
+        run: npx tsx scripts/ops/production-operations-gate.ts
+
+      - name: Archive production release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwakopos-exact-release-evidence-${{ github.event.client_payload.release_sha || inputs.release_sha || github.sha }}
+          path: artifacts/release-evidence/
+          retention-days: 90
+          if-no-files-found: error
+\\n'/}"
+          provider="${provider#"""}"
+          provider="${provider%"""}"
+          provider="${provider#\'}"
+          provider="${provider%\'}"
           provider="${provider#https://iam.googleapis.com/}"
           provider="${provider#http://iam.googleapis.com/}"
           provider="${provider#//iam.googleapis.com/}"
           provider="${provider#iam.googleapis.com/}"
+          provider="${provider%/}"
+          provider="$(printf '%s' "$provider" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
           [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
-            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name"
+            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
             exit 1
           }
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
