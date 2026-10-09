@@ -54,3 +54,54 @@ CREATE TABLE IF NOT EXISTS inter_vertical_payment_requests (
   confirmed_at TIMESTAMPTZ, UNIQUE (tenant_id, branch_id, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS inter_vertical_payment_requests_order_idx ON inter_vertical_payment_requests (order_id, status, created_at);
+-- Durable inbound logistics records; tenant/branch identify the receiving Retail scope.
+CREATE TABLE IF NOT EXISTS supply_chain_shipments (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  po_id TEXT NOT NULL,
+  supplier_id TEXT NOT NULL,
+  gateway_order_id TEXT,
+  source_tenant_id TEXT,
+  source_branch_id TEXT,
+  carrier_name TEXT NOT NULL,
+  tracking_number TEXT,
+  status TEXT NOT NULL CHECK (status IN ('PLANNED','CONFIRMED','IN_TRANSIT','ARRIVED','RECEIVING','RECEIVED','EXCEPTION','CANCELLED')),
+  supplier_eta TIMESTAMPTZ NOT NULL,
+  carrier_eta TIMESTAMPTZ,
+  actual_arrival_date TIMESTAMPTZ,
+  destination_warehouse_id TEXT,
+  created_by_user_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, branch_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS supply_chain_shipments_gateway_order_idx
+  ON supply_chain_shipments (tenant_id, branch_id, gateway_order_id, created_at);
+CREATE INDEX IF NOT EXISTS supply_chain_shipments_po_idx
+  ON supply_chain_shipments (tenant_id, branch_id, po_id, status);
+
+CREATE TABLE IF NOT EXISTS supply_chain_shipment_lines (
+  id TEXT PRIMARY KEY,
+  shipment_id TEXT NOT NULL REFERENCES supply_chain_shipments(id) ON DELETE CASCADE,
+  gateway_line_id TEXT,
+  seller_variant_id TEXT,
+  buyer_variant_id TEXT,
+  product_id TEXT,
+  sku TEXT NOT NULL,
+  description TEXT NOT NULL,
+  quantity_shipped NUMERIC(12,4) NOT NULL CHECK (quantity_shipped > 0),
+  quantity_received NUMERIC(12,4) NOT NULL DEFAULT 0 CHECK (quantity_received >= 0 AND quantity_received <= quantity_shipped),
+  unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+  net_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  tax_rate_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+  tax_inclusive BOOLEAN NOT NULL DEFAULT TRUE,
+  tax_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  gross_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_shipment_idx ON supply_chain_shipment_lines (shipment_id);
+CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_gateway_line_idx ON supply_chain_shipment_lines (gateway_line_id);
+
