@@ -65,7 +65,7 @@ POST /api/v1/inter-vertical/connections/:id/respond
 
 ## Example: submit an order
 
-Call the catalog endpoint first to get valid sellerVariantId values. Include buyerVariantId when the corresponding Retail variant is known; otherwise the gateway attempts an exact-SKU match. A valid Retail variant mapping is required before receipt is posted.
+Call the catalog endpoint first to get valid sellerVariantId values. Every order line must map to an active Retail variant, either by supplying buyerVariantId or by accepting the gateway's exact-SKU match. If a Retail variant does not exist yet, create it in Retail inventory before submitting the order. The gateway creates a native Retail PurchaseOrder in DRAFT status at submission, then updates it to APPROVED with the accepted wholesale quantities and prices when the seller accepts; receipts are linked to that same native PO.
 
 POST /api/v1/inter-vertical/orders
 
@@ -75,7 +75,7 @@ POST /api/v1/inter-vertical/orders
       "notes": "Replenishment for Mwanza branch",
       "idempotencyKey": "mw-order-2026-10-09-001",
       "items": [
-        { "sellerVariantId": "WHOLESALER-VARIANT-ID", "quantity": 24 }
+        { "sellerVariantId": "WHOLESALER-VARIANT-ID", "buyerVariantId": "RETAIL-VARIANT-ID", "quantity": 24 }
       ]
     }
 
@@ -121,7 +121,7 @@ POST /api/v1/inter-vertical/orders/:id/receive
 - Product variants are tenant/branch-owned; seller IDs are never used as buyer inventory IDs.
 - Dispatch locks seller variants, checks authoritative stock-ledger balance, writes immutable stock-ledger movements, and refreshes stock projections.
 - Seller dispatch creates a native Sale, CustomerInvoice, accounts-receivable balance, and general-ledger journal. Dispatch is blocked if it would exceed the configured B2B customer credit limit.
-- Buyer receipt creates a native PurchaseReceipt, stock-ledger movements, supplier payable balance, and general-ledger journal. Received quantities are valued at seller-accepted prices.
+- Each gateway order is linked to a native Retail PurchaseOrder exposed to the existing purchasing module. Seller acceptance updates accepted quantity/price and PO status; goods receipts link to the PO and update its partial/complete receipt status. Buyer receipt also creates a native PurchaseReceipt, stock-ledger movements, supplier payable balance, and general-ledger journal. Received quantities are valued at seller-accepted prices.
 - Payment requests do not modify balances. Seller confirmation writes buyer supplier payment and seller customer payment records, updates payable/receivable balances and invoice allocation, and writes both journals in a single database transaction.
 - Shipment tracking is stored in the gateway logistics snapshot in this first iteration; it does not create a record in the separate supply-chain shipment subsystem.
 - Settlement request methods currently support bank transfer and mobile money only, because those can be reconciled without bypassing cash-session controls. Cash, card and other methods are intentionally not exposed in this gateway flow.
