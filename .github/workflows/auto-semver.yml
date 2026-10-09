@@ -85,6 +85,17 @@ jobs:
             fi
           fi
 
+          # A release candidate can contain post-release fixups (manifest,
+          # certification, lock refreshes) before it reaches main. If the
+          # current version is still the unreleased candidate and a matching
+          # chore(release) commit exists in recent ancestry, continue the
+          # exact-main certification path instead of creating another bot PR.
+          if [[ "$release_commit" == "false" ]]; then
+            if git log -n 40 --pretty=%s | grep -Eq "^chore\(release\): v${version}( |$)"; then
+              release_commit=true
+            fi
+          fi
+
           if [[ "$release_commit" == "true" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "release_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
