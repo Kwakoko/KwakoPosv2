@@ -20,6 +20,7 @@ export interface AccountLookup {
   inventoryAccountId: string;   // 1410
   payableAccountId: string;     // 2110
   taxPayableAccountId: string;  // 2210
+  inputTaxAccountId?: string;   // 1420, recoverable input VAT
   salesRevenueAccountId: string;// 4100
   salesDiscountAccountId: string;// 4900
   cogsAccountId: string;        // 5100
@@ -124,25 +125,37 @@ export class FinancialBridge {
     ctx: TenantContext,
     receipt: PurchaseReceipt,
     accounts: AccountLookup,
-    journalSequence = 1
+    journalSequence = 1,
+    taxOptions?: { inputTaxAmount?: number; grossPayable?: number },
   ): { journal: JournalEntry; lines: JournalLine[] } {
     const journalNumber = TransactionNumbering.formatNumber("JRN", "MAIN", journalSequence);
     const totalCost = (receipt.items || []).reduce((acc, item) => acc + Number(item.totalCost), 0);
-
-    const lines = [
+    const inputTaxAmount = Number(taxOptions?.inputTaxAmount || 0);
+    const grossPayable = Number(taxOptions?.grossPayable ?? (totalCost + inputTaxAmount));
+    if (!Number.isFinite(inputTaxAmount) || inputTaxAmount < 0 || !Number.isFinite(grossPayable) || grossPayable < 0) {
+      throw new Error("PURCHASE_TAX_JOURNAL_AMOUNT_INVALID");
+    }
+    if (inputTaxAmount > 0 && !accounts.inputTaxAccountId) throw new Error("INPUT_TAX_ACCOUNT_REQUIRED");
+    const lines: Array<{ accountId: string; description: string; debit: number; credit: number }> = [
       {
         accountId: accounts.inventoryAccountId,
         description: `Goods Receipt ${receipt.receiptNumber} - Inventory Addition`,
         debit: totalCost,
         credit: 0,
       },
-      {
-        accountId: accounts.payableAccountId,
-        description: `Goods Receipt ${receipt.receiptNumber} - Supplier Liability`,
-        debit: 0,
-        credit: totalCost,
-      },
     ];
+    if (inputTaxAmount > 0) lines.push({
+      accountId: accounts.inputTaxAccountId!,
+      description: `Goods Receipt ${receipt.receiptNumber} - Recoverable Input VAT`,
+      debit: inputTaxAmount,
+      credit: 0,
+    });
+    lines.push({
+      accountId: accounts.payableAccountId,
+      description: `Goods Receipt ${receipt.receiptNumber} - Supplier Liability`,
+      debit: 0,
+      credit: grossPayable,
+    });
 
     return AccountingEngine.createJournalEntry(ctx, {
       journalNumber,
