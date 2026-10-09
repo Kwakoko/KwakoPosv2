@@ -5,16 +5,18 @@ import { describe, expect, it } from "vitest";
 const python = process.platform === "win32" ? "python" : "python3";
 const script = path.resolve(process.cwd(), "scripts/release/normalize-gcp-wif-provider.py");
 
-function run(value: string): string {
-  return execFileSync(python, [script, value], {
+function run(value: string, fallback?: string): string {
+  const args = fallback === undefined ? [script, value] : [script, value, fallback];
+  return execFileSync(python, args, {
     encoding: "utf8",
     timeout: 5000,
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
 
-function runFailure(value: string): { status: number | null; stderr: string } {
-  const result = spawnSync(python, [script, value], {
+function runFailure(value: string, fallback?: string): { status: number | null; stderr: string } {
+  const args = fallback === undefined ? [script, value] : [script, value, fallback];
+  const result = spawnSync(python, args, {
     encoding: "utf8",
     timeout: 5000,
     stdio: ["ignore", "pipe", "pipe"],
@@ -54,6 +56,15 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(() => run(wrapped + "\nextra-content")).toThrow();
   });
 
+  it("uses a valid legacy provider when the non-empty primary value is malformed", () => {
+    expect(run("not-a-canonical-provider", canonical)).toBe("provider=" + canonical);
+  });
+
+  it("prefers a valid primary provider when both candidates are valid", () => {
+    const fallback = canonical.replace("5provider", "other-provider");
+    expect(run(canonical, fallback)).toBe("provider=" + canonical);
+  });
+
   it("rejects a project ID where Google requires a project number", () => {
     expect(() => run(canonical.replace("projects/123456789012/", "projects/kwakopos-prod/"))).toThrow();
   });
@@ -71,6 +82,20 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(result.stderr).toContain("safe_shape_diagnostic");
     expect(result.stderr).toContain("has_global_location=true");
     expect(result.stderr).not.toContain(privatePoolMarker);
+    expect(result.stderr).not.toContain("123456789012");
+  });
+
+  it("reports both safe errors if both provider candidates are malformed", () => {
+    const primaryMarker = "private-primary-pool";
+    const fallbackMarker = "private-legacy-pool";
+    const primary = "projects/123456789012/locations/global/pools/" + primaryMarker + "/providers/5provider";
+    const fallback = "projects/123456789012/locations/global/pools/" + fallbackMarker + "/providers/5provider";
+    const result = runFailure(primary, fallback);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("GCP_WIF_PROVIDER rejected");
+    expect(result.stderr).toContain("GCP_WORKLOAD_IDENTITY_PROVIDER rejected");
+    expect(result.stderr).not.toContain(primaryMarker);
+    expect(result.stderr).not.toContain(fallbackMarker);
     expect(result.stderr).not.toContain("123456789012");
   });
 
