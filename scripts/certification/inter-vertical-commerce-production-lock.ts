@@ -28,7 +28,7 @@ for (const marker of [
   "async function resolveBranchTaxAuthority",
   "tx.setting.findMany",
   'key: "tax.config"',
-  "tax.vatEnabled",
+  "value.vatEnabled",
   "tx.tax.findFirst",
   "PricingTaxEngine.calculateLineItem",
   "PricingTaxEngine.calculateSaleTotals",
