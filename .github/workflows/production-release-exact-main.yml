@@ -217,7 +217,17 @@ jobs:
           provider="$GCP_WIF_PROVIDER"
           # Normalize harmless transport/format wrappers without weakening the
           # canonical Google WIF resource-name requirement.
-          provider="${provider//
+          provider="$(printf '%s' "$provider" | tr -d '\r\n' | sed -E "s/^[[:space:]]+//; s/[[:space:]]+$//; s/^[\"']//; s/[\"']$//")"
+          provider="${provider#https://iam.googleapis.com/}"
+          provider="${provider#http://iam.googleapis.com/}"
+          provider="${provider#//iam.googleapis.com/}"
+          provider="${provider#iam.googleapis.com/}"
+          provider="${provider%/}"
+          provider="$(printf '%s' "$provider" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
+            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
+            exit 1
+          }
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
