@@ -87,6 +87,11 @@ const semverLockWiring = (workflow: string) =>
   workflow.includes("scripts/certification/semver-production-lock.ts");
 
 assert(
+  autoSemverWorkflow.includes("scripts/release/pending-unreleased-candidate.ts"),
+  "Automatic SemVer must resolve pending unreleased candidates from authoritative manifest/tag state."
+);
+
+assert(
   semverLockWiring(autoSemverWorkflow),
   "Automatic SemVer workflow must execute the SemVer Production Lock."
 );
