@@ -139,6 +139,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **release**: v2.13.0 protected production candidate
 - **core**: Merge pull request #175 from Kwakoko/fix/release-exact-main-clean-rebuild
 - **release**: v2.13.0 refresh clean workflow fingerprints
 - **release**: v2.13.0 refresh clean workflow fingerprints
@@ -795,6 +796,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **release**: align WIF validation with Google resource IDs
 - **release**: restore missing GCP WIF provider normalizer
 - **release**: simplify WIF normalization shell safely
 - **release**: correct WIF normalization shell syntax
