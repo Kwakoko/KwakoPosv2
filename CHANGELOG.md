@@ -139,6 +139,21 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #175 from Kwakoko/fix/release-exact-main-clean-rebuild
+- **release**: v2.13.0 refresh clean workflow fingerprints
+- **release**: v2.13.0 refresh clean workflow fingerprints
+- **release**: v2.13.0 refresh clean workflow fingerprints
+- **release**: v2.13.0 rebuild exact-main workflow cleanly
+- **core**: Merge pull request #172 from Kwakoko/fix/release-wif-workflow-final
+- **release**: v2.13.0 refresh workflow fingerprints
+- **release**: v2.13.0 refresh workflow fingerprints
+- **release**: v2.13.0 refresh workflow fingerprints
+- **release**: v2.13.0 WIF workflow finalization
+- **core**: Merge pull request #170 from Kwakoko/fix/release-semver-ancestry-convergence
+- **release**: v2.13.0 automation convergence
+- **core**: Merge pull request #169 from Kwakoko/release/v2.13.0
+- **release**: refresh final 2.13.0 candidate metadata
+- **release**: v2.13.0
 - **core**: Merge pull request #168 from Kwakoko/fix/release-gcp-wif-normalization-closed-loop
 - **release**: refresh backdated lock for certified WIF workflow
 - **release**: refresh dashboard lock for certified WIF workflow
@@ -780,6 +795,7 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **release**: restore missing GCP WIF provider normalizer
 - **release**: simplify WIF normalization shell safely
 - **release**: correct WIF normalization shell syntax
 - **release**: harden GCP WIF provider normalization
