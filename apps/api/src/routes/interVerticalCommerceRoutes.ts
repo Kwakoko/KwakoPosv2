@@ -676,6 +676,11 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
             if (!invoice || Number(invoice.balanceDue) + 0.005 < allocation) throw new Error("SELLER_INVOICE_BALANCE_MISMATCH");
             const balance = Math.max(0, Number(invoice.balanceDue) - allocation);
             await tx.customerInvoice.update({ where: { id: invoice.id }, data: { amountPaid: { increment: allocation }, balanceDue: balance, status: balance <= 0.005 ? "PAID" : "PARTIALLY_PAID" } });
+            await tx.paymentAllocation.create({ data: {
+              id: randomUUID(), tenantId: sc.tenantId, branchId: sc.branchId,
+              paymentId: sellerPayment.id, customerInvoiceId: invoice.id,
+              allocatedAmount: allocation, createdById: sc.userId,
+            } });
           }
           remain -= allocation;
         }
