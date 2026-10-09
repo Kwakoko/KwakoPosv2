@@ -103,7 +103,7 @@ function httpStatus(err: unknown): number {
   const m = err instanceof Error ? err.message : String(err);
   if (m.startsWith("FORBIDDEN")) return 403;
   if (m.includes("NOT_FOUND") || m.includes("NOT_LINKED") || m.includes("CONNECTION_NOT_FOUND")) return 404;
-  if (m.includes("CONFLICT") || m.includes("INVALID_STATUS") || m.includes("ALREADY_") || m.includes("IDEMPOTENCY")) return 409;
+  if (m.includes("CONFLICT") || m.includes("INVALID_STATUS") || m.includes("ALREADY_") || m.includes("IDEMPOTENCY") || m.includes("UNIQUE") || m.includes("P2002")) return 409;
   if (m.includes("INSUFFICIENT") || m.includes("EXCEEDS_") || m.includes("BOUNDARY") || m.includes("MAPPING_REQUIRED") || m.includes("CREDIT_LIMIT")) return 422;
   if (m.includes("TENANT_BRANCH_CONTEXT_REQUIRED") || m.includes("UNAUTHORIZED")) return 401;
   if (m.includes("INVALID") || m.includes("REQUIRED") || m.includes("MISSING") || m.includes("DUPLICATE") || m.includes("CANNOT_")) return 400;
@@ -204,6 +204,11 @@ async function sellerInvoice(tx: any, ctx: Ctx, order: any, dispatch: Array<{ it
     invoiceDate: now, dueDate: new Date(now.getTime() + 30 * 86400000), subtotal: totals.revenue,
     taxTotal: 0, discountTotal: 0, grandTotal: totals.revenue, amountPaid: 0, balanceDue: totals.revenue,
     status: "ISSUED", notes: "Inter-Vertical Order " + order.order_number,
+    lines: { create: dispatch.map((x) => ({
+      id: randomUUID(), variantId: x.variant.id, description: x.item.name || x.item.sku,
+      quantity: x.quantity, unitPrice: Number(x.item.unitPrice),
+      taxRate: 0, taxAmount: 0, discountAmount: 0, lineTotal: x.quantity * Number(x.item.unitPrice),
+    })) },
   } });
   await tx.customer.update({ where: { id: customer.id }, data: { currentBalance: { increment: totals.revenue } } });
   const accounts = await finance.accounts(tx, ctx);
