@@ -5,7 +5,8 @@ import {
   prisma, PrismaAtomicCommercialFinanceService, PricingAuthority, projectProductBranchStock,
   projectProductStockSummary, projectVariantInventory,
 } from "@kwakopos2/database";
-import { FinancialBridge } from "@kwakopos2/domain";
+import { FinancialBridge, PricingTaxEngine } from "@kwakopos2/domain";
+import { globalTraVfdService } from "../services/traVfdService.js";
 import type { TenantContext } from "@kwakopos2/contracts";
 
 type Ctx = TenantContext & { tenantId: string; branchId: string; userId: string };
@@ -13,6 +14,18 @@ type Item = {
   lineId: string; sellerVariantId: string; buyerVariantId: string | null; sku: string; name: string;
   requestedQuantity: number; proposedUnitPrice: number; acceptedQuantity: number | null;
   unitPrice: number | null; dispatchedQuantity: number; receivedQuantity: number;
+  dispatchAllocations?: DispatchAllocation[];
+};
+type DispatchAllocation = {
+  shipmentId: string; quantity: number; receivedQuantity: number; unitPrice: number;
+  taxRatePct: number; taxInclusive: boolean; netAmount: number; taxAmount: number; grossAmount: number;
+  receivedNetAmount: number; receivedTaxAmount: number; receivedGrossAmount: number;
+  sellerInvoiceId: string; sellerInvoiceNumber: string;
+};
+type ReceivePortion = {
+  item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string;
+  shipmentId: string; unitPrice: number; taxRatePct: number; taxInclusive: boolean;
+  netAmount: number; taxAmount: number; grossAmount: number;
 };
 type OrderRow = Record<string, any> & { items: Item[] };
 const db: any = prisma;
@@ -66,6 +79,12 @@ async function ensureSchema(): Promise<void> {
       "CREATE INDEX IF NOT EXISTS inter_vertical_finance_documents_order_idx ON inter_vertical_finance_documents (order_id, side, created_at)",
       "CREATE TABLE IF NOT EXISTS inter_vertical_payment_requests (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, submitted_by_user_id TEXT NOT NULL, amount NUMERIC(14,2) NOT NULL, payment_method TEXT NOT NULL, provider TEXT, provider_reference TEXT, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'PENDING_CONFIRMATION', idempotency_key TEXT NOT NULL, buyer_payment_id TEXT, seller_payment_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), confirmed_at TIMESTAMPTZ, UNIQUE (tenant_id, branch_id, idempotency_key))",
       "CREATE INDEX IF NOT EXISTS inter_vertical_payment_requests_order_idx ON inter_vertical_payment_requests (order_id, status, created_at)",
+      "CREATE TABLE IF NOT EXISTS supply_chain_shipments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, po_id TEXT NOT NULL, supplier_id TEXT NOT NULL, gateway_order_id TEXT, source_tenant_id TEXT, source_branch_id TEXT, carrier_name TEXT NOT NULL, tracking_number TEXT, status TEXT NOT NULL CHECK (status IN ('PLANNED','CONFIRMED','IN_TRANSIT','ARRIVED','RECEIVING','RECEIVED','EXCEPTION','CANCELLED')), supplier_eta TIMESTAMPTZ NOT NULL, carrier_eta TIMESTAMPTZ, actual_arrival_date TIMESTAMPTZ, destination_warehouse_id TEXT, created_by_user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (tenant_id, branch_id, idempotency_key))",
+      "CREATE INDEX IF NOT EXISTS supply_chain_shipments_gateway_order_idx ON supply_chain_shipments (tenant_id, branch_id, gateway_order_id, created_at)",
+      "CREATE INDEX IF NOT EXISTS supply_chain_shipments_po_idx ON supply_chain_shipments (tenant_id, branch_id, po_id, status)",
+      "CREATE TABLE IF NOT EXISTS supply_chain_shipment_lines (id TEXT PRIMARY KEY, shipment_id TEXT NOT NULL, gateway_line_id TEXT, seller_variant_id TEXT, buyer_variant_id TEXT, product_id TEXT, sku TEXT NOT NULL, description TEXT NOT NULL, quantity_shipped NUMERIC(12,4) NOT NULL CHECK (quantity_shipped > 0), quantity_received NUMERIC(12,4) NOT NULL DEFAULT 0 CHECK (quantity_received >= 0 AND quantity_received <= quantity_shipped), unit_price NUMERIC(14,2) NOT NULL DEFAULT 0, net_amount NUMERIC(14,2) NOT NULL DEFAULT 0, tax_rate_pct NUMERIC(5,2) NOT NULL DEFAULT 0, tax_inclusive BOOLEAN NOT NULL DEFAULT TRUE, tax_amount NUMERIC(14,2) NOT NULL DEFAULT 0, gross_amount NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), FOREIGN KEY (shipment_id) REFERENCES supply_chain_shipments(id) ON DELETE CASCADE)",
+      "CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_shipment_idx ON supply_chain_shipment_lines (shipment_id)",
+      "CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_gateway_line_idx ON supply_chain_shipment_lines (gateway_line_id)",
     ];
     for (const statement of sql) await db.$executeRawUnsafe(statement);
   })().catch((err) => { schemaReady = null; throw err; });
