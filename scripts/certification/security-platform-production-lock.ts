@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 
 type Check = { id: string; name: string; passed: boolean; detail: string };
 
@@ -216,6 +217,25 @@ export function runSecurityPlatformProductionLock(cwd = process.cwd()) {
     packageJson.includes('"certify:security-platform-lock"') &&
     foundation.includes('"certify:security-platform-lock"'),
     "The dedicated lock is part of the production release contract.");
+
+
+  const trackedSqlSources = (() => {
+    try {
+      return execSync("git ls-files apps packages scripts .github", { cwd, encoding: "utf8" })
+        .split(/\r?\n/).filter(Boolean);
+    } catch {
+      return [];
+    }
+  })();
+  const unsafeSqlFiles = trackedSqlSources.filter((file) => {
+    if (!/\.(ts|tsx|js|jsx)$/.test(file)) return false;
+    const source = read(file);
+    return /\$queryRawUnsafe\s*(?:<[^>]+>)?\s*\(\s*[`"][^`"]*\$\{/.test(source) ||
+      /\$executeRawUnsafe\s*(?:<[^>]+>)?\s*\(\s*[`"][^`"]*\$\{/.test(source);
+  });
+  add("SECPLAT-A34", "Dynamic SQL is rejected when unsafe raw APIs interpolate request/data strings",
+    unsafeSqlFiles.length === 0,
+    unsafeSqlFiles.length === 0 ? "No interpolated unsafe SQL found." : "Interpolated unsafe SQL remains in: " + unsafeSqlFiles.join(", "));
 
   const passed = checks.filter((c) => c.passed).length;
   const failed = checks.length - passed;

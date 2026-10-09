@@ -59,6 +59,7 @@
     "test:browser": "playwright test --config=playwright.production.config.mjs",
     "certify": "tsx scripts/certification/runCertification.ts",
     "certify:security": "npm run release:auth-lock && tsx scripts/certification/strict-security-runtime-gate.ts",
+    "certify:security-lock": "tsx scripts/certification/security-platform-production-lock.ts",
     "certify:resilience": "tsx scripts/certification/runResilienceCertification.ts",
     "certify:performance": "tsx scripts/certification/runPerformanceCertification.ts",
     "certify:reliability": "tsx scripts/certification/runReliabilityCertification.ts",
