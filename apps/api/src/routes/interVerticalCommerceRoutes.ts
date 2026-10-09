@@ -194,6 +194,52 @@ async function patchOrder(tx: any, id: string, patch: Record<string, any>): Prom
   return rows[0];
 }
 function tenantCtx(base: Ctx, tenantId: string, branchId: string, userId: string): Ctx { return { ...base, tenantId, branchId, userId } as Ctx; }
+
+type BranchTaxAuthority = {
+  vatEnabled: boolean;
+  taxCode: string;
+  taxName: string;
+  config: { ratePct: number; isInclusive: boolean };
+};
+
+async function resolveBranchTaxAuthority(tx: any, ctx: Ctx): Promise<BranchTaxAuthority> {
+  const settings = await tx.setting.findMany({
+    where: { tenantId: ctx.tenantId, branchId: ctx.branchId, scope: "BRANCH", key: "tax.config", isActive: true },
+    orderBy: { updatedAt: "desc" }, take: 1,
+  });
+  const value = (settings[0]?.value || {}) as any;
+  const vatEnabled = Boolean(value.vatEnabled);
+  const taxCode = String(value.taxCode || "VAT").trim().toUpperCase();
+  const taxName = String(value.taxName || "VAT");
+  let tax: any = null;
+  if (vatEnabled) {
+    const taxId = typeof value.taxId === "string" ? value.taxId : "";
+    tax = taxId ? await tx.tax.findFirst({
+      where: { id: taxId, tenantId: ctx.tenantId, branchId: ctx.branchId, isActive: true },
+    }) : null;
+    if (!tax) tax = await tx.tax.findFirst({
+      where: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode, isActive: true },
+    });
+    if (!tax) {
+      const rate = Number(value.vatRatePercent ?? 0);
+      if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw new Error("SALE_TAX_RATE_INVALID");
+      tax = await tx.tax.upsert({
+        where: { tenantId_branchId_code: { tenantId: ctx.tenantId, branchId: ctx.branchId, code: taxCode } },
+        create: {
+          id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, name: taxName, code: taxCode, rate,
+          isInclusive: value.taxInclusivePricing !== false, isActive: true,
+        },
+        update: { name: taxName, rate, isInclusive: value.taxInclusivePricing !== false, isActive: true },
+      });
+    }
+  }
+  const ratePct = vatEnabled && tax ? Number(tax.rate) : 0;
+  if (!Number.isFinite(ratePct) || ratePct < 0 || ratePct > 100) throw new Error("SALE_TAX_RATE_INVALID");
+  return {
+    vatEnabled, taxCode, taxName,
+    config: { ratePct, isInclusive: tax ? Boolean(tax.isInclusive) : true },
+  };
+}
 async function addFinanceDoc(tx: any, order: any, ctx: Ctx, side: "BUYER" | "SELLER", type: string, documentId: string, amount: number): Promise<void> {
   await tx.$executeRawUnsafe(
     "INSERT INTO inter_vertical_finance_documents (id,order_id,tenant_id,branch_id,side,document_type,document_id,amount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
