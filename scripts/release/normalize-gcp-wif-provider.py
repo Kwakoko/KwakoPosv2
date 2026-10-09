@@ -29,12 +29,16 @@ def normalize(value: str) -> str:
     provider = re.sub(r"^iam\.googleapis\.com/", "", provider, flags=re.IGNORECASE)
     provider = provider.rstrip("/").strip()
 
+    provider = provider.split("#", 1)[0].split("?", 1)[0].strip()
+    provider = re.sub(r"^/?(?:v1beta1?|v1)/", "", provider, flags=re.IGNORECASE)
+    provider = provider.lstrip("/").rstrip("/").strip()
+
     if not RESOURCE_PATTERN.fullmatch(provider):
         raise ValueError(
             "GCP_WORKLOAD_IDENTITY_PROVIDER must be a full "
             "projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> "
             "resource name or its iam.googleapis.com URL form; pool/provider IDs must be "
-            "4–32 lowercase letters, digits, or hyphens, start with a letter, and end alphanumerically"
+            "4-32 lowercase letters, digits, or hyphens, start with a letter, and end alphanumerically"
         )
 
     return provider
