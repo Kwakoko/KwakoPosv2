@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ArrowDownToLine, ArrowLeftRight, Building2, CheckCircle2, CircleDollarSign, Network, Package, RefreshCw, Send, Truck, XCircle } from "lucide-react";
 import { useBranch, useTenant } from "../context/KwakoPosContexts.js";
 import { apiFetch, safeUUID } from "../services/applicationApiService.js";
@@ -48,9 +48,6 @@ export const InterVerticalCommercePage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const buyerConnections = useMemo(() => connections.filter((x) => x.buyerTenantId === currentTenantId && x.buyerBranchId === currentBranchId), [connections, currentTenantId, currentBranchId]);
-  const sellerInvitations = useMemo(() => connections.filter((x) => x.sellerTenantId === currentTenantId && x.status === "PENDING"), [connections, currentTenantId]);
-
   const reload = useCallback(async () => {
     const [c, o] = await Promise.all([
       get<Connection[]>(endpoint + "/connections"),
@@ -58,10 +55,7 @@ export const InterVerticalCommercePage: React.FC = () => {
     ]);
     setConnections(c || []);
     setOrders(o || []);
-    if (activeDetails) {
-      try { setActiveDetails(await get<Order>(endpoint + "/orders/" + activeDetails.id)); } catch { /* the list stays useful if one detail request fails */ }
-    }
-  }, [activeDetails]);
+  }, []);
 
   useEffect(() => { void reload().catch((e) => setErrorMessage(String(e?.message || e))); }, [reload]);
 
