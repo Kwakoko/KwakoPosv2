@@ -16,7 +16,7 @@ type OrderItem = {
 };
 type PaymentRequest = { id: string; amount: number; paymentMethod: string; provider?: string; providerReference?: string; notes?: string; status: string; createdAt?: string };
 type Order = {
-  id: string; orderNumber: string; connectionId: string; buyerTenantId: string; buyerBranchId: string;
+  id: string; orderNumber: string; connectionId: string; buyerPurchaseOrderId?: string | null; buyerTenantId: string; buyerBranchId: string;
   sellerTenantId: string; sellerBranchId: string; status: string; financeStatus: string; currency: string;
   items: OrderItem[]; totalAmount: number; settledAmount: number; notes?: string; logistics?: Record<string, any>;
   payments?: PaymentRequest[]; events?: Array<{action: string; fromStatus?: string; toStatus?: string; createdAt: string}>;
@@ -234,6 +234,7 @@ export const InterVerticalCommercePage: React.FC = () => {
                   <strong>{order.orderNumber}</strong>
                   <div className="v2-text-xs v2-text-muted v2-mt-1">{buyer ? "Buying from" : "Selling to"} tenant {buyer ? order.sellerTenantId : order.buyerTenantId}</div>
                   <div className="v2-text-sm v2-mt-1">{order.status} · Finance: {order.financeStatus || "OPEN"} · {money(order.totalAmount, order.currency)}</div>
+                  {buyer && order.buyerPurchaseOrderId && <div className="v2-text-xs v2-text-muted v2-mt-1">Retail Purchase Order · {order.buyerPurchaseOrderId}</div>}
                   <div className="v2-text-xs v2-text-muted v2-mt-1">{order.items.length} lines · {order.items.reduce((n, x) => n + x.dispatchedQuantity, 0)} dispatched · {order.items.reduce((n, x) => n + x.receivedQuantity, 0)} received</div>
                 </div>
                 <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void openDetails(order)}><RefreshCw size={13} /> Details</button>
