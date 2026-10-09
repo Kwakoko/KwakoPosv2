@@ -139,6 +139,11 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **core**: Merge pull request #168 from Kwakoko/fix/release-gcp-wif-normalization-closed-loop
+- **release**: refresh backdated lock for certified WIF workflow
+- **release**: refresh dashboard lock for certified WIF workflow
+- **release**: refresh navigation lock for certified WIF workflow
+- **release**: v2.13.0
 - **core**: Merge pull request #163 from Kwakoko/release/v2.13.0-authoritative
 - **release**: bind 2.13.0 candidate to exact main SHA
 - **release**: normalize Google Workload Identity Provider
@@ -775,6 +780,9 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **release**: simplify WIF normalization shell safely
+- **release**: correct WIF normalization shell syntax
+- **release**: harden GCP WIF provider normalization
 - **release**: keep source candidate manifest pending
 - **release**: keep candidate manifest pending until certification
 - **release**: refresh stale open SemVer release PRs
