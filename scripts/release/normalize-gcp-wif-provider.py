@@ -102,10 +102,46 @@ def normalize(value: str) -> str:
             "has_providers": "providers" in segments,
         }
         shape = ", ".join(f"{name}={str(present).lower()}" for name, present in markers.items())
+        first_segment = segments[0] if segments else ""
+        first_candidate = _strip_boundary_format_marks(first_segment)
+        first_has_project_word = "projects" in first_segment.casefold()
+        first_has_non_ascii = any(ord(character) > 127 for character in first_segment)
+        first_has_control = any(unicodedata.category(character).startswith("C") for character in first_segment)
+        first_has_colon = ":" in first_segment
+        first_has_equals = "=" in first_segment
+        first_has_jsonish_prefix = bool(re.match(r"^\s*[\{\[]", first_segment))
+        first_has_key_value_prefix = bool(re.match(r"^\s*[\w\"']+\s*[:=]", first_segment))
+        first_segment_category = (
+            "projects-with-wrapper" if first_has_project_word and first_candidate.casefold() != "projects"
+            else "canonical-projects" if first_candidate.casefold() == "projects"
+            else "jsonish-prefix" if first_has_jsonish_prefix
+            else "key-value-prefix" if first_has_key_value_prefix
+            else "non-ascii-or-control" if first_has_non_ascii or first_has_control
+            else "punctuation-prefix" if first_has_colon or first_has_equals
+            else "other"
+        )
+        keyword_positions = {
+            "projects": [i for i, segment in enumerate(segments) if _strip_boundary_format_marks(segment).casefold() == "projects"],
+            "locations": [i for i, segment in enumerate(segments) if _strip_boundary_format_marks(segment).casefold() == "locations"],
+            "global": [i for i, segment in enumerate(segments) if _strip_boundary_format_marks(segment).casefold() == "global"],
+            "workloadIdentityPools": [i for i, segment in enumerate(segments) if _strip_boundary_format_marks(segment).casefold() == "workloadidentitypools"],
+            "providers": [i for i, segment in enumerate(segments) if _strip_boundary_format_marks(segment).casefold() == "providers"],
+        }
+        position_summary = ";".join(
+            f"{keyword}={'/'.join(str(i) for i in positions) if positions else 'none'}"
+            for keyword, positions in keyword_positions.items()
+        )
+        safe_shape = (
+            f"first_segment_category={first_segment_category}, "
+            f"first_segment_length={len(first_segment)}, "
+            f"first_segment_non_ascii={str(first_has_non_ascii).lower()}, "
+            f"first_segment_control={str(first_has_control).lower()}, "
+            f"keyword_positions={position_summary}"
+        )
         raise ValueError(
             "provider path must use projects/<project-number>/locations/global/"
             "workloadIdentityPools/<pool-id>/providers/<provider-id>; "
-            f"safe_shape_diagnostic: segments={len(segments)}, {shape}; provider value omitted"
+            f"safe_shape_diagnostic: segments={len(segments)}, {shape}, {safe_shape}; provider value omitted"
         )
 
     project_number, pool_id, provider_id = match.groups()

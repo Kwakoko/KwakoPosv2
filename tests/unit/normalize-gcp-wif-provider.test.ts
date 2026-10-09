@@ -67,10 +67,13 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(() => run(canonical.replace("5provider", "5pro\u200bvider"))).toThrow();
   });
 
-  it("continues to fail closed on unrecognized resource prefixes without exposing the secret", () => {
+  it("continues to fail closed on unrecognized resource prefixes with only safe shape metadata", () => {
     const result = runFailure("unknown-prefix/" + canonical);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("safe_shape_diagnostic");
+    expect(result.stderr).toContain("first_segment_category=");
+    expect(result.stderr).toContain("keyword_positions=");
+    expect(result.stderr).not.toContain("unknown-prefix");
     expect(result.stderr).not.toContain("123456789012");
     expect(result.stderr).not.toContain("5provider");
   });
