@@ -95,6 +95,7 @@ export const InterVerticalCommercePage: React.FC = () => {
       buyerVariantId: buyerMappings[x.sellerVariantId]?.trim() || undefined,
     }));
     if (!catalogConnection || !lines.length) throw new Error("Choose at least one product and enter a quantity.");
+    if (lines.some((line) => !line.buyerVariantId)) throw new Error("Map every wholesaler SKU to an existing Retail inventory variant before submitting the order.");
     await post(endpoint + "/orders", { connectionId: catalogConnection, notes: "Created from Inter-Vertical Commerce", currency: "TZS", idempotencyKey: key("order"), items: lines });
     setCatalog([]); setCatalogConnection("");
   });
@@ -209,7 +210,7 @@ export const InterVerticalCommercePage: React.FC = () => {
               </div>
               <div className="v2-grid v2-grid-2 v2-gap-2 v2-mt-2">
                 <label className="v2-text-xs">Order quantity<input className="v2-input v2-mt-1" type="number" min="0" step="0.01" value={quantities[item.sellerVariantId] || ""} onChange={(e) => setQuantities((prev) => ({ ...prev, [item.sellerVariantId]: e.target.value }))} /></label>
-                <label className="v2-text-xs">Retail variant ID (optional)<input className="v2-input v2-mt-1" value={buyerMappings[item.sellerVariantId] || ""} onChange={(e) => setBuyerMappings((prev) => ({ ...prev, [item.sellerVariantId]: e.target.value }))} placeholder="Auto-match by SKU" /></label>
+                <label className="v2-text-xs">Retail variant ID<input className="v2-input v2-mt-1" value={buyerMappings[item.sellerVariantId] || ""} onChange={(e) => setBuyerMappings((prev) => ({ ...prev, [item.sellerVariantId]: e.target.value }))} placeholder="Auto-match by SKU" /></label>
               </div>
             </div>)}
           </div>
