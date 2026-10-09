@@ -442,12 +442,12 @@ async function buyerReceipt(
     if (!updated.length) throw new Error("SHIPMENT_RECEIPT_QUANTITY_MISMATCH");
   }
   const updatedShipments = await tx.$queryRawUnsafe(
-    "UPDATE supply_chain_shipments AS s SET status=CASE WHEN NOT EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received<l.quantity_shipped) THEN 'RECEIVED' WHEN EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received>0) THEN 'RECEIVING' ELSE s.status END, updated_at=now() WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.gateway_order_id=$3 RETURNING id,status",
-    ctx.tenantId, ctx.branchId, order.id,
+    "UPDATE supply_chain_shipments AS s SET status=CASE WHEN NOT EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received<l.quantity_shipped) THEN 'RECEIVED' WHEN EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received>0) THEN 'RECEIVING' ELSE s.status END, updated_at=now() WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.gateway_order_id=$3 AND s.id=ANY($4::text[]) RETURNING id,status",
+    ctx.tenantId, ctx.branchId, order.id, shipmentIds,
   );
   await tx.$executeRawUnsafe(
-    "UPDATE supply_chain_shipments SET actual_arrival_date=COALESCE(actual_arrival_date,now()),updated_at=now() WHERE tenant_id=$1 AND branch_id=$2 AND gateway_order_id=$3 AND status IN ('RECEIVING','RECEIVED') AND actual_arrival_date IS NULL",
-    ctx.tenantId, ctx.branchId, order.id,
+    "UPDATE supply_chain_shipments SET actual_arrival_date=COALESCE(actual_arrival_date,now()),updated_at=now() WHERE tenant_id=$1 AND branch_id=$2 AND gateway_order_id=$3 AND id=ANY($4::text[]) AND status IN ('RECEIVING','RECEIVED') AND actual_arrival_date IS NULL",
+    ctx.tenantId, ctx.branchId, order.id, shipmentIds,
   );
   for (const shipment of updatedShipments) {
     const shipmentId = String(shipment.id);
