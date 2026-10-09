@@ -86,16 +86,27 @@ jobs:
           fi
 
           # A release candidate can contain post-release fixups (manifest,
-          # certification, lock refreshes) before it reaches main. If the
-          # current version is still the unreleased candidate and a matching
-          # chore(release) commit exists in recent ancestry, continue the
-          # exact-main certification path instead of creating another bot PR.
+          # certification, lock refreshes) before it reaches main. Use recent
+          # history as a fast-path, not as the source of truth.
           if [[ "$release_commit" == "false" ]]; then
-            if git log -n 40 --pretty=%s | grep -Eq "^chore\(release\): v${version}( |$)"; then
+            if git log -n 40 --pretty=%s | grep -Eq "^chore\\(release\\): v${version}( |$)"; then
               release_commit=true
             fi
           fi
 
+          # Resolve a pending release from authoritative manifest/tag state.
+          # This still converges if the original release commit has aged out
+          # of the bounded history window.
+          if [[ "$release_commit" == "false" ]]; then
+            candidate_state="$(npx tsx scripts/release/pending-unreleased-candidate.ts)"
+            if [[ "$candidate_state" == "PENDING_UNRELEASED_CANDIDATE" ]]; then
+              release_commit=true
+              echo "Pending unreleased candidate detected by manifest/tag state for $GITHUB_SHA"
+            elif [[ "$candidate_state" != "NOT_PENDING_UNRELEASED_CANDIDATE" ]]; then
+              echo "RELEASE_BLOCKED: unexpected pending candidate state: $candidate_state"
+              exit 1
+            fi
+          fi
           if [[ "$release_commit" == "true" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "release_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
