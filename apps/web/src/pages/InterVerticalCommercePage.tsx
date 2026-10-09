@@ -205,7 +205,7 @@ export const InterVerticalCommercePage: React.FC = () => {
             {catalog.map((item) => <div key={item.sellerVariantId} className="v2-border v2-rounded-lg v2-p-3">
               <div className="v2-flex v2-items-center v2-justify-between v2-gap-2">
                 <div><strong>{item.name}</strong><div className="v2-text-xs v2-text-muted">{item.sku} · {Math.round(item.available)} available</div></div>
-                <div className="v2-text-sm">{money(item.proposedUnitPrice)}</div>
+                <div className="v2-text-sm">Indicative {money(item.proposedUnitPrice)}</div>
               </div>
               <div className="v2-grid v2-grid-2 v2-gap-2 v2-mt-2">
                 <label className="v2-text-xs">Order quantity<input className="v2-input v2-mt-1" type="number" min="0" step="0.01" value={quantities[item.sellerVariantId] || ""} onChange={(e) => setQuantities((prev) => ({ ...prev, [item.sellerVariantId]: e.target.value }))} /></label>
@@ -239,9 +239,9 @@ export const InterVerticalCommercePage: React.FC = () => {
                 <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void openDetails(order)}><RefreshCw size={13} /> Details</button>
               </div>
               <div className="v2-flex v2-flex-wrap v2-gap-2 v2-mt-3">
-                {seller && order.status === "SUBMITTED" && <><button className="v2-btn v2-btn-primary v2-btn-sm" disabled={busy} onClick={() => void respondOrder(order, "ACCEPT")}><CheckCircle2 size={13} /> Accept at listed prices</button><button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void respondOrder(order, "REJECT")}><XCircle size={13} /> Reject</button></>}
+                {seller && order.status === "SUBMITTED" && <><button className="v2-btn v2-btn-primary v2-btn-sm" disabled={busy} onClick={() => void respondOrder(order, "ACCEPT")}><CheckCircle2 size={13} /> Accept using price rules</button><button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void respondOrder(order, "REJECT")}><XCircle size={13} /> Reject</button></>}
                 {buyer && ["SUBMITTED", "ACCEPTED"].includes(order.status) && <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void cancelOrder(order)}><XCircle size={13} /> Cancel</button>}
-                {seller && ["ACCEPTED", "PARTIALLY_DISPATCHED", "PARTIALLY_RECEIVED"].includes(order.status) && <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={busy} onClick={() => void dispatchOrder(order)}><Truck size={13} /> Dispatch remaining</button>}
+                {seller && ["ACCEPTED", "PARTIALLY_DISPATCHED", "PARTIALLY_RECEIVED", "IN_TRANSIT"].includes(order.status) && <button className="v2-btn v2-btn-primary v2-btn-sm" disabled={busy} onClick={() => void dispatchOrder(order)}><Truck size={13} /> Dispatch remaining</button>}
                 {seller && ["DISPATCHED", "PARTIALLY_DISPATCHED"].includes(order.status) && <button className="v2-btn v2-btn-secondary v2-btn-sm" disabled={busy} onClick={() => void markTransit(order)}><Truck size={13} /> Mark in transit</button>}
                 {seller && ["ACCEPTED", "PARTIALLY_DISPATCHED", "PARTIALLY_RECEIVED"].includes(order.status) && <input className="v2-input" style={{ maxWidth: 210 }} value={tracking[order.id] || ""} onChange={(e) => setTracking((prev) => ({ ...prev, [order.id]: e.target.value }))} placeholder="Carrier / tracking note" />}
               </div>
