@@ -31,13 +31,15 @@ def _strip_boundary_format_marks(value: str) -> str:
 
 
 def _canonicalize_resource_keyword(value: str, expected: str) -> str:
-    # Invisible Unicode format characters can be embedded inside a copied
-    # Google resource-type keyword. Remove them only from these fixed keyword
-    # segments. Project numbers, pool IDs, and provider IDs never use this
-    # helper, so their original bytes remain subject to strict validation.
+    # Provider resource-type keywords are fixed tokens, not identifiers.
+    # Normalize compatibility glyphs and strip invisible Unicode marks only
+    # in these keyword positions. Project number, pool ID, and provider ID
+    # segments never pass through this function and remain strictly validated.
+    candidate = unicodedata.normalize("NFKC", value)
     candidate = "".join(
-        character for character in value
-        if unicodedata.category(character) != "Cf"
+        character
+        for character in candidate
+        if unicodedata.category(character) not in {"Cc", "Cf", "Cs", "Mn", "Me", "Zs", "Zl", "Zp"}
     )
     candidate = _strip_boundary_format_marks(candidate)
     return expected if candidate.casefold() == expected.casefold() else value
