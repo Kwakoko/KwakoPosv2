@@ -12,7 +12,8 @@ import sys
 
 IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9-]{2,30}[a-z0-9]$")
 RESOURCE_LAYOUT = re.compile(
-    r"^projects/([^/]+)/locations/global/workloadIdentityPools/([^/]+)/providers/([^/]+)$"
+    r"^projects/([^/]+)/locations/global/workloadIdentityPools/([^/]+)/providers/([^/]+)$",
+    re.IGNORECASE,
 )
 
 
@@ -60,6 +61,16 @@ def normalize(value: str) -> str:
         provider = "/".join(segments)
 
     match = RESOURCE_LAYOUT.fullmatch(provider)
+    if match is not None:
+        # Canonicalize only fixed Google resource-type keywords. Identifier
+        # values remain byte-for-byte unchanged and are validated below.
+        project_number, pool_id, provider_id = match.groups()
+        provider = (
+            f"projects/{project_number}/locations/global/"
+            f"workloadIdentityPools/{pool_id}/providers/{provider_id}"
+        )
+        match = RESOURCE_LAYOUT.fullmatch(provider)
+
     if match is None:
         # Only shape metadata is logged. Never echo secret contents or IDs.
         segments = [segment for segment in provider.split("/") if segment]
