@@ -23,6 +23,10 @@ const journal = read("packages/domain/src/financialBridge.ts");
 const finance = read("packages/database/src/atomicCommercialFinance.ts");
 const migration = read("packages/database/prisma/migrations/202610090001_inter_vertical_commerce_gateway/migration.sql");
 const docs = read("docs/operations/INTER_VERTICAL_COMMERCE_GATEWAY.md");
+const pkg = read("package.json");
+const ci = read(".github/workflows/ci.yml");
+const candidate = read(".github/workflows/production-certification.yml");
+const exactMain = read(".github/workflows/production-release-exact-main.yml");
 
 for (const marker of [
   "async function resolveBranchTaxAuthority",
@@ -41,6 +45,8 @@ for (const marker of [
   "BUYER_VARIANT_BOUNDARY_OR_NOT_FOUND",
   "SHIPMENT_RECEIPT_QUANTITY_MISMATCH",
   "replayEvent(tx, c, b.idempotencyKey, id, \"ORDER_DISPATCHED\")",
+  'server.post("/api/v1/inter-vertical/orders/:id/dispatch"',
+  'server.post("/api/v1/inter-vertical/orders/:id/receive"',
   "IDEMPOTENCY_KEY_ALREADY_USED",
 ]) must(gateway, marker, "gateway tax, fiscalization, inventory, or idempotency authority");
 
@@ -79,8 +85,7 @@ for (const marker of [
   'server.get("/api/v1/supply-chain/shipments/:id"',
   'server.post("/api/v1/supply-chain/shipments"',
   'server.post("/api/v1/supply-chain/shipments/:id/status"',
-  'server.post("/api/v1/inter-vertical/orders/:id/dispatch"',
-  'server.post("/api/v1/inter-vertical/orders/:id/receive"',
+  "interVerticalCommerceRoutes(server);",
   "GATEWAY_SHIPMENT_MUST_BE_CREATED_BY_DISPATCH",
   "GATEWAY_SHIPMENT_STATUS_MUST_USE_ORDER_LIFECYCLE",
   "supplyShipmentRoleAllowed",
@@ -98,6 +103,11 @@ for (const marker of [
   "persisted inbound shipment",
   "/api/v1/supply-chain/shipments/:id/status",
 ]) must(docs, marker, "deployment and operational documentation");
+
+must(pkg, '"certify:inter-vertical-commerce-lock"', "certification command registration");
+for (const workflow of [ci, candidate, exactMain]) {
+  must(workflow, "npm run certify:inter-vertical-commerce-lock", "mandatory gateway production gate");
+}
 
 const exclusive = PricingTaxEngine.calculateTax(10_000, { ratePct: 18, isInclusive: false });
 if (exclusive.taxAmount !== 1_800 || exclusive.netAmount !== 10_000 || exclusive.grossAmount !== 11_800) {
