@@ -273,6 +273,10 @@ async function sellerInvoice(
   allocations: Array<{ item: Item; variant: any; allocation: DispatchAllocation }>;
 }> {
   const now = new Date();
+  await tx.$queryRawUnsafe(
+    'SELECT id FROM customers WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 FOR UPDATE',
+    order.seller_customer_id, ctx.tenantId, ctx.branchId,
+  );
   const customer = await tx.customer.findFirst({
     where: { id: order.seller_customer_id, tenantId: ctx.tenantId, branchId: ctx.branchId },
   });
@@ -366,8 +370,9 @@ async function sellerInvoice(
           lineTotal: x.calculated.lineTotal,
         })),
         subtotal: netRevenue, taxRatePct: tax.config.ratePct, taxInclusive: tax.config.isInclusive,
-        taxTotal: totals.taxTotal, grandTotal: totals.grandTotal, paidAmount: 0,
-        paymentMethod: "CREDIT", paymentStatus: "UNPAID",
+        taxTotal: totals.taxTotal, grandTotal: totals.grandTotal,
+        // TRA expects the invoiced gross for an invoice/credit tender; this payload is fiscal only and does not settle AP/AR.
+        paidAmount: Number(totals.grandTotal), paymentMethod: "CREDIT", paymentStatus: "UNPAID",
       },
     });
     fiscalizationId = fiscal.id; fiscalizationState = fiscal.state;
@@ -701,6 +706,10 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           item.acceptedQuantity = quantity; item.unitPrice = price; total += Number(acceptedLine.lineTotal);
         }
         if ((b.items || []).some((x) => !items.some((i) => i.lineId === x.lineId))) throw new Error("ORDER_LINE_NOT_FOUND");
+        await tx.$queryRawUnsafe(
+          'SELECT id FROM customers WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 FOR UPDATE',
+          o.seller_customer_id, c.tenantId, c.branchId,
+        );
         const customer = await tx.customer.findFirst({ where: { id: o.seller_customer_id, tenantId: c.tenantId, branchId: c.branchId } });
         if (!customer) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
         if (Number(customer.currentBalance || 0) + total > Number(customer.creditLimit || 0) + 0.005) throw new Error("SELLER_CREDIT_LIMIT_EXCEEDED");
