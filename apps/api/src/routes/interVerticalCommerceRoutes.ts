@@ -282,6 +282,13 @@ async function sellerInvoice(
   });
   if (!customer) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
   const tax = await resolveBranchTaxAuthority(tx, ctx);
+  const vfdConfig = await tx.traVfdConfig.findUnique({
+    where: { tenantId_branchId: { tenantId: ctx.tenantId, branchId: ctx.branchId } },
+    select: { enabled: true },
+  });
+  if (tax.config.ratePct > 0 && !vfdConfig?.enabled) {
+    throw new Error("TRA_VFD_REQUIRED_FOR_TAXABLE_B2B_INVOICE");
+  }
   const lineBuilds = dispatch.map((x) => ({
     ...x,
     calculated: PricingTaxEngine.calculateLineItem({
@@ -348,10 +355,6 @@ async function sellerInvoice(
   await addFinanceDoc(tx, order, ctx, "SELLER", "CUSTOMER_INVOICE", invoice.id, Number(totals.grandTotal));
 
   let fiscalizationId: string | null = null, fiscalizationState = "DISABLED";
-  const vfdConfig = await tx.traVfdConfig.findUnique({
-    where: { tenantId_branchId: { tenantId: ctx.tenantId, branchId: ctx.branchId } },
-    select: { enabled: true },
-  });
   if (vfdConfig?.enabled) {
     const fiscal = await globalTraVfdService.enqueueInTransaction(tx, ctx, {
       transactionId: invoice.id,
@@ -885,7 +888,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         if (await replayEvent(tx, c, b.idempotencyKey, id, "ORDER_IN_TRANSIT")) return o;
-        if (!["DISPATCHED","PARTIALLY_DISPATCHED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_TRANSIT:" + o.status);
+        if (!["DISPATCHED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_TRANSIT:" + o.status);
         const eta = b.eta ? new Date(b.eta) : null;
         const shipmentRows = await tx.$queryRawUnsafe(
           "UPDATE supply_chain_shipments SET status='IN_TRANSIT',carrier_name=COALESCE(NULLIF($4,''),carrier_name),tracking_number=COALESCE(NULLIF($5,''),tracking_number),carrier_eta=COALESCE($6,carrier_eta),updated_at=now() WHERE tenant_id=$1 AND branch_id=$2 AND gateway_order_id=$3 AND status='CONFIRMED' RETURNING id",
