@@ -798,6 +798,14 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           o.buyer_tenant_id, o.buyer_branch_id, o.id, b.carrierName || "", b.trackingNumber || "", eta,
         );
         if (!shipmentRows.length) throw new Error("SHIPMENT_NOT_READY_FOR_TRANSIT");
+        for (const shipment of shipmentRows) {
+          await tx.$executeRawUnsafe(
+            "INSERT INTO supply_chain_shipment_events (id,shipment_id,tenant_id,branch_id,actor_user_id,action,from_status,to_status,idempotency_key,payload) VALUES ($1,$2,$3,$4,$5,'SHIPMENT_IN_TRANSIT','CONFIRMED','IN_TRANSIT',$6,$7::jsonb)",
+            randomUUID(), shipment.id, o.buyer_tenant_id, o.buyer_branch_id, c.userId,
+            "gateway-shipment-transit:" + shipment.id + ":" + b.idempotencyKey,
+            JSON.stringify({ carrierName: b.carrierName, trackingNumber: b.trackingNumber, carrierEta: b.eta || null }),
+          );
+        }
         const l = { ...(o.logistics || {}), inTransitAt: new Date().toISOString(),
           shipmentIdsInTransit: shipmentRows.map((x: any) => x.id) };
         for (const k of ["carrierName","trackingNumber","eta"] as const) if (b[k] !== undefined) (l as any)[k] = b[k];
