@@ -79,7 +79,7 @@ jobs:
             if [[ "$(echo "$parents" | awk '{print NF-1}')" -ge 2 ]]; then
               release_parent="$(echo "$parents" | awk '{print $3}')"
               release_subject="$(git log -1 --pretty=%s "$release_parent")"
-              if [[ "$release_subject" == "chore(release): v${version}" ]]; then
+              if [[ "$release_subject" == "chore(release): v${version}" || "$release_subject" == "chore(release): v${version} "* ]]; then
                 release_commit=true
               fi
             fi

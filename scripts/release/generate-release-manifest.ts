@@ -6,7 +6,7 @@ import * as path from "path";
 export interface ReleaseManifest {
   version: string;
   tag: string;
-  gitSha: string;
+  gitSha: string | null;
   containerDigest: string | null;
   cloudRunRevision: string | null;
   environment: string;
@@ -17,7 +17,7 @@ export interface ReleaseManifest {
     platform: string;
     posCapability: string;
   };
-  certification: "PASS" | "FAIL";
+  certification: "PASS" | "PENDING" | "FAIL";
   compatibility: {
     databaseSchemaVersion: number;
     syncProtocolVersion: number;
@@ -30,9 +30,9 @@ export interface ReleaseManifest {
 
 export function generateReleaseManifest(options?: {
   version?: string;
-  certification?: "PASS" | "FAIL";
+  certification?: "PASS" | "PENDING" | "FAIL";
   evidencePath?: string;
-  gitSha?: string;
+  gitSha?: string | null;
   containerDigest?: string | null;
   cloudRunRevision?: string | null;
   environment?: string;
@@ -42,14 +42,21 @@ export function generateReleaseManifest(options?: {
   const identity = getReleaseIdentity(config);
   const targetVersion = options?.version || identity.appVersion;
   if (!targetVersion) throw new Error("RELEASE_BLOCKED: application version is missing");
-  const gitSha = options?.gitSha || identity.gitSha;
-  if (!/^[0-9a-f]{40}$/i.test(gitSha)) throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
   const targetTag = `v${targetVersion}`;
-  const certification = options?.certification || "FAIL";
+  const certification = options?.certification ?? "FAIL";
   const containerDigest = options?.containerDigest ?? identity.containerDigest ?? null;
   const cloudRunRevision = options?.cloudRunRevision ?? identity.cloudRunRevision ?? null;
   const environment = options?.environment || identity.environment || "release-candidate";
   const releaseChannel = options?.releaseChannel || identity.releaseChannel || "stable";
+  const hasExplicitGitSha = Object.prototype.hasOwnProperty.call(options || {}, "gitSha");
+  const gitSha = hasExplicitGitSha ? (options?.gitSha ?? null) : (identity.gitSha || null);
+  const pendingDevelopmentSource = certification === "PENDING" && environment === "development" && releaseChannel === "development";
+  if (gitSha !== null && !/^[0-9a-f]{40}$/i.test(gitSha)) {
+    throw new Error(`RELEASE_BLOCKED: invalid Git SHA: ${gitSha}`);
+  }
+  if (gitSha === null && !pendingDevelopmentSource) {
+    throw new Error("RELEASE_BLOCKED: a Git SHA is mandatory except for a pending development source manifest.");
+  }
   if (certification === "PASS") {
     if (!/^sha256:[0-9a-f]{64}$/i.test(containerDigest || "")) {
       throw new Error("RELEASE_BLOCKED: PASS certification requires a real immutable CONTAINER_DIGEST.");
@@ -105,9 +112,11 @@ if (process.argv[1]?.endsWith("generate-release-manifest.ts") || process.argv[1]
       case "--version":
         opts.version = args[++i];
         break;
-      case "--gitSha":
-        opts.gitSha = args[++i];
+      case "--gitSha": {
+        const gitSha = args[++i];
+        opts.gitSha = gitSha === "null" ? null : gitSha;
         break;
+      }
       case "--containerDigest":
         opts.containerDigest = args[++i];
         break;
@@ -120,9 +129,14 @@ if (process.argv[1]?.endsWith("generate-release-manifest.ts") || process.argv[1]
       case "--releaseChannel":
         opts.releaseChannel = args[++i];
         break;
-      case "--certification":
-        opts.certification = args[++i] === "FAIL" ? "FAIL" : "PASS";
+      case "--certification": {
+        const certification = args[++i];
+        if (certification !== "PASS" && certification !== "PENDING" && certification !== "FAIL") {
+          throw new Error(`RELEASE_BLOCKED: invalid certification state: ${certification}`);
+        }
+        opts.certification = certification;
         break;
+      }
       case "--evidencePath":
         opts.evidencePath = args[++i];
         break;
