@@ -377,6 +377,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       if (items.some((item) => !item.buyerVariantId)) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED: map every wholesaler SKU to a Retail inventory variant before submitting the order");
       if (new Set(items.map((item) => item.buyerVariantId)).size !== items.length) throw new Error("DUPLICATE_BUYER_VARIANT_MAPPING");
       for (const item of items) {
+        if (!item.buyerVariantId) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED: map every wholesaler SKU to a Retail inventory variant before submitting the order");
         const local = await db.productVariant.findFirst({ where: { id: item.buyerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true }, select: { id: true } });
         if (!local) throw new Error("BUYER_VARIANT_BOUNDARY_OR_NOT_FOUND");
       }
@@ -389,7 +390,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           supplierId: link.buyer_supplier_id, status: "DRAFT", totalAmount: proposedTotal,
           notes: "Inter-Vertical Gateway order " + number, createdById: c.userId,
           items: { create: items.map((item) => ({
-            id: randomUUID(), variantId: item.buyerVariantId, quantityOrdered: item.requestedQuantity,
+            id: randomUUID(), variantId: item.buyerVariantId!, quantityOrdered: item.requestedQuantity,
             quantityReceived: 0, unitCost: item.proposedUnitPrice, totalCost: item.requestedQuantity * item.proposedUnitPrice,
           })) },
         } });
