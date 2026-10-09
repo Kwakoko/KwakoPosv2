@@ -128,9 +128,23 @@ jobs:
           RELEASE_BRANCH="release/v${VERSION}"
           OPEN_PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$RELEASE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
           if [[ -n "$OPEN_PR" ]]; then
-            echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
-            echo "release_pr=$OPEN_PR" >> "$GITHUB_OUTPUT"
-            echo "Release PR #$OPEN_PR already exists for $RELEASE_BRANCH; leaving it untouched."
+            REMOTE_RELEASE_SHA="$(git ls-remote --heads origin "$RELEASE_BRANCH" | awk '{print $1}')"
+            [[ -n "$REMOTE_RELEASE_SHA" ]] || { echo "RELEASE_BLOCKED: PR #$OPEN_PR exists but release branch $RELEASE_BRANCH is missing"; exit 1; }
+            git fetch origin "$RELEASE_BRANCH"
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$REMOTE_RELEASE_SHA"; then
+              echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+              echo "release_pr=$OPEN_PR" >> "$GITHUB_OUTPUT"
+              echo "Release PR #$OPEN_PR already contains current main SHA $GITHUB_SHA; leaving it unchanged."
+            else
+              echo "STALE_RELEASE_PR: refreshing PR #$OPEN_PR ($RELEASE_BRANCH) onto current main SHA $GITHUB_SHA"
+              git switch -C "$RELEASE_BRANCH" "$GITHUB_SHA"
+              git add -A
+              git commit --allow-empty -m "chore(release): v${VERSION}"
+              git push --force-with-lease=refs/heads/"$RELEASE_BRANCH":"$REMOTE_RELEASE_SHA" origin "HEAD:$RELEASE_BRANCH"
+              echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+              echo "release_pr=$OPEN_PR" >> "$GITHUB_OUTPUT"
+              echo "Release PR #$OPEN_PR refreshed from current main SHA $GITHUB_SHA with release commit $(git rev-parse HEAD)."
+            fi
             exit 0
           fi
           # A stale release branch without an open PR is recoverable.
