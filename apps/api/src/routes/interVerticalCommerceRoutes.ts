@@ -797,7 +797,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const rows = await orderFor(tx, id, c, "BUYER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
         if (!["DISPATCHED","PARTIALLY_DISPATCHED","IN_TRANSIT","PARTIALLY_RECEIVED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_RECEIPT:" + o.status);
-        const items = itemsOf(o), receives: Array<{ item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string }> = [];
+        const items = itemsOf(o), receives: ReceivePortion[] = [];
         if (new Set(b.items.map((x) => x.lineId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
         for (const x of b.items) {
           const item = items.find((i) => i.lineId === x.lineId); if (!item) throw new Error("ORDER_LINE_NOT_FOUND");
@@ -806,7 +806,33 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           if (!item.buyerVariantId) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED: map the wholesaler SKU to a Retail inventory variant before receiving");
           const variant = await tx.productVariant.findFirst({ where: { id: item.buyerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true } });
           if (!variant) throw new Error("BUYER_VARIANT_BOUNDARY_OR_NOT_FOUND");
-          item.receivedQuantity += x.quantity; receives.push({ item, quantity: x.quantity, variant, batchNumber: x.batchNumber, expiryDate: x.expiryDate });
+          let remaining = x.quantity;
+          for (const a of item.dispatchAllocations || []) {
+            if (remaining <= 0.000001) break;
+            const outstanding = Number(a.quantity) - Number(a.receivedQuantity);
+            if (outstanding <= 0.000001) continue;
+            const quantity = Math.min(remaining, outstanding);
+            const closesAllocation = quantity >= outstanding - 0.000001;
+            const grossAmount = closesAllocation
+              ? Number(a.grossAmount) - Number(a.receivedGrossAmount)
+              : Math.round((Number(a.grossAmount) * quantity / Number(a.quantity)) * 100) / 100;
+            const taxAmount = closesAllocation
+              ? Number(a.taxAmount) - Number(a.receivedTaxAmount)
+              : Math.round((Number(a.taxAmount) * quantity / Number(a.quantity)) * 100) / 100;
+            const netAmount = Math.round((grossAmount - taxAmount) * 100) / 100;
+            a.receivedQuantity = Number(a.receivedQuantity) + quantity;
+            a.receivedGrossAmount = Math.round((Number(a.receivedGrossAmount) + grossAmount) * 100) / 100;
+            a.receivedTaxAmount = Math.round((Number(a.receivedTaxAmount) + taxAmount) * 100) / 100;
+            a.receivedNetAmount = Math.round((Number(a.receivedNetAmount) + netAmount) * 100) / 100;
+            receives.push({
+              item, quantity, variant, batchNumber: x.batchNumber, expiryDate: x.expiryDate,
+              shipmentId: a.shipmentId, unitPrice: a.unitPrice, taxRatePct: a.taxRatePct,
+              taxInclusive: a.taxInclusive, netAmount, taxAmount, grossAmount,
+            });
+            remaining -= quantity;
+          }
+          if (remaining > 0.000001) throw new Error("DISPATCH_TAX_SNAPSHOT_MISSING: shipment lines do not cover the received quantity");
+          item.receivedQuantity += x.quantity;
         }
         const links = await tx.$queryRawUnsafe("SELECT buyer_supplier_id FROM inter_vertical_connections WHERE id=$1 AND buyer_tenant_id=$2 AND buyer_branch_id=$3 AND seller_tenant_id=$4 AND seller_branch_id=$5 AND status='ACTIVE'", o.connection_id, c.tenantId, c.branchId, o.seller_tenant_id, o.seller_branch_id);
         if (!links.length || !links[0].buyer_supplier_id) throw new Error("ACTIVE_CONNECTION_NOT_FOUND");
@@ -830,7 +856,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         const allOut = items.every((x) => x.dispatchedQuantity >= Number(x.acceptedQuantity || 0));
         const next = allIn && allOut ? "RECEIVED" : "PARTIALLY_RECEIVED";
         const updated = await patchOrder(tx, id, { status: next, items, logistics: { ...(o.logistics || {}), lastReceiptAt: new Date().toISOString() } });
-        await event(tx, id, c, "ORDER_RECEIVED", o.status, next, b.idempotencyKey, { receiptId: receipt.receipt.id, amount: receipt.amount, items: receives.map((x) => ({ lineId: x.item.lineId, quantity: x.quantity, buyerVariantId: x.variant.id })) });
+        await event(tx, id, c, "ORDER_RECEIVED", o.status, next, b.idempotencyKey, { receiptId: receipt.receipt.id, supplierInvoiceId: receipt.supplierInvoice.id, amount: receipt.amount, taxAmount: receipt.taxAmount, shipmentIds: [...new Set(receives.map((x) => x.shipmentId))], items: receives.map((x) => ({ lineId: x.item.lineId, quantity: x.quantity, buyerVariantId: x.variant.id, shipmentId: x.shipmentId, grossAmount: x.grossAmount, taxAmount: x.taxAmount })) });
         return patchOrder(tx, id, { finance_status: await financeStatus(tx, updated, Number(updated.settled_amount || 0)) });
       });
       return reply.send({ success: true, data: orderDto(row) });
