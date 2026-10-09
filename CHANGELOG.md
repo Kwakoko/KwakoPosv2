@@ -4,9 +4,16 @@ All notable changes to KwakoPos will be documented in this file.
 
 ---
 
-## [2.13.0] - 2026-10-08
+## [2.13.0] - 2026-10-09
 
 ### ✨ New Features
+- **sync**: add platform-level Offline Sync Production Lock
+- **support**: close Support Production Lock v1
+- **super-admin**: expose live tenant directory in control tower
+- **super-admin**: add platform audit migration
+- **super-admin**: add independent production lock
+- **super-admin**: add live platform control-plane UI
+- **administration**: apply production Administration control plane
 - **tax**: apply Tax and Fiscalization Production Lock v1
 - **bundle**: carry bundle definition version in sale contract
 - **receipts**: expose print audit authority
@@ -132,21 +139,70 @@ All notable changes to KwakoPos will be documented in this file.
 - **auth**: add Argon2id password hashing
 
 ### ⚡ Improvements & Enhancements
+- **release**: normalize Google Workload Identity Provider
+- **platform**: apply C01-C11 Platform Services Production Lock
+- **release**: v2.13.0 final security certification repair
+- **release**: v2.13.0 production lock convergence
+- **core**: align Super Admin context and certification expectations
+- **core**: align support control tower with strict platform-role authorization
+- **super-admin**: require explicit production-lock gate wiring
+- **core**: lock tenant-to-platform privilege boundary
+- **core**: close tenant-to-platform privilege escalation gap
+- **core**: align Super Admin certification with production-backed 15-pillar authority
+- **core**: remove mock WebAuthn authorization assertion
+- **core**: harden Super Admin production lock evidence
+- **core**: gate Super Admin production lock in exact-main certification
+- **core**: gate Super Admin production lock in candidate certification
+- **core**: gate Super Admin production lock
+- **super-admin**: enforce privileged platform boundaries
+- **super-admin**: require independent lock in Foundation gate
+- **super-admin**: register independent production lock
+- **super-admin**: add production lock regression
+- **core**: apply promotions and pricing production lock
+- **main**: reconcile promotions pricing production lock with latest main
+- **main**: refresh sales production lock hashes after pricing reconciliation
+- **main**: refresh navigation-production-lock.ts certification hashes
+- **main**: refresh dashboard-analytics-production-lock.ts certification hashes
+- **main**: refresh backdated-production-lock.ts certification hashes
+- **main**: preserve current finance engine while applying authoritative pricing resolution
+- **main**: preserve latest API routes while applying pricing authority lock
+- **main**: rebase index.ts with pricing lock changes
+- **main**: rebase index.ts with pricing lock changes
+- **main**: rebase package.json with pricing lock changes
+- **main**: rebase production-release-exact-main.yml with pricing lock changes
+- **main**: rebase production-certification.yml with pricing lock changes
+- **main**: rebase ci.yml with pricing lock changes
+- **pricing**: retrigger production lock certification after final pricing fix
+- **pricing**: refresh sales lock hash after pricing authority boundary fix
+- **core**: Merge pull request #123 from Kwakoko/release/v2.13.0
+- **core**: Merge branch 'main' into release/v2.13.0
+- **core**: Merge Product Bundles / Kits Production Lock
+- **backdated**: align production lock dependency hashes
+- **cash**: align contract lock hash
+- **main**: sync bundle closure with latest production baseline
+- **sales**: align bundle closure test lock hash
+- **bundle**: normalize production closure suite
+- **main**: preserve Tax lock with bundle production closure
 - **tax**: enforce POS tax authority in production lock
 - **tax**: refresh backdated-production-lock.ts PosPage lock hash
 - **tax**: refresh sales-production-lock.ts PosPage lock hash
 - **bundle**: refresh inventory lock for bundle stock and sync
 - **bundle**: fix async bundle production invariant
+- **pricing**: refresh backdated-production-lock.ts lock hashes
+- **pricing**: refresh dashboard-analytics-production-lock.ts lock hashes
 - **bundle**: refresh authoritative sale hash after offline check hardening
 - **bundle**: update CASH-MANAGEMENT lock for production repository hash
 - **bundle**: update DASHBOARD-ANALYTICS lock for production repository hash
 - **bundle**: refresh bundle closure test lock hash
 - **bundle**: cover component scope and bundle COGS snapshot
 - **bundle**: refresh offline bundle production lock
+- **pricing**: refresh navigation lock hashes after pricing release-gate wiring
 - **bundle**: lock sync-side bundle definition validation hashes
 - **bundle**: export bundle resolver from database package
 - **bundle**: extend sales production lock to bundles and kits
 - **bundle**: lock availability expansion and refund safety invariants
+- **release**: v2.13.0
+- **pricing**: preserve latest sales lock while binding pricing changes
 - **release**: v2.13.0 (#96)
 - **ci**: refresh backdated lock workflow hashes
 - **ci**: refresh shared production lock hashes
@@ -717,8 +773,61 @@ All notable changes to KwakoPos will be documented in this file.
 - **security**: document Super Admin secret inputs
 
 ### 🐛 Bug Fixes
+- **release**: refresh stale open SemVer release PRs
+- **super-admin**: apply independent production lock
+- **cash-lock**: refresh schema fingerprint after Super Admin security migration
+- **production-locks**: refresh shared server fingerprint after Super Admin hardening
+- **production-locks**: refresh shared server fingerprint after Super Admin hardening
+- **super-admin**: import audit event UUID generator
+- **super-admin**: wire step-up guard into platform routes
+- **super-admin**: type tenant directory search filter
+- **production-locks**: refresh backdated-production-lock.ts fingerprints
+- **production-locks**: refresh dashboard-analytics-production-lock.ts fingerprints
+- **production-locks**: refresh shared fingerprints after Super Admin gate
+- **production-locks**: refresh shared fingerprints after Super Admin gate
+- **dashboard-lock**: refresh fingerprints after Super Admin gate wiring
+- **navigation-lock**: refresh current mainline fingerprints
+- **core**: prevent certification self-scan false positive
+- **super-admin**: remove lock self-reference marker
+- **super-admin**: expose tenant registration to context-switch authority
+- **super-admin**: resolve context-switch tenant from PostgreSQL
+- **super-admin**: repair MFA template literal syntax
+- **core**: remove duplicate audit metadata declaration
+- **super-admin**: expose live tenant management surface
+- **database**: register User Super Admin security relation
+- **super-admin**: enforce strict platform role on support tower
+- **super-admin**: use migrated audit and MFA schema
+- **database**: finalize Super Admin Prisma authority
+- **super-admin**: harden privileged platform actions
+- **super-admin**: replace synthetic certification
+- **super-admin**: bind all core tabs to live platform APIs
+- **super-admin**: remove email-based platform identity bypass
+- **super-admin**: remove email-based platform identity bypass
+- **super-admin**: remove email-based platform identity bypass
+- **super-admin**: remove synthetic platform fixtures
+- **super-admin**: harden MFA and step-up security
+- **super-admin**: extend production step-up allowlist
+- **database**: register Super Admin platform persistence models
+- **super-admin**: wire PostgreSQL control plane into current main
+- **foundation**: apply fail-closed A01-A12 production lock
+- **notifications**: apply Notifications production lock (#133)
+- **workforce**: apply Staff HR production lock on current main
+- **release**: allow pre-production candidate manifest provenance (#131)
+- **release**: apply SemVer production lock (#129)
+- **backdated**: refresh finance lock hash after pricing integration
+- **pricing**: refresh cash management lock hashes after mainline reconciliation
+- **pricing**: correct customer-segment lock marker literal
+- **pricing**: make production lock customer-segment marker whitespace-stable
+- **pricing**: refresh sales production lock server and finance hashes
+- **release**: keep development release manifest non-failing
+- **pricing**: preserve current finance engine while applying authoritative pricing resolution
+- **pricing**: rebase pricing routes onto current main API
+- **pricing**: fall back to variant selling price when inherited product price is unset
 - **tax**: close final POS tax-authority loophole
 - **tax**: make POS tax rate configuration-authoritative
+- **pricing**: keep legacy unit fixtures compatible with optional pricing models
+- **finance**: preserve authoritative finance variant boundary error before pricing resolution
+- **pricing**: align certification marker with Customer schema
 - **bundle**: keep authoritative component cost on offline sync
 - **bundle**: reject stale offline bundle definitions deterministically
 - **bundle**: use stable definition version for offline sales
@@ -734,6 +843,8 @@ All notable changes to KwakoPos will be documented in this file.
 - **bundle**: reverse refunds from immutable bundle sale snapshots
 - **bundle**: expand authoritative sales into component stock ledger
 - **bundle**: add authoritative bundle definition resolver
+- **pricing**: align migration identifiers with text-backed Prisma IDs
+- **core**: apply promotions and pricing production lock
 - **pos**: close backdated sale UI visibility loop (#118)
 - **reports**: apply production report lock
 - **reports**: apply verified production-lock remediation to current mainline
@@ -1384,6 +1495,11 @@ All notable changes to KwakoPos will be documented in this file.
 - **db**: ensure UUID generator exists for auth throttles
 
 ### 🛡️ Security Updates
+- **security**: apply Security Platform production lock
+- **security**: prevent tenant creation of platform super admin roles
+- **security**: make platform audit ledger append-only
+- **security**: harden Super Admin MFA enrollment and global audit
+- **security**: restrict tenant provisioning to platform Super Admin role
 - **security**: harden admin SQL and certification gates
 - **security**: remove unsafe bulk conflict resolution bypass
 - **security**: add immutable fiscal receipt hash chain
