@@ -577,7 +577,22 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         }
         const links = await tx.$queryRawUnsafe("SELECT buyer_supplier_id FROM inter_vertical_connections WHERE id=$1 AND buyer_tenant_id=$2 AND buyer_branch_id=$3 AND seller_tenant_id=$4 AND seller_branch_id=$5 AND status='ACTIVE'", o.connection_id, c.tenantId, c.branchId, o.seller_tenant_id, o.seller_branch_id);
         if (!links.length || !links[0].buyer_supplier_id) throw new Error("ACTIVE_CONNECTION_NOT_FOUND");
-        const receipt = await buyerReceipt(tx, c, o, links[0].buyer_supplier_id, receives, b.idempotencyKey, b.notes);
+        if (!o.buyer_purchase_order_id) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
+        const receipt = await buyerReceipt(tx, c, o, links[0].buyer_supplier_id, o.buyer_purchase_order_id, receives, b.idempotencyKey, b.notes);
+        for (const x of receives) {
+          const changed = await tx.purchaseOrderItem.updateMany({
+            where: { purchaseOrderId: o.buyer_purchase_order_id, variantId: x.variant.id },
+            data: { quantityReceived: { increment: x.quantity } },
+          });
+          if (changed.count !== 1) throw new Error("NATIVE_PURCHASE_ORDER_LINE_NOT_FOUND");
+        }
+        const nativePo = await tx.purchaseOrder.findFirst({
+          where: { id: o.buyer_purchase_order_id, tenantId: c.tenantId, branchId: c.branchId },
+          include: { items: true },
+        });
+        if (!nativePo) throw new Error("NATIVE_PURCHASE_ORDER_NOT_FOUND");
+        const nativePoStatus = nativePo.items.every((x: any) => Number(x.quantityReceived) >= Number(x.quantityOrdered)) ? "RECEIVED" : "PARTIALLY_RECEIVED";
+        await tx.purchaseOrder.update({ where: { id: nativePo.id }, data: { status: nativePoStatus } });
         const allIn = items.every((x) => x.receivedQuantity >= x.dispatchedQuantity);
         const allOut = items.every((x) => x.dispatchedQuantity >= Number(x.acceptedQuantity || 0));
         const next = allIn && allOut ? "RECEIVED" : "PARTIALLY_RECEIVED";
