@@ -21,6 +21,11 @@ RESOURCE_LAYOUT = re.compile(
 def normalize(value: str) -> str:
     provider = value.strip()
 
+    # Copy/pasted GitHub secret values may have line-wraps inserted by an
+    # editor. Remove only CR/LF boundaries and adjacent horizontal indentation.
+    # Remaining characters are still subject to strict shape and ID validation.
+    provider = re.sub(r"[ \t]*(?:\r\n|\r|\n)[ \t]*", "", provider)
+
     # Environment/secret values are sometimes copied with surrounding quotes.
     if len(provider) >= 2 and provider[0] == provider[-1] and provider[0] in {"'", '"'}:
         provider = provider[1:-1].strip()
@@ -36,9 +41,24 @@ def normalize(value: str) -> str:
 
     match = RESOURCE_LAYOUT.fullmatch(provider)
     if match is None:
+        # Safe structure-only diagnostics. Never echo the provider string or
+        # identifiers from the configured secret into GitHub Actions logs.
+        segments = [segment for segment in provider.split("/") if segment]
+        markers = {
+            "starts_projects": bool(segments and segments[0] == "projects"),
+            "has_locations": "locations" in segments,
+            "has_global_location": any(
+                segments[i : i + 2] == ["locations", "global"]
+                for i in range(len(segments) - 1)
+            ),
+            "has_workload_identity_pools": "workloadIdentityPools" in segments,
+            "has_providers": "providers" in segments,
+        }
+        shape = ", ".join(f"{name}={str(present).lower()}" for name, present in markers.items())
         raise ValueError(
             "provider path must use projects/<project-number>/locations/global/"
-            "workloadIdentityPools/<pool-id>/providers/<provider-id>"
+            "workloadIdentityPools/<pool-id>/providers/<provider-id>; "
+            f"safe_shape_diagnostic: segments={len(segments)}, {shape}; provider value omitted"
         )
 
     project_number, pool_id, provider_id = match.groups()
