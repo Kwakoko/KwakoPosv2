@@ -373,49 +373,79 @@ async function sellerInvoice(
     fiscalizationId, fiscalizationState, allocations,
   };
 }
-async function buyerReceipt(tx: any, ctx: Ctx, order: any, supplierId: string, purchaseOrderId: string, receives: Array<{ item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string }>, key: string, notes: string): Promise<{ receipt: any; amount: number }> {
+async function buyerReceipt(
+  tx: any, ctx: Ctx, order: any, supplierId: string, purchaseOrderId: string,
+  receives: ReceivePortion[], key: string, notes: string,
+): Promise<{ receipt: any; supplierInvoice: any; amount: number; taxAmount: number }> {
   const now = new Date();
-  const amount = receives.reduce((s, x) => s + x.quantity * Number(x.item.unitPrice || 0), 0);
-  const supplier = await tx.supplier.findFirst({ where: { id: supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
+  const netAmount = receives.reduce((sum, x) => sum + x.netAmount, 0);
+  const taxAmount = receives.reduce((sum, x) => sum + x.taxAmount, 0);
+  const grossAmount = receives.reduce((sum, x) => sum + x.grossAmount, 0);
+  if (grossAmount <= 0 || Math.abs(grossAmount - netAmount - taxAmount) > 0.03) {
+    throw new Error("PURCHASE_TAX_TOTAL_MISMATCH");
+  }
+  const supplier = await tx.supplier.findFirst({
+    where: { id: supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId },
+  });
   if (!supplier) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
+  const buyerTax = await resolveBranchTaxAuthority(tx, ctx);
+  const recoverInputTax = buyerTax.vatEnabled;
+  const inventoryValue = recoverInputTax ? netAmount : grossAmount;
+  const receiptItems = receives.map((x) => {
+    const value = recoverInputTax ? x.netAmount : x.grossAmount;
+    return {
+      id: randomUUID(), variantId: x.variant.id, quantityReceived: x.quantity,
+      unitCost: value / x.quantity, totalCost: value,
+      batchNumber: x.batchNumber || null, expiryDate: x.expiryDate ? new Date(x.expiryDate) : null,
+    };
+  });
   const receipt = await tx.purchaseReceipt.create({ data: {
     id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
     receiptNumber: "IVR-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase(),
     purchaseOrderId, supplierId, receivedAt: now, createdById: ctx.userId,
     notes: [notes, "Inter-Vertical Order " + order.order_number].filter(Boolean).join(" | "),
-    items: { create: receives.map((x) => ({
-      id: randomUUID(), variantId: x.variant.id, quantityReceived: x.quantity, unitCost: Number(x.item.unitPrice || 0),
-      totalCost: x.quantity * Number(x.item.unitPrice || 0), batchNumber: x.batchNumber || null,
-      expiryDate: x.expiryDate ? new Date(x.expiryDate) : null,
-    })) },
+    items: { create: receiptItems },
   }, include: { items: true } });
-  await tx.supplier.update({ where: { id: supplierId }, data: { outstandingBalance: { increment: amount } } });
-  for (let n = 0; n < receives.length; n++) {
-    const x = receives[n];
-    await tx.$queryRawUnsafe('SELECT id FROM product_variants WHERE id=$1 AND "tenantId"=$2 AND "branchId"=$3 FOR UPDATE', x.variant.id, ctx.tenantId, ctx.branchId);
-    const before = await ledgerQty(tx, ctx.tenantId, ctx.branchId, x.variant.id);
-    if (before < 0) throw new Error("STOCK_LEDGER_INVARIANT_VIOLATION");
-    const delta = x.quantity, cost = Number(x.item.unitPrice || 0);
-    await tx.stockLedger.create({ data: {
-      id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
-      productId: x.variant.productId, variantId: x.variant.id, movementType: "PURCHASE",
-      referenceType: "INTER_VERTICAL_ORDER", referenceId: order.id, quantityBefore: before,
-      quantityChange: delta, quantity: delta, quantityAfter: before + delta, unitCost: cost,
-      totalCost: delta * cost, userId: ctx.userId, deviceId: "inter-vertical-gateway",
-      operationId: "ivg-" + key, idempotencyKey: "ivg-receive-" + key + "-" + n,
-      notes: "Inter-Vertical order " + order.order_number, synced: true, occurredAt: now,
-    } });
-    await projectVariantInventory(tx, ctx.tenantId, ctx.branchId, x.variant.id);
-    await projectProductBranchStock(tx, ctx.tenantId, ctx.branchId, x.variant.id, null);
-    await projectProductStockSummary(tx, ctx.tenantId, ctx.branchId, x.variant.productId);
+  const invoiceNumber = "IVSI-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase();
+  const supplierInvoice = await tx.supplierInvoice.create({ data: {
+    id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId, supplierId,
+    purchaseReceiptId: receipt.id, invoiceNumber, invoiceDate: now, dueDate: new Date(now.getTime() + 30 * 86400000),
+    subtotal: netAmount, taxTotal: taxAmount, grandTotal: grossAmount, amountPaid: 0, balanceDue: grossAmount,
+    status: "RECEIVED",
+    notes: "Seller invoices: " + Array.from(new Set(receives.map((x) => x.item.dispatchAllocations?.find((a) => a.shipmentId === x.shipmentId)?.sellerInvoiceNumber).filter(Boolean))).join(", ") + "; Inter-Vertical Order " + order.order_number,
+    lines: { create: receives.map((x) => ({
+      id: randomUUID(), variantId: x.variant.id, description: x.item.name || x.item.sku,
+      quantity: x.quantity, unitCost: x.netAmount / x.quantity, taxRate: x.taxRatePct,
+      taxAmount: x.taxAmount, lineTotal: x.grossAmount,
+    })) },
+  } });
+  await tx.supplier.update({
+    where: { id: supplierId }, data: { outstandingBalance: { increment: grossAmount } },
+  });
+
+  for (const entry of receives) {
+    const updated = await tx.$queryRawUnsafe(
+      "UPDATE supply_chain_shipment_lines SET quantity_received=quantity_received+$2, updated_at=now() WHERE shipment_id=$1 AND gateway_line_id=$3 AND quantity_received+$2<=quantity_shipped RETURNING id",
+      entry.shipmentId, entry.quantity, entry.item.lineId,
+    );
+    if (!updated.length) throw new Error("SHIPMENT_RECEIPT_QUANTITY_MISMATCH");
   }
+  await tx.$executeRawUnsafe(
+    "UPDATE supply_chain_shipments AS s SET status=CASE WHEN NOT EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received<l.quantity_shipped) THEN 'RECEIVED' WHEN EXISTS (SELECT 1 FROM supply_chain_shipment_lines AS l WHERE l.shipment_id=s.id AND l.quantity_received>0) THEN 'RECEIVING' ELSE s.status END, actual_arrival_date=COALESCE(s.actual_arrival_date,now()), updated_at=now() WHERE s.tenant_id=$1 AND s.branch_id=$2 AND s.gateway_order_id=$3",
+    ctx.tenantId, ctx.branchId, order.id,
+  );
+
   const accounts = await finance.accounts(tx, ctx);
-  const built = FinancialBridge.mapGoodsReceiptToJournal(ctx as any,
+  const built = FinancialBridge.mapGoodsReceiptToJournal(
+    ctx as any,
     { ...receipt, items: receipt.items.map((x: any) => ({ ...x, totalCost: Number(x.totalCost) })) } as any,
-    accounts as any, (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1);
+    accounts as any,
+    (await tx.journalEntry.count({ where: { tenantId: ctx.tenantId, branchId: ctx.branchId } })) + 1,
+    { inputTaxAmount: recoverInputTax ? taxAmount : 0, grossPayable: grossAmount },
+  );
   await finance.writeJournal(tx, ctx as any, built);
-  await addFinanceDoc(tx, order, ctx, "BUYER", "PURCHASE_RECEIPT", receipt.id, amount);
-  return { receipt, amount };
+  await addFinanceDoc(tx, order, ctx, "BUYER", "SUPPLIER_INVOICE", supplierInvoice.id, grossAmount);
+  return { receipt, supplierInvoice, amount: grossAmount, taxAmount };
 }
 async function openFinance(tx: any, orderId: string, side: "BUYER" | "SELLER"): Promise<number> {
   const r = await tx.$queryRawUnsafe("SELECT COALESCE(SUM(amount-paid_amount),0) AS amount FROM inter_vertical_finance_documents WHERE order_id=$1 AND side=$2", orderId, side);
