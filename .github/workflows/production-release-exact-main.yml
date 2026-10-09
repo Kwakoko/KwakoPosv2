@@ -214,12 +214,24 @@ jobs:
           GCP_WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         run: |
           set -euo pipefail
-          provider="$GCP_WIF_PROVIDER"
-          provider="$(node -e 'const p=(process.env.GCP_WIF_PROVIDER||"").trim(); process.stdout.write(p.replace(/^https?:\\/\\/iam.googleapis.com\\//,"").replace(/^\\/\\/iam.googleapis.com\\//,"").replace(/^iam.googleapis.com\\//,"").replace(/\\/$/,""))')"
-          [[ "$provider" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+$ ]] || {
-            echo "RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization"
-            exit 1
-          }
+          python - <<'PY'
+          import os, re
+          provider = os.environ["GCP_WIF_PROVIDER"].strip()
+          for prefix in (
+              "https://iam.googleapis.com/",
+              "http://iam.googleapis.com/",
+              "//iam.googleapis.com/",
+              "iam.googleapis.com/",
+          ):
+              if provider.startswith(prefix):
+                  provider = provider[len(prefix):]
+                  break
+          provider = provider.rstrip("/")
+          if not re.fullmatch(r"projects/[0-9]+/locations/global/workloadIdentityPools/[^/]+/providers/[^/]+", provider):
+              raise SystemExit("RELEASE_BLOCKED: GCP_WORKLOAD_IDENTITY_PROVIDER must be a full projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> resource name after safe normalization")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("provider=" + provider + "\n")
+          PY
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to Google Cloud
