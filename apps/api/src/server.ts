@@ -6919,6 +6919,11 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
           include: { items: true },
         });
         if (!po || ["CANCELLED","REJECTED"].includes(po.status)) throw new Error("PURCHASE_ORDER_NOT_SHIPPABLE");
+        const gatewayOrders = await tx.$queryRawUnsafe(
+          "SELECT id FROM inter_vertical_orders WHERE buyer_purchase_order_id=$1 AND buyer_tenant_id=$2 AND buyer_branch_id=$3",
+          body.poId, ctx.tenantId, ctx.branchId,
+        );
+        if (gatewayOrders.length) throw new Error("GATEWAY_SHIPMENT_MUST_BE_CREATED_BY_DISPATCH");
         if (po.supplierId !== body.supplierId) throw new Error("SHIPMENT_SUPPLIER_MISMATCH");
         const supplier = await tx.supplier.findFirst({
           where: { id: body.supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId, status: "ACTIVE" },
@@ -6995,6 +7000,7 @@ server.post("/api/v1/retail/pos/checkout", async (req, reply) => {
           id, ctx.tenantId, ctx.branchId,
         );
         const shipment = rows[0]; if (!shipment) throw new Error("SHIPMENT_NOT_FOUND");
+        if (shipment.gateway_order_id) throw new Error("GATEWAY_SHIPMENT_STATUS_MUST_USE_ORDER_LIFECYCLE");
         const transitions: Record<string, string[]> = {
           PLANNED: ["CONFIRMED","CANCELLED"], CONFIRMED: ["IN_TRANSIT","CANCELLED"],
           IN_TRANSIT: ["ARRIVED","RECEIVING","EXCEPTION","CANCELLED"], ARRIVED: ["RECEIVING","RECEIVED","EXCEPTION"],
