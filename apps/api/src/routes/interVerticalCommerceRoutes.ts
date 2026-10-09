@@ -56,7 +56,7 @@ async function ensureSchema(): Promise<void> {
       "CREATE INDEX IF NOT EXISTS inter_vertical_connections_buyer_idx ON inter_vertical_connections (buyer_tenant_id, buyer_branch_id, status)",
       "CREATE INDEX IF NOT EXISTS inter_vertical_connections_seller_idx ON inter_vertical_connections (seller_tenant_id, seller_branch_id, status)",
       "CREATE UNIQUE INDEX IF NOT EXISTS inter_vertical_connections_seller_response_uq ON inter_vertical_connections (seller_tenant_id, seller_branch_id, seller_response_idempotency_key) WHERE seller_response_idempotency_key IS NOT NULL",
-      "CREATE TABLE IF NOT EXISTS inter_vertical_orders (id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE, connection_id TEXT NOT NULL, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT NOT NULL, buyer_supplier_id TEXT NOT NULL, seller_customer_id TEXT NOT NULL, status TEXT NOT NULL, finance_status TEXT NOT NULL DEFAULT 'OPEN', currency TEXT NOT NULL DEFAULT 'TZS', items JSONB NOT NULL DEFAULT '[]'::jsonb, logistics JSONB NOT NULL DEFAULT '{}'::jsonb, total_amount NUMERIC(14,2) NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', rejection_reason TEXT, created_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, idempotency_key TEXT NOT NULL, settled_amount NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
+      "CREATE TABLE IF NOT EXISTS inter_vertical_orders (id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE, connection_id TEXT NOT NULL, buyer_purchase_order_id TEXT, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT NOT NULL, buyer_supplier_id TEXT NOT NULL, seller_customer_id TEXT NOT NULL, status TEXT NOT NULL, finance_status TEXT NOT NULL DEFAULT 'OPEN', currency TEXT NOT NULL DEFAULT 'TZS', items JSONB NOT NULL DEFAULT '[]'::jsonb, logistics JSONB NOT NULL DEFAULT '{}'::jsonb, total_amount NUMERIC(14,2) NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', rejection_reason TEXT, created_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, idempotency_key TEXT NOT NULL, settled_amount NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_buyer_idx ON inter_vertical_orders (buyer_tenant_id, buyer_branch_id, status, created_at DESC)",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_seller_idx ON inter_vertical_orders (seller_tenant_id, seller_branch_id, status, created_at DESC)",
       "CREATE TABLE IF NOT EXISTS inter_vertical_order_events (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT, idempotency_key TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (tenant_id, branch_id, idempotency_key))",
@@ -89,7 +89,7 @@ function itemsOf(row: any): Item[] {
 function orderDto(row: any): Record<string, any> {
   return {
     id: row.id, orderNumber: row.order_number, connectionId: row.connection_id,
-    buyerTenantId: row.buyer_tenant_id, buyerBranchId: row.buyer_branch_id,
+    buyerPurchaseOrderId: row.buyer_purchase_order_id || null, buyerTenantId: row.buyer_tenant_id, buyerBranchId: row.buyer_branch_id,
     sellerTenantId: row.seller_tenant_id, sellerBranchId: row.seller_branch_id,
     buyerSupplierId: row.buyer_supplier_id, sellerCustomerId: row.seller_customer_id,
     status: row.status, financeStatus: row.finance_status, currency: row.currency,
@@ -218,7 +218,7 @@ async function sellerInvoice(tx: any, ctx: Ctx, order: any, dispatch: Array<{ it
   await addFinanceDoc(tx, order, ctx, "SELLER", "CUSTOMER_INVOICE", invoice.id, totals.revenue);
   return { sale, invoice, amount: totals.revenue };
 }
-async function buyerReceipt(tx: any, ctx: Ctx, order: any, supplierId: string, receives: Array<{ item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string }>, key: string, notes: string): Promise<{ receipt: any; amount: number }> {
+async function buyerReceipt(tx: any, ctx: Ctx, order: any, supplierId: string, purchaseOrderId: string, receives: Array<{ item: Item; quantity: number; variant: any; batchNumber?: string; expiryDate?: string }>, key: string, notes: string): Promise<{ receipt: any; amount: number }> {
   const now = new Date();
   const amount = receives.reduce((s, x) => s + x.quantity * Number(x.item.unitPrice || 0), 0);
   const supplier = await tx.supplier.findFirst({ where: { id: supplierId, tenantId: ctx.tenantId, branchId: ctx.branchId } });
@@ -226,7 +226,7 @@ async function buyerReceipt(tx: any, ctx: Ctx, order: any, supplierId: string, r
   const receipt = await tx.purchaseReceipt.create({ data: {
     id: randomUUID(), tenantId: ctx.tenantId, branchId: ctx.branchId,
     receiptNumber: "IVR-" + now.toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + randomUUID().slice(0,8).toUpperCase(),
-    purchaseOrderId: null, supplierId, receivedAt: now, createdById: ctx.userId,
+    purchaseOrderId, supplierId, receivedAt: now, createdById: ctx.userId,
     notes: [notes, "Inter-Vertical Order " + order.order_number].filter(Boolean).join(" | "),
     items: { create: receives.map((x) => ({
       id: randomUUID(), variantId: x.variant.id, quantityReceived: x.quantity, unitCost: Number(x.item.unitPrice || 0),
