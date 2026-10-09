@@ -10,8 +10,9 @@ import re
 import sys
 
 
+IDENTIFIER = r"[a-z][a-z0-9-]{2,30}[a-z0-9]"
 RESOURCE_PATTERN = re.compile(
-    r"^projects/[0-9]+/locations/global/workloadIdentityPools/[^/\s=]+/providers/[^/\s=]+$"
+    rf"^projects/[0-9]+/locations/global/workloadIdentityPools/{IDENTIFIER}/providers/{IDENTIFIER}$"
 )
 
 
@@ -32,7 +33,8 @@ def normalize(value: str) -> str:
         raise ValueError(
             "GCP_WORKLOAD_IDENTITY_PROVIDER must be a full "
             "projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> "
-            "resource name or its iam.googleapis.com URL form"
+            "resource name or its iam.googleapis.com URL form; pool/provider IDs must be "
+            "4–32 lowercase letters, digits, or hyphens, start with a letter, and end alphanumerically"
         )
 
     return provider
