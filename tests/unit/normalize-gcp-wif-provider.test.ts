@@ -84,6 +84,17 @@ describe("Google Workload Identity Provider normalization", () => {
     expect(() => run(canonical.replace("5provider", "5pro\u200bvider"))).toThrow();
   });
 
+  it("reports only first-keyword code-point metadata for invalid Unicode prefixes", () => {
+    const confusableKeyword =
+      "pr\u043ejects/123456789012/locations/global/workloadIdentityPools/1234-pool/providers/5provider";
+    const result = runFailure(confusableKeyword);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("first_keyword_non_ascii=U+043E@2");
+    expect(result.stderr).not.toContain("123456789012");
+    expect(result.stderr).not.toContain("1234-pool");
+    expect(result.stderr).not.toContain("5provider");
+  });
+
   it("continues to fail closed on unrecognized resource prefixes without exposing the secret", () => {
     const result = runFailure("unknown-prefix/" + canonical);
     expect(result.status).toBe(1);
