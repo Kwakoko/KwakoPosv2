@@ -35,7 +35,11 @@ Partial dispatches, receipts, and payments are supported. The seller must confir
 | POST | /api/v1/inter-vertical/orders/:id/respond | Seller accepts with quantities/prices or rejects |
 | POST | /api/v1/inter-vertical/orders/:id/cancel | Buyer cancels before dispatch |
 | POST | /api/v1/inter-vertical/orders/:id/dispatch | Seller records stock-out, Sale, CustomerInvoice and GL journal |
-| POST | /api/v1/inter-vertical/orders/:id/in-transit | Seller records carrier, tracking number and ETA |
+| POST | /api/v1/inter-vertical/orders/:id/in-transit | Seller records carrier, tracking number and ETA; advances persisted inbound shipments |
+| GET | /api/v1/supply-chain/shipments | List shipments for the authenticated receiving tenant/branch |
+| GET | /api/v1/supply-chain/shipments/:id | Read shipment lines and lifecycle audit events within the receiving tenant/branch |
+| POST | /api/v1/supply-chain/shipments | Create a persisted shipment for an eligible native Purchase Order |
+| POST | /api/v1/supply-chain/shipments/:id/status | Apply an allowed shipment status transition with an idempotency key |
 | POST | /api/v1/inter-vertical/orders/:id/receive | Buyer records receipt, stock-in, AP balance and GL journal |
 | POST | /api/v1/inter-vertical/orders/:id/payments | Buyer submits a payment claim for seller confirmation |
 | POST | /api/v1/inter-vertical/orders/:id/payments/:paymentId/confirm | Seller confirms payment; posts matched AP and AR payments/journals atomically |
@@ -119,11 +123,13 @@ POST /api/v1/inter-vertical/orders/:id/receive
 ## Implementation notes and current limitations
 
 - Product variants are tenant/branch-owned; seller IDs are never used as buyer inventory IDs.
-- Dispatch locks seller variants, checks authoritative stock-ledger balance, writes immutable stock-ledger movements, and refreshes stock projections.
+- Dispatch locks seller stock and the linked Retail PurchaseOrder, checks authoritative stock-ledger balance, writes immutable stock-ledger movements, and refreshes stock projections.
 - Seller dispatch creates a native Sale, CustomerInvoice, accounts-receivable balance, and general-ledger journal. Dispatch is blocked if it would exceed the configured B2B customer credit limit.
-- Each gateway order is linked to a native Retail PurchaseOrder exposed to the existing purchasing module. Seller acceptance updates accepted quantity/price and PO status; goods receipts link to the PO and update its partial/complete receipt status. Buyer receipt also creates a native PurchaseReceipt, stock-ledger movements, supplier payable balance, and general-ledger journal. Received quantities are valued at seller-accepted prices.
+- Each gateway order is linked to a native Retail PurchaseOrder exposed to the existing purchasing module. Seller acceptance updates accepted quantity/authoritative price and PO status; goods receipts link to the PO and update its partial/complete receipt status. Buyer receipt also creates a native PurchaseReceipt and SupplierInvoice, stock-ledger movements, supplier payable balance, invoice allocations, and a general-ledger journal. Receipt totals are reconciled against the exact per-dispatch invoice tax/amount snapshot.
+- Each dispatch creates a PostgreSQL-persisted inbound shipment in the buyer tenant/branch, linked to the native PO, gateway order, supplier mapping and shipment lines. Transit updates shipment tracking/status; receipt updates shipment line quantities, actual arrival and completion status. Shipment events are idempotent and tenant/branch scoped. The legacy in-memory supply-chain engine is not used as production shipment authority.
 - Payment requests do not modify balances. Seller confirmation writes buyer supplier payment and seller customer payment records, updates payable/receivable balances and invoice allocation, and writes both journals in a single database transaction.
 - Shipment tracking is stored in the gateway logistics snapshot in this first iteration; it does not create a record in the separate supply-chain shipment subsystem.
 - Settlement request methods currently support bank transfer and mobile money only, because those can be reconciled without bypassing cash-session controls. Cash, card and other methods are intentionally not exposed in this gateway flow.
-- B2B invoice tax is currently zero. Tax calculation and fiscalization must be wired to each business's configured tax policies before VAT-bearing production transactions are enabled.
+- Seller invoices resolve the same authoritative branch `tax.config` and active Tax record used by the existing commercial sale path. The resolved tax rate/inclusive mode is stored on Sale and CustomerInvoice lines and used in the invoice totals. When the seller branch has TRA VFD enabled, the fiscalization record and durable TRA outbox item are written in the same database transaction as the invoice; the existing worker handles submission, retries and reconciliation. When TRA VFD is disabled, invoice creation does not falsely report a fiscal receipt as issued.
+- Buyer receiving preserves the seller-invoice tax snapshot on native SupplierInvoice lines. If the buyer branch has VAT enabled, recoverable input VAT is posted separately from inventory in the purchase journal; otherwise the gross received cost is capitalized. Confirm each business's VAT registration/tax settings and the seller's TRA VFD credentials/configuration before production use.
 - Mutations require the appropriate business permissions or an authorized managerial role.
