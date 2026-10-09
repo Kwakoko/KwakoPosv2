@@ -56,7 +56,7 @@ describe("Google Workload Identity Provider normalization", () => {
 
   it("canonicalizes embedded Unicode format marks inside fixed resource keywords only", () => {
     const embeddedMarks =
-      "pro\\u200bjects/123456789012/locations/global/workloadIdentity\\u2060Pools/1234-pool/provi\\u200bders/5provider";
+      "pro\u200bjects/123456789012/locations/global/workloadIdentity\u2060Pools/1234-pool/provi\u200bders/5provider";
     expect(run(embeddedMarks)).toBe("provider=" + canonical);
   });
 
