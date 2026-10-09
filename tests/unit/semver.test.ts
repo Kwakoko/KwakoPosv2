@@ -53,6 +53,12 @@ describe("Semantic Versioning (SemVer 2.0.0) Engine", () => {
       expect(compareSemVer("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0);
       expect(compareSemVer("1.0.0-alpha.1", "1.0.0")).toBeLessThan(0);
     });
+
+    it("compares arbitrarily large numeric prerelease identifiers exactly", () => {
+      expect(compareSemVer("1.0.0-alpha.9007199254740992", "1.0.0-alpha.9007199254740993")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-alpha.999999999999999999999999999999", "1.0.0-alpha.1000000000000000000000000000000")).toBeLessThan(0);
+      expect(compareSemVer("1.0.0-alpha.9007199254740993", "1.0.0-alpha.9007199254740993")).toBe(0);
+    });
   });
 
   describe("2. Conventional Commit Parsing", () => {
