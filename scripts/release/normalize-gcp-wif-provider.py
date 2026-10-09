@@ -31,7 +31,15 @@ def _strip_boundary_format_marks(value: str) -> str:
 
 
 def _canonicalize_resource_keyword(value: str, expected: str) -> str:
-    candidate = _strip_boundary_format_marks(value)
+    # Invisible Unicode format characters can be embedded inside a copied
+    # Google resource-type keyword. Remove them only from these fixed keyword
+    # segments. Project numbers, pool IDs, and provider IDs never use this
+    # helper, so their original bytes remain subject to strict validation.
+    candidate = "".join(
+        character for character in value
+        if unicodedata.category(character) != "Cf"
+    )
+    candidate = _strip_boundary_format_marks(candidate)
     return expected if candidate.casefold() == expected.casefold() else value
 
 
@@ -68,7 +76,7 @@ def normalize(value: str) -> str:
     segments = provider.split("/")
     if len(segments) == 8:
         # Normalize resource-type keywords at their fixed path positions.
-        # Strip only boundary format/quote marks from those keyword segments;
+        # Strip Unicode format marks only from fixed keyword segments;
         # project number, pool ID, and provider ID bytes remain untouched.
         expected_keywords = {
             0: "projects",
