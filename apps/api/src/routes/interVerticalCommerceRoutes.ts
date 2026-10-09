@@ -36,7 +36,7 @@ const LinkCreate = z.object({ sellerTenantId: z.string().trim().min(1), notes: z
 const LinkResponse = z.object({ action: z.enum(["ACCEPT", "REJECT"]), reason: z.string().trim().max(1000).optional().default(""), creditLimit: z.number().positive().finite().optional(), idempotencyKey: z.string().trim().min(8).max(200) });
 const OrderCreate = z.object({
   connectionId: z.string().trim().min(1), notes: z.string().trim().max(2000).optional().default(""),
-  currency: z.string().trim().length(3).optional().default("TZS"), idempotencyKey: z.string().trim().min(8).max(200),
+  currency: z.literal("TZS").optional().default("TZS"), idempotencyKey: z.string().trim().min(8).max(200),
   items: z.array(z.object({ sellerVariantId: z.string().trim().min(1), buyerVariantId: z.string().trim().min(1).optional(), quantity: z.number().positive().finite() })).min(1).max(100),
 });
 const OrderRespond = z.object({
@@ -254,6 +254,7 @@ async function sellerInvoice(
   key: string, shipmentId: string,
 ): Promise<{
   sale: any; invoice: any; amount: number; taxAmount: number;
+  taxConfig: { ratePct: number; isInclusive: boolean };
   fiscalizationId: string | null; fiscalizationState: string;
   allocations: Array<{ item: Item; variant: any; allocation: DispatchAllocation }>;
 }> {
@@ -372,7 +373,7 @@ async function sellerInvoice(
   }));
   return {
     sale, invoice, amount: Number(totals.grandTotal), taxAmount: Number(totals.taxTotal),
-    fiscalizationId, fiscalizationState, allocations,
+    taxConfig: tax.config, fiscalizationId, fiscalizationState, allocations,
   };
 }
 async function buyerReceipt(
@@ -664,6 +665,8 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         }
         const items = itemsOf(o), overrides = new Map((b.items || []).map((x) => [x.lineId, x]));
         if ((b.items || []).length && new Set((b.items || []).map((x) => x.lineId)).size !== b.items!.length) throw new Error("DUPLICATE_ORDER_LINE");
+        const acceptanceTax = await resolveBranchTaxAuthority(tx, c);
+        const acceptedLineTotals = new Map<string, number>();
         let total = 0;
         for (const item of items) {
           const v = await tx.productVariant.findFirst({ where: { id: item.sellerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true }, select: { id: true, productId: true, price: true } });
@@ -677,7 +680,11 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           const price = pricing.unitPrice;
           if (price <= 0 || !Number.isFinite(price)) throw new Error("SELLER_UNIT_PRICE_REQUIRED");
           if (await ledgerQty(tx, c.tenantId, c.branchId, item.sellerVariantId) < quantity) throw new Error("INSUFFICIENT_STOCK_FOR_ACCEPTED_QUANTITY");
-          item.acceptedQuantity = quantity; item.unitPrice = price; total += price * quantity;
+          const acceptedLine = PricingTaxEngine.calculateLineItem({
+            unitPrice: price, unitCost: 0, quantity, taxConfig: acceptanceTax.config,
+          });
+          acceptedLineTotals.set(item.lineId, Number(acceptedLine.lineTotal));
+          item.acceptedQuantity = quantity; item.unitPrice = price; total += Number(acceptedLine.lineTotal);
         }
         if ((b.items || []).some((x) => !items.some((i) => i.lineId === x.lineId))) throw new Error("ORDER_LINE_NOT_FOUND");
         const customer = await tx.customer.findFirst({ where: { id: o.seller_customer_id, tenantId: c.tenantId, branchId: c.branchId } });
@@ -690,7 +697,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           if (!poItem) throw new Error("NATIVE_PURCHASE_ORDER_LINE_NOT_FOUND");
           await tx.purchaseOrderItem.update({ where: { id: poItem.id }, data: {
             quantityOrdered: Number(item.acceptedQuantity), quantityReceived: 0,
-            unitCost: Number(item.unitPrice), totalCost: Number(item.acceptedQuantity) * Number(item.unitPrice),
+            unitCost: Number(item.unitPrice), totalCost: acceptedLineTotals.get(item.lineId) ?? (Number(item.acceptedQuantity) * Number(item.unitPrice)),
           } });
         }
         await tx.purchaseOrder.update({ where: { id: buyerPo.id }, data: {
@@ -793,13 +800,23 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           JSON.stringify({ gatewayOrderId: o.id, carrierName: b.carrierName, trackingNumber: b.trackingNumber }),
         );
         const complete = items.every((x) => x.dispatchedQuantity >= Number(x.acceptedQuantity || 0));
+        const projectedGrossTotal = items.reduce((sum, item) => {
+          const shippedGross = (item.dispatchAllocations || []).reduce((part, allocation) => part + Number(allocation.grossAmount || 0), 0);
+          const remaining = Math.max(0, Number(item.acceptedQuantity || 0) - item.dispatchedQuantity);
+          const remainingGross = remaining > 0
+            ? PricingTaxEngine.calculateLineItem({
+                unitPrice: Number(item.unitPrice || 0), unitCost: 0, quantity: remaining, taxConfig: documents.taxConfig,
+              }).lineTotal
+            : 0;
+          return sum + shippedGross + remainingGross;
+        }, 0);
         const logistics = {
           ...(o.logistics || {}), carrierName: b.carrierName, trackingNumber: b.trackingNumber,
           eta: b.eta || null, lastDispatchAt: new Date().toISOString(),
           shipmentIds: [...new Set([...(Array.isArray(o.logistics?.shipmentIds) ? o.logistics.shipmentIds : []), shipmentId])],
         };
         const next = complete ? "DISPATCHED" : "PARTIALLY_DISPATCHED";
-        const updated = await patchOrder(tx, id, { status: next, items, logistics });
+        const updated = await patchOrder(tx, id, { status: next, items, logistics, total_amount: Math.round(projectedGrossTotal * 100) / 100 });
         await event(tx, id, c, "ORDER_DISPATCHED", o.status, next, b.idempotencyKey, {
           saleId: documents.sale.id, invoiceId: documents.invoice.id, amount: documents.amount,
           taxAmount: documents.taxAmount, fiscalizationId: documents.fiscalizationId,
