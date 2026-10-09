@@ -534,7 +534,11 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const b = LinkCreate.parse(req.body);
       if (b.sellerTenantId === c.tenantId) throw new Error("CANNOT_CONNECT_TENANT_TO_ITSELF");
       const dupe = await db.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE buyer_tenant_id=$1 AND buyer_branch_id=$2 AND idempotency_key=$3", c.tenantId, c.branchId, b.idempotencyKey);
-      if (dupe.length) return reply.send({ success: true, data: dupe[0] });
+      if (dupe.length) {
+        const prior = dupe[0];
+        if (prior.seller_tenant_id !== b.sellerTenantId || String(prior.notes || "") !== b.notes) throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+        return reply.send({ success: true, data: prior });
+      }
       const seller = await db.tenant.findUnique({ where: { id: b.sellerTenantId }, select: { id: true, status: true } });
       if (!seller || seller.status !== "ACTIVE") throw new Error("SELLER_TENANT_NOT_FOUND_OR_INACTIVE");
       const pair = await db.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE buyer_tenant_id=$1 AND buyer_branch_id=$2 AND seller_tenant_id=$3 AND status IN ('PENDING','ACTIVE') ORDER BY created_at DESC LIMIT 1", c.tenantId, c.branchId, b.sellerTenantId);
@@ -550,7 +554,15 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const id = String((req.params as any).id || ""), b = LinkResponse.parse(req.body);
       const row = await db.$transaction(async (tx: any) => {
         const replay = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE seller_tenant_id=$1 AND seller_branch_id=$2 AND seller_response_idempotency_key=$3", c.tenantId, c.branchId, b.idempotencyKey);
-        if (replay.length) return replay[0];
+        if (replay.length) {
+          const prior = replay[0];
+          if (prior.id !== id ||
+              (b.action === "ACCEPT" && prior.status !== "ACTIVE") ||
+              (b.action === "REJECT" && prior.status !== "REJECTED")) {
+            throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+          }
+          return prior;
+        }
         const rows = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE id=$1 AND seller_tenant_id=$2 FOR UPDATE", id, c.tenantId);
         const link = rows[0]; if (!link) throw new Error("CONNECTION_NOT_FOUND");
         if (link.status === "ACTIVE" && b.action === "ACCEPT" && link.seller_branch_id === c.branchId) return link;
@@ -594,7 +606,20 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       await ensureSchema(); const c = ctxOf(req); permission(c, "purchase.create", "purchasing.create", "purchase.manage");
       const b = OrderCreate.parse(req.body);
       const prior = await db.$queryRawUnsafe("SELECT * FROM inter_vertical_orders WHERE buyer_tenant_id=$1 AND buyer_branch_id=$2 AND idempotency_key=$3", c.tenantId, c.branchId, b.idempotencyKey);
-      if (prior.length) return reply.send({ success: true, data: orderDto(prior[0]) });
+      if (prior.length) {
+        const priorOrder = prior[0], priorItems = itemsOf(priorOrder);
+        const sameLines = b.items.length === priorItems.length && b.items.every((input) => {
+          const saved = priorItems.find((x) => x.sellerVariantId === input.sellerVariantId);
+          return Boolean(saved && Number(saved.requestedQuantity) === input.quantity &&
+            (input.buyerVariantId === undefined || input.buyerVariantId === saved.buyerVariantId));
+        });
+        if (priorOrder.connection_id !== b.connectionId ||
+            String(priorOrder.currency || "TZS") !== b.currency.toUpperCase() ||
+            String(priorOrder.notes || "") !== b.notes || !sameLines) {
+          throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+        }
+        return reply.send({ success: true, data: orderDto(priorOrder) });
+      }
       const connections = await db.$queryRawUnsafe("SELECT * FROM inter_vertical_connections WHERE id=$1 AND buyer_tenant_id=$2 AND buyer_branch_id=$3 AND status='ACTIVE'", b.connectionId, c.tenantId, c.branchId);
       const link = connections[0]; if (!link?.seller_branch_id || !link.buyer_supplier_id || !link.seller_customer_id) throw new Error("ACTIVE_CONNECTION_NOT_FOUND");
       if (new Set(b.items.map((x) => x.sellerVariantId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
@@ -966,7 +991,15 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const result = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "BUYER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         const prior = await tx.$queryRawUnsafe("SELECT * FROM inter_vertical_payment_requests WHERE tenant_id=$1 AND branch_id=$2 AND idempotency_key=$3", c.tenantId, c.branchId, b.idempotencyKey);
-        if (prior.length) return prior[0];
+        if (prior.length) {
+          const payment = prior[0];
+          if (payment.order_id !== id || Math.abs(Number(payment.amount) - b.amount) > 0.005 ||
+              payment.payment_method !== b.paymentMethod || (payment.provider || null) !== (b.provider || null) ||
+              (payment.provider_reference || null) !== (b.providerReference || null) || String(payment.notes || "") !== b.notes) {
+            throw new Error("IDEMPOTENCY_KEY_ALREADY_USED");
+          }
+          return payment;
+        }
         if (!["PARTIALLY_RECEIVED","RECEIVED"].includes(o.status)) throw new Error("PAYMENT_REQUIRES_RECEIVED_GOODS");
         if (b.amount > (await openFinance(tx, id, "BUYER")) + 0.005 || b.amount > (await openFinance(tx, id, "SELLER")) + 0.005) throw new Error("PAYMENT_EXCEEDS_ORDER_OPEN_BALANCE");
         const insertedRows = await tx.$queryRawUnsafe("INSERT INTO inter_vertical_payment_requests (id,order_id,tenant_id,branch_id,submitted_by_user_id,amount,payment_method,provider,provider_reference,notes,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *",
