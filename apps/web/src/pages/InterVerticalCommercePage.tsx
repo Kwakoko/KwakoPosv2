@@ -95,7 +95,6 @@ export const InterVerticalCommercePage: React.FC = () => {
       buyerVariantId: buyerMappings[x.sellerVariantId]?.trim() || undefined,
     }));
     if (!catalogConnection || !lines.length) throw new Error("Choose at least one product and enter a quantity.");
-    if (lines.some((line) => !line.buyerVariantId)) throw new Error("Map every wholesaler SKU to an existing Retail inventory variant before submitting the order.");
     await post(endpoint + "/orders", { connectionId: catalogConnection, notes: "Created from Inter-Vertical Commerce", currency: "TZS", idempotencyKey: key("order"), items: lines });
     setCatalog([]); setCatalogConnection("");
   });
