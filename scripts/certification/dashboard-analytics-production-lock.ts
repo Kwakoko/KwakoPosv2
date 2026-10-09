@@ -12,9 +12,9 @@ const LOCKED_BLOBS: Record<string, string> = {
   "apps/web/src/services/dashboardKpiService.ts": "9c624cadd529f028ebb46ca4fdfc95712e677d84",
   "packages/database/src/prismaProductionRepositories.ts": "b2cf81b306fca370b230e8554c60b33c920279eb",
   "tests/integration/dashboard-final-closures.test.ts": "07a0c2c012569e52f32fa0c719bafffb28e7f129",
-  ".github/workflows/ci.yml": "7d91f6194335d10b761c16e1e6a7f6f8ab10d335",
-  ".github/workflows/production-certification.yml": "b571200b143cc61156099bdd227b6d6d37884cba",
-  ".github/workflows/production-release-exact-main.yml": "476bdce5d068576bb78d563be7caf1c853fb3d4a"
+  ".github/workflows/ci.yml": "e1fba0fbf5a7eed4302529d3c16804de70228e6d",
+  ".github/workflows/production-certification.yml": "cbb5ee8eb264dcd89752b036bce03f76afb62048",
+  ".github/workflows/production-release-exact-main.yml": "83f32ee23991146795bb22cde954c1734d5b9aea"
 };
 
 const REQUIRED_MARKERS: Array<[string,string,string]> = [
