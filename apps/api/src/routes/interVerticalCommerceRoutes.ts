@@ -57,6 +57,7 @@ async function ensureSchema(): Promise<void> {
       "CREATE INDEX IF NOT EXISTS inter_vertical_connections_seller_idx ON inter_vertical_connections (seller_tenant_id, seller_branch_id, status)",
       "CREATE UNIQUE INDEX IF NOT EXISTS inter_vertical_connections_seller_response_uq ON inter_vertical_connections (seller_tenant_id, seller_branch_id, seller_response_idempotency_key) WHERE seller_response_idempotency_key IS NOT NULL",
       "CREATE TABLE IF NOT EXISTS inter_vertical_orders (id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE, connection_id TEXT NOT NULL, buyer_purchase_order_id TEXT, buyer_tenant_id TEXT NOT NULL, buyer_branch_id TEXT NOT NULL, seller_tenant_id TEXT NOT NULL, seller_branch_id TEXT NOT NULL, buyer_supplier_id TEXT NOT NULL, seller_customer_id TEXT NOT NULL, status TEXT NOT NULL, finance_status TEXT NOT NULL DEFAULT 'OPEN', currency TEXT NOT NULL DEFAULT 'TZS', items JSONB NOT NULL DEFAULT '[]'::jsonb, logistics JSONB NOT NULL DEFAULT '{}'::jsonb, total_amount NUMERIC(14,2) NOT NULL DEFAULT 0, notes TEXT NOT NULL DEFAULT '', rejection_reason TEXT, created_by_user_id TEXT NOT NULL, accepted_by_user_id TEXT, idempotency_key TEXT NOT NULL, settled_amount NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (buyer_tenant_id, buyer_branch_id, idempotency_key))",
+      "ALTER TABLE inter_vertical_orders ADD COLUMN IF NOT EXISTS buyer_purchase_order_id TEXT",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_buyer_idx ON inter_vertical_orders (buyer_tenant_id, buyer_branch_id, status, created_at DESC)",
       "CREATE INDEX IF NOT EXISTS inter_vertical_orders_seller_idx ON inter_vertical_orders (seller_tenant_id, seller_branch_id, status, created_at DESC)",
       "CREATE TABLE IF NOT EXISTS inter_vertical_order_events (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, tenant_id TEXT NOT NULL, branch_id TEXT NOT NULL, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, from_status TEXT, to_status TEXT, idempotency_key TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (tenant_id, branch_id, idempotency_key))",
@@ -373,16 +374,29 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
           sku: String(v.sku), name: String(v.name || v.product?.name || v.sku), requestedQuantity: x.quantity,
           proposedUnitPrice: Number(v.price || 0), acceptedQuantity: null, unitPrice: null, dispatchedQuantity: 0, receivedQuantity: 0 };
       });
-      for (const item of items) if (item.buyerVariantId) {
+      if (items.some((item) => !item.buyerVariantId)) throw new Error("BUYER_VARIANT_MAPPING_REQUIRED: map every wholesaler SKU to a Retail inventory variant before submitting the order");
+      if (new Set(items.map((item) => item.buyerVariantId)).size !== items.length) throw new Error("DUPLICATE_BUYER_VARIANT_MAPPING");
+      for (const item of items) {
         const local = await db.productVariant.findFirst({ where: { id: item.buyerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true }, select: { id: true } });
         if (!local) throw new Error("BUYER_VARIANT_BOUNDARY_OR_NOT_FOUND");
       }
       const id = randomUUID(), number = "IVO-" + new Date().toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + id.slice(0,8).toUpperCase();
+      const nativePoNumber = "IVPO-" + new Date().toISOString().replace(/[^0-9]/g, "").slice(0,14) + "-" + id.slice(0,8).toUpperCase();
       const inserted = await db.$transaction(async (tx: any) => {
-        const rows = await tx.$queryRawUnsafe("INSERT INTO inter_vertical_orders (id,order_number,connection_id,buyer_tenant_id,buyer_branch_id,seller_tenant_id,seller_branch_id,buyer_supplier_id,seller_customer_id,status,currency,items,notes,created_by_user_id,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'SUBMITTED',$10,$11::jsonb,$12,$13,$14) RETURNING *",
-          id, number, link.id, c.tenantId, c.branchId, link.seller_tenant_id, link.seller_branch_id, link.buyer_supplier_id, link.seller_customer_id,
+        const proposedTotal = items.reduce((sum, item) => sum + item.requestedQuantity * item.proposedUnitPrice, 0);
+        const nativePo = await tx.purchaseOrder.create({ data: {
+          id: randomUUID(), tenantId: c.tenantId, branchId: c.branchId, orderNumber: nativePoNumber,
+          supplierId: link.buyer_supplier_id, status: "DRAFT", totalAmount: proposedTotal,
+          notes: "Inter-Vertical Gateway order " + number, createdById: c.userId,
+          items: { create: items.map((item) => ({
+            id: randomUUID(), variantId: item.buyerVariantId, quantityOrdered: item.requestedQuantity,
+            quantityReceived: 0, unitCost: item.proposedUnitPrice, totalCost: item.requestedQuantity * item.proposedUnitPrice,
+          })) },
+        } });
+        const rows = await tx.$queryRawUnsafe("INSERT INTO inter_vertical_orders (id,order_number,connection_id,buyer_purchase_order_id,buyer_tenant_id,buyer_branch_id,seller_tenant_id,seller_branch_id,buyer_supplier_id,seller_customer_id,status,currency,items,notes,created_by_user_id,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'SUBMITTED',$11,$12::jsonb,$13,$14,$15) RETURNING *",
+          id, number, link.id, nativePo.id, c.tenantId, c.branchId, link.seller_tenant_id, link.seller_branch_id, link.buyer_supplier_id, link.seller_customer_id,
           b.currency.toUpperCase(), JSON.stringify(items), b.notes, c.userId, b.idempotencyKey);
-        await event(tx, id, c, "ORDER_SUBMITTED", null, "SUBMITTED", b.idempotencyKey, { orderNumber: number, connectionId: link.id, lineCount: items.length });
+        await event(tx, id, c, "ORDER_SUBMITTED", null, "SUBMITTED", b.idempotencyKey, { orderNumber: number, connectionId: link.id, purchaseOrderId: nativePo.id, lineCount: items.length });
         return rows[0];
       });
       return reply.status(201).send({ success: true, data: orderDto(inserted) });
