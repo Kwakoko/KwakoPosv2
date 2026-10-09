@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
-  prisma, PrismaAtomicCommercialFinanceService, projectProductBranchStock,
+  prisma, PrismaAtomicCommercialFinanceService, PricingAuthority, projectProductBranchStock,
   projectProductStockSummary, projectVariantInventory,
 } from "@kwakopos2/database";
 import { FinancialBridge } from "@kwakopos2/domain";
@@ -29,7 +29,7 @@ const OrderCreate = z.object({
 const OrderRespond = z.object({
   action: z.enum(["ACCEPT", "REJECT"]), reason: z.string().trim().max(1000).optional().default(""),
   idempotencyKey: z.string().trim().min(8).max(200),
-  items: z.array(z.object({ lineId: z.string().trim().min(1), quantity: z.number().positive().finite(), unitPrice: z.number().positive().finite() })).optional(),
+  items: z.array(z.object({ lineId: z.string().trim().min(1), quantity: z.number().positive().finite(), unitPrice: z.number().positive().finite(), priceOverrideReason: z.string().trim().min(3).max(500).optional() })).optional(),
 });
 const Dispatch = z.object({
   idempotencyKey: z.string().trim().min(8).max(200), carrierName: z.string().trim().max(200).optional().default(""),
@@ -428,16 +428,23 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
         if ((b.items || []).length && new Set((b.items || []).map((x) => x.lineId)).size !== b.items!.length) throw new Error("DUPLICATE_ORDER_LINE");
         let total = 0;
         for (const item of items) {
-          const v = await tx.productVariant.findFirst({ where: { id: item.sellerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true }, select: { id: true, price: true } });
+          const v = await tx.productVariant.findFirst({ where: { id: item.sellerVariantId, tenantId: c.tenantId, branchId: c.branchId, isActive: true }, select: { id: true, productId: true, price: true } });
           if (!v) throw new Error("SELLER_VARIANT_BOUNDARY_OR_NOT_FOUND");
           const chosen: any = overrides.get(item.lineId);
           const quantity = chosen ? chosen.quantity : item.requestedQuantity;
-          const price = chosen ? chosen.unitPrice : Number(v.price || item.proposedUnitPrice || 0);
+          const pricing = await PricingAuthority.resolveUnitPrice(tx, c, {
+            variantId: item.sellerVariantId, productId: v.productId, customerId: o.seller_customer_id,
+            quantity, requestedUnitPrice: chosen?.unitPrice, priceOverrideReason: chosen?.priceOverrideReason,
+          });
+          const price = pricing.unitPrice;
           if (price <= 0 || !Number.isFinite(price)) throw new Error("SELLER_UNIT_PRICE_REQUIRED");
           if (await ledgerQty(tx, c.tenantId, c.branchId, item.sellerVariantId) < quantity) throw new Error("INSUFFICIENT_STOCK_FOR_ACCEPTED_QUANTITY");
           item.acceptedQuantity = quantity; item.unitPrice = price; total += price * quantity;
         }
         if ((b.items || []).some((x) => !items.some((i) => i.lineId === x.lineId))) throw new Error("ORDER_LINE_NOT_FOUND");
+        const customer = await tx.customer.findFirst({ where: { id: o.seller_customer_id, tenantId: c.tenantId, branchId: c.branchId } });
+        if (!customer) throw new Error("COUNTERPARTY_FINANCE_MAPPING_NOT_FOUND");
+        if (Number(customer.currentBalance || 0) + total > Number(customer.creditLimit || 0) + 0.005) throw new Error("SELLER_CREDIT_LIMIT_EXCEEDED");
         const updated = await patchOrder(tx, id, { status: "ACCEPTED", accepted_by_user_id: c.userId, items, total_amount: total });
         await event(tx, id, c, "ORDER_ACCEPTED", o.status, "ACCEPTED", b.idempotencyKey, { totalAmount: total, items: items.map((i) => ({ lineId: i.lineId, quantity: i.acceptedQuantity, unitPrice: i.unitPrice })) });
         return updated;
@@ -469,7 +476,7 @@ export function interVerticalCommerceRoutes(server: FastifyInstance): void {
       const row = await db.$transaction(async (tx: any) => {
         const rows = await orderFor(tx, id, c, "SELLER", true), o = rows[0]; if (!o) throw new Error("ORDER_NOT_FOUND_OR_FORBIDDEN");
         if (await replayEvent(tx, c, b.idempotencyKey)) return o;
-        if (!["ACCEPTED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_DISPATCH:" + o.status);
+        if (!["ACCEPTED","PARTIALLY_DISPATCHED","PARTIALLY_RECEIVED","IN_TRANSIT"].includes(o.status)) throw new Error("ORDER_INVALID_STATUS_FOR_DISPATCH:" + o.status);
         const items = itemsOf(o), dispatch: Array<{ item: Item; quantity: number; variant: any }> = [];
         if (new Set(b.items.map((x) => x.lineId)).size !== b.items.length) throw new Error("DUPLICATE_ORDER_LINE");
         for (const x of b.items) {
