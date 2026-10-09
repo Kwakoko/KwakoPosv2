@@ -104,4 +104,21 @@ CREATE TABLE IF NOT EXISTS supply_chain_shipment_lines (
 );
 CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_shipment_idx ON supply_chain_shipment_lines (shipment_id);
 CREATE INDEX IF NOT EXISTS supply_chain_shipment_lines_gateway_line_idx ON supply_chain_shipment_lines (gateway_line_id);
+CREATE TABLE IF NOT EXISTS supply_chain_shipment_events (
+  id TEXT PRIMARY KEY,
+  shipment_id TEXT NOT NULL REFERENCES supply_chain_shipments(id) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, branch_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS supply_chain_shipment_events_shipment_idx
+  ON supply_chain_shipment_events (shipment_id, created_at);
+
 
